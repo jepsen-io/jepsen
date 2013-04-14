@@ -1,0 +1,16 @@
+[x] Set up LXC
+[x] Set up network partitions
+[x] Set up riak
+[x] Set up redis
+[ ] Set up mongo
+[ ] Set up postgres
+[ ] Write riak LWW app
+[x] Write riak CRDT app
+[ ] Write mongo app
+[ ] Write postgres app
+[ ] Write redis app
+[ ] Decide on demo order
+[ ] Draw visuals
+[ ] Practice demo
+[ ] Practice full talk
+[ ] Deliver talk! 
