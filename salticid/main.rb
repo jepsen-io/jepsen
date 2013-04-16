@@ -5,6 +5,10 @@ role :base do
     end
   end
 
+  task :shutdown do
+    sudo { shutdown '-h', :now }
+  end
+
   task :reboot do
     sudo { reboot }
   end
@@ -102,8 +106,88 @@ end
 role :mongo do
   task :setup do
     sudo do
-      exec! 'apt-get install -y mongodb-server'
+      unless (dpkg '-l').include? 'mongodb-10gen'
+        exec! 'apt-key adv --keyserver keyserver.ubuntu.com --recv 7F0CEB10'
+        echo 'deb http://downloads-distro.mongodb.org/repo/ubuntu-upstart dist 10gen', to: '/etc/apt/sources.list.d/10gen.list'
+        exec! 'apt-get update', echo: true
+      end
+      exec! 'apt-get install -y mongodb-10gen', echo: true
+      begin
+        mongo.start
+      rescue => e
+        throw unless e.message =~ /already running/
+      end
     end
+    
+    if name == 'n1'
+      log "Waiting for mongo to become available"
+      loop do
+        begin
+          mongo '--eval', true
+          break
+        rescue
+          sleep 1
+        end
+      end
+      log "Adding members to replica set."
+      mongo.eval 'rs.initiate()'
+      log "Waiting for replica set to initialize."
+      until (mongo('--eval', 'rs.status().members[0].state') rescue '') =~ /1\Z/
+        log  mongo('--eval', 'rs.status().members[0].state')
+        sleep 1
+      end
+      mongo.eval 'rs.add("n2")'
+      mongo.eval 'rs.add("n3")'
+      mongo.eval 'rs.add("n4")'
+      mongo.eval 'rs.add("n5")'
+    end
+  end
+
+  task :nuke do
+    sudo do
+      mongo.stop rescue nil
+      rm '-rf', '/var/lib/mongodb/*'
+    end
+  end
+
+  task :stop do
+    sudo { service :mongodb, :stop, echo: true }
+  end
+
+  task :start do
+    sudo { service :mongodb, :start, echo: true }
+  end
+
+  task :restart do
+    sudo { service :mongodb, :restart, echo: true }
+  end
+
+  task :tail do
+    tail '-F', '/var/log/mongodb/mongodb.log', echo: true
+  end
+
+  task :eval do |str|
+    unless (str =~ /;/)
+      str = "printjson(#{str})"
+    end
+
+    mongo '--eval', str, echo: true
+  end
+
+  task :rs_conf do
+    mongo.eval 'rs.conf()'
+  end
+
+  task :rs_status do
+    mongo.eval 'rs.status()'
+  end
+
+  task :deploy do
+    sudo do
+      echo File.read(__DIR__/:mongo/'mongodb.conf').gsub('%%NODE%%', name), to: '/etc/mongodb.conf'
+    end
+    mongo.eval 'c = rs.conf(); c.members[0].priority = 2; rs.reconfig(c);'
+    mongo.restart
   end
 end
 
@@ -136,8 +220,8 @@ role :redis do
     sudo do
       echo "port 26379
 sentinel monitor mymaster n1 6379 2
-sentinel down-after-milliseconds mymaster 2000
-sentinel failover-timeout mymaster 900000
+sentinel down-after-milliseconds mymaster 5000
+sentinel failover-timeout mymaster 90000
 sentinel can-failover mymaster yes
 sentinel parallel-syncs mymaster 1", to: '/opt/redis/sentinel.config'
       cd '/opt/redis/src'
@@ -195,6 +279,12 @@ role :jepsen do
     sudo do
       iptables '-F', echo: true
       iptables '-X', echo: true
+      iptables '--list', echo: true
+    end
+  end
+
+  task :status do
+    sudo do
       iptables '--list', echo: true
     end
   end

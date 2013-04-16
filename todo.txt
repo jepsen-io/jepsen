@@ -2,7 +2,7 @@
 [x] Set up network partitions
 [x] Set up riak
 [x] Set up redis
-[ ] Set up mongo
+[x] Set up mongo
 [ ] Set up postgres
 [ ] Write riak LWW app
 [x] Write riak CRDT app
