@@ -71,6 +71,12 @@
     (results  [this]         (locking global-lock (results app)))
     (teardown [this]         (locking global-lock (teardown app)))))
 
+(defn apps
+  "Returns a set of apps for testing, given a function."
+  [app-fn]
+  (map #(app-fn {:host %})
+       ["n1" "n2" "n3" "n4" "n5"]))
+
 (defn run [apps]
   ; Set up apps
   (dorun (map setup apps))

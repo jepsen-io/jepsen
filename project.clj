@@ -3,6 +3,6 @@
             :dependencies [[org.clojure/clojure "1.5.0"]
                            [aleph "0.3.0-beta16"]
                            [com.novemberain/welle "1.4.0"]
-                           [pallet "0.1.1"]]
+                           [com.taoensso/carmine "1.6.0"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :jvm-opts ["-Xmx128m"])
