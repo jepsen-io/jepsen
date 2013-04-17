@@ -3,7 +3,7 @@
 [x] Set up riak
 [x] Set up redis
 [x] Set up mongo
-[ ] Set up postgres
+[x] Set up postgres
 [ ] Write riak LWW app
 [x] Write riak CRDT app
 [ ] Write mongo app
