@@ -219,12 +219,13 @@ role :redis do
   task :sentinel do
     sudo do
       echo "port 26379
-sentinel monitor mymaster n1 6379 2
+sentinel monitor mymaster n1 6379 3
 sentinel down-after-milliseconds mymaster 5000
-sentinel failover-timeout mymaster 90000
+sentinel failover-timeout mymaster 900000
 sentinel can-failover mymaster yes
-sentinel parallel-syncs mymaster 1", to: '/opt/redis/sentinel.config'
+sentinel parallel-syncs mymaster 5", to: '/opt/redis/sentinel.config'
       cd '/opt/redis/src'
+      sleep(rand * 5)
       exec! './redis-sentinel /opt/redis/sentinel.config', echo: true
     end
   end
