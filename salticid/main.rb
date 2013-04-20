@@ -297,7 +297,15 @@ role :jepsen do
     redis.setup
     postgres.setup
   end
-  
+ 
+  task :slow do
+    sudo { exec! 'tc qdisc add dev eth0 root netem delay 5ms 100ms distribution normal' }
+  end
+
+  task :perfect do
+    sudo { tc :qdisc, :del, :dev, :eth0, :root }
+  end
+
   task :partition do
     sudo do
       n3 = dig '+short', :n3
