@@ -83,7 +83,7 @@
   (riak-app (merge {:read {:r 1
                            :pr 1}
                     :write {:w 1
-                            :dw 0
+                            :dw 1
                             :pw 1}
                     :bucket-opts {:allow-siblings true
                                   :n-val 3}}

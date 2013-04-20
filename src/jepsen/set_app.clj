@@ -7,38 +7,57 @@
   (results [app] "Return the current set.")
   (teardown [app]))
 
+(defn print-list
+  "Tell us a bit about a list of things."
+  [coll]
+  (if (< (count coll) 16)
+    (println coll)
+    (apply println (concat (take 6 coll) ["..."] (take-last 6 coll)))))
+
 (defn print-results
-  [target results]
-  (println)
-  (cond
-    (= target results)
-    (println "All writes succeeded. :-)")
+  [target acked results]
+  (let [target (set target)
+        acked (set acked)
+        results (set results)]
 
-    (empty? target)
-    (println "Expected an empty set, but results had"
-             (count results)
-             "elements!")
+    (println)
+    (println (count target) "total")
+    (println (count acked) "acknowledged")
+    (println (count results) "survivors")
 
-    (empty? results)
-    (println "Expected"
-             (count target)
-             "elements, but results were empty!")
+    (cond
+      (= target results)
+      (println "All" (count target) "writes succeeded. :-D")
 
-    :else
-    (do
-      (let [diff1 (difference target results)
-            diff2 (difference results target)]
-        (when-not (empty? diff1)
-          (println (count diff1) "elements missing from result set:")
-          (prn (sort diff1)))
+      (= acked results)
+      (println "all" (count acked) "acked writes out of" (count target) "succeeded. :-)")
 
-        (when-not (empty? diff2)
-          (println (count diff2) "spurious elements in result set:")
-          (prn (sort diff2)))
+      (empty? target)
+      (println "Expected an empty set, but results had"
+               (count results)
+               "elements!")
 
-        (let [frac (/ (+ (count diff1) (count diff2))
-                      (count target))]
-          (println (float frac) "error rate"))))))
+      (empty? results)
+      (println "Expected"
+               (count target)
+               "elements, but results were empty!")
+
+      :else
+      (do
+        (let [diff1 (sort (difference target results))
+              diff2 (sort (difference results target))]
+          (when-not (empty? diff1)
+            (println (count diff1) "acknowledged writes lost! (╯°□°）╯︵ ┻━┻")
+            (print-list diff1))
+
+            (when-not (empty? diff2)
+              (println (count diff2) "unacknowledged writes found! ヽ(´ー｀)ノ")
+              (print-list diff2))
+
+            (println (float (/ (count diff1) (count target))) "failure rate")
+            (println (float (/ (count diff1) (count acked))) "loss rate")
+            (println (float (/ (count diff2) (count acked)))
+                     "unacknowledged but successful rate"))))))
 
 (defn partition-rr
   "Partitions a sequence into n evenly distributed subsequences."
@@ -51,15 +70,21 @@
        (range n)))
 
 (defn worker
-  "Runs a workload in a new future."
+  "Runs a workload in a new future. Returns a vector of written elements."
   [app workload]
   (future
-    (dorun
-      (map-indexed (fn [i element]
-                     (add app element)
-                     (when (zero? (mod i 1))
-                       (print ".") (flush)))
-                   workload))))
+    (doall
+      (remove #{::failed}
+              (map-indexed (fn [i element]
+                             (when (zero? (mod i 100))
+                               (print ".") (flush))
+                             (try (add app element)
+                               element
+                               (catch Throwable e
+                                 (print "!") (flush)
+                                 (Thread/sleep 1000)
+                                 ::failed)))
+                           workload)))))
 
 (def global-lock "hi")
 (defn locking-app
@@ -71,29 +96,47 @@
     (results  [this]         (locking global-lock (results app)))
     (teardown [this]         (locking global-lock (teardown app)))))
 
+(def nodes
+  ["n1" "n2" "n3" "n4" "n5"])
+
+(def partitions
+  [#{"n1" "n2"}
+   #{"n3" "n4" "n5"}])
+
+(defn partition-peers
+  "Given a node, returns the nodes visible to that node when partitioned."
+  [node]
+  (first (filter #(get % node) partitions)))
+
 (defn apps
   "Returns a set of apps for testing, given a function."
   [app-fn]
-  (map #(app-fn {:host %})
-       ["n1" "n2" "n3" "n4" "n5"]))
+  (map #(app-fn {:host %
+                 :hosts (partition-peers %)})
+       nodes))
 
 (defn run [apps]
   ; Set up apps
   (dorun (map setup apps))
 
   ; Divide work and start workers
-  (let [elements (range 10000)
+  (let [n 8000
+        t0 (System/currentTimeMillis)
+        elements (range n)
         workloads (partition-rr (count apps) elements)
-        workers (doall (map worker apps workloads))]
+        workers (doall (map worker apps workloads))
    
-    ; Wait for workers.
-    (dorun (map deref workers))
+        ; Wait for workers.
+        acked (apply union (map (comp set deref) workers))
+        t1 (System/currentTimeMillis)]
 
     ; Get results
     (println "Hit enter when ready to collect results.")
     (read-line)
+    
     (let [results (results (first apps))]
-      (print-results (set elements) results)
+      (println "Writes completed in" (float (/ (- t1 t0) 1000)) "seconds")
+      (print-results elements acked results)
 
       ; Shut down apps
       (dorun (map teardown apps))

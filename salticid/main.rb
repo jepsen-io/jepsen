@@ -129,13 +129,17 @@ role :mongo do
           sleep 1
         end
       end
-      log "Adding members to replica set."
+      log "Initiating replica set."
       mongo.eval 'rs.initiate()'
       log "Waiting for replica set to initialize."
       until (mongo('--eval', 'rs.status().members[0].state') rescue '') =~ /1\Z/
-        log  mongo('--eval', 'rs.status().members[0].state')
+        log mongo('--eval', 'rs.status().members')
         sleep 1
       end
+      log "Assigning priority."
+      mongo.eval 'c = rs.conf(); c.members[0].priority = 2; rs.reconfig(c)'
+      
+      log "Adding members to replica set."
       mongo.eval 'rs.add("n2")'
       mongo.eval 'rs.add("n3")'
       mongo.eval 'rs.add("n4")'
@@ -188,6 +192,22 @@ role :mongo do
     end
     mongo.eval 'c = rs.conf(); c.members[0].priority = 2; rs.reconfig(c);'
     mongo.restart
+  end
+
+  task :reset do
+    sudo do
+      find '/var/lib/mongodb/rollback/', '-iname', '*.bson', '-delete'
+    end
+  end
+
+  task :rollbacks do
+    if dir? '/var/lib/mongodb/rollback'
+      find('/var/lib/mongodb/rollback/',
+           '-iname', '*.bson').split("\n").each do |f|
+        bsondump f, echo: true
+      end
+      ls '-lah', '/var/lib/mongodb/rollback', echo: true 
+    end
   end
 end
 
