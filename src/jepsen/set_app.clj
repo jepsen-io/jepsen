@@ -120,7 +120,7 @@
   (dorun (map setup apps))
 
   ; Divide work and start workers
-  (let [n 8000
+  (let [n 10000
         t0 (System/currentTimeMillis)
         elements (range n)
         workloads (partition-rr (count apps) elements)

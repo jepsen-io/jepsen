@@ -73,6 +73,10 @@
   [opts]
   (mongo-app (merge {:write-concern WriteConcern/REPLICAS_SAFE} opts)))
 
+(defn mongo-safe-app
+  [opts]
+  (mongo-app (merge {:write-concern WriteConcern/SAFE} opts)))
+
 (defn mongo-unsafe-app
   [opts]
   (mongo-app (merge {:write-concern WriteConcern/ERRORS_IGNORED} opts)))
