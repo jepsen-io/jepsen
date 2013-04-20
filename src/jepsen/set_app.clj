@@ -44,8 +44,8 @@
 
       :else
       (do
-        (let [diff1 (sort (difference target results))
-              diff2 (sort (difference results target))]
+        (let [diff1 (sort (difference acked results))
+              diff2 (sort (difference results acked))]
           (when-not (empty? diff1)
             (println (count diff1) "acknowledged writes lost! (╯°□°）╯︵ ┻━┻")
             (print-list diff1))
@@ -54,7 +54,7 @@
               (println (count diff2) "unacknowledged writes found! ヽ(´ー｀)ノ")
               (print-list diff2))
 
-            (println (float (/ (count diff1) (count target))) "failure rate")
+            (println (float (/ (count acked) (count target))) "ack rate")
             (println (float (/ (count diff1) (count acked))) "loss rate")
             (println (float (/ (count diff2) (count acked)))
                      "unacknowledged but successful rate"))))))

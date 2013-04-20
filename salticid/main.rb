@@ -196,7 +196,10 @@ role :mongo do
 
   task :reset do
     sudo do
-      find '/var/lib/mongodb/rollback/', '-iname', '*.bson', '-delete'
+      if dir? '/var/lib/mongdb/rollback'
+        find '/var/lib/mongodb/rollback/', '-iname', '*.bson', '-delete'
+      end
+      find '/var/log/mongodb/', '-iname', '*.log', '-delete'
     end
   end
 
