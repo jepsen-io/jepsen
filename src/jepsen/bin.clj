@@ -3,5 +3,5 @@
         jepsen.riak))
 
 (defn -main []
-  (run (apps (comp locking-app riak-crdt-app)))
+  (run (apps riak-crdt-app))
   (System/exit 0))

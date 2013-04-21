@@ -13,13 +13,12 @@
   [default f]
   (reify ConflictResolver
     (resolve [_ siblings]
-             (locking *out* (prn (count siblings) "siblings")
-               (doseq [v (map :vclock siblings)]
-                 (println (.asString v))))
-             (case (count siblings)
-               0 [default]
-               1 siblings
-               [(f siblings)]))))
+             (-> (case (count siblings)
+                   0 default
+                   1 (first siblings)
+                     (f siblings))
+               (with-meta {:siblings (count siblings)})
+               list))))
 
 (defn riak-value-resolver
   "Constructs a resolver based on a default new value, and a function which
@@ -31,7 +30,6 @@
                  (fn wrapper [siblings]
                    (-> siblings
                      first
-                     (select-keys [:metadata :content-type :indexes :links])
                      (assoc :value (f (map :value siblings)))))))
                  
 (def resolver
@@ -47,13 +45,14 @@
         host       (get opts :host "127.0.0.1")
         port       (get opts :port 8087)
         client     (welle/connect-via-pb host port)
+        http-client (welle/connect (str "http://" host ":8098/riak"))
         read-opts  (mapcat identity (:read opts))
         write-opts (mapcat identity (:write opts))
         bucket-opts (get opts :bucket-opts {})]
 
     (reify SetApp
       (setup [app]
-             (welle/with-client client
+             (welle/with-client http-client
                                 ; Reset bucket
                                 (apply buckets/update bucket
                                        (mapcat identity bucket-opts))
@@ -69,18 +68,29 @@
                                                           :pr Quora/ALL)))))
 
       (add [app element]
-           (let [res (-> (future
+           (let [siblings (promise)
+                 res (-> (future
                            (welle/with-client
                              client
                              (apply kv/modify bucket key
                                     (fn [v]
-                                      (locking *out* (prn v))
+                                      (deliver siblings (:siblings (meta v)))
                                       (update-in v [:value] conj element))
                                     (concat read-opts write-opts))))
                            (deref 5000 ::timeout))]
              (when (= res ::timeout)
 ;               (println "Timed out.")
-               (throw (RuntimeException. "timeout")))))
+               (throw (RuntimeException. "timeout")))
+
+             ; Back off when siblings pile up
+             (let [t (* 20 (dec (int (Math/pow (max (- @siblings 4)
+                                               1)
+                                          1.8))))]
+;              (prn @siblings :sleep t)
+               (when (pos? t)
+                 (Thread/sleep t)))
+
+             res))
 
 
       (results [app]
@@ -88,7 +98,6 @@
                                   (-> (apply kv/fetch bucket key
                                            :pr Quora/ALL
                                            read-opts)
-                                    prn
                                     first
                                     :value)))
 
@@ -96,10 +105,9 @@
                 (welle/with-client
                   client
                   ; Wipe object
-;                  (kv/delete bucket key :dw Quora/ALL)
-;                  (assert (empty? (kv/fetch bucket key
-;                                            :pr Quora/ALL))))))))
-                  )))))
+                  (kv/delete bucket key :dw Quora/ALL)
+                  (assert (empty? (kv/fetch bucket key
+                                            :pr Quora/ALL))))))))
 
 (defn riak-lww-all-app
   [opts]
@@ -135,9 +143,9 @@
 
 (defn riak-crdt-app
   [opts]
-  (riak-app (merge {:read {:r Quora/ALL
+  (riak-app (merge {:read {:r 1
                            :resolver resolver}
-                    :write {:w Quora/ALL}
+                    :write {:w 1}
                     :bucket-opts {:allow-siblings true
                                   :n-val 3}}
                    opts)))

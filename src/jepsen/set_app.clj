@@ -82,8 +82,8 @@
                              (try (add app element)
                                element
                                (catch Throwable e
-                                 (locking *out*
-                                   (clojure.stacktrace/print-cause-trace e))
+                                 ;(locking *out*
+                                 ;  (clojure.stacktrace/print-cause-trace e))
                                  (print "!") (flush)
                                  (Thread/sleep 1000)
                                  ::failed)))
@@ -123,7 +123,7 @@
   (dorun (map setup apps))
 
   ; Divide work and start workers
-  (let [n 100
+  (let [n 8000
         t0 (System/currentTimeMillis)
         elements (range n)
         workloads (partition-rr (count apps) elements)
