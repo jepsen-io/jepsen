@@ -1,4 +1,5 @@
 (ns jepsen.set-app
+  (:require clojure.stacktrace)
   (:use [clojure.set :only [union difference]]))
 
 (defprotocol SetApp
@@ -76,11 +77,13 @@
     (doall
       (remove #{::failed}
               (map-indexed (fn [i element]
-                             (when (zero? (mod i 100))
+                             (when (zero? (mod i 10))
                                (print ".") (flush))
                              (try (add app element)
                                element
                                (catch Throwable e
+                                 (locking *out*
+                                   (clojure.stacktrace/print-cause-trace e))
                                  (print "!") (flush)
                                  (Thread/sleep 1000)
                                  ::failed)))
@@ -120,7 +123,7 @@
   (dorun (map setup apps))
 
   ; Divide work and start workers
-  (let [n 10000
+  (let [n 100
         t0 (System/currentTimeMillis)
         elements (range n)
         workloads (partition-rr (count apps) elements)

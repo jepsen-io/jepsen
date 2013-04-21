@@ -94,6 +94,13 @@ role :riak do
       exec! 'bin/riak-admin ring_status', echo: true
     end
   end
+
+  task :transfers do
+    cd '/opt/riak/rel/riak'
+    sudo do
+      exec! 'bin/riak-admin transfers', echo: true
+    end
+  end
   
   task :status do
     cd '/opt/riak/rel/riak'
