@@ -70,6 +70,14 @@
                        s))
        (range n)))
 
+(def logger (agent nil))
+(defn log-print
+    [_ & things]
+    (apply println things))
+(defn log
+    [& things]
+    (apply send-off logger log-print things))
+
 (defn worker
   "Runs a workload in a new future. Returns a vector of written elements."
   [app workload]
@@ -77,15 +85,13 @@
     (doall
       (remove #{::failed}
               (map-indexed (fn [i element]
-                             (when (zero? (mod i 10))
-                               (print ".") (flush))
-                             (try (add app element)
+                             (try
+                               (add app element)
+                               (log (str element "\t" :ok))
                                element
                                (catch Throwable e
-                                 ;(locking *out*
-                                 ;  (clojure.stacktrace/print-cause-trace e))
-                                 (print "!") (flush)
                                  (Thread/sleep 1000)
+                                 (log (str element "\t" (.getMessage e)))
                                  ::failed)))
                            workload)))))
 

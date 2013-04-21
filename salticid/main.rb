@@ -226,19 +226,19 @@ role :mongo do
     download '/var/log/mongodb/mongodb.log', d
 
     # Oplogs
-    oplogs = d/:oplogs
-    FileUtils.mkdir_p oplogs
-    cd '/tmp'
-    rm '-rf', 'mongo-collect'
-    mkdir 'mongo-collect'
-    mongodump '-d', 'local', '-c', 'oplog.rs', '-o', 'mongo-collect', echo: true
-    cd 'mongo-collect/local'
-    find('*.bson').split("\n").each do |f|
-      log oplogs
-      download f, oplogs
-    end
-    cd '/tmp'
-    rm '-rf', 'mongo-collect'
+    #oplogs = d/:oplogs
+    #FileUtils.mkdir_p oplogs
+    #cd '/tmp'
+    #rm '-rf', 'mongo-collect'
+    #mkdir 'mongo-collect'
+    #mongodump '-d', 'local', '-c', 'oplog.rs', '-o', 'mongo-collect', echo: true
+    #cd 'mongo-collect/local'
+    #find('*.bson').split("\n").each do |f|
+    #  log oplogs
+    #  download f, oplogs
+    #end
+    #cd '/tmp'
+    #rm '-rf', 'mongo-collect'
 
     # Data dirs
     rb = '/var/lib/mongodb/rollback'
