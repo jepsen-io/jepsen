@@ -1,3 +1,5 @@
+require 'fileutils'
+
 role :base do
   task :setup do
     sudo do
@@ -193,6 +195,10 @@ role :mongo do
     mongo.eval 'rs.status()'
   end
 
+  task :rs_stat do
+    mongo.eval 'rs.status().members.map(function(m) { print(m.name + " " + m.stateStr + "\t" + m.optime.t + "/" + m.optime.i); }); true'
+  end
+
   task :deploy do
     sudo do
       echo File.read(__DIR__/:mongo/'mongodb.conf').gsub('%%NODE%%', name), to: '/etc/mongodb.conf'
@@ -207,6 +213,40 @@ role :mongo do
         find '/var/lib/mongodb/rollback/', '-iname', '*.bson', '-delete'
       end
       find '/var/log/mongodb/', '-iname', '*.log', '-delete'
+      mongo.restart
+    end
+  end
+
+  # Grabs logfiles and data files and tars them up
+  task :collect do
+    d = 'mongo-collect/' + name
+    FileUtils.mkdir_p d
+
+    # Logs
+    download '/var/log/mongodb/mongodb.log', d
+
+    # Oplogs
+    oplogs = d/:oplogs
+    FileUtils.mkdir_p oplogs
+    cd '/tmp'
+    rm '-rf', 'mongo-collect'
+    mkdir 'mongo-collect'
+    mongodump '-d', 'local', '-c', 'oplog.rs', '-o', 'mongo-collect', echo: true
+    cd 'mongo-collect/local'
+    find('*.bson').split("\n").each do |f|
+      log oplogs
+      download f, oplogs
+    end
+    cd '/tmp'
+    rm '-rf', 'mongo-collect'
+
+    # Data dirs
+    rb = '/var/lib/mongodb/rollback'
+    if dir? rb
+      FileUtils.mkdir_p "#{d}/rollback"
+      find(rb, '-iname', '*.bson').split("\n").each do |f|
+        download f, "#{d}/rollback"
+      end
     end
   end
 
