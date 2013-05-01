@@ -346,7 +346,7 @@ role :jepsen do
   end
  
   task :slow do
-    sudo { exec! 'tc qdisc add dev eth0 root netem delay 2ms 10ms distribution normal' }
+    sudo { exec! 'tc qdisc add dev eth0 root netem delay 100ms 10ms distribution normal' }
   end
 
   task :flaky do
@@ -368,6 +368,14 @@ role :jepsen do
         iptables '-A', 'INPUT', '-s', n4, '-j', 'DROP'
         iptables '-A', 'INPUT', '-s', n5, '-j', 'DROP'
       end
+      iptables '--list', echo: true
+    end
+  end
+
+  task :drop_pg do
+    sudo do
+      log "Dropping all PG traffic."
+      iptables '-A', 'INPUT', '-p', 'tcp', '--dport', 5432, '-j', 'DROP'
       iptables '--list', echo: true
     end
   end

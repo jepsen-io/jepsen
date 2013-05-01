@@ -3,7 +3,8 @@
   (:use jepsen.set-app
         jepsen.riak
         jepsen.mongo
-        jepsen.redis))
+        jepsen.redis
+        jepsen.pg))
 
 (def app-map
   "A map from command-line names to apps you can run"
@@ -15,7 +16,8 @@
    "riak-lww-all"           riak-lww-all-app
    "riak-lww-quorum"        riak-lww-quorum-app
    "riak-lww-sloppy-quorum" riak-lww-sloppy-quorum-app
-   "riak-crdt"              riak-crdt-app})
+   "riak-crdt"              riak-crdt-app
+   "pg"                     pg-app})
 
 (defn -main
   ([]
@@ -26,5 +28,6 @@
      (run (apps (app-map app)))
      (System/exit 0)
      (catch Throwable t
-       (clojure.stacktrace/print-cause-trace t)
+       (.printStackTrace t)
+;       (clojure.stacktrace/print-cause-trace t)
        (System/exit 1)))))
