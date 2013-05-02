@@ -1,3 +1,5 @@
+require 'fileutils'
+
 role :base do
   task :setup do
     sudo do
@@ -94,6 +96,13 @@ role :riak do
       exec! 'bin/riak-admin ring_status', echo: true
     end
   end
+
+  task :transfers do
+    cd '/opt/riak/rel/riak'
+    sudo do
+      exec! 'bin/riak-admin transfers', echo: true
+    end
+  end
   
   task :status do
     cd '/opt/riak/rel/riak'
@@ -129,13 +138,17 @@ role :mongo do
           sleep 1
         end
       end
-      log "Adding members to replica set."
+      log "Initiating replica set."
       mongo.eval 'rs.initiate()'
       log "Waiting for replica set to initialize."
       until (mongo('--eval', 'rs.status().members[0].state') rescue '') =~ /1\Z/
-        log  mongo('--eval', 'rs.status().members[0].state')
+        log mongo('--eval', 'rs.status().members')
         sleep 1
       end
+      log "Assigning priority."
+      mongo.eval 'c = rs.conf(); c.members[0].priority = 2; rs.reconfig(c)'
+      
+      log "Adding members to replica set."
       mongo.eval 'rs.add("n2")'
       mongo.eval 'rs.add("n3")'
       mongo.eval 'rs.add("n4")'
@@ -182,12 +195,69 @@ role :mongo do
     mongo.eval 'rs.status()'
   end
 
+  task :rs_stat do
+    mongo.eval 'rs.status().members.map(function(m) { print(m.name + " " + m.stateStr + "\t" + m.optime.t + "/" + m.optime.i); }); true'
+  end
+
   task :deploy do
     sudo do
       echo File.read(__DIR__/:mongo/'mongodb.conf').gsub('%%NODE%%', name), to: '/etc/mongodb.conf'
     end
     mongo.eval 'c = rs.conf(); c.members[0].priority = 2; rs.reconfig(c);'
     mongo.restart
+  end
+
+  task :reset do
+    sudo do
+      if dir? '/var/lib/mongdb/rollback'
+        find '/var/lib/mongodb/rollback/', '-iname', '*.bson', '-delete'
+      end
+      find '/var/log/mongodb/', '-iname', '*.log', '-delete'
+      mongo.restart
+    end
+  end
+
+  # Grabs logfiles and data files and tars them up
+  task :collect do
+    d = 'mongo-collect/' + name
+    FileUtils.mkdir_p d
+
+    # Logs
+    download '/var/log/mongodb/mongodb.log', d
+
+    # Oplogs
+    #oplogs = d/:oplogs
+    #FileUtils.mkdir_p oplogs
+    #cd '/tmp'
+    #rm '-rf', 'mongo-collect'
+    #mkdir 'mongo-collect'
+    #mongodump '-d', 'local', '-c', 'oplog.rs', '-o', 'mongo-collect', echo: true
+    #cd 'mongo-collect/local'
+    #find('*.bson').split("\n").each do |f|
+    #  log oplogs
+    #  download f, oplogs
+    #end
+    #cd '/tmp'
+    #rm '-rf', 'mongo-collect'
+
+    # Data dirs
+    rb = '/var/lib/mongodb/rollback'
+    if dir? rb
+      FileUtils.mkdir_p "#{d}/rollback"
+      find(rb, '-iname', '*.bson').split("\n").each do |f|
+        download f, "#{d}/rollback"
+      end
+    end
+  end
+
+  task :rollbacks do
+    if dir? '/var/lib/mongodb/rollback'
+      find('/var/lib/mongodb/rollback/',
+           '-iname', '*.bson').split("\n").each do |f|
+        bsondump f, echo: true
+      end
+      ls '-lah', '/var/lib/mongodb/rollback', echo: true 
+    end
   end
 end
 
@@ -218,12 +288,13 @@ role :redis do
 
   task :sentinel do
     sudo do
+      myip = dig '+short', name
       echo "port 26379
-sentinel monitor mymaster n1 6379 2
+sentinel monitor mymaster #{myip} 6379 3
 sentinel down-after-milliseconds mymaster 5000
-sentinel failover-timeout mymaster 90000
+sentinel failover-timeout mymaster 900000
 sentinel can-failover mymaster yes
-sentinel parallel-syncs mymaster 1", to: '/opt/redis/sentinel.config'
+sentinel parallel-syncs mymaster 5", to: '/opt/redis/sentinel.config'
       cd '/opt/redis/src'
       exec! './redis-sentinel /opt/redis/sentinel.config', echo: true
     end
@@ -273,7 +344,19 @@ role :jepsen do
     redis.setup
     postgres.setup
   end
-  
+ 
+  task :slow do
+    sudo { exec! 'tc qdisc add dev eth0 root netem delay 100ms 10ms distribution normal' }
+  end
+
+  task :flaky do
+    sudo { exec! 'tc qdisc add dev eth0 root netem loss 20% 75%' }
+  end
+
+  task :fast do
+    sudo { tc :qdisc, :del, :dev, :eth0, :root }
+  end
+
   task :partition do
     sudo do
       n3 = dig '+short', :n3
@@ -285,6 +368,14 @@ role :jepsen do
         iptables '-A', 'INPUT', '-s', n4, '-j', 'DROP'
         iptables '-A', 'INPUT', '-s', n5, '-j', 'DROP'
       end
+      iptables '--list', echo: true
+    end
+  end
+
+  task :drop_pg do
+    sudo do
+      log "Dropping all PG traffic."
+      iptables '-A', 'INPUT', '-p', 'tcp', '--dport', 5432, '-j', 'DROP'
       iptables '--list', echo: true
     end
   end

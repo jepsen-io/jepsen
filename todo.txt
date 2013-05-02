@@ -4,11 +4,11 @@
 [x] Set up redis
 [x] Set up mongo
 [x] Set up postgres
-[ ] Write riak LWW app
+[x] Write riak LWW app
 [x] Write riak CRDT app
-[ ] Write mongo app
+[x] Write mongo app
 [ ] Write postgres app
-[ ] Write redis app
+[x] Write redis app
 [ ] Decide on demo order
 [ ] Draw visuals
 [ ] Practice demo
