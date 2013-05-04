@@ -7,7 +7,8 @@
                            [com.novemberain/monger "1.5.0"]
                            [org.clojure/java.jdbc "0.3.0-alpha1"]
                            [korma "0.3.0-RC5"]
-                           [postgresql/postgresql "8.4-702.jdbc4"]]
+                           [postgresql/postgresql "8.4-702.jdbc4"]
+                           [org.clojure/tools.cli "0.2.2"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
             :jvm-opts ["-Xmx128m"])
