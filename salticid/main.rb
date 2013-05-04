@@ -25,6 +25,8 @@ role :riak do
         git :clone, 'git://github.com/basho/riak.git', echo: true
       end
       cd 'riak'
+      git :pull, echo: true
+      make :distclean, echo: true
       make :rel, echo: true
     end
   end
@@ -38,15 +40,19 @@ role :riak do
   
   task :restart do
     sudo do
-      cd '/opt/riak/rel/riak'
-      exec! 'bin/riak start', echo: true
+      riak.stop rescue false
+      riak.start
     end
   end
 
   task :stop do
     sudo do
-      cd '/opt/riak/rel/riak'
-      exec! 'bin/riak stop', echo: true
+      begin
+        cd '/opt/riak/rel/riak'
+        exec! 'bin/riak stop', echo: true
+      rescue
+        killall '-9', 'beam.smp'
+      end
     end
   end
 
@@ -62,7 +68,7 @@ role :riak do
 
   task :deploy do
     sudo do
-      riak.stop
+      riak.stop rescue nil
       echo File.read(__DIR__/:riak/'app.config'), to: '/opt/riak/rel/riak/etc/app.config'
       echo File.read(__DIR__/:riak/'vm.args').gsub('%%NODE%%', name), to: '/opt/riak/rel/riak/etc/vm.args'
     end
@@ -108,6 +114,23 @@ role :riak do
     cd '/opt/riak/rel/riak'
     sudo do
       exec! 'bin/riak-admin status', echo: true
+    end
+  end
+
+  task :reset do
+    sudo do
+      riak.stop rescue false
+      rm '-rf', '/opt/riak/rel/riak/data/*'
+    end
+  end
+
+  task :nuke do
+    sudo do
+      begin
+        riak.stop
+      rescue
+      end
+      rm '-rf', '/opt/riak'
     end
   end
 end
