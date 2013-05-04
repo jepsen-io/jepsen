@@ -25,10 +25,18 @@ role :riak do
         git :clone, 'git://github.com/basho/riak.git', echo: true
       end
       cd 'riak'
+      begin
+        git :checkout, '1.3'
+      rescue
+        git :checkout, '-b', '1.3', 'origin/1.3'
+      end
       git :pull, echo: true
       make :distclean, echo: true
       make :rel, echo: true
     end
+
+    riak.deploy
+
   end
 
   task :start do
@@ -67,8 +75,8 @@ role :riak do
   end
 
   task :deploy do
+    riak.stop rescue nil
     sudo do
-      riak.stop rescue nil
       echo File.read(__DIR__/:riak/'app.config'), to: '/opt/riak/rel/riak/etc/app.config'
       echo File.read(__DIR__/:riak/'vm.args').gsub('%%NODE%%', name), to: '/opt/riak/rel/riak/etc/vm.args'
     end
