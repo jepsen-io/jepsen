@@ -124,13 +124,12 @@
                  :hosts (partition-peers %)})
        nodes))
 
-(defn run [apps]
+(defn run [n apps]
   ; Set up apps
   (dorun (map setup apps))
 
   ; Divide work and start workers
-  (let [n 2000
-        t0 (System/currentTimeMillis)
+  (let [t0 (System/currentTimeMillis)
         elements (range n)
         workloads (partition-rr (count apps) elements)
         workers (doall (map worker apps workloads))
