@@ -38,6 +38,9 @@
 ;    #(apply union (map set %))))
     #(apply union %)))
 
+(defn default-value []
+  (first (.resolve resolver [])))
+
 (defn riak-app
   [opts]
   (let [bucket     (get opts :bucket "test")
@@ -74,16 +77,19 @@
                              client
                              (apply kv/modify bucket key
                                     (fn [v]
-                                      (deliver siblings (:siblings (meta v)))
-                                      (update-in v [:value] conj element))
+                                      (let [v (or v (default-value))]
+                                        (deliver siblings (:siblings (meta v)))
+                                        (update-in v [:value] conj element)))
                                     (concat read-opts write-opts))))
-                           (deref 5000 ::timeout))]
+                       ; Allow a 5 second timeout
+                       (deref 5000 ::timeout))]
              (when (= res ::timeout)
 ;               (println "Timed out.")
                (throw (RuntimeException. "timeout")))
 
              ; Back off when siblings pile up
-             (let [t (* 20 (dec (int (Math/pow (max (- @siblings 4)
+             (let [siblings (or @siblings 0)
+                   t (* 20 (dec (int (Math/pow (max (- siblings 4)
                                                1)
                                           1.8))))]
 ;              (prn @siblings :sleep t)
@@ -114,7 +120,6 @@
   (riak-app (merge {:read {:r Quora/ALL
                            :pr Quora/ALL}
                     :write {:w Quora/ALL
-                            :dw Quora/ALL
                             :pw Quora/ALL}
                     :bucket-opts {:allow-siblings false
 ;                                  :last-write-wins true
@@ -126,7 +131,6 @@
   (riak-app (merge {:read {:r Quora/QUORUM
                            :pr Quora/QUORUM}
                     :write {:w Quora/QUORUM
-                            :dw Quora/QUORUM
                             :pw Quora/QUORUM}
                     :bucket-opts {:allow-siblings false
                                   :n-val 3}}
@@ -135,8 +139,7 @@
 (defn riak-lww-sloppy-quorum-app
   [opts]
   (riak-app (merge {:read {:r Quora/QUORUM}
-                    :write {:w Quora/QUORUM
-                            :dw Quora/QUORUM}
+                    :write {:w Quora/QUORUM}
                     :bucket-opts {:allow-siblings false
                                   :n-val 3}}
                    opts)))
