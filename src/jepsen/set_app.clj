@@ -90,8 +90,8 @@
                                (log (str element "\t" :ok))
                                element
                                (catch Throwable e
-                                 (Thread/sleep 1000)
                                  (log (str element "\t" (.getMessage e)))
+                                 (Thread/sleep 1000)
                                  ::failed)))
                            workload)))))
 
