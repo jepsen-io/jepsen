@@ -238,6 +238,12 @@ role :mongo do
     mongo.restart
   end
 
+  task :flip do
+    if name != "n1"
+      mongo.eval 'rs.stepDown(30)'
+    end
+  end
+
   task :reset do
     sudo do
       if dir? '/var/lib/mongdb/rollback'
@@ -377,7 +383,7 @@ role :jepsen do
   end
  
   task :slow do
-    sudo { exec! 'tc qdisc add dev eth0 root netem delay 100ms 10ms distribution normal' }
+    sudo { exec! 'tc qdisc add dev eth0 root netem delay 50ms 10ms distribution normal' }
   end
 
   task :flaky do
@@ -399,6 +405,28 @@ role :jepsen do
         iptables '-A', 'INPUT', '-s', n4, '-j', 'DROP'
         iptables '-A', 'INPUT', '-s', n5, '-j', 'DROP'
       end
+      iptables '--list', echo: true
+    end
+  end
+
+  task :partition_reject do
+    sudo do
+      n1 = dig '+short', :n1
+      n2 = dig '+short', :n2
+      n3 = dig '+short', :n3
+      n4 = dig '+short', :n4
+      n5 = dig '+short', :n5
+      if ['n1', 'n2'].include? name
+        log "Partitioning from n3, n4 and n5."
+        iptables '-A', 'INPUT', '-s', n3, '-j', 'REJECT'
+        iptables '-A', 'INPUT', '-s', n4, '-j', 'REJECT'
+        iptables '-A', 'INPUT', '-s', n5, '-j', 'REJECT'
+      else
+        log "Partitioning from n1, n2"
+        iptables '-A', 'INPUT', '-s', n1, '-j', 'REJECT'
+        iptables '-A', 'INPUT', '-s', n2, '-j', 'REJECT'
+      end
+
       iptables '--list', echo: true
     end
   end
