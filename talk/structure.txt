@@ -39,6 +39,7 @@ Introduce partition
     - "unusually high" latency between nodes
     - Practically speaking: high enough that timeouts come into play
   - We're going to split the cluster into two components
+    - DIAGRAM
     - Minority component: n1, n2
     - Majority component: n3, n4, n5
 
@@ -55,7 +56,6 @@ Postgres
     - Possible for clients and servers to disagree about a commit
     - How?
       - Postgres uses 2PC
-        - Two phases: voting and commit
         - When transaction is finished, the coordinator (client) votes to commit
         - PG checks to see if it's OK, and commits
         - PG tells the client that the commit succeeded
@@ -231,13 +231,13 @@ Recap
     - A very minor problem for most apps
       - Easy to recover CP at the client
   - MySQL, Oracle, MSSQL, etc
-    - Varing degrees of CP ACID designs
-    - Similar 2PC semantics
-  - Redis: CP design which allows multiple primaries
+    - Varying degrees of CP ACID designs
+    - Similar transactional semantics
+  - Redis: single-primary design which allows multiple primaries
     - Enters split-brain readily
     - Must deal with divergent histories
-    - Can't really improve consistency
-  - Mongo: CP design which allows multiple primaries
+    - Can't really work around this problem
+  - Mongo: single-primary design which allows multiple primaries
     - In general, this is a dangerous property
     - Must deal with divergent histories
     - Can get close to CP for selected writes
@@ -252,20 +252,20 @@ Recap
     - Traditionally LWW
       - Subject to similar data-loss problems under partition
     - Now working on Paxos-backed compare-and-set operations
-      - Could allow CP transactions when visible quorum exists?
+      - Could allow CP transactions when quorum available?
 
-- We've seen all these systems *lie* to us
+- Big questions
   - How do you know your app is *really* consistent?
-  - Need to test the DB config, datatypes, and client together
-  - Lots of integration, but not spectacularly difficult
-  - As databases grow, you start to find more and more inconsistencies
-  - Consider behavior under partition as a possible cause
-    - Lots of things look like partitions
   - Implementation (and bugs!) can trump theory
     - Postgres: pretty solid, IMO
     - Redis: not even sure what it's supposed to do
     - Mongo: makes claims, but they don't work
     - Riak: partitions can push latencies to extreme heights
+  - Need to test the DB config, datatypes, and client together
+    - Lots of integration, but not spectacularly difficult
+  - As databases grow, you start to find more and more inconsistencies
+    - Consider behavior under partition as a possible cause
+    - Lots of things look like partitions
   - Consider simplicity over safety
     - Drop/GC inconsistent writes
     - Little white lies
