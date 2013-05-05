@@ -1,12 +1,14 @@
-Introduce workload
-  - 5 clients
-  - Write N distinct integers
-  - Each client has its own distinct set of writes
-  - Simultaneous writes
-  - Use atomic operations
-  - This is not a real-world workload
-    - Simple to explain, write, and verify
-    - It's a branching-off point to demonstrate different types of behavior
+Introduce self
+  - Kyle Kingsbury
+  - Work at Factual
+  - This will be a pragmatic talk
+    - What happens when theory meets hardware
+
+Interested in the problem of *reliability*
+  - Can mean consistency
+  - Can mean availability
+  - CAP puts complex, balanced limits on these
+  - A key prerequisite: know what happened to your operation
   - Goal of many applications: time-bounded consistency
     - I want to tell the user that their write succeeded, or failed, in 5 s
     - "Succeeded" can be flexible
@@ -15,10 +17,21 @@ Introduce workload
         state of the system
       - Dear user, YOLO
 
+Introduce workload
+  - Write N distinct integers to a list
+  - 5 clients
+  - Each client has its own disjoint set of writes
+  - Concurrent writes
+    - Use atomic operations
+  - Going to express this application in several different databases
+  - This is not a real-world workload
+    - Simple to explain, write, and verify
+    - It's a branching-off point to demonstrate different types of behavior
+
 Introduce cluster
   - 5 nodes
-  - Each node runs a database server
-  - The master, where applicable, lives on n1.
+  - 5 servers
+  - The primary, where applicable, lives on n1
 
 Introduce partition
   - What are partitions?
@@ -31,11 +44,13 @@ Introduce partition
 
 Postgres
   - Postgres is a classic ACID relational database
-    - Strong consistency model: 1 master, not HA, consistent under partition
+    - Strong consistency model: 1 primary.
+    - If single-node, CP
     - If you use synchronous primary->secondary replication, still CP, durable
     - If you use asynchronous replication, and never promote secondary, CP,
       less durable
     - Secondaries can not accept writes
+  - Postgres is consistent
   - But even though Postgres itself is consistent, client+server is not
     - Possible for clients and servers to disagree about a commit
     - How?
@@ -69,7 +84,6 @@ Redis
   - Redis is a data structure server
   - Not designed for distribution: single primary server, n secondaries
     - Asynchronous replication only
-    - Ordinarily we'd call this a CP system
   - How do you provide high availability when the primary is unreachable?
     - Promote a secondary node
     - Lose N seconds of writes depending on replication log delay
@@ -103,7 +117,10 @@ Redis
     - Asynchronous replication means servers *will* drop acknowledged writes
   - Strategies
     - Redis is not a database
+    - HA redis is not consistent
+    - HA redis is certainly not a distributed lock server
     - Ensure you can tolerate/recover from any number of dropped writes
+      - Or inconsistent views of the world
 
 Mongo
   - Mongodb is a document store
@@ -112,7 +129,7 @@ Mongo
     - Replica sets have a single primary, n secondaries
       - CP-ish: minority component should go unavailable
       - Asynchronous replication
-      - Write to primary, reads from all nodes
+      - Write to primary, read from all nodes
         - Means you can fail to read your writes
         - Use ReadConcern Primary
         - Turns out getting monotonic consistency is hard
@@ -244,6 +261,11 @@ Recap
   - As databases grow, you start to find more and more inconsistencies
   - Consider behavior under partition as a possible cause
     - Lots of things look like partitions
+  - Implementation (and bugs!) can trump theory
+    - Postgres: pretty solid, IMO
+    - Redis: not even sure what it's supposed to do
+    - Mongo: makes claims, but they don't work
+    - Riak: partitions can push latencies to extreme heights
   - Consider simplicity over safety
     - Drop/GC inconsistent writes
     - Little white lies
