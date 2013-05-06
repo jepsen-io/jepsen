@@ -17,6 +17,12 @@ Interested in the problem of *reliability*
         state of the system
       - Dear user, YOLO
 
+Introduce partitions
+  - What are partitions?
+    - A communication breakdown
+    - "unusually high" latency between nodes
+    - Practically speaking: high enough that timeouts come into play
+
 Introduce workload
   - Write N distinct integers to a list
   - 5 clients
@@ -32,16 +38,11 @@ Introduce cluster
   - 5 nodes
   - 5 servers
   - The primary, where applicable, lives on n1
-
-Introduce partition
-  - What are partitions?
-    - A communication breakdown
-    - "unusually high" latency between nodes
-    - Practically speaking: high enough that timeouts come into play
   - We're going to split the cluster into two components
     - DIAGRAM
     - Minority component: n1, n2
     - Majority component: n3, n4, n5
+
 
 Postgres
   - Postgres is a classic ACID relational database
