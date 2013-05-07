@@ -45,7 +45,8 @@
 
       (add [app element]
            (with-sentinel sentinel
-                          (redis/sadd key element)))
+                          (redis/sadd key element)
+                          (Thread/sleep 100)))
 
       (results [app]
                (set (map #(Long. %)
