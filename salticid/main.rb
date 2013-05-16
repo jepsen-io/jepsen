@@ -464,7 +464,6 @@ group :jepsen do
   each_host do
     user :ubuntu
     role :base
-    role :net
     role :postgres
     role :redis
     role :mongo
