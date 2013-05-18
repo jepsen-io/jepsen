@@ -306,6 +306,7 @@ role :redis do
         git :clone, 'git://github.com/antirez/redis.git', echo: true
       end
       cd :redis
+      git :pull
       make echo: true
 #      make :test, echo: true
     end
