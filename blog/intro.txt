@@ -1,0 +1,348 @@
+Call me maybe 
+
+## Carly Rae Jepsen and the perils of network partitions
+
+I'm fascinated by the boundaries between systems. Like sound through the
+resonating chambers and surfaces of an instrument, or light passing through
+optics, information passes through computer systems through boundary
+layers--and as the characteristic dynamics of those media change, the
+information passing through is transformed, compressed, refracted.
+
+The boundaries between computer systems are especially fascinating when they
+cross a network. We call these systems "distributed"--because even though all
+computer processes are distributed and concurrent to some extent, the impedance
+mismatches within a single computer are typically small. On *networks*,
+however, time variance--and the probability of failure--is much larger. We
+cannot easily provide the veneer of continuous, synchronous communication. The
+dynamics become increasingly complex.
+
+Like all hard problems, it ultimately comes down to shared state. A set of
+nodes separated by the network must exchange information about a particular
+process. "Did I like that post?" "Was my write successful?" "Will you thumbnail
+my image?"
+
+At the end of a request, you might guarantee that the requested operation...
+
+- will be visible to everyone from now on
+- will be visible to your connection now, and others later
+- may not yet be visible, but is causally connected to some
+  future state of the system
+- is visible now, but might not be later
+- may or may not be visible: ERRNO_YOLO
+
+These are some examples of the complex interplay between *consistency* and
+*durability* in distributed systems. For instance, if you're writing CRDTs to
+one of two geographically replicated Riak clusters with W=2 and DW=1, you can
+guarantee that write...
+
+- is causally connected to some future state of the system
+- will survive the total failure of one node
+- will survive a power failure (assuming fsync works) of all nodes
+- will survive the destruction of an entire datacenter, given a few minutes to replicate
+
+If you're writing to ZooKeeper, you might have a stronger set of guarantees:
+the write is visible *now* to *all* participants, for instance, and that the
+write will survive the total failure of up to n/2 - 1 nodes. If you write to
+Postgres, depending on your transaction's consistency level, you might be able
+to guarantee that the write will be visible to everyone, just to yourself, or
+"eventually".
+
+These guarantees are particularly tricky to understand when the network is
+unreliable.
+
+## Partitions
+
+Formal proofs of distributed systems often assume that the network is
+*asynchronous*, which means the network may arbitrarily duplicate, drop, delay,
+or reorder messages between nodes. This is a weak hypothesis: some physical
+networks can do *better* than this, but in practice IP networks will encounter
+all of these failure modes, so the theoretical limitations of the asynchronous network apply to real-world systems as well.
+
+In *practice*, the TCP state machine allows nodes to reconstruct "reliable"
+ordered delivery of messages between nodes. TCP sockets guarantee that our
+messages will arrive without drops, duplication, or reordering. However, there
+can still be arbitrary *delays*--which would ordinarily cause the distributed
+system to *lock* indefinitely. Since computers have finite memory and latency
+bounds, we introduce *timeouts*, which close the connection when expected
+messages fail to arrive within a given time frame.
+
+Detecting network failures is *hard*. Since our only knowledge of the other
+nodes passes through the network, delays are indistinguishible from failure.
+This is the fundamental problem of the *network partition*: latency high enough
+to be considered a failure. When partitions arise, we have no way to determine
+*what* happened on the other nodes: are they alive? Dead? Did they receive our
+message? Did they issue a response? All bets are off!
+
+In this series, I'm going to demonstrate how some real distributed systems
+behave under network partitions. You can follow along at home!
+
+## Setting up a cluster
+
+You can create partitions at home! For these demonstrations, I'm going to be
+running a five node cluster of Ubuntu 12.10 machines, virtualized using
+LXC--but you can use real computers, virtual private servers, EC2, etc. I've
+named the nodes n1, n2, n3, n4, and n5: it's probably easiest to add these
+entries to `/etc/hosts` on your computer and on each of the nodes themselves.
+
+We're going to need some configuration for the cluster, and client applications
+to test their behavior. You can clone http://github.com/aphyr/jepsen to follow
+along.
+
+To run commands across the cluster, I'm using Salticid
+(http://github.com/aphyr/salticid). I've set my `~/.salticidrc` to point to
+configuration in the Jepsen repo:
+
+```ruby
+load ENV['HOME'] + '/jepsen/salticid/*.rb'
+```
+
+If you take a look at this file, you'll see that it defines a group called
+`:jepsen`, with hosts n1 ... n5. The user and password for each node is
+'ubuntu'--you'll probably want to change this if you're running your nodes on
+the public internet.
+
+I run `salticid -s salticid` to see all the groups, hosts, and roles defined by the current configuration:
+
+```
+$ salticid -s salticid
+Groups
+  jepsen
+
+Hosts:
+  n1
+  n2
+  n3
+  n4
+  n5
+
+Roles
+  base
+  riak
+  mongo
+  redis
+  postgres
+  jepsen
+  net
+
+Top-level tasks
+```
+
+The `base` role defines some basic operating system functions. `salticid
+base.setup` installs some common software we'll want for all the
+demos--build-essential, git, vim, iptables, and so on. `base.reboot` will
+reboot the cluster, and `base.shutdown` will unpower it.
+
+The `jepsen` role defines tasks for simulating network failures. To cause a
+partition, run `salticid jepsen.partition`. That command causes nodes n1 and n2
+to drop IP traffic from n3, n4, and n5--essentially by running
+
+```
+iptables -A INPUT -s n3 -j DROP
+iptables -A INPUT -s n4 -j DROP
+iptables -A INPUT -s n5 -j DROP
+```
+
+That's it, really. To check the current network status, run `jepsen.status`.
+`jepsen.heal` will reset the iptables chains to their defaults, resolving the
+partition.
+
+To simulate slow networks, or networks which drop packets, we can use `tc` to
+adjust the ethernet interface. Jepsen assumes the inter-node interface is
+`eth0`. `salticid jepsen.slow` will add latency to the network, making it
+easier to reproduce bugs which rely on a particular message being dropped.
+`salticid jepsen.flaky` will probabilistically *drop* messages. Adjusting the
+inter-node latency and lossiness simulates the behavior of real-world networks
+under congestion, and helps expose timing dependencies in distributed
+algorithms--like database replication.
+
+## A sample application
+
+In order to test a distributed system, we need a workload--a set of clients
+which make requests and record their results for analysis. For these posts,
+we're going to work with a simple application which writes several numbers to a
+list in a database. Each client app will independently write some integers to
+the DB. With five clients, client 0 writes 0, 5, 10, 15, ...; client 1 writes
+1, 6, 11, and so on.
+
+ For each write we record whether the database *acknowledged* the write
+successfully or whether there was an error. At the end of the run, we ask the
+database for the full set. If acknowledged writes are missing, or
+unacknowledged writes are present, we know that the system was *inconsistent*
+in some way: that the client application and the database disagreed about the
+state of the system.
+
+I've written several implementations of this workload in Clojure.
+`jepsen/src/jepsen/set_app.clj` defines the application. `(defprotocol SetApp
+...)` lists the functions an app has to implement, and `(run n apps)` sets up
+the apps and runs them in parallel, collects results, and shows any
+inconsistencies. Particular implementations live in `src/jepsen/riak.clj`,
+`pg.clj, `redis.clj`, and so forth.
+
+You'll want Leiningen 2, available from github, to run this code. Once you've installed lein, and added it to your path, we're ready to go!
+
+## Postgres
+
+Postgresql is a terrific open-source relational database. It offers a variety
+of ACID guarantees, from repeatable read to serializable. Because Postgres only
+accepts writes on a single primary node, we think of it as a CP system in the
+sense of the CAP theorem. If a partition occurs and you can't talk to the
+server, the system is unavaiable. Because transactions are ACID, we're always
+*consistent*. Right?
+
+Well... almost. Even though the Postgres server is always consistent, the
+distributed system composed of the server *and* client together may *not* be
+consistent. It's possible for the client and server to disagree about whether
+or not a transaction took place.
+
+Postgres' commit protocol, like most relational databases, is a special case of
+two-phase commit, or 2PC. In the first phase, the client votes to commit (or
+abort) the current transaction, and sends that message to the server. The
+server checks to see whether its consistency constraints allow the transcation
+to proceed, and if so, it votes to commit. It writes the transaction to storage
+and informs the client that the commit has taken place (or failed, as the case
+may be.) Now both the client and server agree on the outcome of the
+transaction.
+
+What happens if the message acknowledging the commit is dropped before the
+client receives it? Then the client *does't know* whether the commit succeeded
+or not! The 2PC protocol says that we *must* wait for the acknowledgement
+message to arrive in order to decide the outcome. If it doesn't arrive, 2PC
+*deadlocks*. It's not a partition-tolerant protocol. Waiting forever isn't
+realistic for real systems, so at some point the client will time out and
+declare an error occurred. The commit protocol is now in an indeterminate
+state.
+
+To demonstrate this, we'll need an install of Postgres to work with.
+
+```
+salticid postgres.setup
+```
+
+This installs Postgres from apt, uploads some config files from
+`jepsen/salticid/postgres`, and creates a database for Jepsen. Then:
+
+```
+cd salticid
+lein run pg -n 100
+```
+
+If all goes well, you'll see something like
+
+```
+...
+85  :ok
+91  :ok
+90  :ok
+95  :ok
+96  :ok
+Hit enter when ready to collect results.
+
+Writes completed in 0.317 seconds
+
+100 total
+100 acknowledged
+100 survivors
+All 100 writes succeeded. :-D
+```
+
+Each line shows the number being written, followed by whether it was OK or not.
+In this example, all five nodes talk to a single postgres server on n1. Out of
+100 writes, the clients reported that all 100 succeeded--and at the end of the
+test, all 100 numbers were present in the result set.
+
+Now let's cause a partition. Since this failure mode only arises when the
+connection drops *after* the server decides to acknowledge, but *before* the
+client receives it, there's only a short window in which to begin the partition. We can widen that window by slowing down the network:
+
+```
+salticid jepsen.slow
+```
+
+Now, we start the test:
+
+```
+lein run pg
+```
+
+And while it's running, cut off all postgres traffic to and from n1:
+
+```
+salticid jepsen.drop_pg
+```
+
+If we're lucky, we'll manage to catch one of those acknowledgement packets in flight, and the client will log an error like:
+
+```
+217 An I/O error occurred while sending to the backend. 
+Failure to execute query with SQL:
+INSERT INTO "set_app" ("element") VALUES (?)  ::  [219]
+PSQLException:
+ Message: An I/O error occured while sending to the backend.
+ SQLState: 08006
+ Error Code: 0
+218 An I/O error occured while sending to the backend.
+```
+
+
+After that, new transactions will just time out; the client will correctly log these as failures:
+
+```
+220 Connection attempt timed out.
+222 Connection attempt timed out.
+```
+
+We can resolve the partition with `salticid jepsen.heal`, and wait for the test to complete.
+
+```
+1000 total
+950 acknowledged
+952 survivors
+2 unacknowledged writes found! ヽ(´ー｀)ノ
+(215 218)
+0.95 ack rate
+0.0 loss rate
+0.002105263 unacknowledged but successful rate
+```
+
+So out of 1000 attempted writes, 950 were successfully acknowledged, and all
+950 of those writes were present in the result set. Howerver, two writes (215
+and 218) succeeded, even though they threw an exception claiming that a failure
+occurred! Note that this exception *doesn't* guarantee that the write succeeded
+or failed: 217 also threw an I/O error while sending, but because the
+connection dropped before the client's commit message arrived at the server,
+the transaction never took place.
+
+There is no way to distinguish these cases from the client. A network
+partition--and indeed, most network errors--doesn't mean a failure. It means
+the *absence* of information. Without a partition-tolerant commit protocol,
+like extended three-phase commit, we *cannot* assert the state of the system for these writes.
+
+## 2PC strategies
+
+Two-phase commit protocols aren't just for relational databases. They crop up
+in all sorts of consensus problems. Mongodb's documents essentially comprise an
+asynchronous network, and many users implement 2PC on top of their Mongo
+objects to obtain multi-key transactions.
+
+If you're working with two-phase commit, there are a few things you can do. One
+is to accept false negatives. In most relational databases, the probability of
+this failure occurring is low--and it can only affect writes which were
+in-flight at the time the partition began. It may be perfectly acceptable to
+return failures to clients even if there's a small chance the transaction
+succeeded.
+
+Alternatively, you can use consistency guarantees or other data structures to
+allow for *idempotent* operations. When you encounter a network error, just
+retry them blindly. A highly available queue with at-least-once delivery is a
+great place to put repeatable writes which need to be retried later.
+
+Finally, within some databases you can obtain strong consistency by taking note
+of the current transaction ID, and writing that ID to the database during the
+transaction. When the partition is resolved, the client can either retry or
+cancel the transaction at a later time, by checking whether or not that
+transaction ID was written. Again, this relies on having some sort of storage
+suitable for the timescales of the partition: perhaps a local log on disk, or
+an at-least-once queue.
+
+In the next post, we'll look at a very different kind of consistency model:
+Redis Sentinel.
