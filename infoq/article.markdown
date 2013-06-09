@@ -128,7 +128,7 @@ client's commit message arrived at the server, the transaction never took
 place.
 
 There is no way to reliably distinguish these cases from the client. A network
-partition–and indeed, most network errors–doesn't mean a failure. It means the
+partition--and indeed, most network errors--doesn't mean a failure. It means the
 *absence* of information. Without a partition-tolerant commit protocol, like
 extended three-phase commit, we cannot assert the state of these writes.
 
@@ -154,7 +154,7 @@ they can see, and attempt to promote and demote nodes to maintain a single
 authoritative primary.
 
 In this test, I've installed Redis and Redis Sentinel on all five nodes.
-Initially all five clients read from the primary on n1, and n2–n5 are
+Initially all five clients read from the primary on n1, and n2--n5 are
 secondaries. Then we partition n1 and n2 away from n3, n4, and n5.
 
 If Redis were a CP system, n1 and n2 would become unavailable during the
@@ -165,7 +165,7 @@ the partition, and elect, say, n5 as a new primary.
 
 For the duration of the partition, there are *two* primary nodes--one in each
 component of the system--and both accept writes independently. This is a
-classic split-brain scenario–and it violates the C in CP. Writes (and reads) in
+classic split-brain scenario--and it violates the C in CP. Writes (and reads) in
 this state are not linearizable, because clients will see a different state of
 the database depending on which node they’re talking to.
 
@@ -192,8 +192,8 @@ However, only 872 of those integers were present in the final set. Redis threw
 away 56% of the writes it claimed were successful.
 
 There are two problems here. First, notice that all the clients lost
-writes at the beginning of the partition: (50, 51, 52, 53, …). That’s because
-they were all writing to n1 when the network dropped–and since n1 was demoted
+writes at the beginning of the partition: (50, 51, 52, 53, ...). That’s because
+they were all writing to n1 when the network dropped--and since n1 was demoted
 later, any writes made during that window were destroyed.
 
 The second problem was caused by split-brain: both n1 and n5 were primaries up
@@ -412,11 +412,11 @@ cause unbounded data loss if a partition occurs:
 ```
 
 Dynamo is designed to preserve writes as much as possible. Even though a node
-might return “PW val unsatisfied” when it can't replicate to the primary vnodes
-for a key, it may have been able to write to one primary vnode–or any number of
+might return "PW val unsatisfied" when it can't replicate to the primary vnodes
+for a key, it may have been able to write to one primary vnode--or any number of
 fallback vnodes. Those values will still be exchanged during read-repair,
 considered as conflicts, and the timestamp used to discard the older
-value–meaning all writes from one side of the cluster.
+value--meaning all writes from one side of the cluster.
 
 This means the minority component's "failed" writes can destroy all of the
 majority component's successful writes.
@@ -476,7 +476,7 @@ Even if you don't use MongoDB or Riak, there are some general lessons you can
 take away from these examples.
 
 First, clients are an important part of the distributed system, not objective
-observers. Network errors mean “I don't know,” not “It failed.” Make the
+observers. Network errors mean "I don't know," not "It failed." Make the
 difference between success, failure, and indeterminacy explicit in your code
 and APIs. Consider extending consistency algorithms through the boundaries of
 your systems: hand TCP clients ETags or vector clocks, or extend CRDTs to the
@@ -500,7 +500,7 @@ nodes. Measure your clock skew anyway.
 
 Where correctness matters, rely on techniques with a formal proof and review in
 the literature. There's a huge gulf between theoretically correct algorithm and
-live software–especially with respect to latency–but a buggy implementation of
+live software--especially with respect to latency--but a buggy implementation of
 a correct algorithm is typically better than a correct implementation of a
 terrible algorithm. Bugs you can fix. Designs are much harder to re-evaluate.
 
