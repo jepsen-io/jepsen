@@ -438,7 +438,8 @@ time out or report failures--but it does guarantee safe convergence for
 acknowledged writes.
 
 If you're using Riak, use CRDTs, or write as much of a merge function as you
-can. There are only a few cases (e.g. immutable data) where LWW is appropriate; avoid it everywhere else.
+can. There are only a few cases (e.g. immutable data) where LWW is appropriate;
+avoid it everywhere else.
 
 ## Measure assumptions
 
