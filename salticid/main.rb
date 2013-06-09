@@ -306,6 +306,7 @@ role :redis do
         git :clone, 'git://github.com/antirez/redis.git', echo: true
       end
       cd :redis
+      make :clean, echo: true
       make echo: true
 #      make :test, echo: true
     end
@@ -325,9 +326,8 @@ role :redis do
 
   task :sentinel do
     sudo do
-      myip = dig '+short', name
       echo "port 26379
-sentinel monitor mymaster #{myip} 6379 3
+sentinel monitor mymaster #{dig '+short', name} 6379 3
 sentinel down-after-milliseconds mymaster 5000
 sentinel failover-timeout mymaster 900000
 sentinel can-failover mymaster yes
