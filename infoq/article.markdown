@@ -262,6 +262,7 @@ to the primary, also loses a large number of writes:
 0.98333335 ack rate
 0.3742373 loss rate
 0.0 unacknowledged but successful rate
+```
 
 Because the replication protocol is asynchronous, writes continued to succeed
 against n1, even though n1 couldn't replicate those writes to the rest of the
