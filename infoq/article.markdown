@@ -1,6 +1,12 @@
-# Jepsen: partition tolerance in practice
+[AA] I propose a title that draws the attention by providing more detail on the content.
+# Jepsen: Testing how PostgreSQL, Redis, MongoDB and Riak Behave when Partitioned
 
 Kyle Kingsbury <aphyr@aphyr.com> 
+
+[AA] We use a description of the article (up to 400 chars) in our CMS. 
+The description appears beneath the article title on the website and in the newsletter.
+I could use the following paragraph but it is a bit longer at 414 chars. 
+Could you shorten it a bit?
 
 Distributed systems are characterized by exchanging state over high-latency or
 unreliable links--most often, via an IP network. The system must be robust to
@@ -16,6 +22,9 @@ network may arbitrarily delay messages, and connections may drop at any time.
 Moreover, failure detection is unreliable: it may be impossible to determine
 whether a node has died, the network connection has dropped, or things are just
 slower than expected.
+
+[AA] You may want to read Eric Brewer's article: http://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed
+especially the section "Why "2 of 3" is misleading". He has a more nuanced approach to CA under partitioning.
 
 This type of failure--where messages are arbitrarily delayed or dropped--is
 called a network partition. Partitions can occur in production networks for a
@@ -66,7 +75,7 @@ The client and config automation, including scripts for simulating partitions
 and setting up databases, is freely available. For instructions and code, see
 http://aphyr.com/posts/281-call-me-maybe-carly-rae-jepsen-and-the-perils-of-network-partitions.
 
-## Postgresql
+## PostgreSQL
 
 A single-node PostgreSQL instance is a CP system; it can provide serializable
 consistency for transactions, at the cost of becoming unavailable when the node
@@ -526,3 +535,5 @@ Distributed state is a difficult problem, but with a little work we can make
 our systems significantly more reliable. For more on the consequences of
 network partitions, including examples of production failures, see
 http://aphyr.com/tags/jepsen.
+
+[AA] Please add 1-2 biographical paragraphs. You may include a thumbnail face pic if you want to.
