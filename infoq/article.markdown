@@ -1,19 +1,13 @@
-[AA] I propose a title that draws the attention by providing more detail on the content.
-# Jepsen: Testing how PostgreSQL, Redis, MongoDB and Riak Behave when Partitioned
+# Jepsen: Testing the Partition Tolerance of PostgreSQL, Redis, MongoDB and Riak
 
 Kyle Kingsbury <aphyr@aphyr.com> 
 
-[AA] We use a description of the article (up to 400 chars) in our CMS. 
-The description appears beneath the article title on the website and in the newsletter.
-I could use the following paragraph but it is a bit longer at 414 chars. 
-Could you shorten it a bit?
-
 Distributed systems are characterized by exchanging state over high-latency or
-unreliable links--most often, via an IP network. The system must be robust to
-both node and network failure if it is to operate reliably--however, not all
-systems satisfy the safety invariants we'd like. In this article, we'll explore
-some of the design considerations of distributed databases, and how they
-respond to a network partitions.
+unreliable links. The system must be robust to both node and network failure if
+it is to operate reliably--however, not all systems satisfy the safety
+invariants we'd like. In this article, we'll explore some of the design
+considerations of distributed databases, and how they respond to network
+partitions.
 
 IP networks may arbitrarily drop, delay, reorder, or duplicate messages send
 between nodes--so many distributed systems use TCP to prevent reordered and
@@ -23,20 +17,26 @@ Moreover, failure detection is unreliable: it may be impossible to determine
 whether a node has died, the network connection has dropped, or things are just
 slower than expected.
 
-[AA] You may want to read Eric Brewer's article: http://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed
-especially the section "Why "2 of 3" is misleading". He has a more nuanced approach to CA under partitioning.
-
 This type of failure--where messages are arbitrarily delayed or dropped--is
 called a network partition. Partitions can occur in production networks for a
 variety of reasons: GC pressure, NIC failure, switch firmware bugs,
-misconfiguration, congestion, or backhoes, to name a few.  Given that
-partitions occur, the CAP theorem restricts the maximally achievable guarantees
-of distributed systems. When messages are dropped, "consistent" (CP) systems
+misconfiguration, congestion, or backhoes, to name a few. Given that partitions
+occur, the CAP theorem restricts the maximally achievable guarantees of
+distributed systems. When messages are dropped, "consistent" (CP) systems
 preserve linearizability by rejecting some requests on some nodes. "Available"
 (AP) systems can handle requests on all nodes, but must sacrifice
 linearizability: different nodes can disagree about the order in which
-operations took place. Since partition tolerance is not optional, CA systems do
-not exist.
+operations took place. Systems can be both consistent and available when the
+network is healthy, but since real networks partition, there are no fully CA
+systems.
+
+It's also worth noting that CAP doesn't just apply to the database as a
+whole--but also to subsystems like tables, keys, columns, and even distinct
+operations. For example, a database can offer linearizability for each key
+independently, but not *between* keys. Making that tradeoff allows the system
+to handle a larger space of requests during a partition. Many databases offer
+tunable consistency levels for individual reads and writes, with commensurate
+performance and correctness tradeoffs.
 
 ## Testing partitions
 
@@ -536,4 +536,13 @@ our systems significantly more reliable. For more on the consequences of
 network partitions, including examples of production failures, see
 http://aphyr.com/tags/jepsen.
 
-[AA] Please add 1-2 biographical paragraphs. You may include a thumbnail face pic if you want to.
+---
+
+Thumbnail pic: http://ricon.io/images/speakers/east/kylekingsbury.png
+
+Kyle Kingsbury is an engineer at [Factual](http://factual.com), and writes at
+http://aphyr.com. He's also the author of [Riemann](http://riemann.io), an
+open source event-driven monitoring system; and
+[Timelike](http://github.com/aphyr/timelike), an experiment in network
+simulation. He lives in San Francisco, California, and has no idea how
+computers work.
