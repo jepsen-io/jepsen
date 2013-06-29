@@ -1,10 +1,14 @@
 (ns jepsen.bin
   (:require clojure.stacktrace)
   (:use jepsen.set-app
-        jepsen.riak
+        [jepsen.riak :only [riak-lww-all-app
+                            riak-lww-quorum-app
+                            riak-lww-sloppy-quorum-app
+                            riak-crdt-app]]
         jepsen.mongo
         jepsen.redis
-        jepsen.pg
+        [jepsen.pg :only [pg-app]]
+        [jepsen.nuodb :only [nuodb-app]]
         [clojure.tools.cli :only [cli]]))
 
 (def app-map
@@ -19,6 +23,7 @@
    "riak-lww-sloppy-quorum" riak-lww-sloppy-quorum-app
    "riak-crdt"              riak-crdt-app
    "pg"                     pg-app
+   "nuodb"                  nuodb-app
    "lock"                   locking-app})
 
 (defn parse-args
