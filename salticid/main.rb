@@ -1,14 +1,15 @@
 require 'fileutils'
 
+load __DIR__/'mongo.rb'
+load __DIR__/'nuodb.rb'
+load __DIR__/'postgres.rb'
 load __DIR__/'redis.rb'
 load __DIR__/'riak.rb'
-load __DIR__/'postgres.rb'
-load __DIR__/'mongo.rb'
 
 role :base do
   task :setup do
     sudo do
-      exec! 'apt-get install -y curl wget build-essential git-core vim psmisc iptables dnsutils telnet nmap', echo: true
+      exec! 'apt-get install -y ntp curl wget build-essential git-core vim psmisc iptables dnsutils telnet nmap', echo: true
     end
   end
 
@@ -112,9 +113,10 @@ group :jepsen do
   each_host do
     user :ubuntu
     role :base
+    role :mongo
+    role :nuodb
     role :postgres
     role :redis
-    role :mongo
     role :riak
     role :jepsen
     @password = 'ubuntu'
