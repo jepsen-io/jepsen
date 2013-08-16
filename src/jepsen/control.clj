@@ -3,6 +3,7 @@
   (:require [clj-ssh.ssh :as ssh]
             [clojure.string :as str]))
 
+(def ^:dynamic *host* nil)
 (def ^:dynamic *session* nil)
 (def ^:dynamic *dir* "/")
 (def ^:dynamic *sudo* nil)
@@ -101,10 +102,9 @@
      ~@body))
 
 (defmacro sudo
-  "Evaluates forms with a particular user and password."
-  [user pass & body]
-  `(binding [*sudo*     ~user
-             *password* ~pass]
+  "Evaluates forms with a particular user."
+  [user & body]
+  `(binding [*sudo* ~user]
      ~@body))
 
 (defmacro trace
@@ -113,14 +113,22 @@
   `(binding [*trace* true]
      ~@body))
 
+(defmacro on
+  "Opens a session to the given host and evaluates body there."
+  [host & body]
+  `(let [agent# (ssh/ssh-agent {})
+         session# (ssh/session agent# ~host {:username "ubuntu"
+                                             :strict-host-key-checking :yes})]
+     (ssh/with-connection session#
+       (binding [*session*  session#
+                 *host*     ~host
+                 *password* "ubuntu"]
+         ~@body))))
+
 (defn go
   [host]
-  (let [agent (ssh/ssh-agent {})
-        session (ssh/session agent host {:username "ubuntu"
-                                         :strict-host-key-checking :yes})]
-    (ssh/with-connection session
-      (binding [*session* session]
-        (trace 
-          (cd "/"
-              (sudo "root" "ubuntu"
-                    (println (exec "whoami")))))))))
+  (on host
+      (trace 
+        (cd "/"
+            (sudo "root"
+                  (println (exec "whoami")))))))
