@@ -82,8 +82,8 @@
                                      (update-in v [:value] conj element)))
                                  (concat read-opts write-opts)))
                         ok)
-                      ; Allow a 5 second timeout
-                      (deref 5000 ::timeout))]
+                      ; Allow a 65 second timeout
+                      (deref 65000 ::timeout))]
           (when (= res ::timeout)
             ;               (println "Timed out.")
             (throw (RuntimeException. "timeout")))
