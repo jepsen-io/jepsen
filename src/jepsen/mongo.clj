@@ -1,6 +1,7 @@
 (ns jepsen.mongo
   (:use [clojure.set :only [union difference]]
         [monger.result :only [ok? has-error?]]
+        jepsen.util
         jepsen.set-app)
   (:require [monger.core :as mg]
             [monger.collection :as c]

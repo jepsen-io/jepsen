@@ -1,9 +1,17 @@
 (ns jepsen.load
-  (:use clojure.tools.logging)
+  (:use jepsen.util)
   (:import (java.util.concurrent ScheduledThreadPoolExecutor
                                  ThreadPoolExecutor
                                  SynchronousQueue
                                  TimeUnit)))
+
+(def ok
+  "An acknowledged response."
+  {:state :ok})
+
+(def error
+  "An error response."
+  {:state :error})
 
 (def max-threads 100000)
 
@@ -42,7 +50,7 @@
                           ; Call function and record result
                           (swap! output assoc i (f element))
                           (catch Throwable t
-                            (warn t "map-fixed-rate execution failed"))))))
+                            (log t "map-fixed-rate execution failed"))))))
           ; Done enqueuing
           (deliver done true)))
       0
@@ -51,11 +59,10 @@
 
     ; Await all stasks started
     @done
-    (prn "enqueue done")
-    (prn :core-pool (.getCorePoolSize executor))
-    (prn :active (.getActiveCount executor))
-    (prn :completed (.getCompletedTaskCount executor))
-    (prn :largest-pool-size (.getLargestPoolSize executor))
+;    (prn :core-pool (.getCorePoolSize executor))
+;    (prn :active (.getActiveCount executor))
+;    (prn :completed (.getCompletedTaskCount executor))
+;    (prn :largest-pool-size (.getLargestPoolSize executor))
 
     ; Shut down workers
     (.shutdown boss)
@@ -65,5 +72,42 @@
     (if (.awaitTermination executor 30 TimeUnit/SECONDS)
       @output
       (do
-        (warn "Timed out waiting for some tasks to complete!")
+        (log "Timed out waiting for some tasks to complete!")
         @output))))
+
+(defn wrap-latency
+  "Returns a function which takes an argument and calls (f arg). (f arg) should
+  return a map. Wrap-time will add a new key :latency to this map, which is the
+  number of milliseconds the call took."
+  [f]
+  (fn measure-latency [req]
+    (let [t1 (System/nanoTime)
+          v  (f req)
+          t2 (System/nanoTime)]
+      (assoc v :latency (/ (double (- t2 t1)) 1000000.0)))))
+
+(defn wrap-catch
+  "Catches any errors thrown by f, logs them, and returns {:state :error
+  :message ...}"
+  [f]
+  (fn catcher [req]
+    (try
+      (f req)
+      (catch Throwable t
+        (log (str req "\t" (.getMessage t)))
+        {:state :error
+         :message (.getMessage t)}))))
+
+(defn wrap-log
+  "Returns a function that calls (f arg), then logs the arg and return value."
+  [f]
+  (fn logger [req]
+    (let [r (f req)]
+      (log (str req "\t" (pr-str r)))
+      r)))
+
+(defn wrap-record-req
+  "Returns a function that calls (f req), and assoc's :req req onto the result."
+  [f]
+  (fn record-req [req]
+    (assoc (f req) :req req)))

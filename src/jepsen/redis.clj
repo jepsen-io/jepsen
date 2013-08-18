@@ -1,5 +1,6 @@
 (ns jepsen.redis
   (:use [clojure.set :only [union difference]]
+        jepsen.util
         jepsen.set-app)
   (:require [taoensso.carmine :as redis]
             [clojure.string :as string]))

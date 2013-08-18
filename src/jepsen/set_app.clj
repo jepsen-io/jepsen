@@ -1,5 +1,7 @@
 (ns jepsen.set-app
   (:require clojure.stacktrace)
+  (:use jepsen.load
+        jepsen.util)
   (:use [clojure.set :only [union difference]]))
 
 (defprotocol SetApp
@@ -70,30 +72,18 @@
                        s))
        (range n)))
 
-(def logger (agent nil))
-(defn log-print
-    [_ & things]
-    (apply println things))
-(defn log
-    [& things]
-    (apply send-off logger log-print things))
-
 (defn worker
-  "Runs a workload in a new future. Returns a vector of written elements."
-  [app workload]
+  "Runs a workload in a new future. Returns a log of all the write operations."
+  [r app workload]
   (future
-    (doall
-      (remove #{::failed}
-              (map-indexed (fn [i element]
-                             (try
-                               (add app element)
-                               (log (str element "\t" :ok))
-                               element
-                               (catch Throwable e
-                                 (log (str element "\t" (.getMessage e)))
-                                 (Thread/sleep 1000)
-                                 ::failed)))
-                           workload)))))
+    (map-fixed-rate r
+                    (->> app
+                         (partial add)
+                         wrap-log
+                         wrap-catch
+                         wrap-latency
+                         wrap-record-req)
+                    workload)))
 
 (def global-lock "hi")
 (defn locking-app
@@ -124,7 +114,7 @@
                  :hosts (partition-peers %)})
        nodes))
 
-(defn run [n apps]
+(defn run [r n apps]
   ; Set up apps
   (dorun (map setup apps))
 
@@ -132,11 +122,17 @@
   (let [t0 (System/currentTimeMillis)
         elements (range n)
         workloads (partition-rr (count apps) elements)
-        workers (doall (map worker apps workloads))
-   
-        ; Wait for workers.
-        acked (apply union (map (comp set deref) workers))
+        log (->> (map (partial worker r) apps workloads)
+                 doall
+                 (mapcat deref)
+                 (sort-by :req))
+        acked (->> log
+                   (remove #(= :error (:state %)))
+                   (map :req))
         t1 (System/currentTimeMillis)]
+
+    (doseq [r log]
+      (prn r))
 
     ; Get results
     (println "Hit enter when ready to collect results.")
