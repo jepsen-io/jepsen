@@ -26,16 +26,19 @@
 (defn partition
   "Partitions the network."
   []
-  (let [nodes (map ip [:n3 :n4 :n5])]
-    (when (#{"n1" "n2"} *host*)
-      (prn "partitioning from n3, n4, n5")
-      (doseq [n nodes]
-        (exec :iptables :-A :INPUT :-s n :-j :DROP)))
-    (println (exec :iptables :--list))))
+  (su
+    (let [nodes (map ip [:n3 :n4 :n5])]
+      (when (#{"n1" "n2"} *host*)
+        (doseq [n nodes]
+          (exec :iptables :-A :INPUT :-s n :-j :DROP))))))
+
+(defn iptables-list
+  []
+  (su (exec :iptables :--list)))
 
 (defn heal
   "Heals a partition."
   []
-  (exec :iptables :-F)
-  (exec :iptables :-X)
-  (println (exec :iptables :--list)))
+  (su
+    (exec :iptables :-F)
+    (exec :iptables :-X)))

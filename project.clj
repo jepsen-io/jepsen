@@ -13,4 +13,4 @@
                            [com.nuodb.jdbc/nuodb-jdbc "1.1.1"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
-            :jvm-opts ["-Xmx128m"])
+            :jvm-opts ["-Xmx512m" "-server"])
