@@ -2,6 +2,7 @@
   (:use [clojure.set :only [union difference]]
         [korma.core :exclude [union]]
         [korma.db :only [create-db with-db transaction]]
+        jepsen.util
         jepsen.set-app)
   (:import (com.nuodb.jdbc Driver))
   (:require [clojure.string :as string]

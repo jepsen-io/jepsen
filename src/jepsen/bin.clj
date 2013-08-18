@@ -26,17 +26,20 @@
    "nuodb"                  nuodb-app
    "lock"                   locking-app})
 
+(defn parse-int [i] (Integer. i))
+
 (defn parse-args
   [args]
   (cli args
-       ["-n" "--number" "number of elements to add"
-        :parse-fn #(Integer. %)]))
+       ["-n" "--number" "number of elements to add" :parse-fn parse-int]
+       ["-r" "--rate" "requests per second" :parse-fn parse-int]))
 
 (defn -main
   [& args]
   (try
     (let [[opts app-names usage] (parse-args args)
-          n (get opts :number 2000)]
+          n (get opts :number 2000)
+          r (get opts :rate 2)]
       (when (empty? app-names)
         (println usage)
         (println "Available apps:")
@@ -46,7 +49,7 @@
       (let [app-fn (->> app-names
                      (map app-map)
                      (apply comp))]
-        (run n (apps app-fn))
+        (run r n (apps app-fn))
         (System/exit 0)))
 
     (catch Throwable t

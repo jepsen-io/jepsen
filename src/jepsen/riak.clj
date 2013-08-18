@@ -1,5 +1,7 @@
 (ns jepsen.riak
   (:use [clojure.set :only [union difference]]
+        jepsen.util
+        jepsen.load
         jepsen.set-app)
   (:require [clojurewerkz.welle.core :as welle]
             [clojurewerkz.welle.kv :as kv]
@@ -71,33 +73,21 @@
                                                           :pr Quora/ALL)))))
 
       (add [app element]
-           (let [siblings (promise)
-                 res (-> (future
-                           (welle/with-client
-                             client
-                             (apply kv/modify bucket key
-                                    (fn [v]
-                                      (let [v (or v (default-value))]
-                                        (deliver siblings (:siblings (meta v)))
-                                        (update-in v [:value] conj element)))
-                                    (concat read-opts write-opts))))
-                       ; Allow a 5 second timeout
-                       (deref 5000 ::timeout))]
-             (when (= res ::timeout)
-;               (println "Timed out.")
-               (throw (RuntimeException. "timeout")))
-
-             ; Back off when siblings pile up
-             (let [siblings (or @siblings 0)
-                   t (* 20 (dec (int (Math/pow (max (- siblings 4)
-                                               1)
-                                          1.8))))]
-;              (prn @siblings :sleep t)
-               (when (pos? t)
-                 (Thread/sleep t)))
-
-             res))
-
+        (let [res (-> (future
+                        (welle/with-client
+                          client
+                          (apply kv/modify bucket key
+                                 (fn [v]
+                                   (let [v (or v (default-value))]
+                                     (update-in v [:value] conj element)))
+                                 (concat read-opts write-opts)))
+                        ok)
+                      ; Allow a 5 second timeout
+                      (deref 5000 ::timeout))]
+          (when (= res ::timeout)
+            ;               (println "Timed out.")
+            (throw (RuntimeException. "timeout")))
+          res))
 
       (results [app]
                (welle/with-client client
