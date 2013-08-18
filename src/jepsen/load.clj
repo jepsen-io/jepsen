@@ -50,7 +50,8 @@
                           ; Call function and record result
                           (swap! output assoc i (f element))
                           (catch Throwable t
-                            (log t "map-fixed-rate execution failed"))))))
+                            (log "map-fixed-rate execution failed\n")
+                            (.printStackTrace t))))))
           ; Done enqueuing
           (deliver done true)))
       0

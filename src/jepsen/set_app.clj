@@ -107,8 +107,8 @@
                          (partial add)
                          wrap-catch
                          wrap-latency
-                         console/wrap-log
-                         wrap-record-req)
+                         wrap-record-req
+                         console/wrap-ordered-log)
                     workload)))
 
 (defn partitioner
