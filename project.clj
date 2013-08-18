@@ -10,7 +10,8 @@
                            [korma "0.3.0-RC5"]
                            [postgresql/postgresql "8.4-702.jdbc4"]
                            [org.clojure/tools.cli "0.2.2"]
-                           [com.nuodb.jdbc/nuodb-jdbc "1.1.1"]]
+                           [com.nuodb.jdbc/nuodb-jdbc "1.1.1"]
+                           [myguidingstar/clansi "1.3.0"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
             :jvm-opts ["-Xmx512m" "-server"])

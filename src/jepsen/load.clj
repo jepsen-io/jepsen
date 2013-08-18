@@ -94,12 +94,11 @@
     (try
       (f req)
       (catch Throwable t
-        (log (str req "\t" (.getMessage t)))
         {:state :error
          :message (.getMessage t)}))))
 
 (defn wrap-log
-  "Returns a function that calls (f arg), then logs the arg and return value."
+  "Returns a function that calls (f req), then logs the req and return value."
   [f]
   (fn logger [req]
     (let [r (f req)]

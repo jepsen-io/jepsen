@@ -1,7 +1,8 @@
 (ns jepsen.set-app
   (:require clojure.stacktrace
             [jepsen.control :as control]
-            [jepsen.control.net :as control.net])
+            [jepsen.control.net :as control.net]
+            [jepsen.console :as console])
   (:use jepsen.load
         jepsen.util)
   (:use [clojure.set :only [union difference]]))
@@ -104,9 +105,9 @@
     (map-fixed-rate r
                     (->> app
                          (partial add)
-                         wrap-log
                          wrap-catch
                          wrap-latency
+                         console/wrap-log
                          wrap-record-req)
                     workload)))
 
@@ -149,9 +150,6 @@
                    (remove #(= :error (:state %)))
                    (map :req))
         t1 (System/currentTimeMillis)]
-
-    (doseq [r log]
-      (prn r))
 
     (Thread/sleep 10000)
     (println "Collecting results.")
