@@ -1,5 +1,7 @@
 (ns jepsen.set-app
-  (:require clojure.stacktrace)
+  (:require clojure.stacktrace
+            [jepsen.control :as control]
+            [jepsen.control.net :as control.net])
   (:use jepsen.load
         jepsen.util)
   (:use [clojure.set :only [union difference]]))
@@ -9,6 +11,29 @@
   (add [app element] "Add an element to the set.")
   (results [app] "Return the current set.")
   (teardown [app]))
+
+(def global-lock "hi")
+(defn locking-app
+  "Wraps an app with a perfect mutex."
+  [app]
+  (reify SetApp
+    (setup    [this]         (locking global-lock (setup app)))
+    (add      [this element] (locking global-lock (add app element)))
+    (results  [this]         (locking global-lock (results app)))
+    (teardown [this]         (locking global-lock (teardown app)))))
+
+(def nodes
+  ["n1" "n2" "n3" "n4" "n5"])
+
+(def partitions
+  [#{"n1" "n2"}
+   #{"n3" "n4" "n5"}])
+
+(defn partition-peers
+  "Given a node, returns the nodes visible to that node when partitioned."
+  [node]
+  (first (filter #(get % node) partitions)))
+
 
 (defn print-list
   "Tell us a bit about a list of things."
@@ -85,27 +110,17 @@
                          wrap-record-req)
                     workload)))
 
-(def global-lock "hi")
-(defn locking-app
-  "Wraps an app with a perfect mutex."
-  [app]
-  (reify SetApp
-    (setup    [this]         (locking global-lock (setup app)))
-    (add      [this element] (locking global-lock (add app element)))
-    (results  [this]         (locking global-lock (results app)))
-    (teardown [this]         (locking global-lock (teardown app)))))
-
-(def nodes
-  ["n1" "n2" "n3" "n4" "n5"])
-
-(def partitions
-  [#{"n1" "n2"}
-   #{"n3" "n4" "n5"}])
-
-(defn partition-peers
-  "Given a node, returns the nodes visible to that node when partitioned."
-  [node]
-  (first (filter #(get % node) partitions)))
+(defn partitioner
+  "Causes a partition at t1 seconds, and resolves it at t2 seconds."
+  [t1 t2]
+  (future
+    (Thread/sleep (* 1000 t1))
+    (log "Initiating partition.")
+    (control/on-many nodes (control.net/partition))
+    (log "Partitioned.")
+    (Thread/sleep (* 1000 (- t2 t1)))
+    (control/on-many nodes (control.net/heal))
+    (log "Partition healed.")))
 
 (defn apps
   "Returns a set of apps for testing, given a function."
@@ -116,11 +131,15 @@
 
 (defn run [r n apps]
   ; Set up apps
+  (control/on-many nodes (control.net/heal))
   (dorun (map setup apps))
 
   ; Divide work and start workers
   (let [t0 (System/currentTimeMillis)
         elements (range n)
+        duration (/ n r (count nodes))
+        _ (log "Run will take" duration "seconds")
+        partitioner (partitioner (* 1/4 duration) (* 1/2 duration))
         workloads (partition-rr (count apps) elements)
         log (->> (map (partial worker r) apps workloads)
                  doall
@@ -134,9 +153,11 @@
     (doseq [r log]
       (prn r))
 
+    (Thread/sleep 10000)
+    (println "Collecting results.")
     ; Get results
-    (println "Hit enter when ready to collect results.")
-    (read-line)
+;    (println "Hit enter when ready to collect results.")
+;    (read-line)
     
     (let [results (results (first apps))]
       (println "Writes completed in" (float (/ (- t1 t0) 1000)) "seconds")

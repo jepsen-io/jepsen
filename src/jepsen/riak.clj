@@ -137,8 +137,10 @@
 (defn riak-crdt-app
   [opts]
   (riak-app (merge {:read {:r 1
+                           :pr 0
                            :resolver resolver}
-                    :write {:w 1}
+                    :write {:w 1
+                            :pw 0}
                     :bucket-opts {:allow-siblings true
                                   :n-val 3}}
                    opts)))

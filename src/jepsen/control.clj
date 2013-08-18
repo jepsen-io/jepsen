@@ -36,7 +36,7 @@
   "Wraps command by changing to the current bound directory first."
   [cmd]
   (if *dir*
-    (assoc cmd :cmd (str "cd " (escape *dir*) ";" (:cmd cmd)))
+    (assoc cmd :cmd (str "cd " (escape *dir*) "; " (:cmd cmd)))
     cmd))
 
 (defn wrap-trace
@@ -104,8 +104,13 @@
 (defmacro sudo
   "Evaluates forms with a particular user."
   [user & body]
-  `(binding [*sudo* ~user]
+  `(binding [*sudo* (name ~user)]
      ~@body))
+
+(defmacro su
+  "sudo root ..."
+  [& body]
+  `(sudo :root ~@body))
 
 (defmacro trace
   "Evaluates forms with command tracing enabled."
@@ -125,6 +130,18 @@
                  *password* "ubuntu"]
          ~@body))))
 
+(defmacro on-many
+  "Takes a list of hosts, executes body on each host in parallel, and returns a
+  map of hosts to return values."
+  [hosts & body]
+  `(let [hosts# ~hosts]
+     (->> hosts#
+          (map #(future (on % ~@body)))
+          doall
+          (map deref)
+          (map vector hosts#)
+          (into {}))))
+        
 (defn go
   [host]
   (on host
