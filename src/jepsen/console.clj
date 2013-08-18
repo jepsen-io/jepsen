@@ -1,7 +1,8 @@
 (ns jepsen.console
   "Formats ANSI art for console logging."
   (:use jepsen.util)
-  (:require [clansi.core :as clansi]))
+  (:require [clansi.core :as clansi]
+            [clojure.set :as set]))
 
 (def full       \█)
 (def horizontal [nil \▏ \▎ \▍ \▌ \▋ \▊ \▉ \█])
@@ -51,8 +52,8 @@
 (defn latency-bar
   "A colorized latency bar chart."
   [latency]
-  (let [ok 1000
-        warning 3000
+  (let [ok       1000
+        warning  5000
         critical 10000
         w 60
         m 30000]
@@ -70,18 +71,53 @@
                          :yellow    (* w (/ critical m))
                          :red)))))
 
+(defn line
+  "A log line for a response."
+  [{:keys [req state latency]}]
+  (str req \tab
+       (clansi/style
+         state
+         (case state
+           :ok :green
+           :error :red))
+       \tab
+       (latency-bar latency)))
+
 (defn wrap-log
   "Returns a function that calls (f req), then logs the request and a colorized
   bar representing the request latency."
   [f]
   (fn logger [req]
-    (let [{:keys [state latency] :as res} (f req)]
-      (log (str req \tab
-                (clansi/style
-                  state
-                  (case state
-                    :ok :green
-                    :error :red))
-                \tab
-                (latency-bar latency)))
+    (let [res (f req)]
+      (log (line res))
       res)))
+
+(def ordered-log-buffer 
+  "An atom wrapping [next req index, pending responses, ready-to-print]"
+  (atom [0
+         (sorted-set-by #(compare (:req %1)
+                                  (:req %2)))
+         []]))
+
+(defn wrap-ordered-log
+  "Like wrap-log, but ensures responses are printed in request order."
+  [f]
+  (fn logger [req]
+    (let [res (f req)]
+      (locking ordered-log-buffer
+        (->> (swap! ordered-log-buffer
+                    (fn [[idx queued _]]
+                      (let [queued (conj queued res)
+                            [idx ready] (reduce (fn [[idx ready] e]
+                                                  (if (= idx (:req e))
+                                                    [(inc idx) (conj ready e)]
+                                                    (reduced
+                                                      [idx ready])))
+                                                [idx []]
+                                                queued)
+                            queued (apply disj queued ready)]
+                        [idx queued ready])))
+             last
+             (map (comp log line))
+             dorun)
+        res))))
