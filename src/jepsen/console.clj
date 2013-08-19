@@ -73,7 +73,7 @@
 
 (defn line
   "A log line for a response."
-  [{:keys [req state latency]}]
+  [{:keys [req state latency message]}]
   (str req \tab
        (clansi/style
          state
@@ -81,7 +81,9 @@
            :ok :green
            :error :red))
        \tab
-       (latency-bar latency)))
+       (latency-bar latency)
+       (when message
+         (str "\n" message))))
 
 (defn wrap-log
   "Returns a function that calls (f req), then logs the request and a colorized

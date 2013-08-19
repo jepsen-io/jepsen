@@ -7,8 +7,9 @@
                             riak-crdt-app]]
         jepsen.mongo
         jepsen.redis
-        [jepsen.pg :only [pg-app]]
+        [jepsen.pg    :only [pg-app]]
         [jepsen.nuodb :only [nuodb-app]]
+        [jepsen.zk    :only [zk-app]]
         [clojure.tools.cli :only [cli]]))
 
 (def app-map
@@ -24,6 +25,7 @@
    "riak-crdt"              riak-crdt-app
    "pg"                     pg-app
    "nuodb"                  nuodb-app
+   "zk"                     zk-app
    "lock"                   locking-app})
 
 (defn parse-int [i] (Integer. i))
