@@ -1,8 +1,12 @@
 role :nuodb do
+  task :tail do
+    tail '-F', '/var/log/nuodb/agent.log', echo: true
+  end
+
   task :setup do
     # Get package
     cd '/tmp'
-    version = '1.1'
+    version = '1.2'
     md5 = '3811457767612140abf0f014c4906e4f'
     file = "nuodb-#{version}.linux.x64.deb"
     unless (md5sum(file) =~ /#{md5}\s+#{file}/ rescue false)
@@ -67,10 +71,8 @@ role :nuodb do
 
   task :deploy do
     # Copy default.properties
-    name =~ /(\d+)/
-    next_node = $1.to_i % 5 + 1
-    log next_node.to_s
-    peer = dig '+short', "n#{next_node}"
+    # lmao it's possible to self-join; worst database ever
+    peer = dig '+short', (name == "n1" ? "n2" : "n1")
     sudo :nuodb do
       echo File.read(__DIR__/:nuodb/'default.properties').
         gsub('%%PEER%%', peer),
@@ -78,12 +80,34 @@ role :nuodb do
     end
     sudo_upload __DIR__/:nuodb/'webapp.properties', '/opt/nuodb/etc/webapp.properties'
 
-    nuodb.restart
+    nuodb.stop
+
+    # Block until n1 ready
+    unless name == "n1"
+      @@nuodb_ready ||= false
+      ready = false
+      until ready do
+        salticid.mutex.synchronize do
+          sleep 1
+          log "waiting for n1"
+          ready = @@nuodb_ready
+        end
+      end
+    end
+
+    # Restart manager
+    nuodb.start
 
     # Set up storage manager
     log nuodb.manager "start process sm host #{name} database jepsen archive /opt/nuodb/data initialize true options '--dba-user jepsen --dba-password jepsen'"
 
     # Set up transaction engine
     log nuodb.manager "start process te host #{name} database jepsen options '--dba-user jepsen --dba-password jepsen'"
+
+    # Let others know they can run
+    salticid.mutex.synchronize do
+      log 'other nodes may proceed'
+      @@nuodb_ready = true
+    end
   end
 end

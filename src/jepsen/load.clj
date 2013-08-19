@@ -70,7 +70,7 @@
     (.shutdown executor)
 
     ; Await completion
-    (if (.awaitTermination executor 30 TimeUnit/SECONDS)
+    (if (.awaitTermination executor 100 TimeUnit/SECONDS)
       @output
       (do
         (log "Timed out waiting for some tasks to complete!")
