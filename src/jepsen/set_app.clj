@@ -2,7 +2,8 @@
   (:require clojure.stacktrace
             [jepsen.control :as control]
             [jepsen.control.net :as control.net]
-            [jepsen.console :as console])
+            [jepsen.console :as console]
+            [clojure.java.io :as io])
   (:use jepsen.load
         jepsen.util)
   (:use [clojure.set :only [union difference]]))
@@ -154,13 +155,19 @@
                    (map :req))
         t1 (System/currentTimeMillis)]
 
+    ; Spit out logfile
+    (with-open [w (io/writer "log.txt")]
+      (doseq [l log]
+        (.write w (console/line l))
+        (.write w "\n")))
+
     (println (count (filter nil? log)) "unrecoverable timeouts")
 
     (Thread/sleep 10000)
     (println "Collecting results.")
     ; Get results
 ;    (println "Hit enter when ready to collect results.")
-;    (read-line)
+;    (read-line0)
     
     (let [results (results (first apps))]
       (println "Writes completed in" (float (/ (- t1 t0) 1000)) "seconds")
