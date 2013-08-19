@@ -1,5 +1,6 @@
 (ns jepsen.load
   (:use jepsen.util)
+  (:require [clojure.stacktrace :as trace])
   (:import (java.util.concurrent ScheduledThreadPoolExecutor
                                  ThreadPoolExecutor
                                  SynchronousQueue
@@ -96,7 +97,9 @@
       (f req)
       (catch Throwable t
         {:state :error
-         :message (.getMessage t)}))))
+         :message (str (.getMessage t) "\n"
+                       (with-out-str
+                         (trace/print-cause-trace t)))}))))
 
 (defn wrap-log
   "Returns a function that calls (f req), then logs the req and return value."

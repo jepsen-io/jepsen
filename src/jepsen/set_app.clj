@@ -143,7 +143,7 @@
         elements (range n)
         duration (/ n r (count nodes))
         _ (log "Run will take" duration "seconds")
-        partitioner (partitioner (* 1/4 duration) (* 1/2 duration))
+        partitioner (partitioner (min 10 (* 1/4 duration)) (* 1/2 duration))
         workloads (partition-rr (count apps) elements)
         log (->> (map (partial worker r) apps workloads)
                  doall

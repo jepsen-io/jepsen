@@ -118,6 +118,7 @@ group :jepsen do
     role :postgres
     role :redis
     role :riak
+    role :zk
     role :jepsen
     @password = 'ubuntu'
   end
