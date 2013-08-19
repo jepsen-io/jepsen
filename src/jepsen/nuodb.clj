@@ -3,6 +3,7 @@
         [korma.core :exclude [union]]
         [korma.db :only [create-db with-db transaction]]
         jepsen.util
+        jepsen.load
         jepsen.set-app)
   (:import (com.nuodb.jdbc Driver))
   (:require [clojure.string :as string]
@@ -21,20 +22,20 @@
   `(loop []
      (let [result# (try
                      ~@body
-                     (catch RuntimeException e#
-                       (log "runtime ex" e#)
-                       (if-let [cause# (.getCause e#)]
-                         (throw cause#)
-                         (throw e#)))
                      (catch java.sql.SQLException e#
                        (if (or (re-find #"update conflict" (.getMessage e#))
                                (re-find #"pending update rejected"
                                         (.getMessage e#)))
                          ::retry
+                         (throw e#)))
+                     (catch RuntimeException e#
+                       (log "runtime ex" e#)
+                       (if-let [cause# (.getCause e#)]
+                         (throw cause#)
                          (throw e#))))]
      (if (= ::retry result#)
        (do
-         (log :retry)
+;         (log :retry)
          (recur))
        result#))))
 
@@ -47,18 +48,18 @@
 
     (reify SetApp
       (setup [app]
-             (locking db-lock
-               (teardown app)
-               (with-db db
-                        (exec-raw "CREATE TABLE SET_APP (
-                                  ID INTEGER GENERATED ALWAYS AS IDENTITY,
-                                  JSON TEXT NOT NULL)")
-                        (insert table (values {:JSON "[]"}))
-                        (assert (-> table
-                                  (select (aggregate (count :ID) :count))
-                                  first
-                                  :count
-                                  (= 1))))))
+        (locking db-lock
+          (teardown app)
+          (with-db db
+            (exec-raw "CREATE TABLE SET_APP (
+                      ID INTEGER GENERATED ALWAYS AS IDENTITY,
+                      JSON TEXT NOT NULL)")
+            (insert table (values {:JSON "[]"}))
+            (assert (-> table
+                        (select (aggregate (count :ID) :count))
+                        first
+                        :count
+                        (= 1))))))
 
       (add [app element]
         (let [write (future
@@ -73,11 +74,11 @@
                                               (conj element)
                                               json/generate-string)]
                               (update table (set-fields {:JSON numbers})))))))
-              res (deref write 5000 ::timeout)]
-              (when (= res ::timeout)
-                (future-cancel write)
-                (throw (RuntimeException. "timeout")))
-              res))
+              res (deref write 65000 ::timeout)]
+          (when (= res ::timeout)
+            (future-cancel write)
+            (throw (RuntimeException. "timeout")))
+          ok))
 
       (results [app]
         (with-db db

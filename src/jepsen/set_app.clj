@@ -133,7 +133,9 @@
 (defn run [r n apps]
   ; Set up apps
   (control/on-many nodes (control.net/heal))
-  (dorun (map setup apps))
+  ; Destroys nuodb
+  ; (dorun (map setup apps))
+  (setup (first apps))
 
   ; Divide work and start workers
   (let [t0 (System/currentTimeMillis)
@@ -147,9 +149,12 @@
                  (mapcat deref)
                  (sort-by :req))
         acked (->> log
+                   (remove nil?)
                    (remove #(= :error (:state %)))
                    (map :req))
         t1 (System/currentTimeMillis)]
+
+    (println (count (filter nil? log)) "unrecoverable timeouts")
 
     (Thread/sleep 10000)
     (println "Collecting results.")

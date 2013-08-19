@@ -1,0 +1,8 @@
+- nuodb
+  - "duplicate value in unique index SEQUENCES..PRIMARY_KEY" 
+  - Error purging table SYSTEM.SET_APP: update conflict in update rec 27 transaction 4199818
+    Error purging table SYSTEM.SET_APP: sequence "SYSTEM.SET_APP$IDENTITY_SEQUENCE" does not exist
+  - SQL> DROP TABLE SET_APP CASCADE;
+    sequence "SYSTEM.SET_APP$IDENTITY_SEQUENCE" does not exist
+    SQL> CREATE SEQUENCE SYSTEM.SET_APP$IDENTITY_SEQUENCE;
+    sequence SYSTEM.SET_APP$IDENTITY_SEQUENCE already exists
