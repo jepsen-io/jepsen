@@ -10,6 +10,7 @@ repl-port
 *~
 .*.swp
 *.log
+log.txt
 lib
 classes
 build
