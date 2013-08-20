@@ -7,7 +7,6 @@ role :nuodb do
     # Get package
     cd '/tmp'
     version = '1.2'
-    md5 = '3811457767612140abf0f014c4906e4f'
     file = "nuodb-#{version}.linux.x64.deb"
     unless (md5sum(file) =~ /#{md5}\s+#{file}/ rescue false)
       # Need to re-download file.
@@ -71,7 +70,7 @@ role :nuodb do
 
   task :deploy do
     # Copy default.properties
-    # lmao it's possible to self-join; worst database ever
+    # lmao it's possible to self-join, so don't do that
     peer = dig '+short', (name == "n1" ? "n2" : "n1")
     sudo :nuodb do
       echo File.read(__DIR__/:nuodb/'default.properties').
