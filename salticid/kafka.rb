@@ -23,12 +23,12 @@ role :kafka do
   task :deploy do
     sudo do
       name =~ /(\d+)/
-      id = $1
+      id = 6 - $1.to_i 
 
       # Create topic
       exec! '/opt/kafka/bin/kafka-create-topic.sh --partition 5 --replica 5 --topic jepsen --zookeeper localhost:2181'
 
-      echo File.read(__DIR__/:kafka/'server.properties').gsub('%%ID%%', id),
+      echo File.read(__DIR__/:kafka/'server.properties').gsub('%%ID%%', id.to_s),
         to: '/opt/kafka/config/server.properties'
     end
     kafka.start
