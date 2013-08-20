@@ -10,11 +10,13 @@
         [jepsen.pg    :only [pg-app]]
         [jepsen.nuodb :only [nuodb-app]]
         [jepsen.zk    :only [zk-app]]
+        [jepsen.kafka :only [kafka-app]]
         [clojure.tools.cli :only [cli]]))
 
 (def app-map
   "A map from command-line names to apps you can run"
-  {"mongo-replicas-safe"    mongo-replicas-safe-app
+  {"kafka"                  kafka-app
+   "mongo-replicas-safe"    mongo-replicas-safe-app
    "mongo-safe"             mongo-safe-app
    "mongo-unsafe"           mongo-unsafe-app
    "mongo"                  mongo-app
