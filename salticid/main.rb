@@ -113,6 +113,7 @@ group :jepsen do
   each_host do
     user :ubuntu
     role :base
+    role :kafka
     role :mongo
     role :nuodb
     role :postgres
