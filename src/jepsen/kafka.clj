@@ -40,6 +40,11 @@
                     first)
         producer (producer/producer
                    {"metadata.broker.list" (str (:host opts) ":9092")
+                    "request.required.acks" "-1" ; all in-sync brokers
+                    "producer.type"         "sync" 
+                    "message.send.max_retries" "1" 
+                    "connect.timeout.ms"    "1000"
+                    "retry.backoff.ms"       "1000"
                     "serializer.class"     "kafka.serializer.DefaultEncoder"
                     "partitioner.class"    "kafka.producer.DefaultPartitioner"})]
 
@@ -49,11 +54,12 @@
 
       (add [app element]
         (try
-          (->> element
-               codec/encode
-               (producer/message "jepsen")
-               (producer/send-message producer))
-          ok
+          (timeout 100000 error
+                   (->> element
+                        codec/encode
+                        (producer/message "jepsen")
+                        (producer/send-message producer))
+                   ok)
           (catch org.apache.zookeeper.KeeperException$ConnectionLossException e
             error)))
 

@@ -32,6 +32,7 @@ role :zk do
     sudo do
       zk.stop rescue nil
       exec! 'rm -rf /var/lib/zookeeper/version-*'
+      exec! 'rm -rf /var/log/zookeeper/*'
     end
   end
 
