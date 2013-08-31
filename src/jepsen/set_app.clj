@@ -133,17 +133,16 @@
 
 (defn run [r n apps]
   ; Set up apps
-;  (control/on-many nodes (control.net/heal))
+  (control/on-many nodes (control.net/heal))
   ; Destroys nuodb
-  ; (dorun (map setup apps))
-  (setup (first apps))
+  (dorun (map setup apps))
 
   ; Divide work and start workers
   (let [t0 (System/currentTimeMillis)
         elements (range n)
         duration (/ n r (count nodes))
         _ (log "Run will take" duration "seconds")
-;        partitioner (partitioner (min 10 (* 1/4 duration)) (* 1/2 duration))
+        partitioner (partitioner (min 10 (* 1/4 duration)) (* 1/2 duration))
         workloads (partition-rr (count apps) elements)
         log (->> (map (partial worker r) apps workloads)
                  doall

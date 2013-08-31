@@ -6,3 +6,11 @@
     sequence "SYSTEM.SET_APP$IDENTITY_SEQUENCE" does not exist
     SQL> CREATE SEQUENCE SYSTEM.SET_APP$IDENTITY_SEQUENCE;
     sequence SYSTEM.SET_APP$IDENTITY_SEQUENCE already exists
+
+- Cassandra
+  "Columns are overwritten only if the timestamp in the new version of the
+  column is more recent than the existing column, so precise timestamps are
+  necessary if updates (overwrites) are frequent. The timestamp is provided by
+  the client, so the clocks of all client machines should be synchronized using
+  NTP (network time protocol), for example."
+
