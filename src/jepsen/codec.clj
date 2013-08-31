@@ -1,6 +1,7 @@
 (ns jepsen.codec
   "Serializes and deserializes objects to/from bytes."
-  (:require [clojure.edn :as edn])
+  (:require [clojure.edn :as edn]
+            [byte-streams :as b])
   (:import  (java.io ByteArrayInputStream
                      InputStreamReader
                      PushbackReader)))
@@ -15,12 +16,14 @@
 
 (defn decode
   "Deserialize bytes to an object."
-  [^bytes bytes]
-  (if (or (nil? bytes) (= 0 (alength bytes)))
+  [bytes]
+  (if (nil? bytes)
     nil
-    (with-open [s (ByteArrayInputStream. bytes)
-                i (InputStreamReader. s)
-                r (PushbackReader. i)]
-      (binding [*read-eval* false]
-        (edn/read r)))))
-
+    (let [bytes ^bytes (b/to-byte-array bytes)]
+      (if (zero? (alength bytes))
+        nil
+        (with-open [s (ByteArrayInputStream. bytes)
+                    i (InputStreamReader. s)
+                    r (PushbackReader. i)]
+          (binding [*read-eval* false]
+            (edn/read r)))))))
