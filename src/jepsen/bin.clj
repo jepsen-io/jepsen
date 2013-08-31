@@ -1,5 +1,6 @@
 (ns jepsen.bin
-  (:require clojure.stacktrace)
+  (:require clojure.stacktrace
+            [jepsen.cassandra :as cassandra])
   (:use jepsen.set-app
         [jepsen.cassandra :only [cassandra-app]]
         [jepsen.riak :only [riak-lww-all-app
@@ -17,6 +18,7 @@
 (def app-map
   "A map from command-line names to apps you can run"
   {"cassandra"              cassandra-app
+   "cassandra-counter"      cassandra/counter-app
    "kafka"                  kafka-app
    "mongo-replicas-safe"    mongo-replicas-safe-app
    "mongo-safe"             mongo-safe-app
