@@ -13,4 +13,4 @@
   necessary if updates (overwrites) are frequent. The timestamp is provided by
   the client, so the clocks of all client machines should be synchronized using
   NTP (network time protocol), for example."
-
+- "In an UPDATE statement, all updates within the same partition key are applied atomically and in isolation."
