@@ -19,6 +19,8 @@
   "A map from command-line names to apps you can run"
   {"cassandra"              cassandra-app
    "cassandra-counter"      cassandra/counter-app
+   "cassandra-set"          cassandra/set-app
+   "cassandra-isolation"    cassandra/isolation-app
    "kafka"                  kafka-app
    "mongo-replicas-safe"    mongo-replicas-safe-app
    "mongo-safe"             mongo-safe-app
