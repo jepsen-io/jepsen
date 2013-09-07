@@ -12,8 +12,11 @@
                            [org.clojure/tools.cli "0.2.2"]
                            [com.nuodb.jdbc/nuodb-jdbc "1.1.1"]
                            [myguidingstar/clansi "1.3.0"]
-                           [org.apache.curator/curator-recipes "2.0.1-incubating"]
-                           [clj-kafka "0.1.0-0.8-SNAPSHOT"]]
+                           [org.apache.curator/curator-recipes "2.0.1-incubating"
+                            :exclusions [org.jboss.netty/netty]]
+                           [clj-kafka "0.1.0-0.8-SNAPSHOT"]
+                           [clojurewerkz/cassaforte "1.1.0"]
+                           [byte-streams "0.1.4"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
             :jvm-opts ["-Xmx512m" "-server"])
