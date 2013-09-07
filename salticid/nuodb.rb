@@ -69,6 +69,12 @@ role :nuodb do
   end
 
   task :deploy do
+    # Nuo's init script doesn't recreate this properly
+    sudo do
+      mkdir '-p', '/var/run/nuodb'
+      chown 'nuodb:nuodb', '/var/run/nuodb'
+    end
+
     # Copy default.properties
     # lmao it's possible to self-join, so don't do that
     peer = dig '+short', (name == "n1" ? "n2" : "n1")
@@ -81,7 +87,7 @@ role :nuodb do
 
     nuodb.stop
 
-    # Block until n1 ready
+    # Block until n1 ready, because of N race conditions in join
     unless name == "n1"
       @@nuodb_ready ||= false
       ready = false
