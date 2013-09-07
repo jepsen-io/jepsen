@@ -15,7 +15,7 @@
                            [org.apache.curator/curator-recipes "2.0.1-incubating"
                             :exclusions [org.jboss.netty/netty]]
                            [clj-kafka "0.1.0-0.8-SNAPSHOT"]
-                           [clojurewerkz/cassaforte "1.1.0"]
+                           [clojurewerkz/cassaforte "1.2.0"]
                            [byte-streams "0.1.4"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
