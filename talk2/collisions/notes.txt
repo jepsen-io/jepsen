@@ -1,0 +1,38 @@
+; Probability of a read seeing a collision for various poisson rates
+
+{1 1.317905310489196E-7,
+ 10 5.749661865748004E-6,
+ 100 5.303513799265161E-5,
+ 1000 5.090228791739002E-4,
+ 10000 0.005040357033134383,
+ 100000 0.04925138356052143,
+ 1000000 0.4179179486964119}
+
+; Probability of observing 1 or more collisions per day, at 1 read per second:
+
+{1 0.02,
+ 10 0.34,
+ 100 0.985,
+ 1000 1.0,
+ 10000 1.0,
+ 100000 1.0,
+ 1000000 1.0}
+
+; Probability of any given cell being invalid, if it is written to twice by a poisson process with mean arrival rate of 1/s, 10/s, etc.
+
+{1 4.1E-7,
+ 10 4.93E-6,
+ 100 4.994E-5
+ 1000 5.11E-4,
+ 10000 0.005026,
+ 100000 0.046884,
+ 1000000 0.283527}
+
+; At 10 writes per second, number of corrupt rows per day in the above system:
+{1 0.35424,
+ 10 4.25952,
+ 100 43.14816,
+ 1000 441.50399999999996,
+ 10000 4342.464,
+ 100000 40507.776000000005,
+ 1000000 244967.32799999998}
