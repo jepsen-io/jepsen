@@ -142,6 +142,9 @@
       (teardown [app]
         (drop-keyspace session)))))
 
+; Hack: use this to record the set of all written elements for isolation-app.
+(def writes (atom #{}))
+
 (defn isolation-app
   "This app tests whether or not it is possible to consistently update multiple
   cells in a row, such that either *both* writes are visible together, or
@@ -152,10 +155,13 @@
   to cell B. The write is considered successful if A=-B. It is unsuccessful if
   A is *not* equal to -B; e.g. our updates were not isolated.
   
-'concurrency defines the number of writes made to each row. "
+  'concurrency defines the number of writes made to each row. "
   [opts]
-  (let [table       "isolation_app"
-        concurrency 5
+  (let [table        "isolation_app"
+        ; Number of writes to each row
+        concurrency  2
+        ; Mean of uniformly distributed latency for writes
+        mean-latency 100
         client-id   (rand-int Integer/MAX_VALUE)
         cluster     (client/build-cluster {:contact-points [(:host opts)]
                                            :port 9042})
@@ -171,6 +177,13 @@
                                                :primary-key [:id]})))
 
       (add [app element]
+        ; Introduce some entropy
+        (sleep (rand 200))
+
+        ; Record write in memory
+        (swap! writes conj element)
+
+        ; Write to Cassy
         (client/with-consistency-level ConsistencyLevel/ANY
           (dotimes [i concurrency]
             (let [e (- element i)]
@@ -199,8 +212,9 @@
                dorun)
 
           (->> (cql/select session table)
-               (filter #(= (:a %) (- (:b %))))
-               (map :id))))
+               (remove #(= (:a %) (- (:b %))))
+               (map :id)
+               (set/difference @writes))))
 
       (teardown [app]
-        (drop-keyspace session))))) 
+        (drop-keyspace session)))))
