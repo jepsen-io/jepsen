@@ -1,5 +1,6 @@
 (ns jepsen.util
-  "Kitchen sink")
+  "Kitchen sink"
+  (:import (java.util.concurrent.locks LockSupport)))
 
 (def logger (agent nil))
 (defn log-print
@@ -49,3 +50,21 @@
   `(mute-jdk
 ;     (mute-log4j
        ~@body));)
+
+(defn ms->nanos [ms] (* ms 1000000))
+
+(defn nanos->ms [nanos] (/ nanos 1000000))
+
+(defn sleep
+  "High-resolution sleep; takes a (possibly fractional) time in ms."
+  [dt]
+  (let [t (+ (long (ms->nanos dt))
+                    (System/nanoTime))]
+    (while (< (+ (System/nanoTime) 10000) t)
+      (LockSupport/parkNanos (- t (System/nanoTime))))))
+
+(defmacro time-
+  [& body]
+  `(let [t0# (System/nanoTime)]
+    ~@body
+     (nanos->ms (- (System/nanoTime) t0#))))
