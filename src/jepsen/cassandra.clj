@@ -218,3 +218,51 @@
 
       (teardown [app]
         (drop-keyspace session)))))
+
+(defn transaction-app
+  [opts]
+  (let [table    "set_app"
+        clock-skew (rand-int 100)
+        cluster (client/build-cluster {:contact-points [(:host opts)]
+                                       :port 9042})
+        session (client/connect cluster)]
+    (reify SetApp
+      (setup [app]
+        (teardown app)
+        (ensure-keyspace session)
+        (cql/create-table session table
+                          (column-definitions {:id :int
+                                               :elements :blob
+                                               :primary-key [:id]}))
+        (cql/insert session table
+                    {:id 0 :elements (codec/encode [])}))
+
+      (add [app element]
+        (let [value (-> (cql/select session table (where :id 0))
+                        first
+                        :elements)
+              value' (-> value
+                         codec/decode
+                         (conj element)
+                         codec/encode)]
+            (cql/update session table
+                        {:elements value'}
+                        (where :id 0)
+                        (only-if {:elements value})))
+          ok)
+
+      (results [app]
+        (client/with-consistency-level ConsistencyLevel/ALL
+          (prn (->> (cql/select session table
+                                (where :id 0))
+                    first
+                    :elements
+                    codec/decode))
+          (->> (cql/select session table
+                           (where :id 0))
+               first
+               :elements
+               codec/decode)))
+
+      (teardown [app]
+        (drop-keyspace session)))))
