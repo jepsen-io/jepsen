@@ -21,6 +21,7 @@
    "cassandra-counter"      cassandra/counter-app
    "cassandra-set"          cassandra/set-app
    "cassandra-isolation"    cassandra/isolation-app
+   "cassandra-transaction"  cassandra/transaction-app
    "kafka"                  kafka-app
    "mongo-replicas-safe"    mongo-replicas-safe-app
    "mongo-safe"             mongo-safe-app

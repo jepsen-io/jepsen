@@ -1,8 +1,8 @@
 role :cassandra do
   task :setup do
     sudo do
-      echo "deb http://www.apache.org/dist/cassandra/debian 12x main
-deb-src http://www.apache.org/dist/cassandra/debian 12x main",
+      echo "deb http://www.apache.org/dist/cassandra/debian 20x main
+deb-src http://www.apache.org/dist/cassandra/debian 20x main",
         to: '/etc/apt/sources.list.d/cassandra.list'
       exec! 'gpg --keyserver pgp.mit.edu --recv-keys F758CE318D77295D'
       exec! 'gpg --export --armor F758CE318D77295D | apt-key add -'
