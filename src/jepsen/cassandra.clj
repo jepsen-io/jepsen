@@ -1,6 +1,7 @@
 (ns jepsen.cassandra
   "Cassandra test."
-  (:import (com.datastax.driver.core ConsistencyLevel))
+  (:import (com.datastax.driver.core ConsistencyLevel)
+           (com.datastax.driver.core.exceptions NoHostAvailableException))
   (:require [clojurewerkz.cassaforte.client :as client]
             [clojurewerkz.cassaforte.multi.cql :as cql]
             qbits.hayt.cql
@@ -245,10 +246,16 @@
                          codec/decode
                          (conj element)
                          codec/encode)]
-            (cql/update session table
-                        {:elements value'}
-                        (where :id 0)
-                        (only-if {:elements value})))
+          (try
+            (client/with-consistency-level ConsistencyLevel/ONE
+              (cql/update session table
+                          {:elements value'}
+                          (where :id 0)
+                          (only-if {:elements value})))
+            (catch NoHostAvailableException e
+              (println e)
+              (prn (.getErrors e)))))
+              
           ok)
 
       (results [app]

@@ -309,7 +309,7 @@ native_transport_port: 9042
 # native_transport_max_threads: 128
 
 # Whether to start the thrift rpc server.
-start_rpc: false
+start_rpc: true
 
 # The address to bind the Thrift RPC service and native transport
 # server -- clients connect here.
