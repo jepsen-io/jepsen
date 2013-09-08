@@ -1,7 +1,8 @@
 (ns jepsen.cassandra
   "Cassandra test."
   (:import (com.datastax.driver.core ConsistencyLevel)
-           (com.datastax.driver.core.exceptions NoHostAvailableException))
+           (com.datastax.driver.core.exceptions NoHostAvailableException
+                                                WriteTimeoutException))
   (:require [clojurewerkz.cassaforte.client :as client]
             [clojurewerkz.cassaforte.multi.cql :as cql]
             qbits.hayt.cql
@@ -239,24 +240,29 @@
                     {:id 0 :elements (codec/encode [])}))
 
       (add [app element]
-        (let [value (-> (cql/select session table (where :id 0))
-                        first
-                        :elements)
-              value' (-> value
-                         codec/decode
-                         (conj element)
-                         codec/encode)]
-          (try
-            (client/with-consistency-level ConsistencyLevel/ONE
-              (cql/update session table
-                          {:elements value'}
-                          (where :id 0)
-                          (only-if {:elements value})))
-            (catch NoHostAvailableException e
-              (println e)
-              (prn (.getErrors e)))))
-              
-          ok)
+        (client/with-consistency-level ConsistencyLevel/QUORUM
+          (loop []
+            (let [value (-> (cql/select session table (where :id 0))
+                            first
+                            :elements)
+                  value' (-> value
+                             codec/decode
+                             (conj element)
+                             codec/encode)]
+              (let [res (-> (cql/update session table
+                                        {:elements value'}
+                                        (where :id 0)
+                                        (only-if {:elements value}))
+                            first
+                            (try (catch WriteTimeoutException e
+                                   (log e)
+                                   :timeout)))]
+                (if (get res (keyword "[applied]"))
+                  ok
+                  (do
+                    (log "retry" element)
+                    (sleep (rand 1000))
+                    (recur))))))))
 
       (results [app]
         (client/with-consistency-level ConsistencyLevel/ALL
