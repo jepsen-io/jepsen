@@ -241,28 +241,37 @@
 
       (add [app element]
         (client/with-consistency-level ConsistencyLevel/QUORUM
-          (loop []
-            (let [value (-> (cql/select session table (where :id 0))
-                            first
-                            :elements)
-                  value' (-> value
-                             codec/decode
-                             (conj element)
-                             codec/encode)]
-              (let [res (-> (cql/update session table
-                                        {:elements value'}
-                                        (where :id 0)
-                                        (only-if {:elements value}))
-                            first
-                            (try (catch WriteTimeoutException e
-                                   (log e)
-                                   :timeout)))]
-                (if (get res (keyword "[applied]"))
-                  ok
-                  (do
-                    (log "retry" element)
-                    (sleep (rand 1000))
-                    (recur))))))))
+          (let [t0 (System/currentTimeMillis)]
+            (loop []
+              (let [value (-> (cql/select session table (where :id 0))
+                              first
+                              :elements)
+                    value' (-> value
+                               codec/decode
+                               (conj element)
+                               codec/encode)]
+                (let [res (-> (cql/update session table
+                                          {:elements value'}
+                                          (where :id 0)
+                                          (only-if {:elements value}))
+                              first
+                              (try (catch WriteTimeoutException e
+                                     (log e)
+                                     :timeout)))]
+                  (cond
+                    ; Successful write
+                    (get res (keyword "[applied]"))
+                    ok
+                    
+                    ; Enough time to retry?
+                    (< 10000 (- (System/currentTimeMillis) t0))
+                    error
+
+                    :else
+                    (do
+                      (log "retry" element)
+                      (sleep (rand 1000))
+                      (recur)))))))))
 
       (results [app]
         (client/with-consistency-level ConsistencyLevel/ALL
