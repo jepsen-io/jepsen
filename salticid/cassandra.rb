@@ -14,6 +14,17 @@ deb-src http://www.apache.org/dist/cassandra/debian 20x main",
     cassandra.deploy
   end
 
+  task :edge do
+    cd '/tmp'
+    file = 'cassandra_2.0.0_all.deb'
+    rm file rescue nil
+    wget "http://aphyr.com/media/#{file}"
+    sudo do
+      dpkg '-i', '--force-confnew', file
+    end
+    cassandra.deploy
+  end 
+
   task :tail do
     sudo do
       tail '-F', '/var/log/cassandra/output.log', echo: true
