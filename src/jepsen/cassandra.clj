@@ -256,7 +256,7 @@
                                           (only-if {:elements value}))
                               first
                               (try (catch WriteTimeoutException e
-                                     (log e)
+;                                     (log e)
                                      :timeout)))]
                   (cond
                     ; Successful write
@@ -269,17 +269,12 @@
 
                     :else
                     (do
-                      (log "retry" element)
-                      (sleep (rand 1000))
+;                      (log "retry" element)
+                      (sleep (rand 100))
                       (recur)))))))))
 
       (results [app]
         (client/with-consistency-level ConsistencyLevel/ALL
-          (prn (->> (cql/select session table
-                                (where :id 0))
-                    first
-                    :elements
-                    codec/decode))
           (->> (cql/select session table
                            (where :id 0))
                first
