@@ -3,6 +3,7 @@
             [jepsen.control :as control]
             [jepsen.control.net :as control.net]
             [jepsen.console :as console]
+            [jepsen.failure :as failure]
             [clojure.java.io :as io])
   (:use jepsen.load
         jepsen.util)
@@ -112,18 +113,6 @@
                          console/wrap-ordered-log)
                     workload)))
 
-(defn partitioner
-  "Causes a partition at t1 seconds, and resolves it at t2 seconds."
-  [t1 t2]
-  (future
-    (Thread/sleep (* 1000 t1))
-    (log "Initiating partition.")
-    (control/on-many nodes (control.net/partition))
-    (log "Partitioned.")
-    (Thread/sleep (* 1000 (- t2 t1)))
-    (control/on-many nodes (control.net/heal))
-    (log "Partition healed.")))
-
 (defn apps
   "Returns a set of apps for testing, given a function."
   [app-fn]
@@ -131,7 +120,7 @@
                  :hosts (partition-peers %)})
        nodes))
 
-(defn run [r n apps]
+(defn run [r n failure-mode apps]
   ; Set up apps
   (control/on-many nodes (control.net/heal))
   ; Destroys nuodb
@@ -142,7 +131,10 @@
         elements (range n)
         duration (/ n r (count nodes))
         _ (log "Run will take" duration "seconds")
-        partitioner (partitioner (min 10 (* 1/4 duration)) (* 1/2 duration))
+        witch (failure/schedule! failure-mode
+                                 nodes
+                                 (min 10 (* 1/4 duration))
+                                 (* 1/2 duration))
         workloads (partition-rr (count apps) elements)
         log (->> (map (partial worker r) apps workloads)
                  doall

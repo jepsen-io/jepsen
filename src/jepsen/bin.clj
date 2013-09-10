@@ -1,6 +1,7 @@
 (ns jepsen.bin
   (:require clojure.stacktrace
-            [jepsen.cassandra :as cassandra])
+            [jepsen.cassandra :as cassandra]
+            [jepsen.failure :as failure])
   (:use jepsen.set-app
         [jepsen.cassandra :only [cassandra-app]]
         [jepsen.riak :only [riak-lww-all-app
@@ -37,20 +38,30 @@
    "zk"                     zk-app
    "lock"                   locking-app})
 
+(def failures
+  "A map from command-line names to failure modes."
+  {"partition"  failure/simple-partition
+   "noop"       failure/noop})
+
 (defn parse-int [i] (Integer. i))
 
 (defn parse-args
   [args]
   (cli args
        ["-n" "--number" "number of elements to add" :parse-fn parse-int]
-       ["-r" "--rate" "requests per second" :parse-fn parse-int]))
+       ["-r" "--rate" "requests per second" :parse-fn parse-int]
+       ["-f" "--failure" "failure mode"]))
 
 (defn -main
   [& args]
   (try
     (let [[opts app-names usage] (parse-args args)
+          failure (-> opts
+                      (get :failure "partition")
+                      failures)
           n (get opts :number 2000)
           r (get opts :rate 2)]
+
       (when (empty? app-names)
         (println usage)
         (println "Available apps:")
@@ -58,9 +69,9 @@
         (System/exit 0))
 
       (let [app-fn (->> app-names
-                     (map app-map)
-                     (apply comp))]
-        (run r n (apps app-fn))
+                        (map app-map)
+                        (apply comp))]
+        (run r n failure (apps app-fn))
         (System/exit 0)))
 
     (catch Throwable t
