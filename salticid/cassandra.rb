@@ -27,7 +27,7 @@ deb-src http://www.apache.org/dist/cassandra/debian 20x main",
 
   task :tail do
     sudo do
-      tail '-F', '/var/log/cassandra/output.log', echo: true
+      tail '-F', '/var/log/cassandra/system.log', echo: true
     end
   end
 
@@ -51,6 +51,7 @@ deb-src http://www.apache.org/dist/cassandra/debian 20x main",
 
   task :nuke do
     sudo do
+      killall :java
       cassandra.stop rescue nil
       exec! 'rm -rf /var/lib/cassandra/commitlog/*'
       exec! 'rm -rf /var/lib/cassandra/data/*'
