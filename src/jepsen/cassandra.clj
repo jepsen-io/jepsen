@@ -33,6 +33,7 @@
   (cql/use-keyspace session keyspace))
 
 (defn cassandra-app
+  "Tests linearizability on a cell by reading/writing opaque blobs."
   [opts]
   (let [table    "set_app"
         clock-skew (rand-int 100)
@@ -79,6 +80,8 @@
         (drop-keyspace session)))))
 
 (defn counter-app
+  "All writes are increments. Recovers [0...n] where n is the current value of
+  the counter."
   [opts]
   (let [table   "counter_app"
         cluster (client/build-cluster {:contact-points [(:host opts)]
@@ -111,6 +114,7 @@
         (drop-keyspace session)))))
 
 (defn set-app
+  "Uses CQL sets"
   [opts]
   (let [table "set_app"
         cluster (client/build-cluster {:contact-points [(:host opts)]
@@ -129,7 +133,7 @@
                      :elements #{}}))
 
       (add [app element]
-        (client/with-consistency-level ConsistencyLevel/QUORUM
+        (client/with-consistency-level ConsistencyLevel/ANY
           (cql/update session table
                       {:elements [+ #{element}]}
                       (where :id 0)))
@@ -222,6 +226,7 @@
         (drop-keyspace session)))))
 
 (defn transaction-app
+  "Uses Paxos CAS"
   [opts]
   (let [table    "set_app"
         clock-skew (rand-int 100)
