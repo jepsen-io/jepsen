@@ -1,6 +1,7 @@
 (ns jepsen.bin
   (:require clojure.stacktrace
             [jepsen.cassandra :as cassandra]
+            [jepsen.kafka :as kafka]
             [jepsen.failure :as failure])
   (:use jepsen.set-app
         [jepsen.cassandra :only [cassandra-app]]
@@ -13,7 +14,6 @@
         [jepsen.pg    :only [pg-app]]
         [jepsen.nuodb :only [nuodb-app]]
         [jepsen.zk    :only [zk-app]]
-        [jepsen.kafka :only [kafka-app]]
         [clojure.tools.cli :only [cli]]))
 
 (def app-map
@@ -23,7 +23,7 @@
    "cassandra-set"          cassandra/set-app
    "cassandra-isolation"    cassandra/isolation-app
    "cassandra-transaction"  cassandra/transaction-app
-   "kafka"                  kafka-app
+   "kafka"                  kafka/app
    "mongo-replicas-safe"    mongo-replicas-safe-app
    "mongo-safe"             mongo-safe-app
    "mongo-unsafe"           mongo-unsafe-app
@@ -41,7 +41,8 @@
 (def failures
   "A map from command-line names to failure modes."
   {"partition"  failure/simple-partition
-   "noop"       failure/noop})
+   "noop"       failure/noop
+   "kafka"      kafka/failure})
 
 (defn parse-int [i] (Integer. i))
 

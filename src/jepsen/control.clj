@@ -15,7 +15,9 @@
   [s]
   (if (nil? s)
     ""
-    (let [s (name s)]
+    (let [s (if (instance? clojure.lang.Named s)
+              (name s)
+              (str s))]
       (if (re-find #"[\\\$`\" \(\)\{\}\[\]]" s)
         (str "\""
              (str/replace s #"([\\\$`\"])" "\\\\$1")

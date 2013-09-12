@@ -11,10 +11,15 @@
   "Schedules a failure to occur after t1 seconds, recovered at t2 seconds."
   [mode nodes t1 t2]
   (future
-    (Thread/sleep (* 1000 t1))
-    (fail mode nodes)
-    (Thread/sleep (* 1000 (- t2 t1)))
-    (recover mode nodes)))
+    (try
+      (Thread/sleep (* 1000 t1))
+      (fail mode nodes)
+      (Thread/sleep (* 1000 (- t2 t1)))
+      (recover mode nodes)
+      (catch Throwable t
+        (log :scheduled-failure
+             (with-out-str
+               (.printStackTrace t)))))))
 
 (def simple-partition
   (reify Failure

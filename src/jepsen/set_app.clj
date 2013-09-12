@@ -154,6 +154,9 @@
 
     (println (count (filter nil? log)) "unrecoverable timeouts")
 
+    ; Wait for recovery to complete
+    @witch
+
     (Thread/sleep 10000)
     (println "Collecting results.")
     ; Get results
