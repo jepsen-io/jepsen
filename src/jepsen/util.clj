@@ -68,3 +68,10 @@
   `(let [t0# (System/nanoTime)]
     ~@body
      (nanos->ms (- (System/nanoTime) t0#))))
+
+(defn map-vals
+  "Maps values in a map."
+  [f m]
+  (->> m
+       (map (fn [[k v]] [k (f v)]))
+       (into {})))
