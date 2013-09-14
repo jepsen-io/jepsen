@@ -2,8 +2,8 @@ role :etcd do
   task :setup do
     sudo do
       # Select your architecture
-      gofile = 'go1.1.2.linux-386.tar.gz'
-      # gofile = 'go1.1.2.linux-amd64.tar.gz'
+      # gofile = 'go1.1.2.linux-386.tar.gz'
+      gofile = 'go1.1.2.linux-amd64.tar.gz'
 
       # Go
       cd '/opt'
@@ -13,7 +13,7 @@ role :etcd do
         end
         exec! "tar -xzf #{gofile}"
 
-        exec "ln -sf /opt/go/bin/go /usr/bin/go"
+        exec! "ln -nsf /opt/go/bin/go /usr/bin/go"
         
         s1 = "export GOROOT=/opt/go"
         s2 = "export PATH=$PATH:$GOROOT/bin"
@@ -43,7 +43,7 @@ role :etcd do
 
   task :stop do
     sudo do
-      exec! 'ps a | grep etcd | grep -v grep | awk \'{ print $1 }\' | xargs kill -s kill'
+      exec! 'ps ax | grep etcd | grep -v grep | awk \'{ print $1 }\' | xargs kill -s kill'
     end
   end
 
