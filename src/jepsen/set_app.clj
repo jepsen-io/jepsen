@@ -157,12 +157,13 @@
     ; Wait for recovery to complete
     @witch
 
-    (Thread/sleep 10000)
-    (println "Collecting results.")
-    ; Get results
-;    (println "Hit enter when ready to collect results.")
-;    (read-line0)
     
+    ; Get results
+;   (println "Hit enter when ready to collect results.")
+;   (read-line0)
+;   (sleep 10000)
+
+    (println "Collecting results.")
     (let [results (results (first apps))]
       (println "Writes completed in" (float (/ (- t1 t0) 1000)) "seconds")
       (print-results elements acked results)
