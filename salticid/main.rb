@@ -1,5 +1,6 @@
 require 'fileutils'
 
+load __DIR__/'etcd.rb'
 load __DIR__/'mongo.rb'
 load __DIR__/'nuodb.rb'
 load __DIR__/'postgres.rb'
@@ -25,10 +26,11 @@ end
 role :jepsen do
   task :setup do
     base.setup
-    riak.setup
+    etcd.setup
     mongo.setup
-    redis.setup
     postgres.setup
+    redis.setup
+    riak.setup
   end
  
   task :slow do
@@ -45,9 +47,9 @@ role :jepsen do
 
   task :partition do
     sudo do
-      n3 = dig '+short', :n3
-      n4 = dig '+short', :n4
-      n5 = dig '+short', :n5
+      n3 = (getent 'ahosts', :n3).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
+      n4 = (getent 'ahosts', :n4).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
+      n5 = (getent 'ahosts', :n5).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
       if ['n1', 'n2'].include? name
         log "Partitioning from n3, n4 and n5."
         iptables '-A', 'INPUT', '-s', n3, '-j', 'DROP'
@@ -60,11 +62,11 @@ role :jepsen do
 
   task :partition_reject do
     sudo do
-      n1 = dig '+short', :n1
-      n2 = dig '+short', :n2
-      n3 = dig '+short', :n3
-      n4 = dig '+short', :n4
-      n5 = dig '+short', :n5
+      n1 = (getent 'ahosts', :n1).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
+      n2 = (getent 'ahosts', :n2).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
+      n3 = (getent 'ahosts', :n3).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
+      n4 = (getent 'ahosts', :n4).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
+      n5 = (getent 'ahosts', :n5).split("\n").reject {|line| line.start_with?("127.")}.first.split(" ").first
       if ['n1', 'n2'].include? name
         log "Partitioning from n3, n4 and n5."
         iptables '-A', 'INPUT', '-s', n3, '-j', 'REJECT'
@@ -114,6 +116,7 @@ group :jepsen do
     user :ubuntu
     role :base
     role :cassandra
+    role :etcd
     role :kafka
     role :mongo
     role :nuodb
