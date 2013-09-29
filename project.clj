@@ -17,8 +17,9 @@
                            [clj-kafka "0.1.0-0.8-SNAPSHOT"]
                            [clojurewerkz/cassaforte "1.2.0"
                             :exclusions [com.datastax.cassandra/cassandra-driver-core]]
-                           [com.datastax.cassandra/cassandra-driver-core "1.0.4-SNAPSHOT"]
-                           [byte-streams "0.1.4"]]
+                           [com.datastax.cassandra/cassandra-driver-core "1.0.3"]
+                           [byte-streams "0.1.4"]
+                           [org.clojure/math.combinatorics "0.0.4"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
             :jvm-opts ["-Xmx512m" "-server"])
