@@ -50,6 +50,19 @@
   is a *superset* of the known applied operations, and a *subset* of the
   potentially applied operations.
 
+  # Exploiting degeneracy
+
+  If the state space is *degenerate*--that is, many sequences of operations can
+  lead to the same result--then we can dramatically reduce the number of
+  linearizations explored by re-using existing states. This is possible because
+  linearizability is associative: if there exists a linearizable path from
+  [a->b] and [b->c], then there exists a linearizable path from [a->c].
+
+  I'm not exactly sure how this is going to work, because we need to enumerate
+  the possible histories in a->c and some of those transitions might not *be*
+  in a->b or b->c. 1+1 = 2, and 2+2 = 4, but 1+1+2 aren't the only ways to
+  reach4. 1+3 is valid too. We need a notion of *completeness* I think.
+
   # Efficiently traversing the index
 
   The initial and final states are easy to index; just use a hashmap. The
@@ -82,8 +95,8 @@
 
   Valid multisets here are [:a :b :b :c] and [:a :b :c]. Compact nodes with
   single children to transform this into a radix tree."
-
-  (:require [clojure.math.combinatorics :as combinatorics]))
+  (:require [clojure.math.combinatorics :as combinatorics]
+            [jepsen.radix :as radix]))
 
 {:op    :cas
  :v1    :foo
@@ -92,47 +105,94 @@
  :end   15
  :ret   (:success :indeterminate)}
 
-(defn linearization?
-  "Is the given sequence of operations a valid linearization?
-  
-  A linearization requires that every operation appear to commit at a specific
-  time between :start and :end. We always know the start time, because we
-  initiated the operation. We *don't* always know the end time.
-  
-  We know an operation is *not* part of a linearization if its commit time is
-  before any previous operation's commit time. Because we're dealing with fuzzy
-  ranges, this is only true if the operation *ends* before any previous op
-  begins. Essentially, we're computing non-intersecting ranges.
-  
-  If we don't know when the operation ended, it is always a valid
-  linearization."
-  [operations]
-  (if (empty? operations)
-    true
-    (->> operations
-         (reduce (fn [largest-prior-start-time op]
-                   (if (and (:end op)
-                            (< (:end op) largest-prior-start-time))
-                     (reduced false)
-                     (max largest-prior-start-time (:start op))))
-                 (:start (first operations)))
-         boolean)))
+(defn skip-nth
+  "Returns collection, but without the nth element."
+  [n coll]
+  (concat
+    (take n coll)
+    (drop (inc n) coll)))
 
-(defn linearizations
-  "Given a sequence of operations, computes all possible linearizations of
-  those operations."
-  [operations]
+(defn split-out
+  "Given a sequence of elements, returns a lazy sequence of [element remaining]
+  where elements are drawn from the sequence of elements, and remaining are the
+  other elements."
+  [coll]
+  (map-indexed (fn [i element]
+                 [element (skip-nth i coll)])
+               coll))
+
+(defn final-state
+  "Computes the final state from an index, a model, and a history of ops."
+  [model initial-state history]
+  (reduce model initial-state history))
+
+(defn assoc-history
+  "Adds a history leading to a given final state to an index."
+  [model initial-state index history]
+  (let [state' (final-state model initial-state history)]
+    (assoc index state'
+           (radix/assoc-tree (get index state')
+                             (sort history)))))
+
+(defn index-histories
+  "Given a sequence of histories, produces an index for them."
+  [model initial-state histories]
+  (reduce (partial assoc-history model initial-state)
+          {}
+          histories))
+
+(defn index
+  "Given a list of operations, produces an index for all possible histories."
+  [model initial-state operations]
   (->> operations
-       combinatorics/permutations
-       (filter linearization?)))
+       combinatorics/subsets
+       distinct
+       (mapcat combinatorics/permutations)
+       (index-histories model initial-state)))
 
-(defn random-op
-  []
-  (let [t1 (rand-int 10)]
-    {:start t1
-     :end   (when (< 0.5 (rand))
-              (+ t1 (rand-int 2)))}))
-
-(defn random-ops
-  []
-  (repeatedly random-op))
+; Maybe later
+;
+;(defn linearization?
+;  "Is the given sequence of operations a valid linearization?
+;  
+;  A linearization requires that every operation appear to commit at a specific
+;  time between :start and :end. We always know the start time, because we
+;  initiated the operation. We *don't* always know the end time.
+;  
+;  We know an operation is *not* part of a linearization if its commit time is
+;  before any previous operation's commit time. Because we're dealing with fuzzy
+;  ranges, this is only true if the operation *ends* before any previous op
+;  begins. Essentially, we're computing non-intersecting ranges.
+;  
+;  If we don't know when the operation ended, it is always a valid
+;  linearization."
+;  [operations]
+;  (if (empty? operations)
+;    true
+;    (->> operations
+;         (reduce (fn [largest-prior-start-time op]
+;                   (if (and (:end op)
+;                            (< (:end op) largest-prior-start-time))
+;                     (reduced false)
+;                     (max largest-prior-start-time (:start op))))
+;                 (:start (first operations)))
+;         boolean)))
+;
+;(defn linearizations
+;  "Given a sequence of operations, computes all possible linearizations of
+;  those operations."
+;  [operations]
+;  (->> operations
+;       combinatorics/permutations
+;       (filter linearization?)))
+;
+;(defn random-op
+;  []
+;  (let [t1 (rand-int 10)]
+;    {:start t1
+;     :end   (when (< 0.5 (rand))
+;              (+ t1 (rand-int 2)))}))
+;
+;(defn random-ops
+;  []
+;  (repeatedly random-op))
