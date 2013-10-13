@@ -22,6 +22,7 @@
                (.printStackTrace t)))))))
 
 (def simple-partition
+  "Isolates n1 and n2 from n3, n4, and n5."
   (reify Failure
     (fail [_ nodes]
       (control/on-many nodes (net/partition))
@@ -32,6 +33,31 @@
       (log "Partition healed."))))
 
 (def noop
+  "Does nothing."
   (reify Failure
     (fail [_ _])
     (recover [_ _])))
+
+(defn chaos []
+  (let [running (promise)
+        done    (promise)]
+    (reify Failure
+      (fail [_ nodes]
+        (future
+          (loop []
+            (if (deref running 1000 true)
+              (do
+                (control/on (rand-nth nodes)
+                            (net/heal)
+                            (net/cut-random-link nodes)
+                            (log (control/exec :hostname) (net/iptables-list)))
+                (recur))
+              (deliver done true)))))
+    
+      (recover [_ nodes]
+        (log "Recovery initiated")
+        (deliver running false)
+        @done
+        (log "Chaos ended")
+        (control/on-many nodes (net/heal)) 
+        (log "Partition healed.")))))

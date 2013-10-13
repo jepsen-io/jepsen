@@ -9,7 +9,7 @@ deb-src http://www.apache.org/dist/cassandra/debian 20x main",
       exec! 'gpg --keyserver pgp.mit.edu --recv-keys 2B5C1B00'
       exec! 'gpg --export --armor 2B5C1B00 | apt-key add -'
       exec! 'apt-get update', echo: true
-      exec! 'apt-get install -y cassandra', echo: true
+      exec! 'apt-get -y -o Dpkg::Options::="--force-confnew" install cassandra', echo: true
     end
     cassandra.deploy
   end
@@ -43,6 +43,12 @@ deb-src http://www.apache.org/dist/cassandra/debian 20x main",
     end
   end
 
+  task :kill do
+    sudo do
+      killall '-9', :java
+    end
+  end
+
   task :restart do
     sudo do
       service :cassandra, :restart
@@ -51,7 +57,7 @@ deb-src http://www.apache.org/dist/cassandra/debian 20x main",
 
   task :nuke do
     sudo do
-      killall :java
+      cassandra.kill rescue nil
       cassandra.stop rescue nil
       exec! 'rm -rf /var/lib/cassandra/commitlog/*'
       exec! 'rm -rf /var/lib/cassandra/data/*'

@@ -23,6 +23,7 @@
    "cassandra-set"          cassandra/set-app
    "cassandra-isolation"    cassandra/isolation-app
    "cassandra-transaction"  cassandra/transaction-app
+   "cassandra-transaction-dup" cassandra/transaction-dup-app
    "kafka"                  kafka/app
    "mongo-replicas-safe"    mongo-replicas-safe-app
    "mongo-safe"             mongo-safe-app
@@ -42,6 +43,7 @@
   "A map from command-line names to failure modes."
   {"partition"  failure/simple-partition
    "noop"       failure/noop
+   "chaos"      (failure/chaos)
    "kafka"      kafka/failure})
 
 (defn parse-int [i] (Integer. i))
