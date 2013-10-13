@@ -2,10 +2,14 @@
   "Cassandra test."
   (:import (com.datastax.driver.core ConsistencyLevel)
            (com.datastax.driver.core.exceptions NoHostAvailableException
-                                                WriteTimeoutException))
+                                                WriteTimeoutException
+                                                ReadTimeoutException))
   (:require [clojurewerkz.cassaforte.client :as client]
             [clojurewerkz.cassaforte.multi.cql :as cql]
             qbits.hayt.cql
+            [jepsen.control         :as control]
+            [jepsen.control.net     :as control.net]
+            [jepsen.failure         :as failure]
             [jepsen.codec           :as codec]
             [clojure.set            :as set])
   (:use
@@ -31,6 +35,10 @@
                        (with {:replication {:class "SimpleStrategy"
                                             :replication_factor 3}}))
   (cql/use-keyspace session keyspace))
+
+(defn nodetool [node & args]
+  (control/on node (apply control/exec :nodetool args)))
+
 
 (defn cassandra-app
   "Tests linearizability on a cell by reading/writing opaque blobs."
@@ -225,6 +233,11 @@
       (teardown [app]
         (drop-keyspace session)))))
 
+(defn txn-success?
+  "Was the given transaction result succesful?"
+  [result]
+  (boolean (get result (keyword "[applied]"))))
+
 (defn transaction-app
   "Uses Paxos CAS"
   [opts]
@@ -248,35 +261,36 @@
         (client/with-consistency-level ConsistencyLevel/QUORUM
           (let [t0 (System/currentTimeMillis)]
             (loop []
-              (let [value (-> (cql/select session table (where :id 0))
-                              first
-                              :elements)
-                    value' (-> value
-                               codec/decode
-                               (conj element)
-                               codec/encode)]
-                (let [res (-> (cql/update session table
-                                          {:elements value'}
-                                          (where :id 0)
-                                          (only-if {:elements value}))
-                              first
-                              (try (catch WriteTimeoutException e
-;                                     (log e)
-                                     :timeout)))]
-                  (cond
-                    ; Successful write
-                    (get res (keyword "[applied]"))
-                    ok
-                    
-                    ; Enough time to retry?
-                    (< 10000 (- (System/currentTimeMillis) t0))
-                    error
+              (let [res (try
+                          (let [value (-> (cql/select session table
+                                                      (where :id 0))
+                                          first
+                                          :elements)
+                                value' (-> value
+                                           codec/decode
+                                           (conj element)
+                                           codec/encode)]
+                            (-> (cql/update session table
+                                            {:elements value'}
+                                            (where :id 0)
+                                            (only-if {:elements value}))
+                                first))
+                          (catch ReadTimeoutException e :timeout)
+                          (catch WriteTimeoutException e :timeout))]
+                (cond
+                  ; Successful write
+                  (txn-success? res)
+                  ok
 
-                    :else
-                    (do
-;                      (log "retry" element)
-                      (sleep (rand 100))
-                      (recur)))))))))
+                  ; Enough time to retry?
+                  (< 10000 (- (System/currentTimeMillis) t0))
+                  error
+
+                  :else
+                  (do
+                    ;                      (log "retry" element)
+                    (sleep (rand 100))
+                    (recur))))))))
 
       (results [app]
         (client/with-consistency-level ConsistencyLevel/ALL
@@ -287,4 +301,58 @@
                codec/decode)))
 
       (teardown [app]
+        (drop-keyspace session)))))
+
+(def dupes (atom {}))
+
+(defn transaction-dup-app
+  "Tests that transactions may only succeed once."
+  [opts]
+  (let [table "transaction_dup_app"
+        cluster (client/build-cluster {:contact-points ["n1" "n2" "n3" "n4" "n5"]
+                                       :port 9042})
+        session (client/connect cluster)]
+    (reify SetApp
+      (setup [app]
+        (teardown app)
+        (ensure-keyspace session)
+        (cql/create-table session table
+                          (column-definitions {:id :int
+                                               :consumed :boolean
+                                               :primary-key [:id]})))
+
+      (add [app element]
+        (client/with-consistency-level ConsistencyLevel/QUORUM
+          (try
+            ; Insert an unconsumed record
+            (cql/insert session table
+                        {:id element :consumed false})
+            ; Consume once
+            (let [r1 (cql/update session table
+                                 {:consumed true}
+                                 (where :id element)
+                                 (only-if {:consumed false}))
+                  ; Consume again
+                  r2 (cql/update session table
+                                 {:consumed true}
+                                 (where :id element)
+                                 (only-if {:consumed false}))]
+              (if (and (txn-success? r1)
+                       (txn-success? r2))
+                (do
+                  (log "Dupe found!" r1 r2)
+                  (swap! dupes conj element)
+                  ok)
+                ok))
+            (catch ReadTimeoutException e :timeout)
+            (catch WriteTimeoutException e :timeout))))
+
+      (results [app]
+        (client/with-consistency-level ConsistencyLevel/ALL
+          (->> (cql/select session table)
+               (map :id)
+               (remove @dupes))))
+
+      (teardown [app]
+        (reset! dupes #{})
         (drop-keyspace session)))))

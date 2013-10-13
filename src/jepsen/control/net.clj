@@ -23,6 +23,11 @@
   [host]
   (exec :dig :+short host))
 
+(defn cut-random-link
+  "Cuts a random link to any of nodes."
+  [nodes]
+  (su (exec :iptables :-A :INPUT :-s (ip (rand-nth nodes)) :-j :DROP)))
+
 (defn partition
   "Partitions the network."
   []

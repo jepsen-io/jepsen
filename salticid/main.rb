@@ -34,7 +34,7 @@ role :jepsen do
   end
  
   task :slow do
-    sudo { exec! 'tc qdisc add dev eth0 root netem delay 50ms 10ms distribution normal' }
+    sudo { exec! 'tc qdisc add dev eth0 root netem delay 50ms 5ms distribution normal' }
   end
 
   task :flaky do
