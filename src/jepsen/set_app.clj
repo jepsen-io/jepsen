@@ -25,12 +25,11 @@
     (results  [this]         (locking global-lock (results app)))
     (teardown [this]         (locking global-lock (teardown app)))))
 
-(def nodes
-  ["n1" "n2" "n3" "n4" "n5"])
+(def nodes (vals control.net/Hosts-map))
 
 (def partitions
-  [#{"n1" "n2"}
-   #{"n3" "n4" "n5"}])
+  [control.net/Small-partition-set
+   control.net/Large-partition-set])
 
 (defn partition-peers
   "Given a node, returns the nodes visible to that node when partitioned."
@@ -115,9 +114,12 @@
 
 (defn apps
   "Returns a set of apps for testing, given a function."
-  [app-fn]
+  [app-fn port additional-opts]
   (map #(app-fn {:host %
-                 :hosts (partition-peers %)})
+                 :hosts (partition-peers %)
+                 :port    port
+                 :special additional-opts
+                 })
        nodes))
 
 (defn run [r n failure-mode apps]
