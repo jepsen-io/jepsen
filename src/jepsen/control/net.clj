@@ -18,11 +18,6 @@
   []
   (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms :10ms :distribution :normal))
 
-(defn cut-random-link
-  "Cuts a random link to any of nodes."
-  [nodes]
-  (su (exec :iptables :-A :INPUT :-s (ip (rand-nth nodes)) :-j :DROP)))
-
 (defn flaky
   "Drops packets."
   []
@@ -37,6 +32,12 @@
   "Look up an ip for a hostname"
   [host]
   (exec :dig :+short host))
+
+(defn cut-random-link
+  "Cuts a random link to any of nodes."
+  [nodes]
+  (su (exec :iptables :-A :INPUT :-s (ip (rand-nth nodes)) :-j :DROP)))
+
 
 (defn partition
   "Partitions the network."
