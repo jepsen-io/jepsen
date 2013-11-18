@@ -38,23 +38,19 @@ severed.  When failure detection kicks in, it may chose to shutdown the minority
 which will close the client connections, so clients should reconnect in that case.
 
 
-The test setup I used was probably different from what was done for the blog post. It
-isn't 100% clear, but it appears that the blog test setup was 1 TE and 1 SM for each node.
-The setup I used was to have a broker on n1-n5 and a TE on n2, n4, n5 and an SM on
-n1 and n3. This is a simplification and let us more easily experiment with things like
-variable commit protocols. The other difference is in how one uses the commit protocol.
-I interpreted the jepsen test as testing the ability of a system to accept writes that
-should never be lost while that system is undergoing partition. NuoDB allows for a
-configurable commit protocol. By default, the protocol being used is what we call
-'local', meaning that a commit is confirmed when the TE has successfully processed
-everything it needs and sent the commit message off to all the peers (including all
-SMs). In a system with 2 SMs, the most reliable commit protocol would be remote:2
-meaning that a TE won't respond with success to a commit request until confirmation
-has been received from at least 2 SMs that the changes were made durable. There is
-a subtlety here that NuoDB can express. remote:2 means that these updates must be
-made durable everywhere before commit can complete. Region commits are a way of
-assigning priority to some SMs over others. Therefore jepsen can be run with
-the SM in the majority partition as the region commit SM.
+NuoDB is organized somewhat differently from many of the other products jepsen investigated.
+At first, in NuoDB you provision a node by running a lightweight management agent on a machine.
+Management tools are used to start NuoDB processes on nodes that have been provisioned. NuoDB
+has separated durability from memory caching and transaction processing. The durability processes
+are called SMs (for storage managers) and the transaction processing processes are called TEs 
+(for transaction engines). However, it seems from the blog post that the way you tested the system
+was to run a TE and an SM on each machine. I tested changes to the jepsen code and NuoDB against
+that configuration. However, when running with 5 TEs and 5 SMs, one must set the commit protocol
+to be 'remote:3' meaning that a change is confirmed committed only when it has been made durable
+on at least 3 SMs. I did this because I assumed that jepsen was testing writes that could not be
+lost. NuoDB supports a configurable commit protocol, so that applications can make whatever
+durability/performance trade-offs they want. However, I assumed that the application writes that
+jepsen was simulating were of the 100% durable variety.
 
 These changes were tested primarily with NuoDB. I definitely did not test with
 redis, riak, or the rest so I can't state that the node name changes will work in those
