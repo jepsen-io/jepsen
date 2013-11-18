@@ -31,7 +31,7 @@
 (defn ip
   "Look up an ip for a hostname"
   [host]
-  (exec :dig :+short host))
+  (exec :dig :+short :+search host))
 
 (defn cut-random-link
   "Cuts a random link to any of nodes."
