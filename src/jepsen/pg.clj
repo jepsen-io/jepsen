@@ -3,7 +3,7 @@
   (:use [clojure.set :only [union difference]]
         [korma.core :exclude [union]]
         [korma.db :only [postgres create-db with-db transaction]]
-        [jepsen.control.net :only [Hosts-map]]
+        [jepsen.control.net :only [hosts-map]]
         jepsen.set-app)
   )
 
@@ -21,7 +21,7 @@
 (defn pg-app
   [opts]
   (let [table   (get opts :coll "set_app")
-        db      (connect (:n1 jepsen.control.net/Hosts-map))]
+        db      (connect (:n1 jepsen.control.net/hosts-map))]
 
     (reify SetApp
       (setup [app]

@@ -3,15 +3,15 @@
   (:refer-clojure :exclude [partition])
   (:use jepsen.control))
 
-(def Hosts-map {:n1 "n1"
+(def hosts-map {:n1 "n1"
               :n2 "n2"
               :n3 "n3"
               :n4 "n4"
               :n5 "n5"
               })
 
-(def Small-partition-set #{(:n1 Hosts-map) (:n2 Hosts-map)})
-(def Large-partition-set #{(:n3 Hosts-map) (:n4 Hosts-map) (:n5 Hosts-map)})
+(def small-partition-set #{(:n1 hosts-map) (:n2 hosts-map)})
+(def large-partition-set #{(:n3 hosts-map) (:n4 hosts-map) (:n5 hosts-map)})
 
 (defn slow
   "Slows down the network."
@@ -43,8 +43,8 @@
   "Partitions the network."
   []
   (su
-    (let [nodes (map ip Large-partition-set)]
-      (when (Small-partition-set *host*)
+    (let [nodes (map ip large-partition-set)]
+      (when (small-partition-set *host*)
         (doseq [n nodes]
           (exec :iptables :-A :INPUT :-s n :-j :DROP))))))
 
