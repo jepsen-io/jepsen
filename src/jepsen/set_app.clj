@@ -25,11 +25,11 @@
     (results  [this]         (locking global-lock (results app)))
     (teardown [this]         (locking global-lock (teardown app)))))
 
-(def nodes (vals control.net/Hosts-map))
+(def nodes (vals control.net/hosts-map))
 
 (def partitions
-  [control.net/Small-partition-set
-   control.net/Large-partition-set])
+  [control.net/small-partition-set
+   control.net/large-partition-set])
 
 (defn partition-peers
   "Given a node, returns the nodes visible to that node when partitioned."
