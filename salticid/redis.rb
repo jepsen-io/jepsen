@@ -8,6 +8,7 @@ role :redis do
         git :clone, 'git://github.com/antirez/redis.git', echo: true
       end
       cd :redis
+      git :checkout, :unstable
       make :clean, echo: true
       make echo: true
 #      make :test, echo: true

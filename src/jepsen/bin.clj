@@ -2,7 +2,8 @@
   (:require clojure.stacktrace
             [jepsen.cassandra :as cassandra]
             [jepsen.kafka :as kafka]
-            [jepsen.failure :as failure])
+            [jepsen.failure :as failure]
+            [jepsen.redis :as redis])
   (:use jepsen.set-app
         [jepsen.cassandra :only [cassandra-app]]
         [jepsen.riak :only [riak-lww-all-app
@@ -10,7 +11,6 @@
                             riak-lww-sloppy-quorum-app
                             riak-crdt-app]]
         jepsen.mongo
-        jepsen.redis
         [jepsen.pg    :only [pg-app]]
         [jepsen.nuodb :only [nuodb-app]]
         [jepsen.zk    :only [zk-app]]
@@ -29,7 +29,8 @@
    "mongo-safe"             mongo-safe-app
    "mongo-unsafe"           mongo-unsafe-app
    "mongo"                  mongo-app
-   "redis"                  redis-app
+   "redis-sentinel"         redis/sentinel-app
+   "redis-wait"             redis/wait-app
    "riak-lww-all"           riak-lww-all-app
    "riak-lww-quorum"        riak-lww-quorum-app
    "riak-lww-sloppy-quorum" riak-lww-sloppy-quorum-app
@@ -44,7 +45,8 @@
   {"partition"  failure/simple-partition
    "noop"       failure/noop
    "chaos"      (failure/chaos)
-   "kafka"      kafka/failure})
+   "kafka"      kafka/failure
+   "redis"      redis/failure})
 
 (defn parse-int [i] (Integer. i))
 
