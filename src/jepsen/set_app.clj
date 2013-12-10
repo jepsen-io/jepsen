@@ -37,7 +37,6 @@
   [node]
   (first (filter #(get % node) partitions)))
 
-
 (defn print-list
   "Tell us a bit about a list of things."
   [coll]

@@ -79,7 +79,8 @@
          state
          (case state
            :ok :green
-           :error :red))
+           :error :red
+           :cyan))
        \tab
        (latency-bar latency)
        (when message
