@@ -1,9 +1,11 @@
 (ns jepsen.pg
+  (:require [clojure.string :as string])
   (:use [clojure.set :only [union difference]]
         [korma.core :exclude [union]]
         [korma.db :only [postgres create-db with-db transaction]]
+        [jepsen.control.net :only [hosts-map]]
         jepsen.set-app)
-  (:require [clojure.string :as string]))
+  )
 
 (defn connect [host]
   (create-db {:subprotocol "postgresql"
@@ -19,7 +21,7 @@
 (defn pg-app
   [opts]
   (let [table   (get opts :coll "set_app")
-        db      (connect "n1")]
+        db      (connect (:n1 jepsen.control.net/hosts-map))]
 
     (reify SetApp
       (setup [app]

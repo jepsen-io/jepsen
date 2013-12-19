@@ -3,6 +3,16 @@
   (:refer-clojure :exclude [partition])
   (:use jepsen.control))
 
+(def hosts-map {:n1 "n1"
+              :n2 "n2"
+              :n3 "n3"
+              :n4 "n4"
+              :n5 "n5"
+              })
+
+(def small-partition-set #{(:n1 hosts-map) (:n2 hosts-map)})
+(def large-partition-set #{(:n3 hosts-map) (:n4 hosts-map) (:n5 hosts-map)})
+
 (defn slow
   "Slows down the network."
   []
@@ -21,19 +31,20 @@
 (defn ip
   "Look up an ip for a hostname"
   [host]
-  (exec :dig :+short host))
+  (exec :dig :+short :+search host))
 
 (defn cut-random-link
   "Cuts a random link to any of nodes."
   [nodes]
   (su (exec :iptables :-A :INPUT :-s (ip (rand-nth nodes)) :-j :DROP)))
 
+
 (defn partition
   "Partitions the network."
   []
   (su
-    (let [nodes (map ip [:n3 :n4 :n5])]
-      (when (#{"n1" "n2"} *host*)
+    (let [nodes (map ip large-partition-set)]
+      (when (small-partition-set *host*)
         (doseq [n nodes]
           (exec :iptables :-A :INPUT :-s n :-j :DROP))))))
 

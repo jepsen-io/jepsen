@@ -7,6 +7,7 @@
 (def ^:dynamic *session* nil)
 (def ^:dynamic *dir* "/")
 (def ^:dynamic *sudo* nil)
+(def ^:dynamic *username* "ubuntu")
 (def ^:dynamic *password* nil)
 (def ^:dynamic *trace* false)
 
@@ -124,12 +125,12 @@
   "Opens a session to the given host and evaluates body there."
   [host & body]
   `(let [agent# (ssh/ssh-agent {})
-         session# (ssh/session agent# ~host {:username "ubuntu"
+         session# (ssh/session agent# ~host {:username *username*
                                              :strict-host-key-checking :yes})]
      (ssh/with-connection session#
        (binding [*session*  session#
                  *host*     ~host
-                 *password* "ubuntu"]
+                 *password* *password*]
          ~@body))))
 
 (defmacro on-many
