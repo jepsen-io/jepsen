@@ -9,12 +9,15 @@
         [jepsen.riak :only [riak-lww-all-app
                             riak-lww-quorum-app
                             riak-lww-sloppy-quorum-app
-                            riak-crdt-app]]
+                            riak-crdt-app
+                            ]]
         jepsen.mongo
         [jepsen.pg    :only [pg-app]]
         [jepsen.nuodb :only [nuodb-app]]
         [jepsen.zk    :only [zk-app]]
-        [clojure.tools.cli :only [cli]]))
+        [clojure.tools.cli :only [cli]]
+        [jepsen.control :only [*password*]]
+        ))
 
 (def app-map
   "A map from command-line names to apps you can run"
@@ -55,7 +58,12 @@
   (cli args
        ["-n" "--number" "number of elements to add" :parse-fn parse-int]
        ["-r" "--rate" "requests per second" :parse-fn parse-int]
-       ["-f" "--failure" "failure mode"]))
+       ["-f" "--failure" "failure mode"]
+       ["-X" "--special" "additional app arguments (if supported)"]
+       ["-u" "--username" "username to use for ssh"]
+       ["-p" "--password" "password for sudo invocations"]
+       ["-t" "--port" "port to use if not using the default"]
+       ))
 
 (defn -main
   [& args]
@@ -65,7 +73,12 @@
                       (get :failure "partition")
                       failures)
           n (get opts :number 2000)
-          r (get opts :rate 2)]
+          r (get opts :rate 2)
+          spex  (get opts :special [])
+          uname (get opts :username "ubuntu")
+          pw    (get opts :password nil)
+          port  (get opts :port nil)
+          ]
 
       (when (empty? app-names)
         (println usage)
@@ -73,11 +86,14 @@
         (dorun (map println (sort (keys app-map))))
         (System/exit 0))
 
-      (let [app-fn (->> app-names
-                        (map app-map)
-                        (apply comp))]
-        (run r n failure (apps app-fn))
-        (System/exit 0)))
+      (with-redefs [jepsen.control/*password* pw
+                    jepsen.control/*username* uname]
+        (let [app-fn (->> app-names
+                          (map app-map)
+                          (apply comp))] 
+          (run r n failure (apps app-fn port spex))
+          (System/exit 0))
+        ))
 
     (catch Throwable t
       (.printStackTrace t)
