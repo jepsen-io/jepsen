@@ -1,36 +1,14 @@
 role :etcd do
   task :setup do
     sudo do
-      # Select your architecture
-      # gofile = 'go1.1.2.linux-386.tar.gz'
-      gofile = 'go1.1.2.linux-amd64.tar.gz'
-
-      # Go
-      cd '/opt'
-      unless dir? 'go'
-        unless file? gofile
-          exec! "wget https://go.googlecode.com/files/#{gofile}", :echo => true
-        end
-        exec! "tar -xzf #{gofile}"
-
-        exec! "ln -nsf /opt/go/bin/go /usr/bin/go"
-        
-        s1 = "export GOROOT=/opt/go"
-        s2 = "export PATH=$PATH:$GOROOT/bin"
-        exec! "echo '#{s1}' >> /etc/bash.bashrc"
-        exec! "echo '#{s2}' >> /etc/bash.bashrc"
-      end
-    end
-
-    # Re-sudo should set the ENV vars for go
-    sudo do
+      etcd_binary = "https://github.com/coreos/etcd/releases/download/v0.2.0-rc2/etcd-v0.2.0-rc2-Linux-x86_64.tar.gz"
       cd '/opt'
       unless dir? 'etcd'
-        git :clone, 'https://github.com/coreos/etcd.git', :echo => true
+        mkdir :etcd
       end
       cd :etcd
 
-      exec! "GOROOT=/opt/go ./build", :echo => true
+      exec! "wget #{etcd_binary}", :echo => true
     end
   end
 
