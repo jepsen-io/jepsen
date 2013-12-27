@@ -5,6 +5,7 @@
                            [clj-ssh "0.5.6"]
                            [com.novemberain/welle "1.6.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]
+                           [cetcd "0.1.2"]
                            [com.novemberain/monger "1.5.0"]
                            [org.clojure/java.jdbc "0.3.0-alpha1"]
                            [korma "0.3.0-RC5"]
