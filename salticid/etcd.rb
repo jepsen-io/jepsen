@@ -1,7 +1,9 @@
 role :etcd do
+  etcd_download_url = "https://github.com/coreos/etcd/releases/download/v0.2.0-rc2/etcd-v0.2.0-rc2-Linux-x86_64.tar.gz"
+  etcd_tarball = File.basename(etcd_download_url)
+  etcd_dir = etcd_tarball[0...-7] # assumes it is a .tar.gz, not something like tgz
   task :setup do
     sudo do
-      etcd_binary = "https://github.com/coreos/etcd/releases/download/v0.2.0-rc2/etcd-v0.2.0-rc2-Linux-x86_64.tar.gz"
       cd '/opt'
       unless dir? 'etcd'
         mkdir :etcd
@@ -9,6 +11,7 @@ role :etcd do
       cd :etcd
 
       exec! "wget #{etcd_binary}", :echo => true
+      exec! "tar xzf #{etcd_tarball}"
     end
   end
 
@@ -27,13 +30,13 @@ role :etcd do
 
   task :start do
     sudo do
-      cd '/opt/etcd'
+      puts "/opt/etcd/#{etcd_dir}"
+      cd "/opt/etcd/#{etcd_dir}"
       if name == 'n1'
-        exec! "./etcd -s 0.0.0.0:7001 -c 0.0.0.0:4001 -d node-data -n #{name}", :echo => true
+        exec! "./etcd -peer-addr 0.0.0.0:7001 -addr 0.0.0.0:4001 -data-dir node-data -name #{name} -peer-bind-addr 0.0.0.0 -bind-addr 0.0.0.0", :echo => true
       else
-        exec! "./etcd -s 0.0.0.0:7001 -c 0.0.0.0:4001 -d node-data -n #{name} -C n1:7001", :echo => true
+        exec! "./etcd -peer-addr 127.0.0.1:7001 -addr 127.0.0.1:4001 -data-dir node-data -name #{name} -peers n1:7001 -peer-bind-addr 0.0.0.0 -bind-addr 0.0.0.0", :echo => true
       end
-      
     end
   end
   
