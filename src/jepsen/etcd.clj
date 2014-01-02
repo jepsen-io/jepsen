@@ -11,7 +11,7 @@
             [jepsen.control :as control]))
 
 
-(defn etcd-app
+(defn etcd-app [opts]
   (let [directory "/jepsen/"]
     (reify SetApp
            (setup [app]
