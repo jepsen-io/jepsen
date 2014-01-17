@@ -1,8 +1,8 @@
-(defproject jepsen "0.0.2-SNAPSHOT"
+(defproject jepsen "0.0.3-SNAPSHOT"
             :description "Call Me Maybe: Network Partitions in Practice"
             :dependencies [[org.clojure/clojure "1.5.1"]
                            [aleph "0.3.0-beta16"]
-                           [clj-ssh "0.5.6"]
+                           [clj-ssh "0.5.7"]
                            [com.novemberain/welle "1.6.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]
                            [com.novemberain/monger "1.5.0"]
@@ -14,7 +14,7 @@
                            [myguidingstar/clansi "1.3.0"]
                            [org.apache.curator/curator-recipes "2.0.1-incubating"
                             :exclusions [org.jboss.netty/netty]]
-                           [clj-kafka "0.1.0-0.8-SNAPSHOT"]
+                           [clj-kafka "0.1.2-0.8"]
                            [clojurewerkz/cassaforte "1.2.0"
                             :exclusions [com.datastax.cassandra/cassandra-driver-core]]
                            [com.datastax.cassandra/cassandra-driver-core "1.0.3"]

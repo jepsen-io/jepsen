@@ -9,7 +9,9 @@
 (def ^:dynamic *sudo* nil)
 (def ^:dynamic *username* "ubuntu")
 (def ^:dynamic *password* nil)
+(def ^:dynamic *private-key-path* nil)
 (def ^:dynamic *trace* false)
+(def ^:dynamic *strict-host-key-checking* :yes)
 
 (defn escape
   "Escapes a shell string."
@@ -125,8 +127,13 @@
   "Opens a session to the given host and evaluates body there."
   [host & body]
   `(let [agent# (ssh/ssh-agent {})
-         session# (ssh/session agent# ~host {:username *username*
-                                             :strict-host-key-checking :yes})]
+         _#      (when *private-key-path*
+                   (ssh/add-identity agent#
+                                     {:private-key-path *private-key-path*}))
+         session# (ssh/session agent#
+                               ~host
+                               {:username *username*
+                                :strict-host-key-checking *strict-host-key-checking*})]
      (ssh/with-connection session#
        (binding [*session*  session#
                  *host*     ~host
@@ -144,11 +151,11 @@
           (map deref)
           (map vector hosts#)
           (into {}))))
-        
+
 (defn go
   [host]
   (on host
-      (trace 
+      (trace
         (cd "/"
             (sudo "root"
                   (println (exec "whoami")))))))
