@@ -1,91 +1,124 @@
 (ns jepsen.core
-  (:use lamina.core
-        aleph.tcp))
+  "Entry point for all Jepsen tests. Coordinates the setup of servers, running
+  tests, creating and resolving failures, and interpreting results."
+  (:use     clojure.tools.logging)
+  (:require [clojure.stacktrace :as trace]
+            [jepsen.os :as os]
+            [jepsen.db :as db]
+            [jepsen.generator :as generator]
+            [jepsen.checker :as checker]
+            [jepsen.client :as client]))
 
-(defrecord Server
-  [source dest acceptor clients state])
+(defn worker
+  "Spawns a future to execute a particular process in the history."
+  [test process client]
+  (let [gen (:generator test)
+        hist (:history test)]
+    (future
+      (loop [process process]
+        ; Obtain an operation to execute
+        (when-let [op (generator/op gen test process)]
+          (let [op (assoc op :process process)]
+            (info "executing" op)
 
-(defn client
-  "Opens a channel to the given destination address."
-  [dest]
-  (wait-for-result
-    (tcp-client dest)))
+            ; Log invocation
+            (swap! hist conj op)
+            (recur
+              (try
+                ; Evaluate operation
+                (let [completion (client/invoke! client test op)]
+                  ; Sanity check
+                  (info "Completion" completion)
+                  (assert (= (:process op) (:process completion)))
+                  (assert (= (:f op)       (:f completion)))
 
-(defn handle
-  "Accepts new connections for a server. Called with a Server, lamina channel,
-  and information about the client."
-  [server ch client-info]
-  (println "New connection to" server "from" client-info)
-  ; Connect to upstream server.
-  (let [client (client (:dest server))]
-    (println "Client to" (:dest server) "connected")
+                  ; Log completion
+                  (swap! hist conj completion)
 
-    ; Mark this client as active.
-    (swap! (:clients server) conj client)
-    
-    ; Logging connection closes.
-    (on-closed client (fn []
-                        (println "Upstream closed.")))
-    (on-closed ch     (fn []
-                        (println "Downstream closed.")
-                        (swap! (:clients server) disj client)))
+                  ; The process is now free to attempt another execution.
+                  process)
 
-    (let [partitioner (fn [_] (= :connected (deref (:state server))))]
-      ; Connect channels.
-      (siphon
-        (filter* partitioner client) 
-        ch)
-      (siphon
-        (filter* partitioner ch)
-        client))
+                (catch Throwable t
+                  ; At this point all bets are off. If the client or network or
+                  ; DB crashed before doing anything; this operation won't be a
+                  ; part of the history. On the other hand, the DB may have
+                  ; applied this operation and we *don't know* about it; e.g.
+                  ; because of timeout.
+                  ;
+                  ; This process is effectively hung; it can not initiate a new
+                  ; operation without violating the single-threaded process
+                  ; constraint. We cycle to a new process identifier, and leave
+                  ; the invocation uncompleted in the history.
+                  (swap! hist conj (assoc op :type  :info
+                                          :value (str "indeterminate: "
+                                                      (.getMessage t))))
+                  (warn t "Process" process "indeterminate")
+                  (+ process (count (:nodes test))))))))))))
 
-      (println "Connection established.")))
+(defn run!
+  "Runs a test. Tests are maps containing
 
-(defn stop!
-  "Shuts down a server, closing all connections."
-  [server]
-  (locking server
-    (when-let [acceptor (deref (:acceptor server))]
-      (acceptor)))
-  server)
+  :nodes      A sequence of string node names involved in the test.
+  :ssh        SSH credential information: a map containing...
+    :user     The username to connect with   (root)
+    :key      A path to an SSH identity file (~/.ssh/id_rsa)
+  :os         The operating system; given by the OS protocol
+  :db         The database to configure: given by the DB protocol
+  :client     A client for the database
+  :nemesis    A client for failures
+  :generator  A generator of operations to apply to the DB
+  :model      The model used to verify the history is correct
+  :checker    Verifies that the history is valid
 
-(defn start!
-  "Starts up a server."
-  [server]
-  (locking server
-    (stop! server)
-    (reset! (:state server) :connected)
-    (reset! (:clients server) #{})
-    (reset! (:acceptor server)
-           (start-tcp-server
-             (partial handle server)
-             (:source server))))
-  server)
+  Tests proceed like so:
 
-(defn server
-  "Creates a new server which listens on source and proxies to dest. Doesn't
-  start anything."
-  [source dest]
-  (Server. source dest (atom nil) (atom nil) (atom nil)))
-  
-(defn server!
-  "Starts a proxy server which binds to source and forwards connections to
-  dest. Returns the server."
-  [source dest]
-  (start! (server source dest)))
+  1. Setup the operating system
+  2. Setup the database
+  2. Create the nemesis
+  4. Fork the client into one client for each node
 
-(defn kick!
-  "Closes all active connections through a server."
-  [server]
-  (dorun (map close (deref (:clients server)))))
+  5. Fork a thread for each client, each of which requests operations from
+     the generator until the generator returns nil
+    - Each operation is appended to the operation history
+    - The client executes the operation and returns a vector of history elements
+      - which are appended to the operation history
 
-(defn partition!
-  "Partitions a server: drops all messages on the floor."
-  [server]
-  (reset! (:state server) :partitioned))
+  6. Teardown the database
+  7. Teardown the operating system
 
-(defn unpartition!
-  "Resolves a network partition."
-  [server]
-  (kick! server)
-  (reset! (:state server) :connected))
+  8. When the generator is finished, invoke the checker with the model and
+     the history
+    - This generates the final report"
+  [test]
+  ; Create history
+  (let [test (assoc test :history (atom []))]
+
+    ; Setup
+    (dorun (pmap (partial os/setup! (:os test) test) (:nodes test)))
+    (dorun (pmap (partial db/setup! (:db test) test) (:nodes test)))
+
+    (let [nemesis (client/setup! (:nemesis test) test nil)
+          clients (mapv (partial client/setup! (:client test) test)
+                        (:nodes test))
+          workers (mapv (partial worker test)
+                        (cons :nemesis (iterate inc 0)) ; Process IDs
+                        (cons nemesis clients))]        ; Clients
+
+      ; Wait for workers to complete
+      (dorun (map deref workers))
+
+      ; Teardown
+      (dorun (pmap (partial db/teardown! (:db test) test) (:nodes test)))
+      (dorun (pmap (partial os/teardown! (:os test) test) (:nodes test)))
+
+      ; Seal history and check
+      (let [test    (assoc test :history (deref (:history test)))
+            results (try (checker/check (:checker test)
+                                        test
+                                        (:model test)
+                                        (:history test))
+                         (catch Throwable t
+                           {:valid? false
+                            :error (with-out-str
+                                     (trace/print-cause-trace t))}))]
+        (assoc test :results results)))))

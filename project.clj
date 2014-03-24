@@ -1,7 +1,8 @@
 (defproject jepsen "0.0.3-SNAPSHOT"
             :description "Call Me Maybe: Network Partitions in Practice"
-            :dependencies [[org.clojure/clojure "1.5.1"]
+            :dependencies [[org.clojure/clojure "1.6.0-beta1"]
                            [aleph "0.3.0-beta16"]
+                           [knossos "0.1.1-SNAPSHOT"]
                            [clj-ssh "0.5.7"]
                            [com.novemberain/welle "1.6.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]
@@ -22,4 +23,6 @@
                            [org.clojure/math.combinatorics "0.0.4"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
-            :jvm-opts ["-Xmx512m" "-server"])
+            :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
+                       "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
+                       "-XX:+UseFastAccessorMethods" "-server"])
