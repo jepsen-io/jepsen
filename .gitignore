@@ -20,3 +20,4 @@ build
 site/**
 bench/**
 target/**
+checkouts/**
