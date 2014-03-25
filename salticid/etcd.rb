@@ -1,36 +1,17 @@
 role :etcd do
+  etcd_download_url = "https://github.com/coreos/etcd/releases/download/v0.2.0-rc2/etcd-v0.2.0-rc2-Linux-x86_64.tar.gz"
+  etcd_tarball = File.basename(etcd_download_url)
+  etcd_dir = etcd_tarball[0...-7] # assumes it is a .tar.gz, not something like tgz
   task :setup do
-    sudo do
-      # Select your architecture
-      # gofile = 'go1.1.2.linux-386.tar.gz'
-      gofile = 'go1.1.2.linux-amd64.tar.gz'
-
-      # Go
-      cd '/opt'
-      unless dir? 'go'
-        unless file? gofile
-          exec! "wget https://go.googlecode.com/files/#{gofile}", :echo => true
-        end
-        exec! "tar -xzf #{gofile}"
-
-        exec! "ln -nsf /opt/go/bin/go /usr/bin/go"
-        
-        s1 = "export GOROOT=/opt/go"
-        s2 = "export PATH=$PATH:$GOROOT/bin"
-        exec! "echo '#{s1}' >> /etc/bash.bashrc"
-        exec! "echo '#{s2}' >> /etc/bash.bashrc"
-      end
-    end
-
-    # Re-sudo should set the ENV vars for go
     sudo do
       cd '/opt'
       unless dir? 'etcd'
-        git :clone, 'https://github.com/coreos/etcd.git', :echo => true
+        mkdir :etcd
       end
       cd :etcd
 
-      exec! "GOROOT=/opt/go ./build", :echo => true
+      exec! "wget #{etcd_binary}", :echo => true
+      exec! "tar xzf #{etcd_tarball}"
     end
   end
 
@@ -49,13 +30,13 @@ role :etcd do
 
   task :start do
     sudo do
-      cd '/opt/etcd'
+      puts "/opt/etcd/#{etcd_dir}"
+      cd "/opt/etcd/#{etcd_dir}"
       if name == 'n1'
-        exec! "./etcd -s 0.0.0.0:7001 -c 0.0.0.0:4001 -d node-data -n #{name}", :echo => true
+        exec! "./etcd -peer-addr 0.0.0.0:7001 -addr 0.0.0.0:4001 -data-dir node-data -name #{name} -peer-bind-addr 0.0.0.0 -bind-addr 0.0.0.0", :echo => true
       else
-        exec! "./etcd -s 0.0.0.0:7001 -c 0.0.0.0:4001 -d node-data -n #{name} -C n1:7001", :echo => true
+        exec! "./etcd -peer-addr 127.0.0.1:7001 -addr 127.0.0.1:4001 -data-dir node-data -name #{name} -peers n1:7001 -peer-bind-addr 0.0.0.0 -bind-addr 0.0.0.0", :echo => true
       end
-      
     end
   end
   

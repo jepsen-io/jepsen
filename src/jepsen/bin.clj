@@ -3,7 +3,8 @@
             [jepsen.cassandra :as cassandra]
             [jepsen.kafka :as kafka]
             [jepsen.failure :as failure]
-            [jepsen.redis :as redis])
+            [jepsen.redis :as redis]
+            [jepsen.etcd :as etcd])
   (:use jepsen.set-app
         [jepsen.cassandra :only [cassandra-app]]
         [jepsen.riak :only [riak-lww-all-app
@@ -41,7 +42,8 @@
    "pg"                     pg-app
    "nuodb"                  nuodb-app
    "zk"                     zk-app
-   "lock"                   locking-app})
+   "lock"                   locking-app
+   "etcd"                   etcd/etcd-app})
 
 (def failures
   "A map from command-line names to failure modes."
