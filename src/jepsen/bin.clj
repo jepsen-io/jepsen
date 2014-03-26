@@ -17,6 +17,7 @@
         [jepsen.zk    :only [zk-app]]
         [clojure.tools.cli :only [cli]]
         [jepsen.control :only [*password*]]
+        jepsen.foundationdb
         ))
 
 (def app-map
@@ -41,7 +42,10 @@
    "pg"                     pg-app
    "nuodb"                  nuodb-app
    "zk"                     zk-app
-   "lock"                   locking-app})
+   "lock"                   locking-app
+   "foundationdb"           foundationdb-app
+   "foundationdb-append"    foundationdb-append-app
+   "foundationdb-append-noretry" foundationdb-append-noretry-app})
 
 (def failures
   "A map from command-line names to failure modes."

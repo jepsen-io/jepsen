@@ -6,6 +6,7 @@ load __DIR__/'nuodb.rb'
 load __DIR__/'postgres.rb'
 load __DIR__/'redis.rb'
 load __DIR__/'riak.rb'
+load __DIR__/'foundationdb.rb'
 
 role :base do
   task :setup do
@@ -124,6 +125,7 @@ group :jepsen do
     role :redis
     role :riak
     role :zk
+    role :foundationdb
     role :jepsen
     @password = 'ubuntu'
   end
