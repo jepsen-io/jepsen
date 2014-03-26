@@ -23,3 +23,5 @@ Jepsen takes a number command line parameters that may help with configuration:
 Example usage:
 
 $ lein run zk -p "mypassword" -n 100
+
+Remember to run `salticid base.setup` and `salticid <APP>.setup` before invoking Jepsen.
