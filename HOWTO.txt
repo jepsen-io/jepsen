@@ -7,7 +7,7 @@ This is a brief overview of the basic steps necessary to run jepsen on a set of 
 4a) You'll want passwordless key-based access, which means you'll need to setup ssh-agent and add an identity
 4b) If your private ssh key is not located at ~/.ssh/id_rsa, you'll need to provide a path at the command line (see below)
 5) The account will need to be able to sudo on the 5 server machines
-6) The machines need to be resolvable via DNS or /etc/hosts
+6) The machines need to be resolvable from both the client and the machines themselves via DNS or /etc/hosts.
 
 Jepsen takes a number command line parameters that may help with configuration:
 
