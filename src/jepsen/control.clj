@@ -2,9 +2,11 @@
   "Provides SSH control over a remote node. There's a lot of dynamically bound
   state in this namespace because we want to make it as simple as possible for
   scripts to open connections to various nodes."
-  (:require [clj-ssh.ssh :as ssh]
-            [clojure.string :as str]))
+  (:require [clj-ssh.ssh    :as ssh]
+            [clojure.string :as str]
+            [clojure.tools.logging :refer [warn info debug]]))
 
+; STATE STATE STATE STATE
 (def ^:dynamic *host*     "Current hostname"              nil)
 (def ^:dynamic *session*  "Current clj-ssh session"       nil)
 (def ^:dynamic *trace*    "Shall we trace commands?"      false)
@@ -16,10 +18,30 @@
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 
 (defn escape
-  "Escapes a shell string."
+  "Escapes a thing for the shell.
+
+  Nils are empty strings.
+
+  The special keywords :>, :>>, and :< map to their corresponding shell I/O
+  redirection operators.
+
+  Named things like keywords and symbols use their name, escaped. Strings are
+  escaped like normal.
+
+  Sequential collections and sets have each element escaped and
+  space-separated."
   [s]
-  (if (nil? s)
+  (cond
+    (nil? s)
     ""
+
+    (#{:> :>> :<} s)
+    (name s)
+
+    (or (sequential? s) (set? s))
+    (str/join " " (map escape s))
+
+    :else
     (let [s (if (instance? clojure.lang.Named s)
               (name s)
               (str s))]
@@ -49,7 +71,7 @@
 (defn wrap-trace
   "Logs argument to console when tracing is enabled."
   [arg]
-  (do (when *trace* (prn arg))
+  (do (when *trace* (info arg))
       arg))
 
 (defn throw-on-nonzero-exit

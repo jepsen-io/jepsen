@@ -13,3 +13,10 @@
   (reify DB
     (setup!    [db test node])
     (teardown! [db test node])))
+
+(defn cycle!
+  "Tries to tear down, then set up, the given DB."
+  [db test node]
+  (try (teardown! db test node)
+       (catch RuntimeException _))
+  (setup! db test node))
