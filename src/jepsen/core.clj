@@ -5,6 +5,7 @@
   (:require [clojure.stacktrace :as trace]
             [jepsen.os :as os]
             [jepsen.db :as db]
+            [jepsen.control :as control]
             [jepsen.generator :as generator]
             [jepsen.checker :as checker]
             [jepsen.client :as client]))
@@ -19,8 +20,6 @@
         ; Obtain an operation to execute
         (when-let [op (generator/op gen test process)]
           (let [op (assoc op :process process)]
-            (info "executing" op)
-
             ; Log invocation
             (swap! hist conj op)
             (recur
@@ -28,7 +27,6 @@
                 ; Evaluate operation
                 (let [completion (client/invoke! client test op)]
                   ; Sanity check
-                  (info "Completion" completion)
                   (assert (= (:process op) (:process completion)))
                   (assert (= (:f op)       (:f completion)))
 
@@ -55,13 +53,24 @@
                   (warn t "Process" process "indeterminate")
                   (+ process (count (:nodes test))))))))))))
 
+(defn on-nodes
+  "Given a map of nodes to SSH sessions and a test, evaluates (f test node) in
+  parallel on each node, with that node's SSH connection bound."
+  [test sessions f]
+  (dorun (pmap (fn [[node session]]
+                 (control/with-session node session
+                   (f test node)))
+               sessions)))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
   :nodes      A sequence of string node names involved in the test.
   :ssh        SSH credential information: a map containing...
-    :user     The username to connect with   (root)
-    :key      A path to an SSH identity file (~/.ssh/id_rsa)
+    :username           The username to connect with   (root)
+    :password           The password to use
+    :private-key-path   A path to an SSH identity file (~/.ssh/id_rsa)
+    :strict-host-key-checking  Whether or not to verify host keys
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
   :client     A client for the database
@@ -73,8 +82,13 @@
   Tests proceed like so:
 
   1. Setup the operating system
+
   2. Setup the database
-  2. Create the nemesis
+    - If the DB supports the Primary protocol, also perform the Primary setup
+      on the first node.
+
+  3. Create the nemesis
+
   4. Fork the client into one client for each node
 
   5. Fork a thread for each client, each of which requests operations from
@@ -84,6 +98,7 @@
       - which are appended to the operation history
 
   6. Teardown the database
+
   7. Teardown the operating system
 
   8. When the generator is finished, invoke the checker with the model and
@@ -92,33 +107,50 @@
   [test]
   ; Create history
   (let [test (assoc test :history (atom []))]
+    (control/with-ssh (:ssh test)
+      ; Open SSH conns
+      (let [sessions (->> test
+                          :nodes
+                          (pmap (juxt identity control/session))
+                          (into {}))]
 
-    ; Setup
-    (dorun (pmap (partial os/setup! (:os test) test) (:nodes test)))
-    (dorun (pmap (partial db/setup! (:db test) test) (:nodes test)))
+        (try
+          ; Setup
+          (on-nodes test sessions (partial os/setup! (:os test)))
+          (on-nodes test sessions (partial db/setup! (:db test)))
 
-    (let [nemesis (client/setup! (:nemesis test) test nil)
-          clients (mapv (partial client/setup! (:client test) test)
-                        (:nodes test))
-          workers (mapv (partial worker test)
-                        (cons :nemesis (iterate inc 0)) ; Process IDs
-                        (cons nemesis clients))]        ; Clients
+          ; Primary setup
+          (when (satisfies? db/Primary (:db test))
+            (let [primary (first (:nodes test))]
+              (control/with-session primary (get sessions primary)
+                (db/setup-primary! (:db test) test primary))))
 
-      ; Wait for workers to complete
-      (dorun (map deref workers))
+          (let [nemesis (client/setup! (:nemesis test) test nil)
+                clients (mapv (partial client/setup! (:client test) test)
+                              (:nodes test))
+                workers (mapv (partial worker test)
+                              (cons :nemesis (iterate inc 0)) ; Process IDs
+                              (cons nemesis clients))]        ; Clients
 
-      ; Teardown
-      (dorun (pmap (partial db/teardown! (:db test) test) (:nodes test)))
-      (dorun (pmap (partial os/teardown! (:os test) test) (:nodes test)))
+            ; Wait for workers to complete
+            (dorun (map deref workers))
 
-      ; Seal history and check
-      (let [test    (assoc test :history (deref (:history test)))
-            results (try (checker/check (:checker test)
-                                        test
-                                        (:model test)
-                                        (:history test))
-                         (catch Throwable t
-                           {:valid? false
-                            :error (with-out-str
-                                     (trace/print-cause-trace t))}))]
-        (assoc test :results results)))))
+            ; Teardown
+            (on-nodes test sessions (partial db/teardown! (:db test)))
+            (on-nodes test sessions (partial os/teardown! (:os test)))
+
+            ; Seal history and check
+            (let [test    (assoc test :history (deref (:history test)))
+                  results (try (checker/check (:checker test)
+                                              test
+                                              (:model test)
+                                              (:history test))
+                               (catch Throwable t
+                                 {:valid? false
+                                  :error (with-out-str
+                                           (trace/print-cause-trace t))}))]
+              (assoc test :results results)))
+
+          (finally
+            ; Make sure we close the SSH sessions
+            (dorun (pmap control/disconnect (vals sessions)))))))))

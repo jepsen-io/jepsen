@@ -1,17 +1,19 @@
 (ns jepsen.control
-  "Provides SSH control over a remote node."
+  "Provides SSH control over a remote node. There's a lot of dynamically bound
+  state in this namespace because we want to make it as simple as possible for
+  scripts to open connections to various nodes."
   (:require [clj-ssh.ssh :as ssh]
             [clojure.string :as str]))
 
-(def ^:dynamic *host* nil)
-(def ^:dynamic *session* nil)
-(def ^:dynamic *dir* "/")
-(def ^:dynamic *sudo* nil)
-(def ^:dynamic *username* "ubuntu")
-(def ^:dynamic *password* nil)
-(def ^:dynamic *private-key-path* nil)
-(def ^:dynamic *trace* false)
-(def ^:dynamic *strict-host-key-checking* :yes)
+(def ^:dynamic *host*     "Current hostname"              nil)
+(def ^:dynamic *session*  "Current clj-ssh session"       nil)
+(def ^:dynamic *trace*    "Shall we trace commands?"      false)
+(def ^:dynamic *dir*      "Working directory"             "/")
+(def ^:dynamic *sudo*     "User to sudo to"               nil)
+(def ^:dynamic *username* "Username"                      "ubuntu")
+(def ^:dynamic *password* "Password (for login and sudo)" "ubuntu")
+(def ^:dynamic *private-key-path*         "SSH identity file"     nil)
+(def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 
 (defn escape
   "Escapes a shell string."
@@ -123,21 +125,56 @@
   `(binding [*trace* true]
      ~@body))
 
+(defn session
+  "Opens a session to the given host."
+  [host]
+  (let [host  (name host)
+        agent (ssh/ssh-agent {})
+        _     (when *private-key-path*
+                (ssh/add-identity agent
+                                  {:private-key-path *private-key-path*}))]
+    (doto (ssh/session agent
+                       host
+                       {:username *username*
+                        :password *password*
+                        :strict-host-key-checking *strict-host-key-checking*})
+      (ssh/connect))))
+
+(def disconnect
+  "Close a session"
+  ssh/disconnect)
+
+(defmacro with-ssh
+  "Takes a map of SSH configuration and evaluates body in that scope. Options:
+
+  :username
+  :password
+  :private-key-path
+  :strict-host-key-checking"
+  [ssh & body]
+  `(binding [*username*         (get ~ssh :username *username*)
+             *password*         (get ~ssh :password *password*)
+             *private-key-path* (get ~ssh :private-key-path *private-key-path*)
+             *strict-host-key-checking* (get ~ssh :strict-host-key-checking
+                                             *strict-host-key-checking*)]
+     ~@body))
+
+
+(defmacro with-session
+  "Binds a host and session and evaluates body. Does not open or close session;
+  this is just for the namespace dynamics state."
+  [host session & body]
+  `(binding [*host*    (name ~host)
+             *session* ~session]
+     ~@body))
+
 (defmacro on
-  "Opens a session to the given host and evaluates body there."
+  "Opens a session to the given host and evaluates body there; and closes
+  session when body completes."
   [host & body]
-  `(let [agent# (ssh/ssh-agent {})
-         _#      (when *private-key-path*
-                   (ssh/add-identity agent#
-                                     {:private-key-path *private-key-path*}))
-         session# (ssh/session agent#
-                               ~host
-                               {:username *username*
-                                :strict-host-key-checking *strict-host-key-checking*})]
+  `(let [session# (session ~host)]
      (ssh/with-connection session#
-       (binding [*session*  session#
-                 *host*     ~host
-                 *password* *password*]
+       (with-session ~host session#
          ~@body))))
 
 (defmacro on-many

@@ -11,3 +11,10 @@
            reach into the test and conj onto the history atom directly.")
   (teardown! [client test node]
              "Tear down the client when work is complete."))
+
+(def noop
+  "Does nothing."
+  (reify Client
+    (setup!    [this test node] this)
+    (teardown! [this test node])
+    (invoke!   [this test op])))
