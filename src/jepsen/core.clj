@@ -8,7 +8,8 @@
             [jepsen.control :as control]
             [jepsen.generator :as generator]
             [jepsen.checker :as checker]
-            [jepsen.client :as client]))
+            [jepsen.client :as client])
+  (:import (java.util.concurrent CyclicBarrier)))
 
 (defn worker
   "Spawns a future to execute a particular process in the history."
@@ -62,6 +63,17 @@
                    (f test node)))
                sessions)))
 
+(defn synchronize
+  "A synchronization primitive for tests. When invoked, blocks until all
+  nodes have arrived at the same point."
+  [test]
+  (.await ^CyclicBarrier (:barrier test)))
+
+(defn primary
+  "Given a test, returns the primary node."
+  [test]
+  (first (:nodes test)))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -83,7 +95,7 @@
 
   1. Setup the operating system
 
-  2. Setup the database
+  2. Try to teardown, then setup the database
     - If the DB supports the Primary protocol, also perform the Primary setup
       on the first node.
 
@@ -106,7 +118,12 @@
     - This generates the final report"
   [test]
   ; Create history
-  (let [test (assoc test :history (atom []))]
+  (let [test (assoc test
+                    ; The history of operations executed during the test
+                    :history (atom [])
+                    ; Synchronization point for nodes
+                    :barrier (CyclicBarrier. (count (:nodes test))))]
+
     (control/with-ssh (:ssh test)
       ; Open SSH conns
       (let [sessions (->> test
@@ -117,13 +134,13 @@
         (try
           ; Setup
           (on-nodes test sessions (partial os/setup! (:os test)))
-          (on-nodes test sessions (partial db/setup! (:db test)))
+          (on-nodes test sessions (partial db/cycle! (:db test)))
 
           ; Primary setup
           (when (satisfies? db/Primary (:db test))
-            (let [primary (first (:nodes test))]
-              (control/with-session primary (get sessions primary)
-                (db/setup-primary! (:db test) test primary))))
+            (let [p (primary test)]
+            (control/with-session p (get sessions p)
+              (db/setup-primary! (:db test) test p))))
 
           (let [nemesis (client/setup! (:nemesis test) test nil)
                 clients (mapv (partial client/setup! (:client test) test)
