@@ -20,3 +20,8 @@
                r
                (knossos/inconsistent (str "can't read " (:value op)
                                           " from register " value))))))
+
+(def noop
+  "A model which always returns itself, unchanged."
+  (reify Model
+    (step [r op] r)))
