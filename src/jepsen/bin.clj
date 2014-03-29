@@ -17,6 +17,7 @@
         [jepsen.zk    :only [zk-app]]
         [clojure.tools.cli :only [cli]]
         [jepsen.control :only [*password*]]
+        jepsen.foundationdb
         ))
 
 (def app-map
@@ -41,7 +42,10 @@
    "pg"                     pg-app
    "nuodb"                  nuodb-app
    "zk"                     zk-app
-   "lock"                   locking-app})
+   "lock"                   locking-app
+   "foundationdb"           foundationdb-app
+   "foundationdb-append"    foundationdb-append-app
+   "foundationdb-append-noretry" foundationdb-append-noretry-app})
 
 (def failures
   "A map from command-line names to failure modes."
@@ -62,6 +66,7 @@
        ["-X" "--special" "additional app arguments (if supported)"]
        ["-u" "--username" "username to use for ssh"]
        ["-p" "--password" "password for sudo invocations"]
+       ["-k" "--key_path" "path to private ssh key"]
        ["-t" "--port" "port to use if not using the default"]
        ))
 
@@ -77,6 +82,7 @@
           spex  (get opts :special [])
           uname (get opts :username "ubuntu")
           pw    (get opts :password nil)
+          private-key-path (get opts :key_path nil)
           port  (get opts :port nil)
           ]
 
@@ -87,7 +93,8 @@
         (System/exit 0))
 
       (with-redefs [jepsen.control/*password* pw
-                    jepsen.control/*username* uname]
+                    jepsen.control/*username* uname
+                    jepsen.control/*private-key-path* private-key-path]
         (let [app-fn (->> app-names
                           (map app-map)
                           (apply comp))] 

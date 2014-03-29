@@ -1,7 +1,8 @@
 (ns jepsen.control.net
   "Network control functions."
   (:refer-clojure :exclude [partition])
-  (:use jepsen.control))
+  (:use jepsen.control)
+  (:require [clojure.string :as str]))
 
 (def hosts-map {:n1 "n1"
               :n2 "n2"
@@ -31,7 +32,14 @@
 (defn ip
   "Look up an ip for a hostname"
   [host]
-  (exec :dig :+short :+search host))
+  ; getent output is of the form:
+  ; 74.125.239.39   STREAM host.com
+  ; 74.125.239.39   DGRAM
+  ; ...
+  (first (str/split (->> (exec :getent :ahosts host)
+                         (str/split-lines)
+                         (first))
+                    #"\s+")))
 
 (defn cut-random-link
   "Cuts a random link to any of nodes."
