@@ -17,7 +17,6 @@
         [jepsen.zk    :only [zk-app]]
         [clojure.tools.cli :only [cli]]
         [jepsen.control :only [*password*]]
-        jepsen.foundationdb
         ))
 
 (def app-map
@@ -42,10 +41,7 @@
    "pg"                     pg-app
    "nuodb"                  nuodb-app
    "zk"                     zk-app
-   "lock"                   locking-app
-   "foundationdb"           foundationdb-app
-   "foundationdb-append"    foundationdb-append-app
-   "foundationdb-append-noretry" foundationdb-append-noretry-app})
+   "lock"                   locking-app})
 
 (def failures
   "A map from command-line names to failure modes."
@@ -91,6 +87,17 @@
         (println "Available apps:")
         (dorun (map println (sort (keys app-map))))
         (System/exit 0))
+
+      (when
+        (some #{"foundationdb"
+                "foundationdb-append"
+                "foundationdb-append-noretry"} app-names)
+        (require 'jepsen.foundationdb)
+        (def app-map (merge app-map {
+          "foundationdb" (eval 'jepsen.foundationdb/foundationdb-app)
+          "foundationdb-append" (eval 'jepsen.foundationdb/foundationdb-append-app)
+          "foundationdb-append-noretry" (eval 'jepsen.foundationdb/foundationdb-append-noretry-app)
+          })))
 
       (with-redefs [jepsen.control/*password* pw
                     jepsen.control/*username* uname
