@@ -2,7 +2,7 @@
             :description "Call Me Maybe: Network Partitions in Practice"
             :dependencies [[org.clojure/clojure "1.6.0-beta1"]
                            [aleph "0.3.0-beta16"]
-                           [knossos "0.1.1-SNAPSHOT"]
+                           [knossos "0.1.0"]
                            [clj-ssh "0.5.7"]
                            [com.novemberain/welle "1.6.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]
@@ -20,7 +20,8 @@
                             :exclusions [com.datastax.cassandra/cassandra-driver-core]]
                            [com.datastax.cassandra/cassandra-driver-core "1.0.3"]
                            [byte-streams "0.1.4"]
-                           [org.clojure/math.combinatorics "0.0.4"]]
+                           [org.clojure/math.combinatorics "0.0.4"]
+                           [com.foundationdb/fdb-java "2.0.0"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"

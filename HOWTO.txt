@@ -2,11 +2,26 @@ This is a brief overview of the basic steps necessary to run jepsen on a set of 
 
 1) You'll need 6 'machines' running ubuntu. 5 to run the server software, and 1 client machine.
 2) You'll need java and maven installed
-3) you'll need to install leiningen. To fetch out all the clojure and java dependencies just run 'lein deps'
+3) You'll need to install leiningen. To fetch out all the clojure and java dependencies just run 'lein deps'
 4) You'll need to have ssh access to the 5 server machines
 4a) You'll want passwordless key-based access, which means you'll need to setup ssh-agent and add an identity
+4b) If your private ssh key is not located at ~/.ssh/id_rsa, you'll need to provide a path at the command line (see below)
 5) The account will need to be able to sudo on the 5 server machines
-6) The machines need to be resolvable via DNS or /etc/hosts
+6) The machines need to be resolvable from both the client and the machines themselves via DNS or /etc/hosts.
 
-Those are all the configuration and setup issues I've run into so far running this. I've been just invoking the
-jepsen targets directly via leiningen (e.g. lein run nuodb -n ....)
+Jepsen takes a number command line parameters that may help with configuration:
+
+ -n (--number)      | "number of elements to add"
+ -r (--rate)        | "requests per second"
+ -f (--failure)     | "failure mode"
+ -X (--special)     | "additional app arguments (if supported)"
+ -u (--username)    | "username to use for ssh"
+ -p (--password)    | "password for sudo invocations"
+ -k (--key_path)    | "path to private ssh key"
+ -t (--port)        | "port to use if not using the default"
+
+Example usage:
+
+$ lein run zk -p "mypassword" -n 100
+
+Remember to run `salticid base.setup` and `salticid <APP>.setup` before invoking Jepsen.
