@@ -1,9 +1,18 @@
 (ns jepsen.system.rabbitmq
-  (:require [jepsen.core          :as core]
-            [jepsen.control       :as c]
-            [jepsen.control.util  :as cu]
-            [jepsen.db            :as db]
-            [clojure.tools.logging :refer [debug info warn]]))
+  (:require [clojure.tools.logging :refer [debug info warn]]
+            [jepsen.codec          :as codec]
+            [jepsen.core           :as core]
+            [jepsen.control        :as c]
+            [jepsen.control.util   :as cu]
+            [jepsen.client         :as client]
+            [jepsen.db             :as db]
+            [jepsen.generator      :as gen]
+            [langohr.core          :as rmq]
+            [langohr.channel       :as lch]
+            [langohr.confirm       :as lco]
+            [langohr.queue         :as lq]
+            [langohr.exchange      :as le]
+            [langohr.basic         :as lb]))
 
 (def db
   (reify db/DB
@@ -50,9 +59,6 @@
                     (c/exec :rabbitmqctl :join_cluster (str "rabbit@" (name p)))
                     (c/exec :rabbitmqctl :start_app)))
 
-                (core/synchronize test)
-                (info (c/exec :rabbitmqctl :cluster_status))
-
                 (info node "Rabbit ready")))))
 
     (teardown! [_ test node]
@@ -62,3 +68,58 @@
         (c/exec :rabbitmqctl :force_reset)
         (c/exec :service :rabbitmq-server :stop)
         (info "Rabbit stopped")))))
+
+(def queue "jepsen.queue")
+
+(defrecord QueueClient [conn ch]
+  client/Client
+  (setup! [_ test node]
+    (let [conn (rmq/connect {:host (name node)})
+          ch   (lch/open conn)]
+
+      ; We want confirmation tracking on this connection
+      (lco/select ch)
+
+      ; Initialize queue
+      (lq/declare ch queue
+                  :durable     true
+                  :auto-delete false
+                  :exclusive   false)
+
+      ; Bind queue to exchange
+      ; (lq/bind ch queue "amq.topic")
+
+      ; Return client
+      (QueueClient. conn ch)))
+
+  (teardown! [_ test node]
+    ; Purge
+    (lq/purge ch queue)
+
+    ; Close
+    (rmq/close ch)
+    (rmq/close conn))
+
+  (invoke! [this test op]
+    (case (:f op)
+      :enqueue (do
+                 ; Empty string is the default exhange
+                 (lb/publish ch "" queue
+                             (codec/encode (:value op))
+                             :content-type "application/edn"
+                             :persistent true)
+
+                 ; Block until message acknowledged
+                 (if (lco/wait-for-confirms ch 5000)
+                   (assoc op :type :ok)
+                   (assoc op :type :fail)))
+
+      :dequeue (let [[meta payload] (lb/get ch queue)
+                     value          (codec/decode payload)]
+                 (if (nil? meta)
+                   (assoc op :type :fail)
+                   (do
+                     (info "Dequeued" (pr-str meta) (pr-str value))
+                     (assoc op :type :ok :value value)))))))
+
+(defn queue-client [] (QueueClient. nil nil))
