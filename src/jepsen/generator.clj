@@ -27,6 +27,17 @@
          :f     :cas
          :value [(rand-int 5) (rand-int 5)]}))))
 
+(def queue
+  "Random enqueue/dequeue operations."
+  (reify Generator
+    (op [gen test process]
+      (if (< 0.5 (rand))
+        {:type  :invoke
+         :f     :enqueue
+         :value (rand-int 1000)}
+        {:type  :invoke
+         :f     :dequeue}))))
+
 (defn finite-count
   "Takes a generator and returns a generator which only produces n operations."
   [n gen]

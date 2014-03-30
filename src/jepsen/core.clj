@@ -27,6 +27,8 @@
               (try
                 ; Evaluate operation
                 (let [completion (client/invoke! client test op)]
+                  (info completion)
+
                   ; Sanity check
                   (assert (= (:process op) (:process completion)))
                   (assert (= (:f op)       (:f completion)))
@@ -142,9 +144,12 @@
             (control/with-session p (get sessions p)
               (db/setup-primary! (:db test) test p))))
 
+          ; Initialize nemesis and clients
           (let [nemesis (client/setup! (:nemesis test) test nil)
                 clients (mapv (partial client/setup! (:client test) test)
                               (:nodes test))
+
+                ; Begin workload
                 workers (mapv (partial worker test)
                               (cons :nemesis (iterate inc 0)) ; Process IDs
                               (cons nemesis clients))]        ; Clients
@@ -153,6 +158,9 @@
             (dorun (map deref workers))
 
             ; Teardown
+            (client/teardown! nemesis test nil)
+            (dorun (pmap #(client/teardown! %1 test %2) clients (:nodes test)))
+
             (on-nodes test sessions (partial db/teardown! (:db test)))
             (on-nodes test sessions (partial os/teardown! (:os test)))
 

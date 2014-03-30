@@ -4,7 +4,8 @@
                            [aleph "0.3.0-beta16"]
                            [knossos "0.1.0"]
                            [clj-ssh "0.5.7"]
-                           [com.novemberain/welle "1.6.0-beta1"]
+                           [org.clojars.achim/multiset "0.1.0-SNAPSHOT"]
+                           [com.novemberain/welle "2.0.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]
                            [com.novemberain/monger "1.5.0"]
                            [org.clojure/java.jdbc "0.3.0-alpha1"]
@@ -21,6 +22,7 @@
                            [com.datastax.cassandra/cassandra-driver-core "1.0.3"]
                            [byte-streams "0.1.4"]
                            [org.clojure/math.combinatorics "0.0.4"]
+                           [com.novemberain/langohr "2.7.1"]
                            [com.foundationdb/fdb-java "2.0.0"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
