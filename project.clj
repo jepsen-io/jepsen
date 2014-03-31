@@ -8,6 +8,7 @@
                            [com.novemberain/welle "2.0.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]
                            [com.novemberain/monger "1.5.0"]
+                           [clojurewerkz/elastisch "2.0.0-beta2"]
                            [org.clojure/java.jdbc "0.3.0-alpha1"]
                            [korma "0.3.0-RC5"]
                            [postgresql/postgresql "8.4-702.jdbc4"]

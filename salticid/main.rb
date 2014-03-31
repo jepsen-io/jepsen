@@ -7,6 +7,7 @@ load __DIR__/'postgres.rb'
 load __DIR__/'redis.rb'
 load __DIR__/'riak.rb'
 load __DIR__/'foundationdb.rb'
+load __DIR__/'elasticsearch.rb'
 
 role :base do
   task :setup do
@@ -32,6 +33,7 @@ role :jepsen do
     postgres.setup
     redis.setup
     riak.setup
+    elasticsearch.setup
   end
  
   task :slow do
@@ -117,6 +119,7 @@ group :jepsen do
     user :ubuntu
     role :base
     role :cassandra
+    role :elasticsearch
     role :etcd
     role :kafka
     role :mongo
