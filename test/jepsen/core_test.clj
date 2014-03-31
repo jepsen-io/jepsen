@@ -34,7 +34,7 @@
   [state]
   (reify client/Client
     (setup!    [this test node] this)
-    (teardown! [this test node])
+    (teardown! [this test])
     (invoke!   [this test op]
       (case (:f op)
         :write (do (reset! state   (:value op))
@@ -97,6 +97,7 @@
                                   (swap! db-primaries conj
                                          (control/exec :hostname))))))]
 
+    (pprint test)
     (is (:valid? (:results test)))
     (is (= @os-startups @os-teardowns @db-startups @db-teardowns
            {:n1 "n1"

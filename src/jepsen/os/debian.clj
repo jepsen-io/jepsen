@@ -12,6 +12,7 @@
       (c/su
         (c/exec :apt-get :install :-y
                 [:wget
+                 :iptables
                  :logrotate]))
       (info node "debian set up"))
 

@@ -1,6 +1,7 @@
 (ns jepsen.model
   "Functional abstract models of database behavior."
-  (:import knossos.core.Model)
+  (:import knossos.core.Model
+           (clojure.lang PersistentQueue))
   (:require [knossos.core :as knossos]
             [multiset.core :as multiset]))
 
@@ -34,10 +35,29 @@
       :enqueue (UnorderedQueue. (conj pending (:value op)))
       :dequeue (if (contains? pending (:value op))
                  (UnorderedQueue. (disj pending (:value op)))
-                 (inconsistent (str "can't dequeue " (:value op)
-                                    " from " pending))))))
+                 (inconsistent (str "can't dequeue " (:value op)))))))
 
 (defn unordered-queue
   "A queue which does not order its pending elements."
   []
   (UnorderedQueue. (multiset/multiset)))
+
+(defrecord FIFOQueue [pending]
+  Model
+  (step [r op]
+    (condp = (:f op)
+      :enqueue (FIFOQueue. (conj pending (:value op)))
+      :dequeue (cond (zero? (count pending))
+                     (inconsistent (str "can't dequeue " (:value op)
+                                        " from empty queue"))
+
+                     (= (:value op) (peek pending))
+                     (FIFOQueue. (pop pending))
+
+                     :else
+                     (inconsistent (str "can't dequeue " (:value op)))))))
+
+(defn fifo-queue
+  "A FIFO queue."
+  []
+  (FIFOQueue. PersistentQueue/EMPTY))

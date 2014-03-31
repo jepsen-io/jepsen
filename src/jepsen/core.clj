@@ -11,6 +11,85 @@
             [jepsen.client :as client])
   (:import (java.util.concurrent CyclicBarrier)))
 
+(defn synchronize
+  "A synchronization primitive for tests. When invoked, blocks until all
+  nodes have arrived at the same point."
+  [test]
+  (.await ^CyclicBarrier (:barrier test)))
+
+(defn primary
+  "Given a test, returns the primary node."
+  [test]
+  (first (:nodes test)))
+
+(defn fcatch
+  "Takes a function and returns a version of it which returns, rather than
+  throws, exceptions."
+  [f]
+  (fn wrapper [& args]
+    (try (apply f args)
+         (catch Exception e e))))
+
+(defmacro with-resources
+  "Takes a four-part binding vector: a symbol to bind resources to, a function
+  to start a resource, a function to stop a resource, and a sequence of
+  resources. Then takes a body. Starts resources in parallel, evaluates body,
+  and ensures all resources are correctly closed in the event of an error."
+  [[sym start stop resources] & body]
+  ; Start resources in parallel
+  `(let [~sym (doall (pmap (fcatch ~start) ~resources))]
+     (when-let [ex# (some (partial instance? Exception) ~sym)]
+       ; One of the resources threw instead of succeeding; shut down all which
+       ; started OK and throw.
+       (->> ~sym
+            (remove (partial instance? Exception))
+            (pmap (fcatch ~stop))
+            dorun)
+       (throw ex#))
+
+     ; Run body
+     (try ~@body
+       (finally
+         ; Clean up resources
+         (dorun (pmap (fcatch ~stop) ~sym))))))
+
+(defn on-nodes
+  "Given a test, evaluates (f test node) in parallel on each node, with that
+  node's SSH connection bound."
+  [test f]
+  (dorun (pmap (fn [[node session]]
+                 (control/with-session node session
+                   (f test node)))
+               (:sessions test))))
+
+(defmacro with-os
+  "Wraps body in OS setup and teardown."
+  [test & body]
+  `(try
+     (on-nodes ~test (partial os/setup! (:os ~test)))
+     ~@body
+     (finally
+       (on-nodes ~test (partial os/teardown! (:os ~test))))))
+
+(defn setup-primary!
+  "Given a test, sets up the database primary, if the DB supports it."
+  [test]
+  (when (satisfies? db/Primary (:db test))
+    (let [p (primary test)]
+      (control/with-session p (get-in test [:sessions p])
+        (db/setup-primary! (:db test) test p)))))
+
+(defmacro with-db
+  "Wraps body in DB setup and teardown."
+  [test & body]
+  `(try
+     (on-nodes ~test (partial db/cycle! (:db ~test)))
+     (setup-primary! ~test)
+
+     ~@body
+     (finally
+       (on-nodes ~test (partial db/teardown! (:db ~test))))))
+
 (defn worker
   "Spawns a future to execute a particular process in the history."
   [test process client]
@@ -56,25 +135,41 @@
                   (warn t "Process" process "indeterminate")
                   (+ process (count (:nodes test))))))))))))
 
-(defn on-nodes
-  "Given a map of nodes to SSH sessions and a test, evaluates (f test node) in
-  parallel on each node, with that node's SSH connection bound."
-  [test sessions f]
-  (dorun (pmap (fn [[node session]]
-                 (control/with-session node session
-                   (f test node)))
-               sessions)))
+(defmacro with-nemesis
+  "Sets up nemesis and binds to sym, evaluates body, and tears down nemesis."
+  [[sym test] & body]
+  ; Initialize nemesis
+  `(let [~sym (client/setup! (:nemesis ~test) ~test nil)]
+     (try
+       ; Launch nemesis thread
+       (let [worker# (worker ~test :nemesis ~sym)
+             result# ~@body]
+         ; Wait for nemesis worker to complete
+         (deref worker#)
+         result#)
+       (finally
+         (client/teardown! ~sym ~test)))))
 
-(defn synchronize
-  "A synchronization primitive for tests. When invoked, blocks until all
-  nodes have arrived at the same point."
+(defn run-case!
+  "Spawns clients, runs a single test case, and returns that case's history."
   [test]
-  (.await ^CyclicBarrier (:barrier test)))
+  (let [test (assoc test :history (atom []))]
+    ; Initialize clients
+    (with-resources [clients
+                     #(client/setup! (:client test) test %) ; Specialize to node
+                     #(client/teardown! % test)
+                     (:nodes test)]
 
-(defn primary
-  "Given a test, returns the primary node."
-  [test]
-  (first (:nodes test)))
+      ; Begin workload
+      (let [workers (mapv (partial worker test)
+                          (iterate inc 0) ; PIDs
+                          clients)]       ; Clients
+
+        ; Wait for workers to complete
+        (dorun (map deref workers))
+
+        ; Return history from this case's evaluation
+        (deref (:history test))))))
 
 (defn run!
   "Runs a test. Tests are maps containing
@@ -126,56 +221,29 @@
                     ; Synchronization point for nodes
                     :barrier (CyclicBarrier. (count (:nodes test))))]
 
+    ; Open SSH conns
     (control/with-ssh (:ssh test)
-      ; Open SSH conns
-      (let [sessions (->> test
-                          :nodes
-                          (pmap (juxt identity control/session))
-                          (into {}))]
+      (with-resources [sessions control/session control/disconnect
+                       (:nodes test)]
+        ; Index sessions by node name and add to test
+        (let [test (->> sessions
+                        (map vector (:nodes test))
+                        (into {})
+                        (assoc test :sessions))]
 
-        (try
           ; Setup
-          (on-nodes test sessions (partial os/setup! (:os test)))
-          (on-nodes test sessions (partial db/cycle! (:db test)))
-
-          ; Primary setup
-          (when (satisfies? db/Primary (:db test))
-            (let [p (primary test)]
-            (control/with-session p (get sessions p)
-              (db/setup-primary! (:db test) test p))))
-
-          ; Initialize nemesis and clients
-          (let [nemesis (client/setup! (:nemesis test) test nil)
-                clients (mapv (partial client/setup! (:client test) test)
-                              (:nodes test))
-
-                ; Begin workload
-                workers (mapv (partial worker test)
-                              (cons :nemesis (iterate inc 0)) ; Process IDs
-                              (cons nemesis clients))]        ; Clients
-
-            ; Wait for workers to complete
-            (dorun (map deref workers))
-
-            ; Teardown
-            (client/teardown! nemesis test nil)
-            (dorun (pmap #(client/teardown! %1 test %2) clients (:nodes test)))
-
-            (on-nodes test sessions (partial db/teardown! (:db test)))
-            (on-nodes test sessions (partial os/teardown! (:os test)))
-
-            ; Seal history and check
-            (let [test    (assoc test :history (deref (:history test)))
-                  results (try (checker/check (:checker test)
-                                              test
-                                              (:model test)
-                                              (:history test))
-                               (catch Throwable t
-                                 {:valid? false
-                                  :error (with-out-str
-                                           (trace/print-cause-trace t))}))]
-              (assoc test :results results)))
-
-          (finally
-            ; Make sure we close the SSH sessions
-            (dorun (pmap control/disconnect (vals sessions)))))))))
+          (with-os test
+            (with-db test
+              (with-nemesis [nemesis test]
+                ; Run a single case
+                (let [test (assoc test :history (run-case! test))]
+                  ; Analyze
+                  (let [results (try (checker/check (:checker test)
+                                                    test
+                                                    (:model test)
+                                                    (:history test))
+                                     (catch Throwable t
+                                       {:valid? false
+                                        :error (with-out-str
+                                                 (trace/print-cause-trace t))}))]
+                    (assoc test :results results)))))))))))

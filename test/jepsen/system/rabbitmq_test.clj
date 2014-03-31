@@ -6,16 +6,20 @@
         clojure.pprint)
   (:require [jepsen.os.debian :as debian]
             [jepsen.model     :as model]
-            [jepsen.generator :as gen]))
+            [jepsen.generator :as gen]
+            [jepsen.nemesis   :as nemesis]))
 
 (deftest rabbit-test
   (let [test (run! (assoc noop-test
                           :os         debian/os
                           :db         db
                           :client     (queue-client)
-                          :model      (model/unordered-queue)
+                          :nemesis    (nemesis/simple-partition)
+                          :model      (model/fifo-queue)
                           :generator  (->> gen/queue
-                                           (gen/finite-count 1000)
-                                           (gen/nemesis gen/void))))]
+                                           (gen/finite-count 30)
+                                           (gen/nemesis
+                                             (gen/start-stop 1 1)))))]
+
     (is (:valid? (:results test)))
     (pprint test)))

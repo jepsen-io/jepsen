@@ -5,7 +5,8 @@
   the rate at which the test proceeds
 
   Generators do *not* have to emit a :process for their operations; test
-  workers will take care of that.")
+  workers will take care of that."
+  (:refer-clojure :exclude [delay]))
 
 (defprotocol Generator
   (op [generator test process] "Yields an operation to apply."))
@@ -14,6 +15,22 @@
   "A generator which terminates immediately"
   (reify Generator
     (op [generator test process])))
+
+(defn start-stop
+  "A generator which emits a start after a t1 second delay, and then a stop
+  after a t2 second delay."
+  [t1 t2]
+  (let [state (atom :init)]
+    (reify Generator
+      (op [gen test process]
+        (case (swap! state {:init  :start
+                            :start :stop
+                            :stop  :dead})
+          :start (do (Thread/sleep (* t1 1000))
+                     {:type :info :f :start})
+          :stop  (do (Thread/sleep (* t2 1000))
+                     {:type :info :f :stop})
+          :dead  nil)))))
 
 (def cas
   "Random cas/read ops for a compare-and-set register over a small field of
@@ -38,12 +55,20 @@
         {:type  :invoke
          :f     :dequeue}))))
 
+(defn delay
+  "Every operation from the underlying generator takes dt seconds to return."
+  [dt gen]
+  (reify Generator
+    (op [_ test process]
+      (Thread/sleep (* 1000 dt))
+      (op gen test process))))
+
 (defn finite-count
   "Takes a generator and returns a generator which only produces n operations."
   [n gen]
   (let [life (atom (inc n))]
     (reify Generator
-      (op [generator test process]
+      (op [_ test process]
         (when (pos? (swap! life dec))
           (op gen test process))))))
 

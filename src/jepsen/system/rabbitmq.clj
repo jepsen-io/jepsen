@@ -86,13 +86,10 @@
                   :auto-delete false
                   :exclusive   false)
 
-      ; Bind queue to exchange
-      ; (lq/bind ch queue "amq.topic")
-
       ; Return client
       (QueueClient. conn ch)))
 
-  (teardown! [_ test node]
+  (teardown! [_ test]
     ; Purge
     (lq/purge ch queue)
 
@@ -118,8 +115,6 @@
                      value          (codec/decode payload)]
                  (if (nil? meta)
                    (assoc op :type :fail)
-                   (do
-                     (info "Dequeued" (pr-str meta) (pr-str value))
-                     (assoc op :type :ok :value value)))))))
+                   (assoc op :type :ok :value value))))))
 
 (defn queue-client [] (QueueClient. nil nil))
