@@ -42,8 +42,6 @@
       (case (:f op)
         :start (partition! (bisect (:nodes test)))
         :stop  (c/on-many (:nodes test) (net/heal)))
-      (c/on (first (:nodes test))
-            (info (c/su (c/exec :iptables :--list))))
 
       (assoc op :type :info :value "complete"))
 

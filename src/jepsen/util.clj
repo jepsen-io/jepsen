@@ -75,3 +75,8 @@
   (->> m
        (map (fn [[k v]] [k (f v)]))
        (into {})))
+
+(defmacro meh
+  "Returns, rather than throws, exceptions."
+  [& body]
+  `(try ~@body (catch Exception e# e#)))

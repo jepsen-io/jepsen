@@ -97,7 +97,6 @@
                                   (swap! db-primaries conj
                                          (control/exec :hostname))))))]
 
-    (pprint test)
     (is (:valid? (:results test)))
     (is (= @os-startups @os-teardowns @db-startups @db-teardowns
            {:n1 "n1"

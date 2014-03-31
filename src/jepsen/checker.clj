@@ -1,6 +1,7 @@
 (ns jepsen.checker
   "Validates that a history is correct with respect to some model."
-  (:require [knossos.core :as knossos]))
+  (:require [clojure.stacktrace :as trace]
+            [knossos.core :as knossos]))
 
 (defprotocol Checker
   (check [checker test model history]
@@ -24,3 +25,13 @@
             linearizable  (knossos/linearizable-prefix model history')]
         {:valid?                (= history' linearizable)
          :linearizable-prefix   linearizable}))))
+
+(defn check-safe
+  "Like check, but wraps exceptions up and returns them as a map like
+
+  {:valid? nil :error \"...\"}"
+  [checker test model history]
+  (try (check checker test model history)
+       (catch Throwable t
+         {:valid? false
+          :error (with-out-str (trace/print-cause-trace t))})))

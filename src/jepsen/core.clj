@@ -129,9 +129,13 @@
                   ; operation without violating the single-threaded process
                   ; constraint. We cycle to a new process identifier, and leave
                   ; the invocation uncompleted in the history.
-                  (swap! hist conj (assoc op :type  :info
+                  (swap! hist conj (assoc op
+                                          :type :info
                                           :value (str "indeterminate: "
-                                                      (.getMessage t))))
+                                                      (if (.getCause t)
+                                                        (.. t getCause
+                                                            getMessage)
+                                                        (.getMessage t)))))
                   (warn t "Process" process "indeterminate")
                   (+ process (count (:nodes test))))))))))))
 
@@ -214,12 +218,8 @@
      the history
     - This generates the final report"
   [test]
-  ; Create history
-  (let [test (assoc test
-                    ; The history of operations executed during the test
-                    :history (atom [])
-                    ; Synchronization point for nodes
-                    :barrier (CyclicBarrier. (count (:nodes test))))]
+  ; Synchronization point for nodes
+  (let [test (assoc test :barrier (CyclicBarrier. (count (:nodes test))))]
 
     ; Open SSH conns
     (control/with-ssh (:ssh test)
@@ -237,13 +237,8 @@
               (with-nemesis [nemesis test]
                 ; Run a single case
                 (let [test (assoc test :history (run-case! test))]
-                  ; Analyze
-                  (let [results (try (checker/check (:checker test)
-                                                    test
-                                                    (:model test)
-                                                    (:history test))
-                                     (catch Throwable t
-                                       {:valid? false
-                                        :error (with-out-str
-                                                 (trace/print-cause-trace t))}))]
-                    (assoc test :results results)))))))))))
+                  (assoc test :results (checker/check-safe
+                                         (:checker test)
+                                         test
+                                         (:model test)
+                                         (:history test))))))))))))
