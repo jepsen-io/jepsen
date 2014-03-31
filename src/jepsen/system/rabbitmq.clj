@@ -1,5 +1,6 @@
 (ns jepsen.system.rabbitmq
   (:require [clojure.tools.logging :refer [debug info warn]]
+            [jepsen.util           :refer [meh]]
             [jepsen.codec          :as codec]
             [jepsen.core           :as core]
             [jepsen.control        :as c]
@@ -74,6 +75,7 @@
 (defrecord QueueClient [conn ch]
   client/Client
   (setup! [_ test node]
+    (warn node "Client init")
     (let [conn (rmq/connect {:host (name node)})
           ch   (lch/open conn)]
 
@@ -90,12 +92,14 @@
       (QueueClient. conn ch)))
 
   (teardown! [_ test]
+    (warn "Teardown")
+
     ; Purge
-    (lq/purge ch queue)
+    (meh (lq/purge ch queue))
 
     ; Close
-    (rmq/close ch)
-    (rmq/close conn))
+    (meh (rmq/close ch))
+    (meh (rmq/close conn)))
 
   (invoke! [this test op]
     (case (:f op)

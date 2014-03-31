@@ -18,8 +18,9 @@
                           :model      (model/fifo-queue)
                           :generator  (->> gen/queue
                                            (gen/finite-count 30)
+                                           (gen/delay 5)
                                            (gen/nemesis
-                                             (gen/start-stop 1 1)))))]
+                                             (gen/start-stop 1 60)))))]
 
     (is (:valid? (:results test)))
     (pprint test)))
