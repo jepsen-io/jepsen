@@ -9,12 +9,12 @@
            "Apply an operation to the client, returning an operation to be
            appended to the history. For multi-stage operations, the client may
            reach into the test and conj onto the history atom directly.")
-  (teardown! [client test node]
+  (teardown! [client test]
              "Tear down the client when work is complete."))
 
 (def noop
   "Does nothing."
   (reify Client
     (setup!    [this test node] this)
-    (teardown! [this test node])
+    (teardown! [this test])
     (invoke!   [this test op])))
