@@ -45,11 +45,17 @@
     (let [s (if (instance? clojure.lang.Named s)
               (name s)
               (str s))]
-      (if (re-find #"[\\\$`\" \(\)\{\}\[\]]" s)
+      (cond
+        ; Empty string
+        (= "" s)
+        "\"\""
+
+        (re-find #"[\\\$`\" \(\)\{\}\[\]\*\?]" s)
         (str "\""
              (str/replace s #"([\\\$`\"])" "\\\\$1")
              "\"")
-        s))))
+
+        :else s))))
 
 (defn wrap-sudo
   "Wraps command in a sudo subshell."

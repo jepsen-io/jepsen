@@ -64,7 +64,7 @@
                                             (gen/finite-count n)
                                             (gen/nemesis gen/void))
                            :model      (model/->CASRegister 0)))]
-;    (pprint test)
+    (pprint test)
     (is (:valid? (:results test)))))
 
 (deftest ssh-test
@@ -105,3 +105,20 @@
             :n4 "n4"
             :n5 "n5"}))
     (is (= @db-primaries ["n1"]))))
+
+(deftest worker-recovery-test
+  ; Workers should only consume n ops even when failing.
+  (let [invocations (atom 0)
+        n 30]
+    (run! (assoc noop-test
+                 :client (reify client/Client
+                           (setup! [c _ _] c)
+                           (invoke! [_ _ _]
+                             (swap! invocations inc)
+                             (assert false))
+                           (teardown! [c _]))
+                 :checker  checker/unbridled-optimism
+                 :generator (->> gen/queue
+                                 (gen/finite-count n)
+                                 (gen/nemesis gen/void))))
+    (is (= n @invocations))))

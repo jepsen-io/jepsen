@@ -17,6 +17,10 @@
          and maybe there can be some stats about what fraction of requests
          were corrupt, etc."))
 
+(def unbridled-optimism
+  "Everything is wonderful!"
+  (constantly {:valid? true}))
+
 (def linearizable
   "Validates linearizability with Knossos."
   (reify Checker

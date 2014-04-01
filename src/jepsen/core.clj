@@ -92,16 +92,15 @@
 
 (defn worker
   "Spawns a future to execute a particular process in the history."
-  [test process client]
-  (let [gen (:generator test)
-        hist (:history test)]
+  [test history process client]
+  (let [gen (:generator test)]
     (future
       (loop [process process]
         ; Obtain an operation to execute
         (when-let [op (generator/op gen test process)]
           (let [op (assoc op :process process)]
             ; Log invocation
-            (swap! hist conj op)
+            (swap! history conj op)
             (recur
               (try
                 ; Evaluate operation
@@ -113,7 +112,7 @@
                   (assert (= (:f op)       (:f completion)))
 
                   ; Log completion
-                  (swap! hist conj completion)
+                  (swap! history conj completion)
 
                   ; The process is now free to attempt another execution.
                   process)
@@ -129,35 +128,74 @@
                   ; operation without violating the single-threaded process
                   ; constraint. We cycle to a new process identifier, and leave
                   ; the invocation uncompleted in the history.
-                  (swap! hist conj (assoc op
-                                          :type :info
-                                          :value (str "indeterminate: "
-                                                      (if (.getCause t)
-                                                        (.. t getCause
-                                                            getMessage)
-                                                        (.getMessage t)))))
+                  (swap! history conj (assoc op
+                                             :type :info
+                                             :value (str "indeterminate: "
+                                                         (if (.getCause t)
+                                                           (.. t getCause
+                                                               getMessage)
+                                                           (.getMessage t)))))
                   (warn t "Process" process "indeterminate")
                   (+ process (count (:nodes test))))))))))))
 
+(defn nemesis-worker
+  "Starts the nemesis thread, which draws failures from the generator and
+  evaluates them. Returns a future."
+  [test nemesis]
+  (let [gen       (:generator        test)
+        histories (:active-histories test)]
+    (future
+      (loop []
+        (when-let [op (generator/op gen test :nemesis)]
+          (let [op (assoc op :process :nemesis)]
+            ; Log invocation in all histories of all currently running cases
+            (doseq [history @histories]
+              (swap! history conj op))
+
+              (try
+                (let [completion (client/invoke! nemesis test op)]
+                  (info completion)
+
+                  ; Nemesis is not allowed to affect the model
+                  (assert (= (:type op)    :info))
+                  (assert (= (:f op)       (:f completion)))
+                  (assert (= (:process op) (:process completion)))
+
+                  ; Log completion in all histories of all currently running
+                  ; cases
+                  (doseq [history @histories]
+                    (swap! history conj completion)))
+
+                (catch Throwable t
+                  (doseq [history @histories]
+                    (swap! history conj (assoc op :value (str "crashed: " t))))
+                  (warn t "Nemesis crashed evaluating" op)))
+
+            (recur)))))))
+
 (defmacro with-nemesis
-  "Sets up nemesis and binds to sym, evaluates body, and tears down nemesis."
-  [[sym test] & body]
+  "Sets up nemesis, starts nemesis worker thread, evaluates body, waits for
+  nemesis completion, and tears down nemesis."
+  [test & body]
   ; Initialize nemesis
-  `(let [~sym (client/setup! (:nemesis ~test) ~test nil)]
+  `(let [nemesis# (client/setup! (:nemesis ~test) ~test nil)]
      (try
        ; Launch nemesis thread
-       (let [worker# (worker ~test :nemesis ~sym)
+       (let [worker# (nemesis-worker ~test nemesis#)
              result# ~@body]
          ; Wait for nemesis worker to complete
          (deref worker#)
          result#)
        (finally
-         (client/teardown! ~sym ~test)))))
+         (client/teardown! nemesis# ~test)))))
 
 (defn run-case!
   "Spawns clients, runs a single test case, and returns that case's history."
   [test]
-  (let [test (assoc test :history (atom []))]
+  (let [history (atom [])]
+    ; Register history with test's active set.
+    (swap! (:active-histories test) conj history)
+
     ; Initialize clients
     (with-resources [clients
                      #(client/setup! (:client test) test %) ; Specialize to node
@@ -165,15 +203,17 @@
                      (:nodes test)]
 
       ; Begin workload
-      (let [workers (mapv (partial worker test)
+      (let [workers (mapv (partial worker test history)
                           (iterate inc 0) ; PIDs
                           clients)]       ; Clients
 
         ; Wait for workers to complete
         (dorun (map deref workers))
 
-        ; Return history from this case's evaluation
-        (deref (:history test))))))
+        ; Unregister our history
+        (swap! (:active-histories test) disj history)
+
+        @history))))
 
 (defn run!
   "Runs a test. Tests are maps containing
@@ -218,8 +258,11 @@
      the history
     - This generates the final report"
   [test]
-  ; Synchronization point for nodes
-  (let [test (assoc test :barrier (CyclicBarrier. (count (:nodes test))))]
+  (let [test (assoc test
+                    ; Synchronization point for nodes
+                    :barrier (CyclicBarrier. (count (:nodes test)))
+                    ; Currently running histories
+                    :active-histories (atom #{}))]
 
     ; Open SSH conns
     (control/with-ssh (:ssh test)
@@ -234,9 +277,13 @@
           ; Setup
           (with-os test
             (with-db test
-              (with-nemesis [nemesis test]
+              (with-nemesis test
+
                 ; Run a single case
                 (let [test (assoc test :history (run-case! test))]
+
+                  (clojure.pprint/pprint (:history test))
+
                   (assoc test :results (checker/check-safe
                                          (:checker test)
                                          test
