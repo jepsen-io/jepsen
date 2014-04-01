@@ -18,6 +18,12 @@ role :elasticsearch do
     end
   end
 
+  task :restart do
+    sudo do
+      service :elasticsearch, :restart
+    end
+  end
+
   task :tail do
     sudo do
       tail '-F', '/var/log/elasticsearch/elasticsearch.log', echo: true
