@@ -58,7 +58,17 @@
                   (when-not (= node p)
                     (info node "joining" p)
                     (c/exec :rabbitmqctl :join_cluster (str "rabbit@" (name p)))
-                    (c/exec :rabbitmqctl :start_app)))
+                    (info node "joined" p)
+                    (c/exec :rabbitmqctl :start_app)
+                    (info node "started")))
+
+                ; Use mirroring
+                (core/synchronize test)
+                (info node "Enabling mirroring")
+                (c/exec :rabbitmqctl :set_policy :ha-maj "jepsen."
+                        "{\"ha-mode\": \"exactly\",
+                          \"ha-params\": 2,
+                          \"ha-sync-mode\": \"automatic\"}")
 
                 (info node "Rabbit ready")))))
 
