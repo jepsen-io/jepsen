@@ -1,6 +1,7 @@
 (ns jepsen.failure
   (:use jepsen.util)
   (:require [jepsen.control :as control]
+            [clojure.math.combinatorics :as combo]
             [jepsen.control.net :as net]))
 
 (defprotocol Failure
@@ -61,3 +62,34 @@
         (log "Chaos ended")
         (control/on-many nodes (net/heal)) 
         (log "Partition healed.")))))
+
+(def hemispherical
+  "Splits the cluster into two hemispheres connected via one node.
+
+   Such as this:
+
+        .-Master-.
+        |        |
+       L1 <-x-> R1
+        |        |
+       L2 <-x-> R2
+
+   It is assumed that the Master node is living at hostname n1."
+
+  (reify Failure
+    (fail [_ nodes]
+      (let [left [:n2 :n3]
+            right [:n4 :n5]
+            splits (combo/cartesian-product left right)]
+        (doseq [[us them] splits]
+          (control/on us
+            (net/heal)
+            (net/cut-link them)
+            (log (control/exec :hostname) (net/iptables-list))))))
+    (recover [_ nodes]
+      (let [left [:n2 :n3]
+            right [:n4 :n5]
+            splits (combo/cartesian-product left right)]
+        (doseq [[us _] splits]
+          (control/on us
+            (net/heal)))))))

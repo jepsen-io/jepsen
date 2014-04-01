@@ -8,6 +8,7 @@
                            [com.novemberain/welle "2.0.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]
                            [com.novemberain/monger "1.5.0"]
+                           [clojurewerkz/elastisch "2.0.0-beta2"]
                            [org.clojure/java.jdbc "0.3.0-alpha1"]
                            [korma "0.3.0-RC5"]
                            [postgresql/postgresql "8.4-702.jdbc4"]
@@ -23,7 +24,8 @@
                            [byte-streams "0.1.4"]
                            [org.clojure/math.combinatorics "0.0.4"]
                            [com.novemberain/langohr "2.7.1"]
-                           [com.foundationdb/fdb-java "2.0.0"]]
+                           [com.foundationdb/fdb-java "2.0.0"]
+                           [org.clojure/math.combinatorics "0.0.7"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"

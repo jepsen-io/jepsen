@@ -6,6 +6,7 @@
             [jepsen.redis :as redis])
   (:use jepsen.set-app
         [jepsen.cassandra :only [cassandra-app]]
+        [jepsen.elasticsearch :only [elasticsearch-app]]
         [jepsen.riak :only [riak-lww-all-app
                             riak-lww-quorum-app
                             riak-lww-sloppy-quorum-app
@@ -27,6 +28,7 @@
    "cassandra-isolation"    cassandra/isolation-app
    "cassandra-transaction"  cassandra/transaction-app
    "cassandra-transaction-dup" cassandra/transaction-dup-app
+   "elasticsearch"          elasticsearch-app
    "kafka"                  kafka/app
    "mongo-replicas-safe"    mongo-replicas-safe-app
    "mongo-safe"             mongo-safe-app
@@ -45,11 +47,12 @@
 
 (def failures
   "A map from command-line names to failure modes."
-  {"partition"  failure/simple-partition
-   "noop"       failure/noop
-   "chaos"      (failure/chaos)
-   "kafka"      kafka/failure
-   "redis"      redis/failure})
+  {"partition"     failure/simple-partition
+   "noop"          failure/noop
+   "hemispheres"   failure/hemispherical
+   "chaos"         (failure/chaos)
+   "kafka"         kafka/failure
+   "redis"         redis/failure})
 
 (defn parse-int [i] (Integer. i))
 
@@ -64,6 +67,7 @@
        ["-p" "--password" "password for sudo invocations"]
        ["-k" "--key_path" "path to private ssh key"]
        ["-t" "--port" "port to use if not using the default"]
+       ["-c" "--check-keys" "allow for insecure connections to hosts" :parse-fn keyword]
        ))
 
 (defn -main
@@ -73,6 +77,7 @@
           failure (-> opts
                       (get :failure "partition")
                       failures)
+          check-keys? (get opts :check-keys :no)
           n (get opts :number 2000)
           r (get opts :rate 2)
           spex  (get opts :special [])
@@ -101,7 +106,8 @@
 
       (with-redefs [jepsen.control/*password* pw
                     jepsen.control/*username* uname
-                    jepsen.control/*private-key-path* private-key-path]
+                    jepsen.control/*private-key-path* private-key-path
+                    jepsen.control/*strict-host-key-checking* check-keys?]
         (let [app-fn (->> app-names
                           (map app-map)
                           (apply comp))] 

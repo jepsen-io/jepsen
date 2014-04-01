@@ -46,6 +46,9 @@
   [nodes]
   (su (exec :iptables :-A :INPUT :-s (ip (rand-nth nodes)) :-j :DROP)))
 
+(defn cut-link
+  [node]
+  (su (exec :iptables :-A :INPUT :-s (ip node) :-j :DROP)))
 
 (defn partition
   "Partitions the network."
