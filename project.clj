@@ -24,7 +24,8 @@
                            [byte-streams "0.1.4"]
                            [org.clojure/math.combinatorics "0.0.4"]
                            [com.novemberain/langohr "2.7.1"]
-                           [com.foundationdb/fdb-java "2.0.0"]]
+                           [com.foundationdb/fdb-java "2.0.0"]
+                           [org.clojure/math.combinatorics "0.0.7"]]
             :profiles {:dev {:dependencies [[midje "1.5.0"]]}}
             :main jepsen.bin
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"

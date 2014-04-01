@@ -47,11 +47,12 @@
 
 (def failures
   "A map from command-line names to failure modes."
-  {"partition"  failure/simple-partition
-   "noop"       failure/noop
-   "chaos"      (failure/chaos)
-   "kafka"      kafka/failure
-   "redis"      redis/failure})
+  {"partition"     failure/simple-partition
+   "noop"          failure/noop
+   "hemispheres"   failure/hemispherical
+   "chaos"         (failure/chaos)
+   "kafka"         kafka/failure
+   "redis"         redis/failure})
 
 (defn parse-int [i] (Integer. i))
 
