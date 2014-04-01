@@ -66,6 +66,7 @@
        ["-p" "--password" "password for sudo invocations"]
        ["-k" "--key_path" "path to private ssh key"]
        ["-t" "--port" "port to use if not using the default"]
+       ["-c" "--check-keys" "allow for insecure connections to hosts" :parse-fn keyword]
        ))
 
 (defn -main
@@ -75,6 +76,7 @@
           failure (-> opts
                       (get :failure "partition")
                       failures)
+          check-keys? (get opts :check-keys :no)
           n (get opts :number 2000)
           r (get opts :rate 2)
           spex  (get opts :special [])
@@ -103,7 +105,8 @@
 
       (with-redefs [jepsen.control/*password* pw
                     jepsen.control/*username* uname
-                    jepsen.control/*private-key-path* private-key-path]
+                    jepsen.control/*private-key-path* private-key-path
+                    jepsen.control/*strict-host-key-checking* check-keys?]
         (let [app-fn (->> app-names
                           (map app-map)
                           (apply comp))] 
