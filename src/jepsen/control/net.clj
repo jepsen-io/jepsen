@@ -29,6 +29,12 @@
   []
   (exec :tc :qdisc :del :dev :eth0 :root))
 
+(defn reachable?
+  "Can the current node ping the given node?"
+  [node]
+  (try (exec :ping :-w 1 node) true
+       (catch RuntimeException _ false)))
+
 (defn ip
   "Look up an ip for a hostname"
   [host]

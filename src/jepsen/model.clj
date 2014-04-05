@@ -2,6 +2,7 @@
   "Functional abstract models of database behavior."
   (:import knossos.core.Model
            (clojure.lang PersistentQueue))
+  (:use clojure.tools.logging)
   (:require [knossos.core :as knossos]
             [multiset.core :as multiset]))
 
