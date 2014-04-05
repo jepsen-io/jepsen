@@ -1,5 +1,6 @@
 (ns jepsen.system.rabbitmq
   (:require [clojure.tools.logging :refer [debug info warn]]
+            [jepsen.core           :as core]
             [jepsen.util           :refer [meh]]
             [jepsen.codec          :as codec]
             [jepsen.core           :as core]
@@ -8,12 +9,14 @@
             [jepsen.client         :as client]
             [jepsen.db             :as db]
             [jepsen.generator      :as gen]
+            [knossos.core          :as knossos]
             [langohr.core          :as rmq]
             [langohr.channel       :as lch]
             [langohr.confirm       :as lco]
             [langohr.queue         :as lq]
             [langohr.exchange      :as le]
-            [langohr.basic         :as lb]))
+            [langohr.basic         :as lb])
+  (:import (com.rabbitmq.client AlreadyClosedException)))
 
 (def db
   (reify db/DB
@@ -74,61 +77,89 @@
 
     (teardown! [_ test node]
       (c/su
-        (info "Stopping rabbitmq")
-        (c/exec :rabbitmqctl :stop_app)
-        (c/exec :rabbitmqctl :force_reset)
-        (c/exec :service :rabbitmq-server :stop)
-        (info "Rabbit stopped")))))
+;        (info "Stopping rabbitmq")
+;        (meh (c/exec :rabbitmqctl :stop_app))
+;        (meh (c/exec :rabbitmqctl :force_reset))
+;        (meh (c/exec :service :rabbitmq-server :stop))
+        (info node "Nuking rabbit")
+        (meh (c/exec :killall :-9 "beam.smp" "epmd"))
+        (c/exec :rm :-rf "/var/lib/rabbitmq/mnesia/")
+        (info node "Rabbit dead")))))
 
 (def queue "jepsen.queue")
 
-(defrecord QueueClient [conn ch]
+(defn dequeue!
+  "Given a channel and an operation, dequeues a value and returns the
+  corresponding operation."
+  [ch op]
+  (let [[meta payload] (lb/get ch queue)
+        value          (codec/decode payload)]
+    (if (nil? meta)
+      (assoc op :type :fail :value :exhausted)
+      (assoc op :type :ok :value value))))
+
+(defmacro with-ch
+  "Opens a channel on 'conn for body, binds it to the provided symbol 'ch, and
+  ensures the channel is closed after body returns."
+  [[ch conn] & body]
+  `(let [~ch (lch/open ~conn)]
+     (try ~@body
+          (finally
+            (try (rmq/close ~ch)
+                 (catch AlreadyClosedException _#))))))
+
+(defrecord QueueClient [conn]
   client/Client
   (setup! [_ test node]
-    (warn node "Client init")
-    (let [conn (rmq/connect {:host (name node)})
-          ch   (lch/open conn)]
-
-      ; We want confirmation tracking on this connection
-      (lco/select ch)
-
-      ; Initialize queue
-      (lq/declare ch queue
-                  :durable     true
-                  :auto-delete false
-                  :exclusive   false)
+    (let [conn (rmq/connect {:host (name node)})]
+      (with-ch [ch conn]
+        ; Initialize queue
+        (lq/declare ch queue
+                    :durable     true
+                    :auto-delete false
+                    :exclusive   false))
 
       ; Return client
-      (QueueClient. conn ch)))
+      (QueueClient. conn)))
 
   (teardown! [_ test]
-    (warn "Teardown")
-
     ; Purge
-    (meh (lq/purge ch queue))
+    (meh (with-ch [ch conn]
+           (lq/purge ch queue)))
 
     ; Close
-    (meh (rmq/close ch))
     (meh (rmq/close conn)))
 
   (invoke! [this test op]
-    (case (:f op)
-      :enqueue (do
-                 ; Empty string is the default exhange
-                 (lb/publish ch "" queue
-                             (codec/encode (:value op))
-                             :content-type "application/edn"
-                             :persistent true)
+    (with-ch [ch conn]
+      (case (:f op)
+        :enqueue (do
+                   (lco/select ch) ; Use confirmation tracking
 
-                 ; Block until message acknowledged
-                 (if (lco/wait-for-confirms ch 5000)
-                   (assoc op :type :ok)
-                   (assoc op :type :fail)))
+                   ; Empty string is the default exhange
+                   (lb/publish ch "" queue
+                               (codec/encode (:value op))
+                               :content-type "application/edn"
+                               :persistent true)
 
-      :dequeue (let [[meta payload] (lb/get ch queue)
-                     value          (codec/decode payload)]
-                 (if (nil? meta)
-                   (assoc op :type :fail)
-                   (assoc op :type :ok :value value))))))
+                   ; Block until message acknowledged
+                   (if (lco/wait-for-confirms ch 5000)
+                     (assoc op :type :ok)
+                     (assoc op :type :fail)))
 
-(defn queue-client [] (QueueClient. nil nil))
+        :dequeue (dequeue! ch op)
+
+        :drain   (do
+                   ; Note that this does more dequeues than strictly necessary
+                   ; owing to lazy sequence chunking.
+                   (->> (repeat op)                  ; Explode drain into
+                        (map #(assoc % :f :dequeue)) ; infinite dequeues, then
+                        (map (partial dequeue! ch))  ; dequeue something
+                        (take-while knossos/ok?)     ; as long as stuff arrives,
+                        (interleave (repeat op))     ; interleave with invokes
+                        (drop 1)                     ; except the initial one
+                        (map (partial core/conj-op! test))
+                        dorun)
+                   (assoc op :type :info :value :exhausted))))))
+
+(defn queue-client [] (QueueClient. nil))

@@ -18,7 +18,7 @@
   "Given a collection of collections of nodes, isolates each collection of
   nodes from the others."
   [partitions]
-  (let [universe (set (concat partitions))]
+  (let [universe (set (apply concat partitions))]
     (->> partitions
          (pmap (fn [component]
                  (c/on-many component
@@ -38,7 +38,6 @@
       this)
 
     (invoke! [this test op]
-      (info :nemesis op)
       (case (:f op)
         :start (partition! (bisect (:nodes test)))
         :stop  (c/on-many (:nodes test) (net/heal)))

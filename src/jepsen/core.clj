@@ -3,6 +3,7 @@
   tests, creating and resolving failures, and interpreting results."
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
+            [jepsen.util :as util]
             [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.control :as control]
@@ -16,6 +17,11 @@
   nodes have arrived at the same point."
   [test]
   (.await ^CyclicBarrier (:barrier test)))
+
+(defn conj-op!
+  "Add an operation to a tests's history."
+  [test op]
+  (swap! (:history test) conj op))
 
 (defn primary
   "Given a test, returns the primary node."
@@ -92,7 +98,7 @@
 
 (defn worker
   "Spawns a future to execute a particular process in the history."
-  [test history process client]
+  [test process client]
   (let [gen (:generator test)]
     (future
       (loop [process process]
@@ -100,19 +106,19 @@
         (when-let [op (generator/op gen test process)]
           (let [op (assoc op :process process)]
             ; Log invocation
-            (swap! history conj op)
+            (conj-op! test op)
             (recur
               (try
                 ; Evaluate operation
                 (let [completion (client/invoke! client test op)]
-                  (info completion)
+                  (util/log-op completion)
 
                   ; Sanity check
                   (assert (= (:process op) (:process completion)))
                   (assert (= (:f op)       (:f completion)))
 
                   ; Log completion
-                  (swap! history conj completion)
+                  (conj-op! test completion)
 
                   ; The process is now free to attempt another execution.
                   process)
@@ -128,13 +134,13 @@
                   ; operation without violating the single-threaded process
                   ; constraint. We cycle to a new process identifier, and leave
                   ; the invocation uncompleted in the history.
-                  (swap! history conj (assoc op
-                                             :type :info
-                                             :value (str "indeterminate: "
-                                                         (if (.getCause t)
-                                                           (.. t getCause
-                                                               getMessage)
-                                                           (.getMessage t)))))
+                  (conj-op! test (assoc op
+                                        :type :info
+                                        :value (str "indeterminate: "
+                                                    (if (.getCause t)
+                                                      (.. t getCause
+                                                          getMessage)
+                                                      (.getMessage t)))))
                   (warn t "Process" process "indeterminate")
                   (+ process (count (:nodes test))))))))))))
 
@@ -153,8 +159,9 @@
               (swap! history conj op))
 
               (try
+                (util/log-op op)
                 (let [completion (client/invoke! nemesis test op)]
-                  (info completion)
+                  (util/log-op completion)
 
                   ; Nemesis is not allowed to affect the model
                   (assert (= (:type op)    :info))
@@ -192,7 +199,9 @@
 (defn run-case!
   "Spawns clients, runs a single test case, and returns that case's history."
   [test]
-  (let [history (atom [])]
+  (let [history (atom [])
+        test    (assoc test :history history)]
+
     ; Register history with test's active set.
     (swap! (:active-histories test) conj history)
 
@@ -203,7 +212,7 @@
                      (:nodes test)]
 
       ; Begin workload
-      (let [workers (mapv (partial worker test history)
+      (let [workers (mapv (partial worker test)
                           (iterate inc 0) ; PIDs
                           clients)]       ; Clients
 
@@ -282,7 +291,8 @@
                 ; Run a single case
                 (let [test (assoc test :history (run-case! test))]
 
-                  (clojure.pprint/pprint (:history test))
+                  (info "Case complete: history was")
+                  (->> test :history (map util/log-op) dorun)
 
                   (assoc test :results (checker/check-safe
                                          (:checker test)

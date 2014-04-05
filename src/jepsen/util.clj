@@ -1,6 +1,15 @@
 (ns jepsen.util
   "Kitchen sink"
+  (:require [clojure.tools.logging :refer [info]])
   (:import (java.util.concurrent.locks LockSupport)))
+
+(defn log-op
+  "Logs an operation."
+  [op]
+  (info (:process op)
+        (:type op)
+        (pr-str (:f op))
+        (pr-str (:value op))))
 
 (def logger (agent nil))
 (defn log-print
@@ -54,6 +63,15 @@
 (defn ms->nanos [ms] (* ms 1000000))
 
 (defn nanos->ms [nanos] (/ nanos 1000000))
+
+(defn secs->nanos [s] (* s 1e9))
+
+(defn nanos->secs [nanos] (/ nanos 1e9))
+
+(defn linear-time-nanos
+  "A linear time source in nanoseconds."
+  []
+  (System/nanoTime))
 
 (defn sleep
   "High-resolution sleep; takes a (possibly fractional) time in ms."

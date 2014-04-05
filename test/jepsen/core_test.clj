@@ -61,10 +61,9 @@
                            :db         (atom-db state)
                            :client     (atom-client state)
                            :generator  (->> gen/cas
-                                            (gen/finite-count n)
+                                            (gen/limit n)
                                             (gen/nemesis gen/void))
                            :model      (model/->CASRegister 0)))]
-    (pprint test)
     (is (:valid? (:results test)))))
 
 (deftest ssh-test
@@ -118,7 +117,7 @@
                              (assert false))
                            (teardown! [c _]))
                  :checker  checker/unbridled-optimism
-                 :generator (->> gen/queue
-                                 (gen/finite-count n)
+                 :generator (->> (gen/queue)
+                                 (gen/limit n)
                                  (gen/nemesis gen/void))))
-    (is (= n @invocations))))
+      (is (= n @invocations))))
