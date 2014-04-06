@@ -21,3 +21,4 @@ site/**
 bench/**
 target/**
 checkouts/**
+store/**

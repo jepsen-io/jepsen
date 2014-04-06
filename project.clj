@@ -1,6 +1,8 @@
 (defproject jepsen "0.0.3-SNAPSHOT"
             :description "Call Me Maybe: Network Partitions in Practice"
             :dependencies [[org.clojure/clojure "1.6.0-beta1"]
+                           [org.clojure/data.fressian "0.2.0"]
+                           [clj-time "0.6.0"]
                            [aleph "0.3.0-beta16"]
                            [knossos "0.1.1-SNAPSHOT"]
                            [clj-ssh "0.5.7"]

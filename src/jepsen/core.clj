@@ -3,13 +3,14 @@
   tests, creating and resolving failures, and interpreting results."
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
-            [jepsen.util :as util]
+            [jepsen.util :as util :refer [with-thread-name]]
             [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.control :as control]
             [jepsen.generator :as generator]
             [jepsen.checker :as checker]
-            [jepsen.client :as client])
+            [jepsen.client :as client]
+            [jepsen.store :as store])
   (:import (java.util.concurrent CyclicBarrier)))
 
 (defn synchronize
@@ -101,48 +102,53 @@
   [test process client]
   (let [gen (:generator test)]
     (future
-      (loop [process process]
-        ; Obtain an operation to execute
-        (when-let [op (generator/op gen test process)]
-          (let [op (assoc op :process process)]
-            ; Log invocation
-            (conj-op! test op)
-            (recur
-              (try
-                ; Evaluate operation
-                (let [completion (client/invoke! client test op)]
-                  (util/log-op completion)
+      (with-thread-name (str "jepsen worker " process)
+        (info "Worker" process "starting")
+        (loop [process process]
+          ; Obtain an operation to execute
+          (when-let [op (generator/op gen test process)]
+            (let [op (assoc op :process process)]
+              ; Log invocation
+              (util/log-op op)
+              (conj-op! test op)
 
-                  ; Sanity check
-                  (assert (= (:process op) (:process completion)))
-                  (assert (= (:f op)       (:f completion)))
+              (recur
+                (try
+                  ; Evaluate operation
+                  (let [completion (client/invoke! client test op)]
+                    (util/log-op completion)
 
-                  ; Log completion
-                  (conj-op! test completion)
+                    ; Sanity check
+                    (assert (= (:process op) (:process completion)))
+                    (assert (= (:f op)       (:f completion)))
 
-                  ; The process is now free to attempt another execution.
-                  process)
+                    ; Log completion
+                    (conj-op! test completion)
 
-                (catch Throwable t
-                  ; At this point all bets are off. If the client or network or
-                  ; DB crashed before doing anything; this operation won't be a
-                  ; part of the history. On the other hand, the DB may have
-                  ; applied this operation and we *don't know* about it; e.g.
-                  ; because of timeout.
-                  ;
-                  ; This process is effectively hung; it can not initiate a new
-                  ; operation without violating the single-threaded process
-                  ; constraint. We cycle to a new process identifier, and leave
-                  ; the invocation uncompleted in the history.
-                  (conj-op! test (assoc op
-                                        :type :info
-                                        :value (str "indeterminate: "
-                                                    (if (.getCause t)
-                                                      (.. t getCause
-                                                          getMessage)
-                                                      (.getMessage t)))))
-                  (warn t "Process" process "indeterminate")
-                  (+ process (count (:nodes test))))))))))))
+                    ; The process is now free to attempt another execution.
+                    process)
+
+                  (catch Throwable t
+                    ; At this point all bets are off. If the client or network
+                    ; or DB crashed before doing anything; this operation won't
+                    ; be a part of the history. On the other hand, the DB may
+                    ; have applied this operation and we *don't know* about it;
+                    ; e.g.  because of timeout.
+                    ;
+                    ; This process is effectively hung; it can not initiate a
+                    ; new operation without violating the single-threaded
+                    ; process constraint. We cycle to a new process identifier,
+                    ; and leave the invocation uncompleted in the history.
+                    (conj-op! test (assoc op
+                                          :type :info
+                                          :value (str "indeterminate: "
+                                                      (if (.getCause t)
+                                                        (.. t getCause
+                                                            getMessage)
+                                                        (.getMessage t)))))
+                    (warn t "Process" process "indeterminate")
+                    (+ process (count (:nodes test)))))))))
+        (info "Worker" process "done")))))
 
 (defn nemesis-worker
   "Starts the nemesis thread, which draws failures from the generator and
@@ -151,12 +157,13 @@
   (let [gen       (:generator        test)
         histories (:active-histories test)]
     (future
-      (loop []
-        (when-let [op (generator/op gen test :nemesis)]
-          (let [op (assoc op :process :nemesis)]
-            ; Log invocation in all histories of all currently running cases
-            (doseq [history @histories]
-              (swap! history conj op))
+      (with-thread-name "jepsen nemesis"
+        (loop []
+          (when-let [op (generator/op gen test :nemesis)]
+            (let [op (assoc op :process :nemesis)]
+              ; Log invocation in all histories of all currently running cases
+              (doseq [history @histories]
+                (swap! history conj op))
 
               (try
                 (util/log-op op)
@@ -178,7 +185,7 @@
                     (swap! history conj (assoc op :value (str "crashed: " t))))
                   (warn t "Nemesis crashed evaluating" op)))
 
-            (recur)))))))
+              (recur))))))))
 
 (defmacro with-nemesis
   "Sets up nemesis, starts nemesis worker thread, evaluates body, waits for
@@ -267,35 +274,53 @@
      the history
     - This generates the final report"
   [test]
-  (let [test (assoc test
-                    ; Synchronization point for nodes
-                    :barrier (CyclicBarrier. (count (:nodes test)))
-                    ; Currently running histories
-                    :active-histories (atom #{}))]
+  (with-thread-name "jepsen test runner"
+    (let [test (assoc test
+                      ; Initialization time
+                      :start-time (util/local-time)
 
-    ; Open SSH conns
-    (control/with-ssh (:ssh test)
-      (with-resources [sessions control/session control/disconnect
-                       (:nodes test)]
-        ; Index sessions by node name and add to test
-        (let [test (->> sessions
-                        (map vector (:nodes test))
-                        (into {})
-                        (assoc test :sessions))]
+                      ; Synchronization point for nodes
+                      :barrier (CyclicBarrier. (count (:nodes test)))
+                      ; Currently running histories
+                      :active-histories (atom #{}))]
 
-          ; Setup
-          (with-os test
-            (with-db test
-              (with-nemesis test
+      ; Open SSH conns
+      (control/with-ssh (:ssh test)
+        (with-resources [sessions control/session control/disconnect
+                         (:nodes test)]
+          ; Index sessions by node name and add to test
+          (let [test (->> sessions
+                          (map vector (:nodes test))
+                          (into {})
+                          (assoc test :sessions))]
 
-                ; Run a single case
-                (let [test (assoc test :history (run-case! test))]
+            ; Setup
+            (with-os test
+              (with-db test
+                (binding [generator/*threads*
+                          (cons :nemesis (range (count (:nodes test))))]
+                  (with-nemesis test
+                    ; Run a single case
+                    (let [test (assoc test :history (run-case! test))
+                          ; Remove state
+                          test (dissoc test
+                                :barrier
+                                :active-histories
+                                :sessions)]
 
-                  (info "Case complete: history was")
-                  (->> test :history (map util/log-op) dorun)
+                      (info "Case complete: history was")
+                      (->> test :history (map util/log-op) dorun)
 
-                  (assoc test :results (checker/check-safe
-                                         (:checker test)
-                                         test
-                                         (:model test)
-                                         (:history test))))))))))))
+                      (when (:name test) (store/save! test))
+
+                      (info "Analyzing")
+                      (let [test (assoc test :results (checker/check-safe
+                                                        (:checker test)
+                                                        test
+                                                        (:model test)
+                                                        (:history test)))]
+
+                        (info "Analysis complete")
+                        (when (:name test) (store/save! test))
+
+                        test))))))))))))
