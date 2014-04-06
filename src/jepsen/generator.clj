@@ -7,29 +7,62 @@
   Generators do *not* have to emit a :process for their operations; test
   workers will take care of that.
 
+  Every object may act as a generator, and constantly yields itself.
+
   Big ol box of monads, really."
-  (:refer-clojure :exclude [concat delay])
-  (:require [jepsen.util :as util])
+  (:refer-clojure :exclude [concat delay seq])
+  (:require [jepsen.util :as util]
+            [clojure.core :as c]
+            [clojure.tools.logging :refer [info]])
   (:import (java.util.concurrent.atomic AtomicBoolean)
            (java.util.concurrent CyclicBarrier)))
 
 (defprotocol Generator
   (op [gen test process] "Yields an operation to apply."))
 
+(extend-protocol Generator
+  Object
+  (op [this test process] this))
+
+(def ^:dynamic *threads*
+  "The set of threads which will execute a particular generator. Used
+  where all threads must synchronize.")
+
 (def void
   "A generator which terminates immediately"
   (reify Generator
     (op [gen test process])))
 
+(defn delay
+  "Every operation from the underlying generator takes dt seconds to return."
+  [dt gen]
+  (reify Generator
+    (op [_ test process]
+      (Thread/sleep (* 1000 dt))
+      (op gen test process))))
+
+(defn sleep
+  "Takes dt seconds, and always produces a nil."
+  [dt]
+  (delay dt void))
+
 (defn once
-  "A generator which emits a single operation."
-  [operation]
+  "Wraps another generator, invoking it only once."
+  [source]
   (let [emitted (AtomicBoolean. false)]
     (reify Generator
       (op [gen test process]
         (when-not (.get emitted)
           (when-not (.getAndSet emitted true)
-            operation))))))
+            (op source test process)))))))
+
+(defn log
+  "Logs a message once, when invoked."
+  [msg]
+  (once (reify Generator
+          (op [gen test process]
+            (info msg)
+            nil))))
 
 (defn each
   "Emits a single operation once to each process."
@@ -43,21 +76,27 @@
             ; First time!
             op))))))
 
+(defn seq
+  "Given a sequence of generators, emits one operation from the first, then one
+  from the second, then one from the third, etc. If a generator yields nil,
+  immediately moves to the next. Yields nil once coll is exhausted."
+  [coll]
+  (let [elements (atom (c/seq coll))]
+    (reify Generator
+      (op [this test process]
+        (when-let [gen (first (swap! elements next))]
+          (if-let [op (op gen test process)]
+            op
+            (recur test process)))))))
+
 (defn start-stop
   "A generator which emits a start after a t1 second delay, and then a stop
   after a t2 second delay."
   [t1 t2]
-  (let [state (atom :init)]
-    (reify Generator
-      (op [gen test process]
-        (case (swap! state {:init  :start
-                            :start :stop
-                            :stop  :dead})
-          :start (do (Thread/sleep (* t1 1000))
-                     {:type :info :f :start})
-          :stop  (do (Thread/sleep (* t2 1000))
-                     {:type :info :f :stop})
-          :dead  nil)))))
+  (seq (sleep t1)
+       {:type :info :f :start}
+       (sleep t2)
+       {:type :info :f :stop}))
 
 (def cas
   "Random cas/read ops for a compare-and-set register over a small field of
@@ -123,22 +162,47 @@
         (when (<= (util/linear-time-nanos) @t)
           (op source test process))))))
 
+(defn on
+  [f source]
+  "Forwards operations to source generator iff (f process) is true. Rebinds
+  *threads* appropriately."
+  (reify Generator
+    (op [gen test process]
+      (when (f process)
+        (binding [*threads* (filter f *threads*)]
+          (op source test process))))))
+
+(defn concat
+  "Takes n generators and yields the first non-nil operation from any, in
+  order."
+  [& sources]
+  (reify Generator
+    (op [gen test process]
+      (loop [[source & sources] sources]
+        (when source
+          (if-let [op (op source test process)]
+            op
+            (recur sources)))))))
+
 (defn nemesis
   "Combines a generator of normal operations and a generator for nemesis
   operations into one. When the process requesting an operation is :nemesis,
   routes to the nemesis generator; otherwise to the normal generator."
-  [nemesis-gen client-gen]
-  (reify Generator
-    (op [gen test process]
-      (if (= :nemesis process)
-        (op nemesis-gen test process)
-        (op client-gen test process)))))
+  ([nemesis-gen]
+   (on #{:nemesis} nemesis-gen))
+  ([nemesis-gen client-gen]
+   (concat (on #{:nemesis} nemesis-gen)
+           (on (complement #{:nemesis}) client-gen))))
+
+(defn clients
+  "Executes generator only on clients."
+  ([client-gen]
+   (on (complement #{:nemesis}) client-gen)))
 
 (defn synchronize
   "Blocks until all nodes are blocked awaiting operations from this generator,
-  then allows them to proceed.
-
-  TODO: ignore nemesis here? Delicate dependency on number of threads :/"
+  then allows them to proceed. Only synchronizes a single time; subsequent
+  operations on this generator proceed freely."
   [gen]
   (let [state (atom :fresh)]
     (reify Generator
@@ -146,27 +210,12 @@
         (when (not= :clear @state)
           ; Ensure a barrier exists
           (compare-and-set! state :fresh
-                            (CyclicBarrier. (count (:nodes test))
+                            (CyclicBarrier. (count *threads*)
                                             (partial reset! state :clear)))
 
           ; Block on barrier
           (.await ^CyclicBarrier @state))
         (op gen test process)))))
-
-(defn concat
-  "Takes N generators and constructs a generator that emits operations from the
-  first, then the second, then the third, and so on."
-  [& generators]
-  (let [generators (atom (seq generators))]
-    (reify Generator
-      (op [gen test process]
-        (when-let [gens @generators]
-          ; We've got generators to work with
-          (if-let [op (op (first gens) test process)]
-            op
-            ; Whoops, out of ops there; drop first generator and retry
-            (do (compare-and-set! generators gens (next gens))
-                (recur test process))))))))
 
 (defn phases
   "Like concat, but requires that all threads finish the first generator before
@@ -174,13 +223,11 @@
   [& generators]
   (apply concat (map synchronize generators)))
 
-(defn delay
-  "Every operation from the underlying generator takes dt seconds to return."
-  [dt gen]
-  (reify Generator
-    (op [_ test process]
-      (Thread/sleep (* 1000 dt))
-      (op gen test process))))
+(defn then
+  "Generator B, synchronize, then generator A. Why is this backwards? Because
+  it reads better in ->> composition."
+  [a b]
+  (concat b (synchronize a)))
 
 (defn singlethreaded
   "Obtaining an operation from the underlying generator requires an exclusive
@@ -190,17 +237,6 @@
     (op [this test process]
       (locking this
         (op gen test process)))))
-
-(defn sleep
-  "Takes dt seconds, and always produces a nil."
-  [dt]
-  (delay dt void))
-
-(defn then
-  "Generator B, synchronize, then generator A. Why is this backwards? Because
-  it reads better in ->> composition."
-  [a b]
-  (concat b (synchronize a)))
 
 (defn barrier
   "When the given generator completes, synchronizes, then yields nil."

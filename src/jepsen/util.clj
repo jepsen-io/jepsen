@@ -1,7 +1,15 @@
 (ns jepsen.util
   "Kitchen sink"
-  (:require [clojure.tools.logging :refer [info]])
+  (:require [clojure.tools.logging :refer [info]]
+            [clj-time.core :as time]
+            [clj-time.local :as time.local])
   (:import (java.util.concurrent.locks LockSupport)))
+
+(defn local-time
+  "Drops millisecond resolution"
+  []
+  (let [t (time.local/local-now)]
+    (time/minus t (time/millis (time/milli t)))))
 
 (defn log-op
   "Logs an operation."
@@ -98,3 +106,12 @@
   "Returns, rather than throws, exceptions."
   [& body]
   `(try ~@body (catch Exception e# e#)))
+
+(defmacro with-thread-name
+  "Sets the thread name for duration of block."
+  [thread-name & body]
+  `(let [old-name# (.. Thread currentThread getName)]
+     (try
+       (.. Thread currentThread (setName (name ~thread-name)))
+       ~@body
+       (finally (.. Thread currentThread (setName old-name#))))))
