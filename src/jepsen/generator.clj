@@ -56,13 +56,18 @@
           (when-not (.getAndSet emitted true)
             (op source test process)))))))
 
-(defn log
-  "Logs a message once, when invoked."
+(defn log*
+  "Logs a message every time invoked, and yields nil."
   [msg]
-  (once (reify Generator
-          (op [gen test process]
-            (info msg)
-            nil))))
+  (reify Generator
+    (op [gen test process]
+      (info msg)
+      nil)))
+
+(defn log
+  "Logs a message only once, and yields nil."
+  [msg]
+  (once (log* msg)))
 
 (defn each
   "Emits a single operation once to each process."

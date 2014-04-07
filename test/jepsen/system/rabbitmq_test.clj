@@ -19,7 +19,7 @@
                  :os         debian/os
                  :db         db
                  :client     (queue-client)
-                 :nemesis    (nemesis/simple-partition)
+                 :nemesis    (nemesis/partition-halves)
                  :model      (model/unordered-queue)
                  :checker    (checker/compose
                                {:queue       checker/queue
@@ -29,15 +29,15 @@
                                     (gen/delay 1/10)
                                     (gen/nemesis
                                       (gen/seq
-                                        (cycle [(gen/sleep 10)
+                                        (cycle [(gen/sleep 100)
                                                 {:type :info :f :start}
-                                                (gen/sleep 10)
+                                                (gen/sleep 100)
                                                 {:type :info :f :stop}])))
-                                    (gen/time-limit 100))
+                                    (gen/time-limit 1000))
                                (gen/nemesis
                                  (gen/once {:type :info, :f :stop}))
                                (gen/log "waiting for recovery")
-                               (gen/sleep 60)
+                               (gen/sleep 120)
                                (gen/clients
                                  (gen/each {:type :invoke
                                             :f    :drain})))))]

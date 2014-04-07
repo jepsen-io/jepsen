@@ -28,10 +28,10 @@
                                  dorun))))
          dorun)))
 
-(defn simple-partition
-  "Responds to a :start operation by cutting the network into two halves, and
-  a :stop operation by repairing the network."
-  []
+(defn partitioner
+  "Responds to a :start operation by cutting the network into partitions
+  defined by (f nodes)."
+  [f]
   (reify client/Client
     (setup! [this test _]
       (c/on-many (:nodes test) (net/heal))
@@ -39,10 +39,24 @@
 
     (invoke! [this test op]
       (case (:f op)
-        :start (partition! (bisect (:nodes test)))
-        :stop  (c/on-many (:nodes test) (net/heal)))
-
-      (assoc op :type :info :value "complete"))
+        :start (let [partitions (f (:nodes test))]
+                 (partition! partitions)
+                 (assoc op :value (str "partitioned into "
+                                       (pr-str partitions))))
+        :stop  (do (c/on-many (:nodes test) (net/heal))
+                   (assoc op :value "fully connected"))))
 
     (teardown! [this test]
       (c/on-many (:nodes test) (net/heal)))))
+
+(defn partition-halves
+  "Responds to a :start operation by cutting the network into two halves--first
+  nodes together and in the larger half--and a :stop operation by repairing the
+  network."
+  []
+  (partitioner bisect))
+
+(defn partition-random-halves
+  "Cuts the network into randomly chosen halves."
+  []
+  (partitioner (comp bisect shuffle)))

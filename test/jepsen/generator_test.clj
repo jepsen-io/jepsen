@@ -1,5 +1,6 @@
 (ns jepsen.generator-test
   (:use clojure.test
+        clojure.pprint
         clojure.tools.logging)
   (:require [jepsen.generator :as gen]
             [clojure.set :as set]))
@@ -22,10 +23,21 @@
            dorun))
     @ops))
 
-;(deftest seq-test
-;  (is (= (set (ops (:nodes a-test)
-;              (gen/seq (range 100)))))
-;      (set (range 100))))
+(deftest seq-test
+  (is (= (set (ops (:nodes a-test)
+              (gen/seq (range 100)))))
+      (set (range 100)))
+
+  (pprint (ops [:nemesis :a :b]
+            (->> (gen/nemesis
+                   (gen/seq
+                     (cycle [(gen/sleep 3)
+                             (gen/log* "start")
+                             {:type :info :f :start}
+                             (gen/sleep 3)
+                             (gen/log* "stop")
+                             {:type :info :f :stop}])))
+                 (gen/time-limit 20)))))
 
 (deftest complex-test
   (let [ops (ops (:nodes a-test)
