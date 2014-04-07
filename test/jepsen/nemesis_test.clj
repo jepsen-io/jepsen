@@ -21,7 +21,7 @@
   (is (= (bisect [1 2 3 4 5]) [[1 2] [3 4 5]])))
 
 (deftest simple-partition-test
-  (let [n (simple-partition)]
+  (let [n (partition-halves)]
     (try
       (client/setup! n noop-test nil)
       (is (= (edges noop-test)

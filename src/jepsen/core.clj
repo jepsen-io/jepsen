@@ -308,8 +308,7 @@
                                 :active-histories
                                 :sessions)]
 
-                      (info "Case complete: history was")
-                      (->> test :history (map util/log-op) dorun)
+                      (info "Run complete, writing")
 
                       (when (:name test) (store/save! test))
 
