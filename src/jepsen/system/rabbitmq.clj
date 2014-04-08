@@ -1,7 +1,7 @@
 (ns jepsen.system.rabbitmq
   (:require [clojure.tools.logging :refer [debug info warn]]
             [jepsen.core           :as core]
-            [jepsen.util           :refer [meh]]
+            [jepsen.util           :refer [meh timeout]]
             [jepsen.codec          :as codec]
             [jepsen.core           :as core]
             [jepsen.control        :as c]
@@ -92,11 +92,15 @@
   "Given a channel and an operation, dequeues a value and returns the
   corresponding operation."
   [ch op]
-  (let [[meta payload] (lb/get ch queue)
-        value          (codec/decode payload)]
-    (if (nil? meta)
-      (assoc op :type :fail :value :exhausted)
-      (assoc op :type :ok :value value))))
+  ; Rabbit+Langohr's auto-ack dynamics mean that even if we issue a dequeue req
+  ; then crash, the message should be re-delivered and we can count this as a
+  ; failure.
+  (timeout 5000 (assoc op :type :fail :value :timeout)
+           (let [[meta payload] (lb/get ch queue)
+                 value          (codec/decode payload)]
+             (if (nil? meta)
+               (assoc op :type :fail :value :exhausted)
+               (assoc op :type :ok :value value)))))
 
 (defmacro with-ch
   "Opens a channel on 'conn for body, binds it to the provided symbol 'ch, and
