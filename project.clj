@@ -6,6 +6,7 @@
                            [aleph "0.3.0-beta16"]
                            [knossos "0.1.1-SNAPSHOT"]
                            [clj-ssh "0.5.7"]
+                           [hiccup "1.0.5"]
                            [org.clojars.achim/multiset "0.1.0-SNAPSHOT"]
                            [com.novemberain/welle "2.0.0-beta1"]
                            [com.taoensso/carmine "1.6.0"]

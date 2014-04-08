@@ -51,8 +51,8 @@
 
 (defn partition-halves
   "Responds to a :start operation by cutting the network into two halves--first
-  nodes together and in the larger half--and a :stop operation by repairing the
-  network."
+  nodes together and in the smaller half--and a :stop operation by repairing
+  the network."
   []
   (partitioner bisect))
 

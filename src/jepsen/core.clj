@@ -3,7 +3,8 @@
   tests, creating and resolving failures, and interpreting results."
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
-            [jepsen.util :as util :refer [with-thread-name]]
+            [jepsen.util :as util :refer [with-thread-name
+                                          relative-time-nanos]]
             [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.control :as control]
@@ -107,7 +108,9 @@
         (loop [process process]
           ; Obtain an operation to execute
           (when-let [op (generator/op gen test process)]
-            (let [op (assoc op :process process)]
+            (let [op (assoc op
+                            :process process
+                            :time    (relative-time-nanos))]
               ; Log invocation
               (util/log-op op)
               (conj-op! test op)
@@ -115,7 +118,8 @@
               (recur
                 (try
                   ; Evaluate operation
-                  (let [completion (client/invoke! client test op)]
+                  (let [completion (-> (client/invoke! client test op)
+                                       (assoc :time (relative-time-nanos)))]
                     (util/log-op completion)
 
                     ; Sanity check
@@ -141,6 +145,7 @@
                     ; and leave the invocation uncompleted in the history.
                     (conj-op! test (assoc op
                                           :type :info
+                                          :time  (relative-time-nanos)
                                           :value (str "indeterminate: "
                                                       (if (.getCause t)
                                                         (.. t getCause
@@ -160,14 +165,17 @@
       (with-thread-name "jepsen nemesis"
         (loop []
           (when-let [op (generator/op gen test :nemesis)]
-            (let [op (assoc op :process :nemesis)]
+            (let [op (assoc op
+                            :process :nemesis
+                            :time    (relative-time-nanos))]
               ; Log invocation in all histories of all currently running cases
               (doseq [history @histories]
                 (swap! history conj op))
 
               (try
                 (util/log-op op)
-                (let [completion (client/invoke! nemesis test op)]
+                (let [completion (-> (client/invoke! nemesis test op)
+                                     (assoc :time (relative-time-nanos)))]
                   (util/log-op completion)
 
                   ; Nemesis is not allowed to affect the model
@@ -182,7 +190,9 @@
 
                 (catch Throwable t
                   (doseq [history @histories]
-                    (swap! history conj (assoc op :value (str "crashed: " t))))
+                    (swap! history conj (assoc op
+                                               :time  (relative-time-nanos)
+                                               :value (str "crashed: " t))))
                   (warn t "Nemesis crashed evaluating" op)))
 
               (recur))))))))
@@ -288,6 +298,7 @@
       (control/with-ssh (:ssh test)
         (with-resources [sessions control/session control/disconnect
                          (:nodes test)]
+
           ; Index sessions by node name and add to test
           (let [test (->> sessions
                           (map vector (:nodes test))
@@ -299,27 +310,29 @@
               (with-db test
                 (binding [generator/*threads*
                           (cons :nemesis (range (count (:nodes test))))]
-                  (with-nemesis test
-                    ; Run a single case
-                    (let [test (assoc test :history (run-case! test))
-                          ; Remove state
-                          test (dissoc test
-                                :barrier
-                                :active-histories
-                                :sessions)]
+                  (util/with-relative-time
+                    (with-nemesis test
 
-                      (info "Run complete, writing")
+                      ; Run a single case
+                      (let [test (assoc test :history (run-case! test))
+                            ; Remove state
+                            test (dissoc test
+                                         :barrier
+                                         :active-histories
+                                         :sessions)]
 
-                      (when (:name test) (store/save! test))
+                        (info "Run complete, writing")
 
-                      (info "Analyzing")
-                      (let [test (assoc test :results (checker/check-safe
-                                                        (:checker test)
-                                                        test
-                                                        (:model test)
-                                                        (:history test)))]
-
-                        (info "Analysis complete")
                         (when (:name test) (store/save! test))
 
-                        test))))))))))))
+                        (info "Analyzing")
+                        (let [test (assoc test :results (checker/check-safe
+                                                          (:checker test)
+                                                          test
+                                                          (:model test)
+                                                          (:history test)))]
+
+                          (info "Analysis complete")
+                          (when (:name test) (store/save! test))
+
+                          test)))))))))))))
