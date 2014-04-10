@@ -46,7 +46,7 @@
   [[sym start stop resources] & body]
   ; Start resources in parallel
   `(let [~sym (doall (pmap (fcatch ~start) ~resources))]
-     (when-let [ex# (some (partial instance? Exception) ~sym)]
+     (when-let [ex# (some #(when (instance? Exception %) %) ~sym)]
        ; One of the resources threw instead of succeeding; shut down all which
        ; started OK and throw.
        (->> ~sym

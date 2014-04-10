@@ -16,7 +16,8 @@
             [langohr.queue         :as lq]
             [langohr.exchange      :as le]
             [langohr.basic         :as lb])
-  (:import (com.rabbitmq.client AlreadyClosedException)))
+  (:import (com.rabbitmq.client AlreadyClosedException
+                                ShutdownSignalException)))
 
 (def db
   (reify db/DB
@@ -138,7 +139,7 @@
     (with-ch [ch conn]
       (case (:f op)
         :enqueue (do
-                   (lco/select ch) ; Use confirmation tracking
+;                   (lco/select ch) ; Use confirmation tracking
 
                    ; Empty string is the default exhange
                    (lb/publish ch "" queue
@@ -147,9 +148,10 @@
                                :persistent true)
 
                    ; Block until message acknowledged
-                   (if (lco/wait-for-confirms ch 5000)
-                     (assoc op :type :ok)
-                     (assoc op :type :fail)))
+;                   (if (lco/wait-for-confirms ch 5000)
+;                     (assoc op :type :ok)
+;                     (assoc op :type :fail)))
+                   (assoc op :type :ok))
 
         :dequeue (dequeue! ch op)
 
@@ -167,3 +169,83 @@
                    (assoc op :type :info :value :exhausted))))))
 
 (defn queue-client [] (QueueClient. nil))
+
+; https://www.rabbitmq.com/blog/2014/02/19/distributed-semaphores-with-rabbitmq/
+; enqueued is shared state for whether or not we enqueued the mutex record
+; held is independent state to store the currently held message
+(defrecord Semaphore [enqueued? conn ch tag]
+  client/Client
+  (setup! [_ test node]
+    (let [conn (rmq/connect {:host (name node)})]
+      (with-ch [ch conn]
+        (lq/declare ch "jepsen.semaphore"
+                    :durable true
+                    :auto-delete false
+                    :exclusive false)
+
+        ; Enqueue a single message
+        (when (compare-and-set! enqueued? false true)
+          (lco/select ch)
+          (lq/purge ch "jepsen.semaphore")
+          (lb/publish ch "" "jepsen.semaphore" (byte-array 0))
+          (when-not (lco/wait-for-confirms ch 5000)
+            (throw (RuntimeException.
+                     "couldn't enqueue initial semaphore message!")))))
+
+      (Semaphore. enqueued? conn (atom (lch/open conn)) (atom nil))))
+
+  (teardown! [_ test]
+    ; Purge
+    (meh (timeout 5000 nil
+                  (with-ch [ch conn]
+                    (lq/purge ch "jepsen.semaphore"))))
+    (meh (rmq/close @ch))
+    (meh (rmq/close conn)))
+
+  (invoke! [this test op]
+    (case (:f op)
+      :acquire (locking tag
+                 (if @tag
+                   (assoc op :type :fail :value :already-held)
+
+                   (timeout 5000 (assoc op :type :fail :value :timeout)
+                      (try
+                        ; Get a message but don't acknowledge it
+                        (let [dtag (-> (lb/get @ch "jepsen.semaphore" false)
+                                       first
+                                       :delivery-tag)]
+                          (if dtag
+                            (do (reset! tag dtag)
+                                (assoc op :type :ok :value dtag))
+                            (assoc op :type :fail)))
+
+                        (catch ShutdownSignalException e
+                          (meh (reset! ch (lch/open conn)))
+                          (assoc op :type :fail :value (.getMessage e)))
+
+                        (catch AlreadyClosedException e
+                          (meh (reset! ch (lch/open conn)))
+                          (assoc op :type :fail :value :channel-closed))))))
+
+      :release (locking tag
+                 (if-not @tag
+                   (assoc op :type :fail :value :not-held)
+                   (timeout 5000 (assoc op :type :ok :value :timeout)
+                            (let [t @tag]
+                              (reset! tag nil)
+                              (try
+                                ; We're done now--we try to reject but it
+                                ; doesn't matter if we succeed or not.
+                                (lb/reject @ch t true)
+                                (assoc op :type :ok)
+
+                                (catch AlreadyClosedException e
+                                  (meh (reset! ch (lch/open conn)))
+                                  (assoc op :type :ok :value :channel-closed))
+
+                                (catch ShutdownSignalException e
+                                  (assoc op
+                                         :type :ok
+                                         :value (.getMessage e)))))))))))
+
+(defn mutex [] (Semaphore. (atom false) nil nil nil))

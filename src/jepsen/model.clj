@@ -29,6 +29,22 @@
                (inconsistent (str "can't read " (:value op)
                                   " from register " value))))))
 
+(defrecord Mutex [locked]
+  Model
+  (step [r op]
+    (condp = (:f op)
+      :acquire (if locked
+                 (inconsistent "already held")
+                 (Mutex. true))
+      :release (if locked
+                 (Mutex. false)
+                 (inconsistent "not held")))))
+
+(defn mutex
+  "A single mutex responding to :acquire and :release messages"
+  []
+  (Mutex. false))
+
 (defrecord UnorderedQueue [pending]
   Model
   (step [r op]

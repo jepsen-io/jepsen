@@ -26,18 +26,7 @@
 (deftest seq-test
   (is (= (set (ops (:nodes a-test)
               (gen/seq (range 100)))))
-      (set (range 100)))
-
-  (pprint (ops [:nemesis :a :b]
-            (->> (gen/nemesis
-                   (gen/seq
-                     (cycle [(gen/sleep 3)
-                             (gen/log* "start")
-                             {:type :info :f :start}
-                             (gen/sleep 3)
-                             (gen/log* "stop")
-                             {:type :info :f :stop}])))
-                 (gen/time-limit 20)))))
+      (set (range 100))))
 
 (deftest complex-test
   (let [ops (ops (:nodes a-test)
@@ -70,6 +59,11 @@
                                (gen/then (gen/once 2))))))
            [1 2]))))
 
+(deftest each-test
+  (is (= (ops (:nodes a-test)
+              (gen/each (gen/once :a)))
+         [:a :a :a :a :a])))
+
 (deftest nemesis-phase-test
   (testing "nemesis can take part in synchronization barriers"
     (is (= (ops (cons :nemesis (:nodes a-test))
@@ -84,7 +78,7 @@
                             (gen/nemesis (gen/once :nem))
                             (gen/on (complement #{:nemesis})
                                     (gen/synchronize
-                                      (gen/each :*)))
+                                      (gen/each (gen/once :*))))
                             (gen/on #{:c :d}
                                     (->> (gen/once :c)
                                          (gen/then (gen/once :d))))))

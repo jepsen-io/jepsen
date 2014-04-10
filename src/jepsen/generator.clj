@@ -69,24 +69,36 @@
   [msg]
   (once (log* msg)))
 
-(defn each
-  "Emits a single operation once to each process."
-  [op]
-  (let [emitted (atom {})]
+(defn each-
+  "Takes a function that yields a generator. Invokes that function to
+  create a new generator for each distinct process."
+  [gen-fn]
+  (let [processes (atom {})]
     (reify Generator
-      (op [gen test process]
-        (let [emitted (swap! emitted
-                             #(assoc % process (inc (get % process 0))))]
-          (when (= 1 (get emitted process))
-            ; First time!
-            op))))))
+      (op [this test process]
+        (if-let [gen (get @processes process)]
+          (op gen test process)
+          (do
+            (swap! processes (fn [processes]
+                               (if (contains? processes process)
+                                 processes
+                                 (assoc processes process (gen-fn)))))
+            (recur test process)))))))
+
+(defmacro each
+  "Takes an expression evaluating to a generator. Captures that expression as a
+  function, and constructs a generator that invokes that expression once for
+  each process, as new processes arrive, such that each process sees an
+  independent copy of the underlying generator."
+  [gen-expr]
+  `(each- (fn [] ~gen-expr)))
 
 (defn seq
   "Given a sequence of generators, emits one operation from the first, then one
   from the second, then one from the third, etc. If a generator yields nil,
   immediately moves to the next. Yields nil once coll is exhausted."
   [coll]
-  (let [elements (atom (c/seq coll))]
+  (let [elements (atom (cons nil coll))]
     (reify Generator
       (op [this test process]
         (when-let [gen (first (swap! elements next))]

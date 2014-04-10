@@ -11,13 +11,24 @@
   (let [t (time.local/local-now)]
     (time/minus t (time/millis (time/milli t)))))
 
+(defn op->str
+  "Format an operation as a string."
+  [op]
+  (str (:process op)         \tab
+       (:type op)            \tab
+       (pr-str (:f op))      \tab
+       (pr-str (:value op))))
+
+(defn print-history
+  "Prints a history to the console."
+  [history]
+  (doseq [op history]
+    (println (op->str op))))
+
 (defn log-op
   "Logs an operation."
   [op]
-  (info (:process op)
-        (:type op)
-        (pr-str (:f op))
-        (pr-str (:value op))))
+  (info (op->str op)))
 
 (def logger (agent nil))
 (defn log-print
