@@ -82,7 +82,8 @@
           port  (get opts :port nil)
           ]
 
-      (when (empty? app-names)
+      (when (or (empty? app-names)
+                (not-every? true? (map (partial contains? app-map) app-names)))
         (println usage)
         (println "Available apps:")
         (dorun (map println (sort (keys app-map))))
