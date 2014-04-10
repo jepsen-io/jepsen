@@ -39,10 +39,7 @@
   "Validates linearizability with Knossos."
   (reify Checker
     (check [this test model history]
-      (let [history'      (knossos/complete history)
-            linearizable  (knossos/linearizable-prefix model history')]
-        {:valid?                (= history' linearizable)
-         :linearizable-prefix   linearizable}))))
+      (knossos/analysis model history))))
 
 (def queue
   "Every dequeue must come from somewhere. Validates queue operations by

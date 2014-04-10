@@ -95,4 +95,5 @@
                            pairs
                            (map (partial pair->div
                                          (process-index history))))]]])
-           (spit "timeline.html")))))
+           (spit "timeline.html"))
+      {:valid? true})))
