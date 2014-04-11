@@ -21,7 +21,7 @@
       (println "World with fixed history:")
       (util/print-history (:fixed world))
       (println "led to current state: ")
-      (ppprint (:model world))
+      (pprint (:model world))
       (println "with pending operations:")
       (util/print-history (:pending world))
       (println))
