@@ -47,16 +47,15 @@
     ; Set up zookeeper
     (c/exec :echo (zk-node-id test node) :> "/etc/zookeeper/conf/myid")
 
-    (->> (c/exec :echo (str (slurp (io/resource "zk/zoo.cfg"))
-                            "\n"
-                            (zoo-cfg-servers test))
-                 :> "/etc/zookeeper/conf/zoo.cfg"))
+    (c/exec :echo (str (slurp (io/resource "zk/zoo.cfg"))
+                       "\n"
+                       (zoo-cfg-servers test))
+            :> "/etc/zookeeper/conf/zoo.cfg"))
 
     ; Restart
     (info node "ZK restarting")
     (c/exec :service :zookeeper :restart)
-
-    (info node "ZK ready")))
+    (info node "ZK ready"))
 
 (defn teardown-zk!
   "Tears down zookeeper"
@@ -67,12 +66,80 @@
            (c/lit "/var/lib/zookeeper/version-*")
            (c/lit "/var/log/zookeeper/*"))))
 
+(defn riak-node-name
+  [node]
+  (str "riak@" (name node) ".local"))
+
+(defn setup-riak!
+  "Sets up riak"
+  [test node]
+  (c/su
+    ; Install
+    (let [file "riak_2.0.0pre20-1_amd64.deb"]
+      (c/cd "/tmp"
+          (when-not (cu/file? file)
+            (info node "Fetching riak package")
+            (c/exec :wget (str "http://s3.amazonaws.com/downloads.basho.com/riak/2.0/2.0.0pre20/debian/7/" file)))
+
+          (try (c/exec :dpkg-query :-l :riak)
+               (catch RuntimeException _
+                 (info node "Installing Riak")
+                 (c/exec :dpkg :-i file)))))
+
+    ; Config
+    (c/exec :echo (-> "riak/riak.conf"
+                      io/resource
+                      slurp
+                      ; Ugh, .local is a hack cuz riak doesn't use short
+                      ; node names. Gotta figure out what cuttlefish arg
+                      ; to change.
+                      (str/replace "%%NODE%%" (riak-node-name node)))
+            :> "/etc/riak/riak.conf")
+
+    ; Start
+    (info node "starting riak")
+    (c/exec :service :riak :restart)
+
+    ; Join
+    (core/synchronize test)
+    (let [p (core/primary test)]
+      (when-not (= node p)
+        (info node "joining" p)
+        (c/exec :riak-admin :cluster :join (riak-node-name p)))
+
+      (when (= node p)
+        (info "Waiting for riak convergence")
+        (loop []
+          (Thread/sleep 1000)
+          (let [plan (c/exec :riak-admin :cluster :plan)
+                valid (re-find #"\nValid:(\d+)\s" plan)]
+            (when (or (nil? valid)
+                      (not= (Long. (nth valid 1)) (count (:nodes test))))
+              ; Still waiting for other nodes
+              (recur))))
+
+        (info node "committing")
+        (info (c/exec :riak-admin :cluster :commit))
+
+        (info node "riak ready")
+        (info (c/exec :riak-admin :member-status))))))
+
+(defn teardown-riak!
+  [test node]
+  (c/su
+    (meh (c/exec :killall :-9 "beam.smp"))
+    (meh (c/exec :killall :-9 "epmd"))
+    (c/exec :rm :-rf (c/lit "/var/lib/riak/*"))
+    (info node "riak nuked")))
+
 (def db
   (reify db/DB
     (setup! [_ test node]
-      (setup-zk! test node))
+;      (setup-zk! test node)
+      (setup-riak! test node))
 
     (teardown! [_ test node]
 ;      (teardown-zk! test node))
+      (teardown-riak! test node)
       )))
 
