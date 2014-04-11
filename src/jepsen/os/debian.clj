@@ -1,7 +1,8 @@
 (ns jepsen.os.debian
   "Common tasks for Debian boxes."
   (:use clojure.tools.logging)
-  (:require [jepsen.os :as os]
+  (:require [jepsen.util :refer [meh]]
+            [jepsen.os :as os]
             [jepsen.control :as c]
             [jepsen.control.net :as net]
             [clojure.string :as str]))
@@ -26,8 +27,6 @@
     (setup! [_ test node]
       (info node "setting up debian")
 
-      (net/heal)
-
       (setup-hostfile!)
 
       (c/su
@@ -36,6 +35,9 @@
                 [:wget
                  :iptables
                  :logrotate]))
+
+      (meh (net/heal))
+
       (info node "debian set up"))
 
     (teardown! [_ test node])))

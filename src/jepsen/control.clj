@@ -17,10 +17,20 @@
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 
+
+(defrecord Literal [string])
+
+(defn lit
+  "A literal string to be passed, unescaped, to the shell."
+  [s]
+  (Literal. s))
+
 (defn escape
   "Escapes a thing for the shell.
 
   Nils are empty strings.
+
+  Literal wrappers are passed through directly.
 
   The special keywords :>, :>>, and :< map to their corresponding shell I/O
   redirection operators.
@@ -34,6 +44,9 @@
   (cond
     (nil? s)
     ""
+
+    (instance? Literal s)
+    (:string s)
 
     (#{:> :>> :<} s)
     (name s)

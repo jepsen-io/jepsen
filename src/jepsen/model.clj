@@ -29,6 +29,11 @@
                (inconsistent (str "can't read " (:value op)
                                   " from register " value))))))
 
+(defn cas-register
+  "A compare-and-set register"
+  ([] (cas-register nil))
+  ([value] (CASRegister. value)))
+
 (defrecord Mutex [locked]
   Model
   (step [r op]
