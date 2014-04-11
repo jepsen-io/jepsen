@@ -16,19 +16,6 @@
 
 (def max-threads 100000)
 
-(defmacro timeout
-  "Times out body after n millis, returning timeout-val."
-  [millis timeout-val & body]
-  `(let [thread# (Thread/currentThread)
-         alive# (promise)
-         interrupter# (future
-                        (when (deref alive# ~timeout-val true)
-                          (.interrupt thread#)))
-         res# (do ~@body)]
-     (deliver alive# false)
-     (future-cancel interrupter#)
-     res#))
-
 (defn map-fixed-rate
   "Invokes (f element) on each element of a collection, beginning immediately,
   and producing a sequence of outputs. Rate is the number of invocations of f
