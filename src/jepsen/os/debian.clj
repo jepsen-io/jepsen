@@ -33,6 +33,8 @@
         ; Packages!
         (c/exec :apt-get :install :-y
                 [:wget
+                 :curl
+                 :unzip
                  :iptables
                  :logrotate]))
 
