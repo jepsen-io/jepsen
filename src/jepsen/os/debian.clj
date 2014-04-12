@@ -22,6 +22,12 @@
     (when-not (= hosts hosts')
       (c/su (c/exec :echo hosts' :> "/etc/hosts")))))
 
+(defn installed?
+  "Is the given debian package installed on the current system?"
+  [pkg]
+  (boolean (re-find #"\sinstall"
+                    (c/exec :dpkg :--get-selections pkg))))
+
 (def os
   (reify os/OS
     (setup! [_ test node]

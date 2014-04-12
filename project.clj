@@ -1,12 +1,8 @@
 (defproject jepsen "0.0.3-SNAPSHOT"
-  :repositories {"my.datomic.com" {:url "https://my.datomic.com/repo"
-                                   :username "aphyr@aphyr.com"
-                                   :password "966385e7-8676-48c0-bf50-e5168a4b98cb"}}
-
             :description "Call Me Maybe: Network Partitions in Practice"
             :dependencies [[org.clojure/clojure "1.6.0-beta1"]
-                           [org.clojure/data.fressian "0.2.0"
-                            :exclusions [org.fressian/fressian]]
+                           [org.clojure/data.fressian "0.2.0"]
+;                            :exclusions [org.fressian/fressian]]
                            [org.clojure/tools.logging "0.2.6"]
                            [clj-time "0.6.0"]
                            [knossos "0.1.1-SNAPSHOT"]
@@ -39,15 +35,16 @@
                             :exclusions [org.slf4j/slf4j-api
                                          org.slf4j-log4j12
                                          com.google.guava/guava]]
-                           [com.datomic/datomic-pro "0.9.4707"
-                            :exclusions [org.apache.httpcomponents/httpclient
-                                         ; why on earth is this a dep here? It
-                                         ; causes circular dependencies with
-                                         ; slf4j-log4j, which is ALSO a datomic
-                                         ; dep via ZK...
-                                         org.slf4j/log4j-over-slf4j
-                                         ; Cool thanks for breaking my logging
-                                         org.slf4j/slf4j-nop]]]
+;                           [com.datomic/datomic-pro "0.9.4707"
+;                            :exclusions [org.apache.httpcomponents/httpclient
+;                                         ; Why on earth is this a dep here? It
+;                                         ; causes circular dependencies with
+;                                         ; slf4j-log4j, which is ALSO a datomic
+;                                         ; dep via ZK...
+;                                         org.slf4j/log4j-over-slf4j
+;                                         ; Cool thanks for breaking my logging
+;                                         org.slf4j/slf4j-nop]]
+                          [clojurewerkz/elastisch "2.0.0-beta4"]]
             :profiles {:dev {:dependencies []}}
             :main jepsen.bin
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"

@@ -1,9 +1,11 @@
 (ns jepsen.model
   "Functional abstract models of database behavior."
+  (:refer-clojure :exclude [set])
   (:import knossos.core.Model
            (clojure.lang PersistentQueue))
   (:use clojure.tools.logging)
-  (:require [knossos.core :as knossos]
+  (:require [clojure.core :as core]
+            [knossos.core :as knossos]
             [multiset.core :as multiset]))
 
 (def inconsistent knossos/inconsistent)
@@ -49,6 +51,21 @@
   "A single mutex responding to :acquire and :release messages"
   []
   (Mutex. false))
+
+(defrecord Set [s]
+  Model
+  (step [this op]
+    (condp = (:f op)
+      :add (Set. (conj s (:value op)))
+      :read (if (= s (:value op))
+              this
+              (inconsistent (str "can't read " (pr-str (:value op)) " from "
+                                 (pr-str s)))))))
+
+(defn set
+  "A set which responds to :add and :read."
+  []
+  (Set. #{}))
 
 (defrecord UnorderedQueue [pending]
   Model
