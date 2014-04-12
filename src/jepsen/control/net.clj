@@ -35,6 +35,13 @@
   (try (exec :ping :-w 1 node) true
        (catch RuntimeException _ false)))
 
+(defn local-ip
+  "The local node's eth0 address"
+  []
+  (nth (->> (exec :ifconfig "eth0")
+            (re-find #"inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"))
+       1))
+
 (defn ip
   "Look up an ip for a hostname"
   [host]

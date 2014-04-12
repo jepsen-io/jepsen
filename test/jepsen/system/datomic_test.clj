@@ -39,6 +39,6 @@
                                             {:type :info :f :start}
                                             (gen/sleep 5)
                                             {:type :info :f :stop}])))
-                                (gen/time-limit 10)))))]
+                                (gen/time-limit 0)))))]
     (is (:valid? (:results test)))
     (report/linearizability (:linear (:results test)))))
