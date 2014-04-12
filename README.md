@@ -1,16 +1,7 @@
 # Carly Rae Jepsen explains network partitions
 
-Hey, I just met you
-
-Our network's crazy
-
-Our conn might drop now
-
-So call me maybe
-
-## How to run the tests
-
-See http://aphyr.com/posts/281-call-me-maybe-carly-rae-jepsen-and-the-perils-of-network-partitions
+This is a branch preserved for anyone working with the old Jepsen
+infrastructure, from the first two talks. New work is breaking these code paths, but you can keep using them here, or use this branch as a reference to port things forward to the new codebase.
 
 ## License
 
