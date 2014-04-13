@@ -113,7 +113,7 @@
 
 (def index-name "jepsen-index")
 
-(defrecord IndependentSetClient [client]
+(defrecord CreateSetClient [client]
   client/Client
   (setup! [_ test node]
     (let [; client (es/connect [[(name node) 9300]])]
@@ -133,7 +133,7 @@
             (when-not (re-find #"IndexAlreadyExistsException" err)
               (throw (RuntimeException. err))))))
 
-      (IndependentSetClient. client)))
+      (CreateSetClient. client)))
 
   (invoke! [this test op]
     (with-es client
@@ -150,6 +150,9 @@
                         (assoc op :type :info :value r))))
         :read (try
                 (info "Waiting for recovery before read")
+                ; Elasticsearch lies about cluster state during split brain
+                ; woooooooo
+                (Thread/sleep (* 200 1000))
                 (c/on-many (:nodes test) (wait 200 :green))
                 (info "Recovered; flushing index before read")
                 (esi/flush index-name)
@@ -162,6 +165,11 @@
 
   (teardown! [_ test]
     (.close client)))
+
+(defn create-set-client
+  "A set implemented by creating independent documents"
+  []
+  (CreateSetClient. nil))
 
 ; Use ElasticSearch MVCC to do CAS read/write cycles, implementing a set.
 (defrecord CASSetClient [mapping-type doc-id client]
