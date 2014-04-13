@@ -10,10 +10,13 @@
 
 (def inconsistent knossos/inconsistent)
 
+(defrecord NoOp []
+  Model
+  (step [m op] m))
+
 (def noop
   "A model which always returns itself, unchanged."
-  (reify Model
-    (step [r op] r)))
+  (NoOp.))
 
 (defrecord CASRegister [value]
   Model

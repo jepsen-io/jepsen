@@ -22,6 +22,22 @@
                         (.writeObject w (time.local/format-local-time
                                           t :basic-date-time))))}
 
+       clojure.lang.PersistentHashSet
+       {"persistent-hash-set" (reify WriteHandler
+                                (write [_ w set]
+                                  (.writeTag w "persistent-hash-set"
+                                             (count set))
+                                  (doseq [e set]
+                                    (.writeObject w e))))}
+
+       clojure.lang.PersistentTreeSet
+       {"persistent-sorted-set" (reify WriteHandler
+                                  (write [_ w set]
+                                    (.writeTag w "persistent-sorted-set"
+                                               (count set))
+                                    (doseq [e set]
+                                      (.writeObject w e))))}
+
        multiset.core.MultiSet
        {"multiset" (reify WriteHandler
                      (write [_ w set]
@@ -38,6 +54,22 @@
                        (time.format/parse
                          (:basic-date-time time.local/*local-formatters*)
                          (.readObject rdr))))
+
+       "persistent-hash-set" (reify ReadHandler
+                               (read [_ rdr tag component-count]
+                                 (let [s (transient #{})]
+                                   (dotimes [_ component-count]
+                                     (conj! s (.readObject rdr)))
+                                   (persistent! s))))
+
+       "persistent-sorted-set" (reify ReadHandler
+                               (read [_ rdr tag component-count]
+                                 (loop [i component-count
+                                        s (sorted-set)]
+                                   (if (pos? i)
+                                     (recur (dec i)
+                                            (conj s (.readObject rdr)))
+                                     s))))
 
        "multiset" (reify ReadHandler
                     (read [_ rdr tag component-count]

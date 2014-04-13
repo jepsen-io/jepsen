@@ -20,6 +20,21 @@
   (is (= (bisect [1 2 3 4]) [[1 2] [3 4]]))
   (is (= (bisect [1 2 3 4 5]) [[1 2] [3 4 5]])))
 
+(deftest complete-grudge-test
+  (is (= (complete-grudge (bisect [1 2 3 4 5]))
+         {1 #{3 4 5}
+          2 #{3 4 5}
+          3 #{1 2}
+          4 #{1 2}
+          5 #{1 2}})))
+
+(deftest bridge-test
+  (is (= (bridge [1 2 3 4 5])
+         {1 #{4 5}
+          2 #{4 5}
+          4 #{1 2}
+          5 #{1 2}})))
+
 (deftest simple-partition-test
   (let [n (partition-halves)]
     (try

@@ -1,9 +1,18 @@
 (ns jepsen.util
   "Kitchen sink"
   (:require [clojure.tools.logging :refer [info]]
+            [clojure.core.reducers :as r]
+            [clojure.string :as str]
             [clj-time.core :as time]
             [clj-time.local :as time.local])
   (:import (java.util.concurrent.locks LockSupport)))
+
+(defn fraction
+  "a/b, but if b is zero, returns unity."
+  [a b]
+  (if (zero? b)
+    1
+    (/ a b)))
 
 (defn local-time
   "Drops millisecond resolution"
@@ -123,15 +132,23 @@
 (defmacro timeout
   "Times out body after n millis, returning timeout-val."
   [millis timeout-val & body]
-  `(let [thread# (Thread/currentThread)
-         alive# (promise)
-         interrupter# (future
-                        (when (deref alive# ~timeout-val true)
-                          (.interrupt thread#)))
-         res# (do ~@body)]
-     (deliver alive# false)
-     (future-cancel interrupter#)
-     res#))
+  `(let [thread# (promise)
+         worker# (future
+                   (deliver thread# (Thread/currentThread))
+                   ~@body)
+         retval# (deref worker# ~millis ::timeout)]
+     (if (= retval# ::timeout)
+       (do ; Can never remember which does which
+           (.interrupt @thread#)
+           (future-cancel worker#)
+           ~timeout-val)
+       retval#)))
+
+(defn map-kv
+  "Takes a function (f k v) which returns [k v], and builds a new map by
+  applying f to every pair."
+  [f m]
+  (into {} (r/map f m)))
 
 (defn map-vals
   "Maps values in a map."
@@ -139,6 +156,32 @@
   (->> m
        (map (fn [[k v]] [k (f v)]))
        (into {})))
+
+(defn integer-interval-set-str
+  "Takes a set of integers and yields a sorted, compact string representation."
+  [set]
+  (assert (not-any? nil? set))
+       (let [[runs start end]
+             (reduce (fn r [[runs start end] cur]
+                       (cond ; Start new run
+                             (nil? start) [runs cur cur]
+
+                             ; Continue run
+                             (= cur (inc end)) [runs start cur]
+
+                             ; Break!
+                             :else [(conj runs [start end]) cur cur]))
+                     [[] nil nil]
+                     (sort set))
+             runs (if (nil? start) runs (conj runs [start end]))]
+         (str "#{"
+              (->> runs
+                   (map (fn m [[start end]]
+                          (if (= start end)
+                            start
+                            (str start ".." end))))
+                   (str/join " "))
+              "}")))
 
 (defmacro meh
   "Returns, rather than throws, exceptions."

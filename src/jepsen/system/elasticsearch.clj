@@ -24,7 +24,9 @@
   "Waits for elasticsearch to be healthy on the current node. Color is red,
   yellow, or green; timeout is in seconds."
   [timeout-secs color]
-  (timeout (* 1000 timeout-secs) :timed-out
+  (timeout (* 1000 timeout-secs)
+           (throw (RuntimeException.
+                    "Timed out waiting for elasticsearch cluster recovery"))
     (loop []
       (when
         (try
@@ -91,11 +93,6 @@
   `(binding [es/*endpoint* ~client]
      ~@body))
 
-(def index-name "jepsen-index")
-
-(def mappings {"number"
-               {:properties {:num {:type "integer" :store "yes"}}}})
-
 (defn http-error
   "Takes an elastisch ExInfo exception and extracts the HTTP error response as
   a string."
@@ -108,16 +105,15 @@
   "A sequence of all results from a search query."
   [& search-args]
   (let [res      (apply esd/search (concat search-args [:size 0]))
-        count-from (esr/count-from res)
         hitcount (esr/total-hits res)
         res      (apply esd/search (concat search-args [:size hitcount]))]
-    (info :count-from count-from)
-    (info :total-hits hitcount)
     (when (esr/timed-out? res)
       (throw (RuntimeException. "Timed out")))
     (esr/hits-from res)))
 
-(defrecord SetClient [client]
+(def index-name "jepsen-index")
+
+(defrecord IndependentSetClient [client]
   client/Client
   (setup! [_ test node]
     (let [; client (es/connect [[(name node) 9300]])]
@@ -126,7 +122,9 @@
       (try
         (with-es client
           (esi/create index-name
-                      :mappings mappings
+                      :mappings {"number" {:properties
+                                           {:num {:type "integer"
+                                                  :store "yes"}}}}
                       :settings {"index" {"refresh_interval" "1"}}))
         (catch clojure.lang.ExceptionInfo e
           ; Is this seriously how you're supposed to do idempotent
@@ -135,32 +133,102 @@
             (when-not (re-find #"IndexAlreadyExistsException" err)
               (throw (RuntimeException. err))))))
 
-      (SetClient. client)))
+      (IndependentSetClient. client)))
 
   (invoke! [this test op]
-    (timeout 10000 (assoc op :type :info :value :timed-out)
-      (with-es client
-        (case (:f op)
-          :add (let [r (esd/create index-name "number" {:num (:value op)})]
-                 (cond (esr/ok? r)
-                       (assoc op :type :ok)
+    (with-es client
+      (case (:f op)
+        :add (timeout 5000 (assoc op :type :info :value :timed-out)
+                (let [r (esd/create index-name "number" {:num (:value op)})]
+                  (cond (esr/ok? r)
+                        (assoc op :type :ok)
 
-                       (esr/timed-out? r)
-                       (assoc op :type :info :value :timed-out)
+                        (esr/timed-out? r)
+                        (assoc op :type :info :value :timed-out)
 
-                       :else
-                       (assoc op :type :info :value r)))
-          :read (try
-                  (esi/flush index-name)
-                  (assoc op :type :ok
-                         :value (->> (all-results index-name "number")
-                                     (map (comp :num :_source))
-                                     set))
-                  (catch RuntimeException e
-                    (assoc op :type :fail :value (.getMessage e))))))))
+                        :else
+                        (assoc op :type :info :value r))))
+        :read (try
+                (info "Waiting for recovery before read")
+                (c/on-many (:nodes test) (wait 200 :green))
+                (info "Recovered; flushing index before read")
+                (esi/flush index-name)
+                (assoc op :type :ok
+                       :value (->> (all-results index-name "number")
+                                   (map (comp :num :_source))
+                                   (into (sorted-set))))
+                (catch RuntimeException e
+                  (assoc op :type :fail :value (.getMessage e)))))))
 
   (teardown! [_ test]
     (.close client)))
 
-(defn set-client []
-  (SetClient. nil))
+; Use ElasticSearch MVCC to do CAS read/write cycles, implementing a set.
+(defrecord CASSetClient [mapping-type doc-id client]
+  client/Client
+  (setup! [_ test node]
+    (let [; client (es/connect [[(name node) 9300]])]
+          client (es/connect (str "http://" (name node) ":9200"))]
+      (with-es client
+        ; Create index
+        (try
+          (esi/create index-name
+                      :mappings {mapping-type {:properties {}}})
+          (catch clojure.lang.ExceptionInfo e
+            ; Is this seriously how you're supposed to do idempotent
+            ; index creation? I've gotta be doing this wrong.
+            (let [err (http-error e)]
+              (when-not (re-find #"IndexAlreadyExistsException" err)
+                (throw (RuntimeException. err))))))
+
+        ; Initial empty set
+        (esd/create index-name mapping-type {:values []} :id doc-id))
+
+      (CASSetClient. mapping-type doc-id client)))
+
+  (invoke! [this test op]
+    (with-es client
+      (case (:f op)
+        :add (timeout 5000 (assoc op :type :info :value :timed-out)
+                      (let [current (esd/get index-name mapping-type doc-id
+                                                :preference "_primary")]
+                        (if-not (esr/found? current)
+                          ; Can't write without a read
+                          (assoc op :type :fail)
+
+                          (let [version (:_version current)
+                                values  (-> current :_source :values)
+                                values' (vec (conj values (:value op)))
+                                r       (esd/put index-name mapping-type doc-id
+                                                 {:values values'}
+                                                 :version version)]
+                            (cond ; lol esr/ok? actually means :found, and
+                                  ; esr/found? means :ok or :found, and
+                                  ; *neither* of those appear in a successful
+                                  ; conditional put, so I hope this is how
+                                  ; you're supposed to interpret responses.
+                                  (esr/conflict? r)
+                                  (assoc op :type :fail)
+
+                                  (esr/timed-out? r)
+                                  (assoc op :type :info :value :timed-out)
+
+                                  :else (assoc op :type :ok))))))
+
+        :read (try
+                (info "Waiting for recovery before read")
+                (c/on-many (:nodes test) (wait 200 :green))
+                (info "Recovered; flushing index before read")
+                (esi/flush index-name)
+                (assoc op :type :ok
+                       :value (->> (esd/get index-name mapping-type doc-id
+                                       :preference "_primary")
+                                   :_source
+                                   :values
+                                   (into (sorted-set))))))))
+
+  (teardown! [_ test]
+    (.close client)))
+
+(defn cas-set-client []
+  (CASSetClient. "cas-sets" "0" nil))

@@ -1,37 +1,70 @@
 (ns jepsen.nemesis
   (:use clojure.tools.logging)
-  (:require [jepsen.client      :as client]
+  (:require [clojure.set        :as set]
+            [jepsen.util        :as util]
+            [jepsen.client      :as client]
             [jepsen.control     :as c]
             [jepsen.control.net :as net]))
-
-(defn bisect
-  "Given a sequence, cuts it in half; smaller half first."
-  [coll]
-  (split-at (Math/floor (/ (count coll) 2)) coll))
 
 (defn snub-node!
   "Drops all packets from node."
   [node]
   (c/su (c/exec :iptables :-A :INPUT :-s (net/ip node) :-j :DROP)))
 
+(defn snub-nodes!
+  "Drops all packets from the given nodes."
+  [nodes]
+  (dorun (map snub-node! nodes)))
+
 (defn partition!
-  "Given a collection of collections of nodes, isolates each collection of
-  nodes from the others."
-  [partitions]
-  (let [universe (set (apply concat partitions))]
-    (->> partitions
-         (pmap (fn [component]
-                 (c/on-many component
-                            (->> universe
-                                 (remove (set component))
-                                 (map snub-node!)
-                                 dorun))))
-         dorun)))
+  "Takes a *grudge*: a map of nodes to the collection of nodes they should
+  reject messages from, and makes the appropriate changes. Does not heal the
+  network first, so repeated calls to partition! are cumulative right now."
+  [grudge]
+  (->> grudge
+       (map (fn [[node frenemies]]
+              (future
+                (c/on node (snub-nodes! frenemies)))))
+       doall
+       (map deref)
+       dorun))
+
+(defn bisect
+  "Given a sequence, cuts it in half; smaller half first."
+  [coll]
+  (split-at (Math/floor (/ (count coll) 2)) coll))
+
+(defn complete-grudge
+  "Takes a collection of components (collections of nodes), and computes a
+  grudge such that no node can talk to any nodes outside its partition."
+  [components]
+  (let [components (map set components)
+        universe   (apply set/union components)]
+    (reduce (fn [grudge component]
+              (reduce (fn [grudge node]
+                        (assoc grudge node (set/difference universe component)))
+                      grudge
+                      component))
+            {}
+            components)))
+
+(defn bridge
+  "A grudge which cuts the network in half, but preserves a node in the middle
+  which has uninterrupted bidirectional connectivity to both components."
+  [nodes]
+  (let [components (bisect nodes)
+        bridge     (first (second components))]
+    (-> components
+        complete-grudge
+        ; Bridge won't snub anyone
+        (dissoc bridge)
+        ; Nobody hates the bridge
+        (->> (util/map-vals #(disj % bridge))))))
 
 (defn partitioner
-  "Responds to a :start operation by cutting the network into partitions
-  defined by (f nodes)."
-  [f]
+  "Responds to a :start operation by cutting network links as defined by
+  (grudge nodes), and responds to :stop by healing the network."
+  [grudge]
   (reify client/Client
     (setup! [this test _]
       (c/on-many (:nodes test) (net/heal))
@@ -39,10 +72,9 @@
 
     (invoke! [this test op]
       (case (:f op)
-        :start (let [partitions (f (:nodes test))]
-                 (partition! partitions)
-                 (assoc op :value (str "partitioned into "
-                                       (pr-str partitions))))
+        :start (let [grudge (grudge (:nodes test))]
+                 (partition! grudge)
+                 (assoc op :value (str "Cut off " (pr-str grudge))))
         :stop  (do (c/on-many (:nodes test) (net/heal))
                    (assoc op :value "fully connected"))))
 
@@ -54,9 +86,9 @@
   nodes together and in the smaller half--and a :stop operation by repairing
   the network."
   []
-  (partitioner bisect))
+  (partitioner (comp complete-grudge bisect)))
 
 (defn partition-random-halves
   "Cuts the network into randomly chosen halves."
   []
-  (partitioner (comp bisect shuffle)))
+  (partitioner (comp complete-grudge bisect shuffle)))

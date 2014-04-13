@@ -1,8 +1,11 @@
 (ns jepsen.checker
   "Validates that a history is correct with respect to some model."
+  (:refer-clojure :exclude [set])
   (:require [clojure.stacktrace :as trace]
+            [clojure.core :as core]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
+            [jepsen.util :as util]
             [multiset.core :as multiset]
             [knossos.core :as knossos]))
 
@@ -62,6 +65,61 @@
           {:valid?      true
            :final-queue final})))))
 
+(def set
+  "Given a set of :add operations followed by a final :read, verifies that
+  every successfully added element is present in the read, and that the read
+  contains only elements for which an add was attempted."
+  (reify Checker
+    (check [this test model history]
+      (let [attempts (->> history
+                          (r/filter knossos/invoke?)
+                          (r/filter #(= :add (:f %)))
+                          (r/map :value)
+                          (into #{}))
+            adds (->> history
+                      (r/filter knossos/ok?)
+                      (r/filter #(= :add (:f %)))
+                      (r/map :value)
+                      (into #{}))
+            final-read (->> history
+                          (r/filter knossos/ok?)
+                          (r/filter #(= :read (:f %)))
+                          (r/map :value)
+                          (reduce (fn [_ x] x) nil))]
+        (if-not final-read
+          {:valid? false
+           :error  "Set was never read"})
+
+        (let [; The OK set is every read value which we tried to add
+              ok          (set/intersection final-read attempts)
+
+              ; Unexpected records are those we *never* attempted.
+              unexpected  (set/difference final-read attempts)
+
+              ; Lost records are those we definitely added but weren't read
+              lost        (set/difference adds final-read)
+
+              ; Recovered records are those where we didn't know if the add
+              ; succeeded or not, but we found them in the final set.
+              recovered   (set/difference ok adds)]
+
+          {:valid?          (and (empty? lost) (empty? unexpected))
+           :ok              (util/integer-interval-set-str ok)
+           :lost            (util/integer-interval-set-str lost)
+           :unexpected      (util/integer-interval-set-str unexpected)
+           :recovered       (util/integer-interval-set-str recovered)
+           :ok-frac         (util/fraction (count ok) (count attempts))
+           :unexpected-frac (util/fraction (count unexpected) (count attempts))
+           :lost-frac       (util/fraction (count lost) (count attempts))
+           :recovered-frac  (util/fraction (count recovered) (count attempts))})))))
+
+(defn fraction
+  "a/b, but if b is zero, returns unity."
+  [a b]
+  (if (zero? b)
+           1
+           (/ a b)))
+
 (def total-queue
   "What goes in *must* come out. Verifies that every successful enqueue has a
   successful dequeue. Queues only obey this property if the history includes
@@ -103,14 +161,10 @@
          :lost            lost
          :unexpected      unexpected
          :recovered       recovered
-         :ok-frac         (try (/ (count ok)         (count attempts))
-                               (catch ArithmeticException _ 1))
-         :unexpected-frac (try (/ (count unexpected) (count attempts))
-                               (catch ArithmeticException _ 1))
-         :lost-frac       (try (/ (count lost)    (count attempts))
-                               (catch ArithmeticException _ 1))
-         :recovered-frac  (try (/ (count recovered)  (count attempts))
-                               (catch ArithmeticException _ 1))}))))
+         :ok-frac         (util/fraction (count ok)         (count attempts))
+         :unexpected-frac (util/fraction (count unexpected) (count attempts))
+         :lost-frac       (util/fraction (count lost)       (count attempts))
+         :recovered-frac  (util/fraction (count recovered)  (count attempts))}))))
 
 (defn compose
   "Takes a map of names to checkers, and returns a checker which runs each
