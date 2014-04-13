@@ -44,7 +44,7 @@
 ;                                         org.slf4j/log4j-over-slf4j
 ;                                         ; Cool thanks for breaking my logging
 ;                                         org.slf4j/slf4j-nop]]
-                          [clojurewerkz/elastisch "2.0.0-beta4"]]
+                          [clojurewerkz/elastisch "2.0.0-beta5-SNAPSHOT"]]
             :profiles {:dev {:dependencies []}}
             :main jepsen.bin
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"

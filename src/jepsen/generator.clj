@@ -33,13 +33,24 @@
   (reify Generator
     (op [gen test process])))
 
+(defn delay-fn
+  "Every operation from the underlying generator takes (f) seconds longer."
+  [f gen]
+  (reify Generator
+    (op [_ test process]
+      (Thread/sleep (* 1000 (f)))
+      (op gen test process))))
+
 (defn delay
   "Every operation from the underlying generator takes dt seconds to return."
   [dt gen]
-  (reify Generator
-    (op [_ test process]
-      (Thread/sleep (* 1000 dt))
-      (op gen test process))))
+  (delay-fn (constantly dt) gen))
+
+(defn stagger
+  "Introduces uniform random timing noise with a mean delay of dt seconds for
+  every operation. Delays range from 0 to 2 * dt."
+  [dt gen]
+  (delay-fn (partial rand (* 2 dt)) gen))
 
 (defn sleep
   "Takes dt seconds, and always produces a nil."

@@ -22,30 +22,29 @@
                  :name      "elasticsearch"
                  :os        debian/os
                  :db        db
-                 :client    (set-client)
+                 :client    (cas-set-client)
                  :model     (model/set)
-                 :checker   (checker/compose {:html   timeline/html
-                                              :linear checker/linearizable})
-                 :nemesis   (nemesis/partition-random-halves)
+                 :checker   (checker/compose {:html timeline/html
+                                              :set  checker/set})
+                 :nemesis   (nemesis/partitioner nemesis/bridge)
                  :generator (gen/phases
                               (->> (range)
                                    (map (fn [x] {:type  :invoke
                                                  :f     :add
                                                  :value x}))
                                    gen/seq
+                                   (gen/stagger 1/10)
                                    (gen/delay 1)
                                    (gen/nemesis
                                      (gen/seq
-                                       (cycle [(gen/sleep 30)
+                                       (cycle [(gen/sleep 60)
                                                {:type :info :f :start}
-                                               (gen/sleep 30)
+                                               (gen/sleep 300)
                                                {:type :info :f :stop}])))
-                                   (gen/time-limit 120))
+                                   (gen/time-limit 600))
                               (gen/nemesis
                                 (gen/once {:type :info :f :stop}))
-                              (gen/log "waiting for recovery")
-                              (gen/sleep 30)
                               (gen/clients
                                 (gen/once {:type :invoke :f :read})))))]
     (is (:valid? (:results test)))
-    (report/linearizability (:linear (:results test)))))
+    (pprint (:results test))))

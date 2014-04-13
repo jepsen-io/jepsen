@@ -3,6 +3,7 @@
   tests, creating and resolving failures, and interpreting results."
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
+            [knossos.core :as knossos]
             [jepsen.util :as util :refer [with-thread-name
                                           relative-time-nanos]]
             [jepsen.os :as os]
@@ -129,8 +130,11 @@
                     ; Log completion
                     (conj-op! test completion)
 
-                    ; The process is now free to attempt another execution.
-                    process)
+                    (if (or (knossos/ok? completion) (knossos/fail? completion))
+                      ; The process is now free to attempt another execution.
+                      process
+                      ; Process hung; move on
+                      (+ process (count (:nodes test)))))
 
                   (catch Throwable t
                     ; At this point all bets are off. If the client or network
@@ -195,7 +199,8 @@
                                                :value (str "crashed: " t))))
                   (warn t "Nemesis crashed evaluating" op)))
 
-              (recur))))))))
+              (recur))))
+        (info "nemesis done")))))
 
 (defmacro with-nemesis
   "Sets up nemesis, starts nemesis worker thread, evaluates body, waits for
