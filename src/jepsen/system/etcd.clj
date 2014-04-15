@@ -1,20 +1,22 @@
 (ns jepsen.system.etcd
-  (:require [clojure.tools.logging  :refer [debug info warn]]
-            [clojure.java.io        :as io]
-            [clojure.string         :as str]
-            [jepsen.core            :as core]
-            [jepsen.util            :refer [meh timeout]]
-            [jepsen.codec           :as codec]
-            [jepsen.core            :as core]
-            [jepsen.control         :as c]
-            [jepsen.control.net     :as net]
-            [jepsen.control.util    :as cu]
-            [jepsen.client          :as client]
-            [jepsen.db              :as db]
-            [jepsen.generator       :as gen]
-            [jepsen.os.debian       :as debian]
-            [knossos.core           :as knossos]
-            [cheshire.core          :as json]))
+  (:require [clojure.tools.logging    :refer [debug info warn]]
+            [clojure.java.io          :as io]
+            [clojure.string           :as str]
+            [jepsen.core              :as core]
+            [jepsen.util              :refer [meh timeout]]
+            [jepsen.codec             :as codec]
+            [jepsen.core              :as core]
+            [jepsen.control           :as c]
+            [jepsen.control.net       :as net]
+            [jepsen.control.util      :as cu]
+            [jepsen.client            :as client]
+            [jepsen.db                :as db]
+            [jepsen.generator         :as gen]
+            [jepsen.os.debian         :as debian]
+            [knossos.core             :as knossos]
+            [cheshire.core            :as json]
+            [slingshot.slingshot      :refer [try+]]
+            [verschlimmbesserung.core :as v]))
 
 (def binary "/opt/etcd/bin/etcd")
 (def pidfile "/var/run/etcd.pid")
@@ -124,12 +126,51 @@
             (Thread/sleep 2000)
             (swap! running assoc node (running?)))
 
-          (info node "etcd cluster ready.")
-          (Thread/sleep 1000)
-          (info (c/exec :curl :-L "http://127.0.0.1:4001/v2/machines"))))
+          (info node "etcd ready")))
 
       (teardown! [_ test node]
         (c/su
           (meh (c/exec :killall :-9 :etcd))
           (c/exec :rm :-rf pidfile data-dir log-file))
         (info node "etcd nuked")))))
+
+(defrecord CASClient [k client]
+  client/Client
+  (setup! [this test node]
+    (let [client (v/connect (str "http://" (name node) ":4001"))]
+      (v/reset! client k (json/generate-string nil))
+      (assoc this :client client)))
+
+  (invoke! [this test op]
+    (try+
+      (case (:f op)
+        :read  (try (let [value (-> client
+                                    (v/get k {:consistent? true})
+                                    (json/parse-string true))]
+                      (assoc op :type :ok :value value))
+                    (catch Exception e
+                      (warn e "Read failed")
+                      ; Since reads don't have side effects, we can always
+                      ; pretend they didn't happen.
+                      (assoc op :type :fail)))
+
+        :write (do (->> (:value op)
+                        json/generate-string
+                        (v/reset! client k))
+                   (assoc op :type :ok))
+
+        :cas   (let [[value value'] (:value op)
+                     ok?            (v/cas! client k
+                                            (json/generate-string value)
+                                            (json/generate-string value'))]
+                 (assoc op :type (if ok? :ok :fail))))
+
+      (catch (and (:errorCode %) (:message %)) e
+        (assoc op :type :info :value e))))
+
+  (teardown! [_ test]))
+
+(defn cas-client
+  "A compare and set register built around a single etcd node."
+  []
+  (CASClient. "jepsen" nil))
