@@ -145,7 +145,7 @@
        retval#)))
 
 (defn map-kv
-  "Takes a function (f k v) which returns [k v], and builds a new map by
+  "Takes a function (f [k v]) which returns [k v], and builds a new map by
   applying f to every pair."
   [f m]
   (into {} (r/map f m)))
@@ -153,9 +153,7 @@
 (defn map-vals
   "Maps values in a map."
   [f m]
-  (->> m
-       (map (fn [[k v]] [k (f v)]))
-       (into {})))
+  (map-kv (fn [[k v]] [k (f v)]) m))
 
 (defn integer-interval-set-str
   "Takes a set of integers and yields a sorted, compact string representation."

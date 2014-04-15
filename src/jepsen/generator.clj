@@ -131,9 +131,12 @@
   integers."
   (reify Generator
     (op [generator test process]
-      (if (< 0.5 (rand))
-        {:type  :invoke
-         :f     :read}
+      (condp < (rand)
+        0.66 {:type  :invoke
+              :f     :read}
+        0.33 {:type  :invoke
+              :f     :write
+              :value (rand-int 5)}
         {:type  :invoke
          :f     :cas
          :value [(rand-int 5) (rand-int 5)]}))))
