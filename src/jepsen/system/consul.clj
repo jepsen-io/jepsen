@@ -1,4 +1,4 @@
-(ns jepsen.system.etcd
+(ns jepsen.system.consul
   (:require [clojure.tools.logging    :refer [debug info warn]]
             [clojure.java.io          :as io]
             [clojure.string           :as str]
@@ -18,8 +18,8 @@
             [slingshot.slingshot      :refer [try+]]
             [verschlimmbesserung.core :as v]))
 
-(def binary "/opt/etcd/bin/etcd")
-(def pidfile "/var/run/etcd.pid")
+(def binary "/usr/local/bin/consul")
+(def pidfile "/var/run/consul.pid")
 (def data-dir "/var/lib/etcd")
 (def log-file "/var/log/etcd.log")
 
@@ -30,7 +30,7 @@
   (str (name node) ":4001"))
 
 (defn peers
-  "The command-line peer list for an etcd cluster."
+  "The command-line peer list for an consul cluster."
   [test]
   (->> test
        :nodes
@@ -38,7 +38,7 @@
        (str/join ",")))
 
 (defn running?
-  "Is etcd running?"
+  "Is consul running?"
   []
   (try
     (c/exec :start-stop-daemon :--status
@@ -47,9 +47,9 @@
     true
     (catch RuntimeException _ false)))
 
-(defn start-etcd!
+(defn start-consul!
   [test node]
-  (info node "starting etcd")
+  (info node "starting consul")
   (c/exec :start-stop-daemon :--start
           :--background
           :--make-pidfile
@@ -78,9 +78,9 @@
 
         (c/su
           (c/cd "/opt"
-                (when-not (cu/file? "etcd")
-                  (info node "cloning etcd")
-                  (c/exec :git :clone "https://github.com/coreos/etcd")))
+                (when-not (cu/file? "consul")
+                  (info node "cloning consul")
+                  (c/exec :git :clone "https://github.com/hashicorp/consul")))
 
           (c/cd "/opt/etcd"
                 (when-not (cu/file? "bin/etcd")
@@ -108,7 +108,7 @@
 
             ; Launch primary first
             (when (= node (core/primary test))
-              (start-etcd! test node)
+              (start-consul! test node)
               (Thread/sleep 1000))
 
             ; Launch secondaries in any order after the primary...
@@ -119,7 +119,7 @@
             (when-not (= node (core/primary test))
               (locking running
                 (Thread/sleep 1000)
-                (start-etcd! test node)))
+                (start-consul! test node)))
 
             ; Good news is these puppies crash quick, so we don't have to
             ; wait long to see whether they made it.
@@ -130,9 +130,9 @@
 
       (teardown! [_ test node]
         (c/su
-          (meh (c/exec :killall :-9 :etcd))
-          (c/exec :rm :-rf pidfile data-dir log-file))
-        (info node "etcd nuked")))))
+          (meh (c/exec :killall :-9 :consul))
+          (c/exec :rm :-rf data-dir log-file))
+        (info node "consul nuked")))))
 
 (defrecord CASClient [k client]
   client/Client
@@ -171,6 +171,6 @@
   (teardown! [_ test]))
 
 (defn cas-client
-  "A compare and set register built around a single etcd node."
+  "A compare and set register built around a single consul node."
   []
   (CASClient. "jepsen" nil))
