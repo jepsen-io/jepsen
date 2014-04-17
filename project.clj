@@ -25,6 +25,7 @@
 ;                            :exclusions [com.datastax.cassandra/cassandra-driver-core]]
 ;                           [com.datastax.cassandra/cassandra-driver-core "1.0.3"]
                            [byte-streams "0.1.4"]
+                           [base64-clj "0.1.1"]
                            [com.novemberain/langohr "2.7.1"
                             :exclusions [com.google.guava/guava]]
                            [com.foundationdb/fdb-java "2.0.0"]
