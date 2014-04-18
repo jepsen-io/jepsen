@@ -100,18 +100,17 @@
 (defn consul-put! [key-url value]
   (http/put key-url {:body value}))
 
-(defn attempt-cas
-  [key-url index new_val]
-  (let [resp (http/put key-url {:body new_val :query-params {:cas index}})
-        body (:body resp)]
-        (= body "true")))
-
-(defn consul-cas!
-  [key-url value new-val]
-  (let [resp (consul-get key-url)
-        index (parse-index resp)
-        exist (parse-value resp)]
-    (if (= exist value) (attempt-cas key-url index new-val) false)))
+(defn consul-cas! [key-url value new-value]
+  "Consul uses an index based CAS so we must first get the existing value for
+   this key and then use the index for a CAS!"
+  (let [resp (parse (consul-get key-url))
+        index (:index resp)
+        existing-value (:value resp)]
+    (if (= existing-value value)
+        (let [params {:body new-value :query-params {:cas index}}
+              body (:body (http/put key-url params))]
+          (= (body "true")))
+        false)))
 
 (defrecord CASClient [k client]
   client/Client
