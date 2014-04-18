@@ -60,7 +60,10 @@
       (info node "consul nuked"))))
 
 (defn parse-index [resp]
-  (Integer. ((:headers resp) "X-Consul-Index")))
+  (-> resp
+      :headers
+      (get "x-consul-index")
+      Integer.))
 
 (defn maybe-int [value]
   (if (= value "null")
@@ -72,11 +75,11 @@
    The response JSON looks like:
     [
      {
-     \"CreateIndex\": 100,
-     \"ModifyIndex\": 200,
-     \"Key\": \"foo\",
-     \"Flags\": 0,
-     \"Value\": \"YmFy\"
+       \"CreateIndex\": 100,
+       \"ModifyIndex\": 200,
+       \"Key\": \"foo\",
+       \"Flags\": 0,
+       \"Value\": \"YmFy\"
      }
     ]
   "
