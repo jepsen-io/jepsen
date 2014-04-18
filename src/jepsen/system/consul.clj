@@ -46,8 +46,6 @@
 (defn db []
   (reify db/DB
     (setup! [this test node]
-      ; bring down any lingering processes
-      (db/teardown! this test node)
       (start-consul! test node)
 
       (Thread/sleep 1000)
