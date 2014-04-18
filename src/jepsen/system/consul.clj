@@ -67,7 +67,20 @@
       nil
       (Integer. value)))
 
-(defn parse-value [resp]
+(defn parse-value
+  "Parse the base64 encoded value.
+   The response JSON looks like:
+    [
+     {
+     \"CreateIndex\": 100,
+     \"ModifyIndex\": 200,
+     \"Key\": \"foo\",
+     \"Flags\": 0,
+     \"Value\": \"YmFy\"
+     }
+    ]
+  "
+  [resp]
   (-> resp
       :body
       (json/parse-string true)
