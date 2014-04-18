@@ -19,30 +19,6 @@
 (def data-dir "/var/lib/consul")
 (def log-file "/var/log/consul.log")
 
-(defn peer-addr [node]
-  (str (name node) ":8300"))
-
-(defn addr [node]
-  (str (name node) ":8500"))
-
-(defn peers
-  "The command-line peer list for an consul cluster."
-  [test]
-  (->> test
-       :nodes
-       (map peer-addr)
-       (str/join ",")))
-
-(defn running?
-  "Is consul running?"
-  []
-  (try
-    (c/exec :start-stop-daemon :--status
-            :--pidfile pidfile
-            :--exec binary)
-    true
-    (catch RuntimeException _ false)))
-
 (defn start-consul!
   [test node]
   (info node "starting consul")
