@@ -29,7 +29,7 @@
                  :nemesis   (nemesis/partition-random-halves)
                  :generator (gen/phases
                               (->> gen/cas
-                                   (gen/delay 1/2)
+                                   (gen/delay 1)
                                    (gen/nemesis
                                      (gen/seq
                                        (cycle [(gen/sleep 5)

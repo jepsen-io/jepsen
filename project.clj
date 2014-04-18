@@ -47,7 +47,7 @@
                           [clojurewerkz/elastisch "2.0.0-beta5-SNAPSHOT"]
                           [verschlimmbesserung "0.1.1-SNAPSHOT"]]
             :profiles {:dev {:dependencies []}}
-            :main jepsen.bin
+            :main jepsen.repl
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
                        "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
                        "-XX:+UseFastAccessorMethods" "-server"])

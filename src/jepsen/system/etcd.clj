@@ -118,7 +118,7 @@
             ; race condition
             (when-not (= node (core/primary test))
               (locking running
-                (Thread/sleep 1000)
+;                (Thread/sleep 1000)
                 (start-etcd! test node)))
 
             ; Good news is these puppies crash quick, so we don't have to
