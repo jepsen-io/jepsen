@@ -116,40 +116,25 @@
       (assoc this :client client)))
 
   (invoke! [this test op]
-    (try+
-      (case (:f op)
-        :read  (try (let [value (parse-value (consul-get client))]
-                      (assoc op :type :ok :value value))
-                    (catch Exception e
-                      ;(warn e "Read failed")
-                      ; Since reads don't have side effects, we can always
-                      ; pretend they didn't happen.
-                      (assoc op :type :fail)))
-
-        :write (try (do (->> (:value op)
-                        json/generate-string
-                        (consul-put client))
-                   (assoc op :type :ok))
+    (case (:f op)
+      :read  (try (let [value (parse-value (consul-get client))]
+                    (assoc op :type :ok :value value))
                   (catch Exception e
-                      ;(warn e "Write failed")
-                      ; Since reads don't have side effects, we can always
-                      ; pretend they didn't happen.
-                      (assoc op :type :fail)))
-
-        :cas   (try
-                   (let [[value value'] (:value op)
-                       ok?            (consul-cas client
-                                              (json/generate-string value)
-                                              (json/generate-string value'))]
-                   (assoc op :type (if ok? :ok :fail)))
-                (catch Exception e
-                    ;(warn e "CAS failed")
+                    (warn e "Read failed")
                     ; Since reads don't have side effects, we can always
                     ; pretend they didn't happen.
-                    (assoc op :type :fail))))
+                    (assoc op :type :fail)))
 
-      (catch (and (:errorCode %) (:message %)) e
-        (assoc op :type :info :value e))))
+      :write (do (->> (:value op)
+                      json/generate-string
+                      (consul-put! client))
+                 (assoc op :type :ok))
+
+      :cas   (let [[value value'] (:value op)
+                   ok?            (consul-cas! client
+                                               (json/generate-string value)
+                                               (json/generate-string value'))]
+               (assoc op :type (if ok? :ok :fail)))))
 
   (teardown! [_ test]))
 
