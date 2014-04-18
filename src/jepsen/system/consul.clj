@@ -70,7 +70,7 @@
       (get "x-consul-index")
       Integer.))
 
-(defn parse-value
+(defn parse-body
   "Parse the base64 encoded value.
    The response JSON looks like:
     [
@@ -84,13 +84,15 @@
     ]
   "
   [resp]
-  (-> resp
-      :body
-      (json/parse-string true)
-      first
-      :Value
-      base64/decode
-      maybe-int))
+  (let [body  (-> resp
+                  :body
+                  (json/parse-string #(keyword (.toLowerCase %)))
+                  first)
+        value (-> body :value base64/decode maybe-int)]
+    (assoc body :value value)))
+
+(defn parse [response]
+  (assoc (parse-body response) :index (parse-index response)))
 
 (defn consul-get [key-url]
   (http/get key-url))
@@ -120,8 +122,8 @@
 
   (invoke! [this test op]
     (case (:f op)
-      :read  (try (let [value (parse-value (consul-get client))]
-                    (assoc op :type :ok :value value))
+      :read  (try (let [resp  (parse (consul-get client))]
+                    (assoc op :type :ok :value (:value resp)))
                   (catch Exception e
                     (warn e "Read failed")
                     ; Since reads don't have side effects, we can always
