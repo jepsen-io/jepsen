@@ -59,16 +59,16 @@
         (c/exec :rm :-rf pidfile data-dir))
       (info node "consul nuked"))))
 
+(defn maybe-int [value]
+  (if (= value "null")
+      nil
+      (Integer. value)))
+
 (defn parse-index [resp]
   (-> resp
       :headers
       (get "x-consul-index")
       Integer.))
-
-(defn maybe-int [value]
-  (if (= value "null")
-      nil
-      (Integer. value)))
 
 (defn parse-value
   "Parse the base64 encoded value.
