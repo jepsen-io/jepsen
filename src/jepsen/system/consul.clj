@@ -2,23 +2,17 @@
   (:require [clojure.tools.logging    :refer [debug info warn]]
             [clojure.java.io          :as io]
             [clojure.string           :as str]
-            [clojure.core           :as ccore]
             [jepsen.core              :as core]
             [jepsen.util              :refer [meh timeout]]
-            [jepsen.codec             :as codec]
             [jepsen.core              :as core]
             [jepsen.control           :as c]
             [jepsen.control.net       :as net]
             [jepsen.control.util      :as cu]
             [jepsen.client            :as client]
             [jepsen.db                :as db]
-            [jepsen.generator         :as gen]
-            [jepsen.os.debian         :as debian]
-            [knossos.core             :as knossos]
             [cheshire.core            :as json]
-            [slingshot.slingshot      :refer [try+]]
-            [clj-http.client        :as http]
-            [base64-clj.core :as base64]))
+            [clj-http.client          :as http]
+            [base64-clj.core          :as base64]))
 
 (def binary "/usr/bin/consul")
 (def pidfile "/var/run/consul.pid")
