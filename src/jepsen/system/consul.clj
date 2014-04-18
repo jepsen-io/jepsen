@@ -59,31 +59,27 @@
         (c/exec :rm :-rf pidfile data-dir))
       (info node "consul nuked"))))
 
-(defn parse-index
-  [resp]
-  (let [h (:headers resp)
-        index (ccore/get h "X-Consul-Index")]
-    index))
+(defn parse-index [resp]
+  (Integer. ((:headers resp) "X-Consul-Index")))
 
-(defn maybe-int
-  [value]
-  (if (= value "null") nil (Integer. value)))
+(defn maybe-int [value]
+  (if (= value "null")
+      nil
+      (Integer. value)))
 
-(defn parse-value
-  [resp]
-  (let [value (json/parse-string (:body resp) true)
-     seriousValue (-> (first value)
-                             :Value
-                             base64/decode
-                             maybe-int)]
-    seriousValue))
+(defn parse-value [resp]
+  (-> resp
+      :body
+      (json/parse-string true)
+      first
+      :Value
+      base64/decode
+      maybe-int))
 
-(defn consul-get
-  [key-url]
+(defn consul-get [key-url]
   (http/get key-url))
 
-(defn consul-put
-  [key-url value]
+(defn consul-put! [key-url value]
   (http/put key-url {:body value}))
 
 (defn attempt-cas
@@ -92,7 +88,7 @@
         body (:body resp)]
         (= body "true")))
 
-(defn consul-cas
+(defn consul-cas!
   [key-url value new-val]
   (let [resp (consul-get key-url)
         index (parse-index resp)
@@ -103,7 +99,7 @@
   client/Client
   (setup! [this test node]
     (let [client (str "http://" (name node) ":8500/v1/kv/" k)]
-      (consul-put client (json/generate-string nil))
+      (consul-put! client (json/generate-string nil))
       (assoc this :client client)))
 
   (invoke! [this test op]
