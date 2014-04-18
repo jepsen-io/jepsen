@@ -44,59 +44,20 @@
           (c/lit "2>&1")))
 
 (defn db []
-  (let [running (atom nil)] ; A map of nodes to whether they're running
-    (reify db/DB
-      (setup! [this test node]
-        (debian/install [:htop :psmisc])
+  (reify db/DB
+    (setup! [this test node]
+      ; bring down any lingering processes
+      (db/teardown! this test node)
+      (start-consul! test node)
 
-        (c/su
-          (c/cd "/opt"
-                (when-not (cu/file? "consul")
-                  (info node "cloning consul")
-                  (c/exec (c/lit "mkdir consul"))))
+      (Thread/sleep 1000)
+      (info node "consul ready"))
 
-          ; Initially, every node is not running.
-          (core/synchronize test)
-          (reset! running (->> test :nodes (map #(vector % false)) (into {})))
-
-          ; All nodes synchronize at each startup attempt.
-          (while (do (core/synchronize test)
-                     (when (= node (core/primary test))
-                       (info "Running nodes:" @running))
-                     (not-every? @running (:nodes test)))
-
-            ; Nuke local node; we've got to start fresh if we got ourselves
-            ; wedged last time.
-            (db/teardown! this test node)
-            (core/synchronize test)
-
-            ; Launch primary first
-            (when (= node (core/primary test))
-              (start-consul! test node)
-              (Thread/sleep 1000))
-
-            ; Launch secondaries in any order after the primary...
-            (core/synchronize test)
-
-            ; ... but with some time between each to avoid triggering the join
-            ; race condition
-            (when-not (= node (core/primary test))
-              (locking running
-                (Thread/sleep 1000)
-                (start-consul! test node)))
-
-            ; Good news is these puppies crash quick, so we don't have to
-            ; wait long to see whether they made it.
-            (Thread/sleep 2000)
-            (swap! running assoc node (running?)))
-
-          (info node "consul ready")))
-
-      (teardown! [_ test node]
-        (c/su
-          (meh (c/exec :killall :-9 :consul))
-          (c/exec :rm :-rf pidfile data-dir))
-        (info node "consul nuked")))))
+    (teardown! [_ test node]
+      (c/su
+        (meh (c/exec :killall :-9 :consul))
+        (c/exec :rm :-rf pidfile data-dir))
+      (info node "consul nuked"))))
 
 (defn parse-index
   [resp]
