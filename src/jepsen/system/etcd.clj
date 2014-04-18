@@ -118,13 +118,20 @@
             ; race condition
             (when-not (= node (core/primary test))
               (locking running
-;                (Thread/sleep 1000)
+                (Thread/sleep 100)
                 (start-etcd! test node)))
 
             ; Good news is these puppies crash quick, so we don't have to
             ; wait long to see whether they made it.
             (Thread/sleep 2000)
             (swap! running assoc node (running?)))
+
+          ; And spin some more until Raft is ready
+          (let [c (v/connect (str "http://" (name node) ":4001"))]
+            (while (try+ (v/reset! c :test "ok") false
+                         (catch [:status 500] e true)
+                         (catch [:status 307] e true))
+              (Thread/sleep 100)))
 
           (info node "etcd ready")))
 
@@ -142,31 +149,45 @@
       (assoc this :client client)))
 
   (invoke! [this test op]
-    (try+
-      (case (:f op)
-        :read  (try (let [value (-> client
-                                    (v/get k {:consistent? true})
-                                    (json/parse-string true))]
-                      (assoc op :type :ok :value value))
-                    (catch Exception e
-                      (warn e "Read failed")
-                      ; Since reads don't have side effects, we can always
-                      ; pretend they didn't happen.
-                      (assoc op :type :fail)))
+    ; Reads are idempotent; if they fail we can always assume they didn't
+    ; happen in the history, and reduce the number of hung processes, which
+    ; makes the knossos search more efficient
+    (let [fail (if (= :read (:f op))
+                 :fail
+                 :info)]
+      (try+
+        (case (:f op)
+          :read  (let [value (-> client
+                                 (v/get k {:consistent? true})
+                                 (json/parse-string true))]
+                   (assoc op :type :ok :value value))
 
-        :write (do (->> (:value op)
-                        json/generate-string
-                        (v/reset! client k))
-                   (assoc op :type :ok))
+          :write (do (->> (:value op)
+                          json/generate-string
+                          (v/reset! client k))
+                     (assoc op :type :ok))
 
-        :cas   (let [[value value'] (:value op)
-                     ok?            (v/cas! client k
-                                            (json/generate-string value)
-                                            (json/generate-string value'))]
-                 (assoc op :type (if ok? :ok :fail))))
+          :cas   (let [[value value'] (:value op)
+                       ok?            (v/cas! client k
+                                              (json/generate-string value)
+                                              (json/generate-string value'))]
+                   (assoc op :type (if ok? :ok :fail))))
 
-      (catch (and (:errorCode %) (:message %)) e
-        (assoc op :type :info :value e))))
+        ; A few common ways etcd can fail
+        (catch java.net.SocketTimeoutException e
+          (assoc op :type fail :value :timed-out))
+
+        (catch [:body "command failed to be committed due to node failure\n"] e
+          (assoc op :type fail :value :node-failure))
+
+        (catch [:status 307] e
+          (assoc op :type fail :value :redirect-loop))
+
+        (catch (and (instance? clojure.lang.ExceptionInfo %)) e
+          (assoc op :type fail :value e))
+
+        (catch (and (:errorCode %) (:message %)) e
+          (assoc op :type fail :value e)))))
 
   (teardown! [_ test]))
 

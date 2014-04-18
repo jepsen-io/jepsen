@@ -45,7 +45,7 @@
 ;                                         ; Cool thanks for breaking my logging
 ;                                         org.slf4j/slf4j-nop]]
                           [clojurewerkz/elastisch "2.0.0-beta5-SNAPSHOT"]
-                          [verschlimmbesserung "0.1.1-SNAPSHOT"]]
+                          [verschlimmbesserung "0.1.1"]]
             :profiles {:dev {:dependencies []}}
             :main jepsen.repl
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"

@@ -21,7 +21,7 @@
       (println "-------------------------------------------------------------")
       (println "Just prior to that operation, possible interpretations of the")
       (println "linearizable prefix were:")
-      (doseq [world (:last-consistent-worlds res)]
+      (doseq [world (take 32 (shuffle (:last-consistent-worlds res)))]
         (println "World with fixed history:")
         (util/print-history (:fixed world))
         (println)
@@ -31,8 +31,11 @@
         (println "with pending operations:")
         (util/print-history (:pending world))
         (println))
+      (let [c (count (:last-consistent-worlds res))]
+        (when (< 32 c)
+          (println "(and" (- c 32) "more worlds, elided here)")))
       (println "--------------------------------------------------------------")
 
       (println)
       (println "Inconsistent state transitions:")
-      (pprint (:inconsistent-transitions res)))))
+      (pprint (distinct (:inconsistent-transitions res))))))
