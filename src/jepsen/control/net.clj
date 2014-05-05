@@ -2,7 +2,8 @@
   "Network control functions."
   (:refer-clojure :exclude [partition])
   (:use jepsen.control)
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str])
+  (:require [clojure.data :as data]))
 
 (def hosts-map {:n1 "n1"
               :n2 "n2"
