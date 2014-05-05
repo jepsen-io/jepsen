@@ -2,7 +2,8 @@
   "Network control functions."
   (:refer-clojure :exclude [partition])
   (:use jepsen.control)
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str])
+  (:require [clojure.data :as data]))
 
 (def hosts-map {:n1 "n1"
               :n2 "n2"
@@ -13,6 +14,10 @@
 
 (def small-partition-set #{(:n1 hosts-map) (:n2 hosts-map)})
 (def large-partition-set #{(:n3 hosts-map) (:n4 hosts-map) (:n5 hosts-map)})
+
+(def hosts-set (set (vals hosts-map)))
+(def rand-small-partition-set (set (take 2 (shuffle (seq hosts-set)))))
+(def rand-large-partition-set (first (data/diff hosts-set rand-small-partition-set)))
 
 (defn slow
   "Slows down the network."
@@ -66,6 +71,15 @@
   (su
     (let [nodes (map ip large-partition-set)]
       (when (small-partition-set *host*)
+        (doseq [n nodes]
+          (exec :iptables :-A :INPUT :-s n :-j :DROP))))))
+
+(defn rand-partition
+  "Randomly partitions the network."
+  []
+  (su
+    (let [nodes (map ip rand-large-partition-set)]
+      (when (rand-small-partition-set *host*)
         (doseq [n nodes]
           (exec :iptables :-A :INPUT :-s n :-j :DROP))))))
 
