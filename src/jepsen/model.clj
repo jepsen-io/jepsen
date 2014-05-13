@@ -39,14 +39,14 @@
   ([] (cas-register nil))
   ([value] (CASRegister. value)))
 
-(defrecord Mutex [locked]
+(defrecord Mutex [locked?]
   Model
   (step [r op]
     (condp = (:f op)
-      :acquire (if locked
+      :acquire (if locked?
                  (inconsistent "already held")
                  (Mutex. true))
-      :release (if locked
+      :release (if locked?
                  (Mutex. false)
                  (inconsistent "not held")))))
 
