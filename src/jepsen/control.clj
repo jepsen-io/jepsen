@@ -98,7 +98,7 @@
   [result]
   (if (zero? (:exit result))
     result
-    (throw (RuntimeException. (:err result)))))
+    (throw (RuntimeException. (str (:err result) "\n" (:out result))))))
 
 (defn just-stdout
   "Returns the stdout from an ssh result, trimming any newlines at the end."
