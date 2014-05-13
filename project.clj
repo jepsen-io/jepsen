@@ -5,7 +5,7 @@
 ;                            :exclusions [org.fressian/fressian]]
                            [org.clojure/tools.logging "0.2.6"]
                            [clj-time "0.6.0"]
-                           [knossos "0.1.1-SNAPSHOT"]
+                           [knossos "0.2"]
                            [clj-ssh "0.5.7"]
                            [hiccup "1.0.5"]
                            [org.clojars.achim/multiset "0.1.0-SNAPSHOT"]
@@ -44,7 +44,7 @@
 ;                                         org.slf4j/log4j-over-slf4j
 ;                                         ; Cool thanks for breaking my logging
 ;                                         org.slf4j/slf4j-nop]]
-                          [clojurewerkz/elastisch "2.0.0-beta5-SNAPSHOT"]
+                          [clojurewerkz/elastisch "2.0.0-rc1"]
                           [verschlimmbesserung "0.1.1"]]
             :profiles {:dev {:dependencies []}}
             :main jepsen.repl
