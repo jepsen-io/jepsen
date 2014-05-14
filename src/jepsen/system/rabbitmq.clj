@@ -1,5 +1,6 @@
 (ns jepsen.system.rabbitmq
   (:require [clojure.tools.logging :refer [debug info warn]]
+            [clojure.java.io       :as io]
             [jepsen.core           :as core]
             [jepsen.util           :refer [meh timeout]]
             [jepsen.codec          :as codec]
@@ -10,6 +11,7 @@
             [jepsen.db             :as db]
             [jepsen.generator      :as gen]
             [knossos.core          :as knossos]
+            [knossos.op            :as op]
             [langohr.core          :as rmq]
             [langohr.channel       :as lch]
             [langohr.confirm       :as lco]
@@ -43,6 +45,12 @@
                   (c/exec :service :rabbitmq-server :stop)
                   (c/exec :echo "jepsen-rabbitmq"
                           :> "/var/lib/rabbitmq/.erlang.cookie"))
+
+                ; Update config
+                (info "uploading config")
+                (c/exec :echo
+                        (-> "rabbitmq/rabbitmq.config" io/resource slurp)
+                        :> "/etc/rabbitmq/rabbitmq.config")
 
                 ; Ensure node is running
                 (try (c/exec :service :rabbitmq-server :status)
@@ -161,10 +169,12 @@
                    (->> (repeat op)                  ; Explode drain into
                         (map #(assoc % :f :dequeue)) ; infinite dequeues, then
                         (map (partial dequeue! ch))  ; dequeue something
-                        (take-while knossos/ok?)     ; as long as stuff arrives,
+                        (take-while op/ok?)  ; as long as stuff arrives,
                         (interleave (repeat op))     ; interleave with invokes
                         (drop 1)                     ; except the initial one
-                        (map (partial core/conj-op! test))
+                        (map (fn [completion]
+                               (util/log-op completion)
+                               (core/conj-op! test op)))
                         dorun)
                    (assoc op :type :info :value :exhausted))))))
 
