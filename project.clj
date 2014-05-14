@@ -25,28 +25,52 @@
 ;                            :exclusions [com.datastax.cassandra/cassandra-driver-core]]
 ;                           [com.datastax.cassandra/cassandra-driver-core "1.0.3"]
                            [byte-streams "0.1.4"]
-                           [com.novemberain/langohr "2.7.1"
-                            :exclusions [com.google.guava/guava]]
                            [com.foundationdb/fdb-java "2.0.0"]
-                           [com.basho.riak/riak-client "1.4.4"
-                            :exclusions [com.fasterxml.jackson.core/jackson-core
-                                         org.apache.httpcomponents/httpclient]]
                            [com.netflix.curator/curator-framework "1.3.3"
                             :exclusions [org.slf4j/slf4j-api
                                          org.slf4j-log4j12
-                                         com.google.guava/guava]]
-;                           [com.datomic/datomic-pro "0.9.4707"
-;                            :exclusions [org.apache.httpcomponents/httpclient
-;                                         ; Why on earth is this a dep here? It
-;                                         ; causes circular dependencies with
-;                                         ; slf4j-log4j, which is ALSO a datomic
-;                                         ; dep via ZK...
-;                                         org.slf4j/log4j-over-slf4j
-;                                         ; Cool thanks for breaking my logging
-;                                         org.slf4j/slf4j-nop]]
-                          [clojurewerkz/elastisch "2.0.0-rc1"]
-                          [verschlimmbesserung "0.1.1"]]
-            :profiles {:dev {:dependencies []}}
+                                         com.google.guava/guava]]]
+            :profiles {:riak {:dependencies [
+                                             [com.basho.riak/riak-client "1.4.4"
+                                              :exclusions [com.fasterxml.jackson.core/jackson-core
+                                                           org.apache.httpcomponents/httpclient]]
+                                             ]
+                              :source-paths ["riak/src"]
+                              :test-paths ["riak/test"]
+                              } 
+                       :rabbitmq {:dependencies [
+                                                 [com.novemberain/langohr "2.7.1"
+                                                  :exclusions [com.google.guava/guava]]
+                                                 ]
+                                  :source-paths ["rabbitmq/src"]
+                                  :test-paths ["rabbitmq/test"]
+                                  } 
+                       :etcd {:dependencies [
+                                             [verschlimmbesserung "0.1.1"]
+                                             ]
+                                  :source-paths ["etcd/src"]
+                                  :test-paths ["etcd/test"]
+                                  } 
+                       :datomic {:dependencies [
+                                                [com.datomic/datomic-pro "0.9.4707"
+                                                 :exclusions [org.apache.httpcomponents/httpclient
+                                                              ; Why on earth is this a dep here? It
+                                                              ; causes circular dependencies with
+                                                              ; slf4j-log4j, which is ALSO a datomic
+                                                              ; dep via ZK...
+                                                              org.slf4j/log4j-over-slf4j
+                                                              ; Cool thanks for breaking my logging
+                                                              org.slf4j/slf4j-nop]]
+                                                ]
+                                 :source-paths ["datomic/src"]
+                                 :test-paths ["datomic/test"]
+                                 }
+                       :elastic {:dependencies [
+                                             [clojurewerkz/elastisch "2.0.0-rc1"]
+                                             ]
+                              :source-paths ["elastic/src"]
+                              :test-paths ["elastic/test"]
+                              } }
             :main jepsen.repl
             :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
                        "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
