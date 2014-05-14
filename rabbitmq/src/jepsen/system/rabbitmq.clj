@@ -2,7 +2,7 @@
   (:require [clojure.tools.logging :refer [debug info warn]]
             [clojure.java.io       :as io]
             [jepsen.core           :as core]
-            [jepsen.util           :refer [meh timeout]]
+            [jepsen.util           :refer [meh timeout log-op]]
             [jepsen.codec          :as codec]
             [jepsen.core           :as core]
             [jepsen.control        :as c]
@@ -173,7 +173,7 @@
                         (interleave (repeat op))     ; interleave with invokes
                         (drop 1)                     ; except the initial one
                         (map (fn [completion]
-                               (util/log-op completion)
+                               (log-op completion)
                                (core/conj-op! test op)))
                         dorun)
                    (assoc op :type :info :value :exhausted))))))
