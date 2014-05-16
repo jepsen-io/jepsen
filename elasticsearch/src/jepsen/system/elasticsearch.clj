@@ -1,24 +1,18 @@
 (ns jepsen.system.elasticsearch
-  (:require [clojure.tools.logging  :refer [debug info warn]]
+  (:require [cheshire.core          :as json]
             [clojure.java.io        :as io]
             [clojure.string         :as str]
-            [jepsen.core            :as core]
-            [jepsen.util            :refer [meh timeout]]
-            [jepsen.codec           :as codec]
-            [jepsen.core            :as core]
+            [clojure.tools.logging  :refer [info]]
+            [jepsen.client          :as client]
             [jepsen.control         :as c]
             [jepsen.control.net     :as net]
-            [jepsen.control.util    :as cu]
-            [jepsen.client          :as client]
             [jepsen.db              :as db]
-            [jepsen.generator       :as gen]
             [jepsen.os.debian       :as debian]
-            [knossos.core           :as knossos]
-            [cheshire.core          :as json]
-            [clojurewerkz.elastisch.rest :as es]
-            [clojurewerkz.elastisch.rest.response :as esr]
-            [clojurewerkz.elastisch.rest.index :as esi]
-            [clojurewerkz.elastisch.rest.document :as esd]))
+            [jepsen.util            :refer [meh timeout]]
+            [clojurewerkz.elastisch.rest          :as es]
+            [clojurewerkz.elastisch.rest.document :as esd]
+            [clojurewerkz.elastisch.rest.index    :as esi]
+            [clojurewerkz.elastisch.rest.response :as esr]))
 
 (defn wait
   "Waits for elasticsearch to be healthy on the current node. Color is red,
