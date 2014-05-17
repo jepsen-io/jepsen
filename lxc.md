@@ -3,7 +3,7 @@ How to set up nodes via LXC on Debian Testing:
 (refer to https://wiki.debian.org/LXC)
 
 ```sh
-aptitude install lxc bridge-utils libvirt-bin debootstrap
+aptitude install lxc bridge-utils libvirt-bin debootstrap dnsmasq
 ```
 
 Add this line to /etc/fstab:
