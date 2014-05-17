@@ -39,7 +39,7 @@ Edit /var/lib/lxc/n1/config, changing the network hwaddr to something unique. I 
 
 lxc.rootfs = /var/lib/lxc/n1/rootfs
 
-# Common configuratio
+# Common configuration
 lxc.include = /usr/share/lxc/config/debian.common.conf
 
 # Container specific configuration
