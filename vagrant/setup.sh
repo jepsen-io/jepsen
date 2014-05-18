@@ -1,9 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # configure lxc and boxes for running tests
 # need to be run as sudo/root
 
 # basic packages
-apt-get install git
+apt-get install -y git
 
 # install java
 # from http://www.webupd8.org/2014/03/how-to-install-oracle-java-8-in-debian.html
@@ -13,7 +13,7 @@ apt-key adv --keyserver keyserver.ubuntu.com --recv-keys EEA14886
 apt-get update
 
 echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | /usr/bin/debconf-set-selections
-apt-get install oracle-java8-installer
+apt-get install -y oracle-java8-installer
 
 function install_lein() {
     lein=~vagrant/bin/lein
@@ -22,3 +22,6 @@ function install_lein() {
     chmod +x $lein
     echo PATH=$(dirname $lein):$PATH >> ~/.bash_profile
 }
+
+install_lein
+
