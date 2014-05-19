@@ -16,6 +16,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
     mxconsole.vm.provision :shell, :path => "setup.sh"
     mxconsole.vm.provision :shell, :path => "keys.sh"
+    mxconsole.vm.provision :shell, :path => "net.sh"
     mxconsole.vm.provision :shell, :path => "lxc.sh"
   end
 
