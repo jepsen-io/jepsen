@@ -27,9 +27,11 @@ function buildbox() {
         # create box - could clone after the first but it seems that debootstrap caches dloaded
         # stuff so creating is fast anyway
         SUITE=jessie MIRROR=http://ftp.fr.debian.org/debian lxc-create -n "$id" -t debian
-        # install iptables for traffic shaping in tests
-        chroot $container/rootfs apt-get install -y iptables        
     fi
+
+    # install iptables for traffic shaping in tests
+    chroot $container/rootfs apt-get install -y iptables sudo       
+    
     # update configuration, expecially mac address
     cat > "$container/config" <<EOF
 lxc.rootfs = /var/lib/lxc/$id/rootfs
