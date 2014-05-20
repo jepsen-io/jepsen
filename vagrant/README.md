@@ -13,7 +13,7 @@ coffees, a working VM containing five configured LXC boxes configured for runnin
 > ..... [long]
 > vagrant ssh
 > cd /jepsen
-> lein with-profile elasticsearch test
+> lein with-profile elasticsearch test :only jepsen.system.elasticsearch-test
 
 * Configuration of the vagrant's VM is provided as a bunch of scripts (yes, this should be
   puppet/chef/salt/pick-your-own-scm-tool) which may be used independently from Vagrant itself:
@@ -22,6 +22,9 @@ coffees, a working VM containing five configured LXC boxes configured for runnin
       * `lxc.sh` creates the five LXC boxes and configures them
       *  `functions.sh` contains auxiliary functions useful to other scripts
       * Note that scripts should be idempotent
+* **Caveat**: Tests might need to be modified as the authentication configuration of LXC boxes is a bit rough. Modify the tests
+  accordingly by adding `:ssh` keys to the `core/run!`function's parameters. Normally, logging in as `root` with key
+  `~/.ssh/id_rsa` should work fine.
 
 # TODO
 
