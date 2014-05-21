@@ -42,7 +42,7 @@ function buildbox() {
         echo "creating container $container"
         # create box - could clone after the first but it seems that debootstrap caches dloaded
         # stuff so creating is fast anyway
-        SUITE=jessie MIRROR=http://ftp.fr.debian.org/debian lxc-create -n "$id" -t debian
+        MIRROR=http://ftp.fr.debian.org/debian lxc-create -n "$id" -t debian -- -r jessie
     fi
 
     # install iptables for traffic shaping in tests
