@@ -88,10 +88,10 @@ function start_all_boxes() {
         wait_host_is_up $i
 
         # add host key to vagrant's known_hosts keys
-        su vagrant -c "ssh-keygen -R $id"
+        su vagrant -c "ssh-keygen -R $i"
         ssh-keyscan -H $i >> ~vagrant/.ssh/known_hosts
 
-        container=/var/lib/lxc/$id
+        container=/var/lib/lxc/$i
 
         # add vagrant's private key to hosts' root account authorized keys
         sshdir=$container/rootfs/root/.ssh
