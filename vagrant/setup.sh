@@ -3,7 +3,7 @@
 # need to be run as sudo/root
 
 # basic packages
-apt-get install -y git
+apt-get install -y lxc bridge-utils libvirt-bin debootstrap clusterssh dnsmasq git
 
 # install java
 # from http://www.webupd8.org/2014/03/how-to-install-oracle-java-8-in-debian.html

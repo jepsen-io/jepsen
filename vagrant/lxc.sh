@@ -1,12 +1,28 @@
 #!/bin/bash
 # Setup lxc boxes to run tests
 
-dir=$(dirname $0)
+# TODO real function
+function update_etc_hosts() {
+    etchosts=$1
+    num=0
+    for i in n1 n2 n3 n4 n5; do
+        cat >> $etchosts <<EOF
+192.168.122.$((11 + $num)) $i $i.local
+EOF
+        num=$(($num + 1))
+    done
+}
 
-. $dir/functions.sh
-
-# basic packages
-apt-get install -y lxc bridge-utils libvirt-bin debootstrap clusterssh dnsmasq
+# Wait for some machine to be up and running
+# Up and running means we can ping the machine...
+function wait_host_is_up() {
+    echo -n "waiting for $1 to be up"
+    while ! ping -c 1 $1 > /dev/null 2>&1 ;do
+        echo -n .
+        sleep 1
+    done
+    echo 
+}
 
 echo "cgroup  /sys/fs/cgroup  cgroup  defaults  0   0" >> /etc/fstab
 mount /sys/fs/cgroup
@@ -85,6 +101,8 @@ function start_all_boxes() {
         cat ~vagrant/.ssh/id_rsa.pub > $container/rootfs/root/.ssh/authorized_keys
     done
 }
+
+update_etc_hosts /etc/hosts
 
 build_all_boxes
 start_all_boxes

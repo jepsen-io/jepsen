@@ -1,9 +1,6 @@
 #!/bin/bash
 # setup virtual network default for five hosts named n1 through n5
 
-dir=$(dirname $0)
-
-. $dir/functions.sh
 
 virsh net-destroy default
 virsh net-undefine default
@@ -42,4 +39,3 @@ else
     virsh net-start default
 fi
 
-update_etc_hosts /etc/hosts
