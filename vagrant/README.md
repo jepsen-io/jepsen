@@ -30,7 +30,7 @@ coffees, a working VM containing five configured LXC boxes configured for runnin
 
 * Ensure all tests for all systems run correctly
     * elasticsearch works fine
-    * etcd does not compile cleanly because of go compiler version not being correct
+    * etcd installation works fine but runner stays lock in the synchronization phase
 * Number and name of boxes should be parameterized
 * Provide the ability to build boxes using docker
 
