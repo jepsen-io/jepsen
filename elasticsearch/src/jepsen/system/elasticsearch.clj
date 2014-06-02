@@ -81,12 +81,6 @@
         (c/exec :rm :-rf "/var/lib/elasticsearch/elasticsearch"))
       (info node "elasticsearch nuked"))))
 
-(defmacro with-es
-  "Given a list of nodes, runs body with an elasticsearch client bound."
-  [client & body]
-  `(binding [es/*endpoint* ~client]
-     ~@body))
-
 (defn http-error
   "Takes an elastisch ExInfo exception and extracts the HTTP error response as
   a string."
@@ -114,12 +108,11 @@
           client (es/connect (str "http://" (name node) ":9200"))]
       ; Create index
       (try
-        (with-es client
-          (esi/create index-name
-                      :mappings {"number" {:properties
-                                           {:num {:type "integer"
-                                                  :store "yes"}}}}
-                      :settings {"index" {"refresh_interval" "1"}}))
+        (esi/create client index-name
+                    :mappings {"number" {:properties
+                                         {:num {:type "integer"
+                                                :store "yes"}}}}
+                    :settings {"index" {"refresh_interval" "1"}})
         (catch clojure.lang.ExceptionInfo e
           ; Is this seriously how you're supposed to do idempotent
           ; index creation? I've gotta be doing this wrong.
@@ -130,10 +123,9 @@
       (CreateSetClient. client)))
 
   (invoke! [this test op]
-    (with-es client
       (case (:f op)
         :add (timeout 5000 (assoc op :type :info :value :timed-out)
-                (let [r (esd/create index-name "number" {:num (:value op)})]
+                (let [r (esd/create client index-name "number" {:num (:value op)})]
                   (cond (esr/ok? r)
                         (assoc op :type :ok)
 
@@ -149,13 +141,13 @@
                 (Thread/sleep (* 200 1000))
                 (c/on-many (:nodes test) (wait 200 :green))
                 (info "Recovered; flushing index before read")
-                (esi/flush index-name)
+                (esi/flush client index-name)
                 (assoc op :type :ok
-                       :value (->> (all-results index-name "number")
+                       :value (->> (all-results client index-name "number")
                                    (map (comp :num :_source))
                                    (into (sorted-set))))
                 (catch RuntimeException e
-                  (assoc op :type :fail :value (.getMessage e)))))))
+                  (assoc op :type :fail :value (.getMessage e))))))
 
   (teardown! [_ test]
     (.close client)))
@@ -171,28 +163,26 @@
   (setup! [_ test node]
     (let [; client (es/connect [[(name node) 9300]])]
           client (es/connect (str "http://" (name node) ":9200"))]
-      (with-es client
         ; Create index
-        (try
-          (esi/create index-name
-                      :mappings {mapping-type {:properties {}}})
-          (catch clojure.lang.ExceptionInfo e
+      (try
+        (esi/create client index-name
+                    :mappings {mapping-type {:properties {}}})
+        (catch clojure.lang.ExceptionInfo e
             ; Is this seriously how you're supposed to do idempotent
             ; index creation? I've gotta be doing this wrong.
-            (let [err (http-error e)]
-              (when-not (re-find #"IndexAlreadyExistsException" err)
-                (throw (RuntimeException. err))))))
+          (let [err (http-error e)]
+            (when-not (re-find #"IndexAlreadyExistsException" err)
+              (throw (RuntimeException. err))))))
 
-        ; Initial empty set
-        (esd/create index-name mapping-type {:values []} :id doc-id))
+                                        ; Initial empty set
+      (esd/create client index-name mapping-type {:values []} :id doc-id)
 
       (CASSetClient. mapping-type doc-id client)))
 
   (invoke! [this test op]
-    (with-es client
-      (case (:f op)
+    (case (:f op)
         :add (timeout 5000 (assoc op :type :info :value :timed-out)
-                      (let [current (esd/get index-name mapping-type doc-id
+                      (let [current (esd/get client index-name mapping-type doc-id
                                                 :preference "_primary")]
                         (if-not (esr/found? current)
                           ; Can't write without a read
@@ -201,7 +191,7 @@
                           (let [version (:_version current)
                                 values  (-> current :_source :values)
                                 values' (vec (conj values (:value op)))
-                                r       (esd/put index-name mapping-type doc-id
+                                r       (esd/put client index-name mapping-type doc-id
                                                  {:values values'}
                                                  :version version)]
                             (cond ; lol esr/ok? actually means :found, and
@@ -221,13 +211,13 @@
                 (info "Waiting for recovery before read")
                 (c/on-many (:nodes test) (wait 200 :green))
                 (info "Recovered; flushing index before read")
-                (esi/flush index-name)
+                (esi/flush client index-name)
                 (assoc op :type :ok
-                       :value (->> (esd/get index-name mapping-type doc-id
+                       :value (->> (esd/get client index-name mapping-type doc-id
                                        :preference "_primary")
                                    :_source
                                    :values
-                                   (into (sorted-set))))))))
+                                   (into (sorted-set)))))))
 
   (teardown! [_ test]
     (.close client)))
