@@ -3,6 +3,7 @@
 # need to be run as sudo/root
 
 # basic packages
+apt-get update
 apt-get install -y lxc bridge-utils libvirt-bin debootstrap clusterssh dnsmasq git
 
 # install java
