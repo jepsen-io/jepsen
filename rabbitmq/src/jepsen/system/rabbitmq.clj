@@ -147,7 +147,7 @@
     (with-ch [ch conn]
       (case (:f op)
         :enqueue (do
-;                   (lco/select ch) ; Use confirmation tracking
+                   (lco/select ch) ; Use confirmation tracking
 
                    ; Empty string is the default exhange
                    (lb/publish ch "" queue
@@ -156,10 +156,9 @@
                                :persistent true)
 
                    ; Block until message acknowledged
-;                   (if (lco/wait-for-confirms ch 5000)
-;                     (assoc op :type :ok)
-;                     (assoc op :type :fail)))
-                   (assoc op :type :ok))
+                   (if (lco/wait-for-confirms ch 5000)
+                     (assoc op :type :ok)
+                     (assoc op :type :fail)))
 
         :dequeue (dequeue! ch op)
 
@@ -176,7 +175,7 @@
                                (log-op completion)
                                (core/conj-op! test op)))
                         dorun)
-                   (assoc op :type :info :value :exhausted))))))
+                   (assoc op :type :ok :value :exhausted))))))
 
 (defn queue-client [] (QueueClient. nil))
 
