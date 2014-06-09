@@ -28,3 +28,10 @@ For an overview of how a database test works, see
 ```
 lein with-profile +elasticsearch test jepsen.system.elasticsearch-test
 ```
+
+## License
+
+Copyright © 2014 Kyle Kingsbury
+
+Distributed under the Eclipse Public License either version 1.0 or (at
+your option) any later version.
