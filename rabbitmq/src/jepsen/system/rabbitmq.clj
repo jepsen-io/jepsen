@@ -79,7 +79,7 @@
                 (info node "Enabling mirroring")
                 (c/exec :rabbitmqctl :set_policy :ha-maj "jepsen."
                         "{\"ha-mode\": \"exactly\",
-                          \"ha-params\": 2,
+                          \"ha-params\": 3,
                           \"ha-sync-mode\": \"automatic\"}")
 
                 (info node "Rabbit ready")))))
@@ -152,8 +152,9 @@
                    ; Empty string is the default exhange
                    (lb/publish ch "" queue
                                (codec/encode (:value op))
-                               :content-type "application/edn"
-                               :persistent true)
+                               :content-type  "application/edn"
+                               :mandatory     true
+                               :persistent    true)
 
                    ; Block until message acknowledged
                    (if (lco/wait-for-confirms ch 5000)
