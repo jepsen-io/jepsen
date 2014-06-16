@@ -61,6 +61,11 @@
 
         (info node "configuring elasticsearch")
         (c/exec :echo
+                (-> "elasticsearch/default"
+                    io/resource
+                    slurp)
+                :> "/etc/default/elasticsearch")
+        (c/exec :echo
                 (-> "elasticsearch/elasticsearch.yml"
                     io/resource
                     slurp

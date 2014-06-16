@@ -60,7 +60,7 @@
                  :model     (model/set)
                  :checker   (checker/compose {:html timeline/html
                                               :set  checker/set})
-                 :nemesis   (nemesis/partitioner nemesis/bridge)
+                 :nemesis   (nemesis/partitioner nemesis/partition-random-halves)
                  :generator (gen/phases
                               (->> (range)
                                    (map (fn [x] {:type  :invoke

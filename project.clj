@@ -58,7 +58,7 @@
                        :source-paths ["datomic/src"]
                        :test-paths ["datomic/test"]}
              :elasticsearch {:dependencies
-                       [[clojurewerkz/elastisch "2.0.0-rc1"]]
+                       [[clojurewerkz/elastisch "2.0.0-rc2"]]
                              :source-paths ["elasticsearch/src"]
                              :test-paths ["elasticsearch/test"]}}
   :main jepsen.repl
