@@ -9,6 +9,8 @@
             [jepsen.db              :as db]
             [jepsen.os.debian       :as debian]
             [jepsen.util            :refer [meh timeout]]
+            [jepsen.nemesis         :as nemesis]
+            [clj-http.client        :as http]
             [clojurewerkz.elastisch.rest          :as es]
             [clojurewerkz.elastisch.rest.document :as esd]
             [clojurewerkz.elastisch.rest.index    :as esi]
@@ -31,6 +33,40 @@
           false
           (catch RuntimeException e true))
         (recur)))))
+
+(defn primaries
+  "Returns a map of nodes to the node that node thinks is the current primary,
+  as a map of keywords to keywords. Assumes elasticsearch node names are the
+  same as the provided node names."
+  [nodes]
+  (->> nodes
+       (pmap (fn [node]
+               (let [res (-> (str "http://" (name node) ":9200/_cluster/state")
+                             (http/get {:as :json-string-keys})
+                             :body)
+                     primary (get res "master_node")]
+                 [node
+                  (keyword (get-in res ["nodes" primary "name"]))])))
+       (into {})))
+
+(defn self-primaries
+  "A sequence of nodes which think they are primaries."
+  [nodes]
+  (->> nodes
+       primaries
+       (filter (partial apply =))
+       (map key)))
+
+(def isolate-self-primaries-nemesis
+  "A nemesis which completely isolates any node that thinks it is the primary."
+  (nemesis/partitioner
+    (fn [nodes]
+      (let [ps (self-primaries nodes)]
+        (nemesis/complete-grudge
+          ; All nodes that aren't self-primaries in one partition
+          (cons (remove (set ps) nodes)
+                ; Each self-primary in a different partition
+                (map list ps)))))))
 
 (def db
   (reify db/DB
@@ -69,6 +105,7 @@
                 (-> "elasticsearch/elasticsearch.yml"
                     io/resource
                     slurp
+                    (str/replace "$NAME"  (name node))
                     (str/replace "$HOSTS" (json/generate-string
                                             (vals (c/on-many (:nodes test)
                                                              (net/local-ip))))))
@@ -143,8 +180,9 @@
                 (info "Waiting for recovery before read")
                 ; Elasticsearch lies about cluster state during split brain
                 ; woooooooo
-                (Thread/sleep (* 200 1000))
-                (c/on-many (:nodes test) (wait 200 :green))
+                (c/on-many (:nodes test) (wait 1000 :green))
+                (info "Elasticsearch reports green, but it's probably lying, so waiting another 10s")
+                (Thread/sleep (* 10 1000))
                 (info "Recovered; flushing index before read")
                 (esi/flush client index-name)
                 (assoc op :type :ok

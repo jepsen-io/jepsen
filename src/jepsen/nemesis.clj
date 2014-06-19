@@ -92,3 +92,31 @@
   "Cuts the network into randomly chosen halves."
   []
   (partitioner (comp complete-grudge bisect shuffle)))
+
+(defn partition-random-node
+  "Isolates a single node from the rest of the network."
+  []
+  (partitioner (fn [nodes]
+                 (let [loner (rand-nth nodes)]
+                   (complete-grudge [[list loner] (remove loner nodes)])))))
+
+(defn set-time!
+  "Set the local node time in POSIX seconds."
+  [t]
+  (c/su (c/exec :date "+%s" :-s (long t))))
+
+(defn clock-scrambler
+  "Randomizes the system clock of all nodes within a dt-second window."
+  [dt]
+  (reify client/Client
+    (setup! [this test _]
+      this)
+
+    (invoke! [this test op]
+      (c/on-many (:nodes test)
+                 (set-time! (+ (/ (System/currentTimeMillis) 1000)
+                               (- (rand-int (* 2 dt)) dt)))))
+
+    (teardown! [this test]
+      (c/on-many (:nodes test)
+                 (set-time! (/ (System/currentTimeMillis) 1000))))))
