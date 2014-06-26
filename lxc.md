@@ -1,4 +1,5 @@
-How to set up nodes via LXC on Debian Testing:
+# How to set up nodes via LXC
+## Debian Testing:
 
 (refer to https://wiki.debian.org/LXC)
 
@@ -119,3 +120,21 @@ ff02::2   ip6-allrouters
 ```
 
 And that should mostly do it, I think.
+
+## Ubuntu 14.04 / trusty
+Follow generally the same steps as for Debian, but the process is easier. Reference: https://help.ubuntu.com/lts/serverguide/lxc.html
+* right after you have installed LXC, create or open /etc/lxm/dnsmasq.com and add the following contents:
+
+  ```
+dhcp-host=n1,10.0.3.101
+dhcp-host=n2,10.0.3.102
+dhcp-host=n3,10.0.3.103
+dhcp-host=n4,10.0.3.104
+dhcp-host=n5,10.0.3.105
+  ```
+  10.0.3.* is LXM's default network. If you want others, go for it but you'll have to change it in the main configuration for lxm as well.
+* you may not need to add cgroup to fstab and/or mount it. /sys/fs/cgroups may already be there.
+* Then, go and run the lxc-create command, but...
+* no need to edit /var/lib/lxc/*/config or set up a bridge, LXC does that for you.
+* Fire up the boxes (lxc-start -n n{1,2,3,4,5} -d) and you should be able to ssh right into them.
+* Follow the rest of the Debian tutorial, but make sure to use the correct ip addresses.
