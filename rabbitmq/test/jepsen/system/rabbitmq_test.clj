@@ -1,7 +1,7 @@
 (ns jepsen.system.rabbitmq-test
   (:use jepsen.system.rabbitmq
         jepsen.core
-        jepsen.core-test
+        jepsen.tests
         clojure.test
         clojure.pprint)
   (:require [clojure.string   :as str]
