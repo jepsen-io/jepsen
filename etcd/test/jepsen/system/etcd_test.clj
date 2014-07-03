@@ -1,7 +1,7 @@
 (ns jepsen.system.etcd-test
   (:use jepsen.system.etcd
         jepsen.core
-        jepsen.core-test
+        jepsen.tests
         clojure.test
         clojure.pprint)
   (:require [clojure.string   :as str]
