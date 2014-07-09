@@ -7,7 +7,7 @@
             [jepsen.util              :refer [meh timeout]]
             [jepsen.core              :as core]
             [jepsen.os.debian         :as debian]
-            [clj-http.client          :as http]
+            [cockroach.client         :as r]
             [cheshire.core            :as json]
             [slingshot.slingshot      :refer [try+]]))
 
@@ -48,7 +48,7 @@
                 (meh (c/exec "bin/godeb" :install)))
               ; This causes an error as rocksdb.h is not found, but
               ; that can safely be ignored.
-              (meh (c/exec env :go :get "./..."))
+              ; (meh (c/exec env :go :get "./..."))
               (info node "building cockroachdb")
               (c/exec env :make :build))
             (info node "initializing storage engines")
@@ -97,13 +97,15 @@
                  :info)]
       (try+
         (case (:f op)
-          :read (let [value (http/get (str base k))]
+          :read (let [value (r/read! base k)]
                   (assoc op :type :ok, :value value))
 
-          :write (let [res (http/post (str base k) { :body (str (:value op)) })]
+          :write (let [res (->> (:value op)
+                              (r/write! base k))]
                    (if (= (:status res) 200)
                     (assoc op :type :ok)
-                    (assoc op :type :fail, :value (:status res)))))
+                    (assoc op :type :fail, :value (:status res))))
+          :cas nil)
 
         (catch java.net.SocketTimeoutException e
           (assoc op :type fail, :value :timed-out)))))
@@ -114,3 +116,5 @@
   "A simple roach client for a single key"
   []
   (RoachClient. "cockroachdb" nil))
+
+
