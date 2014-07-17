@@ -1,7 +1,7 @@
 (ns jepsen.system.elasticsearch-test
   (:use jepsen.system.elasticsearch
         jepsen.core
-        jepsen.core-test
+        jepsen.tests
         clojure.test
         clojure.pprint)
   (:require [clojure.string   :as str]
