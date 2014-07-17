@@ -1,7 +1,7 @@
 (ns jepsen.system.datomic-test
   (:use jepsen.system.datomic
         jepsen.core
-        jepsen.core-test
+        jepsen.tests
         clojure.test
         clojure.pprint)
   (:require [clojure.string   :as str]
