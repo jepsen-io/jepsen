@@ -34,6 +34,12 @@
   [coll]
   (split-at (Math/floor (/ (count coll) 2)) coll))
 
+(defn split-one
+  "Split one node off from the rest"
+  [coll]
+  (let [loner (rand-nth coll)]
+    [[loner] (remove (fn [x] (= x loner)) coll)]))
+
 (defn complete-grudge
   "Takes a collection of components (collections of nodes), and computes a
   grudge such that no node can talk to any nodes outside its partition."
@@ -96,9 +102,8 @@
 (defn partition-random-node
   "Isolates a single node from the rest of the network."
   []
-  (partitioner (fn [nodes]
-                 (let [loner (rand-nth nodes)]
-                   (complete-grudge [[list loner] (remove loner nodes)])))))
+  (partitioner (comp complete-grudge split-one)))
+
 
 (defn set-time!
   "Set the local node time in POSIX seconds."
