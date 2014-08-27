@@ -181,8 +181,8 @@
                 ; Elasticsearch lies about cluster state during split brain
                 ; woooooooo
                 (c/on-many (:nodes test) (wait 1000 :green))
-                (info "Elasticsearch reports green, but it's probably lying, so waiting another 10s")
-                (Thread/sleep (* 10 1000))
+                (info "Elasticsearch reports green, but it's probably lying, so waiting another 200s")
+                (Thread/sleep (* 200 1000))
                 (info "Recovered; flushing index before read")
                 (esi/flush client index-name)
                 (assoc op :type :ok
