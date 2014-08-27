@@ -28,3 +28,16 @@ For an overview of how a database test works, see
 ```
 lein with-profile +elasticsearch test jepsen.system.elasticsearch-test
 ```
+
+## FAQ
+
+### JSCH auth errors
+
+You might be hitting a jsch bug which doesn't know how to read hashed
+known_hosts files; run
+
+```sh
+ssh-keyscan -t rsa n1
+```
+
+to get n1's hostkey, and drop that in your `~/.ssh/known_hosts`.
