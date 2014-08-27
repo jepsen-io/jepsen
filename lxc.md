@@ -101,6 +101,24 @@ Log into every box. LXC mentions the password at container creation; usually
 cssh n1 n2 n3 n4 n5
 ```
 
+Install some basic packages on each node
+
+```sh
+apt-get install sudo
+```
+
+Jepsen for lazy historical reasons (uggggh, I'm the worst maintainer) uses an
+`ubuntu` user by default. You can override this in tests, but for now...
+
+```sh
+adduser ubuntu
+visudo
+```
+
+```
+ubuntu ALL=NOPASSWD: ALL
+```
+
 Set up hostfiles on each box with hardcoded IP addresses
 
 
