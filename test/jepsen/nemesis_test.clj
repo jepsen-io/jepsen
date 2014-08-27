@@ -6,7 +6,7 @@
             [jepsen.control :as c]
             [jepsen.control.net :as net]
             [jepsen.util :refer [meh]]
-            [jepsen.core-test :refer [noop-test]]))
+            [jepsen.tests :refer [noop-test]]))
 
 (defn edges
   "A map of nodes to the set of nodes they can ping"
