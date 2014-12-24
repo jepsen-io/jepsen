@@ -131,6 +131,11 @@
        (map escape)
        (apply exec*)))
 
+(defn scp*
+  "Evaluates an SCP from the current host to the node."
+  [current-path node-path]
+  (ssh/scp-to *session* current-path node-path))
+
 (defn expand-path
   "Expands path relative to the current directory."
   [path]
