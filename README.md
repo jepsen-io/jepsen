@@ -19,7 +19,7 @@ in your test. The account you use on those boxes needs sudo access to set up
 DBs and run firewalls. Be advised that it's gonna run killall -9 on some
 processes, so you shouldn't, you know, point jepsen at your prod machines. See lxc.md for some of my notes on setting up LXC instances.
 
-Your local machine needs a JVM and leiningen installed.
+Your local machine needs a JVM and leiningen 2 installed.
 
 For an overview of how a database test works, see
 `elasticsearch/src/jepsen/system/elasticsearch.clj` and its corresponding test
