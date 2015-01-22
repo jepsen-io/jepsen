@@ -6,7 +6,7 @@
   (:require [jepsen.core-test :as core-test]
             [jepsen.core :as core]
             [multiset.core :as multiset]
-            [jepsen.tests :refer [noop-test]))
+            [jepsen.tests :refer [noop-test]]))
 
 (deftest roundtrip-test
   (delete! "store-test")
