@@ -1,7 +1,7 @@
 (ns jepsen.system.consul-test
   (:use jepsen.system.consul
         jepsen.core
-        jepsen.core-test
+        jepsen.tests
         clojure.test
         clojure.pprint)
   (:require [clojure.string   :as str]
@@ -24,10 +24,6 @@
                  :db        (db)
                  :client    (cas-client)
                  :model     (model/cas-register)
-                 :ssh       {:username "root"
-                             :private-key-path "~/.ssh/id_rsa"
-                             :strict-host-key-checking false
-                             }
                  :checker   (checker/compose {:html   timeline/html
                                               :linear checker/linearizable})
                  :nemesis   (nemesis/partition-random-halves)

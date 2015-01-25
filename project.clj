@@ -30,7 +30,12 @@
                   :exclusions [org.slf4j/slf4j-api
                                org.slf4j-log4j12
                                com.google.guava/guava]]]
-  :profiles {:riak {:dependencies
+  :profiles {:consul {:source-paths ["consul/src"]
+                      :test-paths   ["consul/test"]
+                      :dependencies [[cheshire "5.4.0"]
+                                     [clj-http "1.0.1"]
+                                     [base64-clj "0.1.1"]]}
+             :riak {:dependencies
                     [[com.basho.riak/riak-client "1.4.4"
                       :exclusions [com.fasterxml.jackson.core/jackson-core
                                    org.apache.httpcomponents/httpclient]]]
