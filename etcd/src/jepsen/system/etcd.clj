@@ -24,19 +24,19 @@
 (def log-file "/var/log/etcd.log")
 
 (defn peer-addr [node]
-  (str (net/ip node) ":2380"))
+  (str (name node) ":2380"))
 
 (defn addr [node]
-  (str (net/ip node) ":2380"))
+  (str (name node) ":2380"))
 
 (defn cluster-url [node]
-  (str "http://" (net/ip node) ":2380"))
+  (str "http://" (name node) ":2380"))
 
 (defn listen-client-url [node]
-  (str "http://" (net/ip node) ":2379"))
+  (str "http://" (name node) ":2379"))
 
 (defn cluster-info [node]
-  (str (name node) "=http://" (net/ip node) ":2380"))
+  (str (name node) "=http://" (name node) ":2380"))
 
 (defn peers
   "The command-line peer list for an etcd cluster."
