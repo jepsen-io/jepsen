@@ -1,0 +1,57 @@
+There are several changes I made in order to make the nuodb testing error-free and
+more comparable to what was done for postgres (at least in terms of the data model).
+
+-Connection Pooling: I've enabled connection pooling for korma. The old code would spin up
+many tens of thousands of connections when client requests would be retried. There's a
+mismatch here between how korma manages a 'database' (e.g. it assumes that it lives on a
+single host) and how nuodb brokers broker client connections. It turns out that just
+capping the connection pool at 200 per named host prevented korma from creating 15000+ 
+connections.
+
+-Using a table as a set rather than a JSON clob: I created an option -X insert that will
+make jepsen use the same data model as postgres, rather than the clob-as-set model that
+it was using before. This was done to make the nuodb and postgres tests more comparable,
+and it also allows for easier interrogation of the dataset via the nuosql command line
+tool (string manipulation in SQL can be very tedious, SELECT is more convenient).
+
+-Abstracting node names: n1, n2, n3, n4, n5 are now symbolic names that are bound to actual
+machine/vm names only in control/net.clj. I did most of my testing on actual hardware, whose
+names I couldn't change, so I figured I'd just parameterize everything by hostname.
+Unfortunately, I haven't found the time to either have them live in a configuration file or
+drill them through as command-line arguments (e.g. -n1 host1.foo.bar). There is now a map
+jepsen.control.net/Hosts-map, that will contain the mapping from symbolic name (e.g. :n1)
+to the actual node name. Note that I have not modified the test harnesses for systems other
+than nuodb and postgres, so it is likely that these changes will have to be made to support
+the other systems.
+
+-sudo username/password support: due to differences in the setup I was using, I found it
+convenient to drill username/password stuff through as command-line arguments. Now people
+don't have to edit the source to switch user identities for jepsening (useful when running
+on shared resources).
+
+-alternate port support, command-line flag to use a non-standard port.
+
+-added retry on disconnect for insert. NuoDB connections are more like a traditional DB 
+connection, than like a more RESTful fire-and-forget connection. Therefore, NuoDB recommends 
+that clients automatically reconnect through a broker if their connection was unexpectedly 
+severed.  When failure detection kicks in, it may chose to shutdown the minority partition(s), 
+which will close the client connections, so clients should reconnect in that case.
+
+
+NuoDB is organized somewhat differently from many of the other products jepsen investigated.
+At first, in NuoDB you provision a node by running a lightweight management agent on a machine.
+Management tools are used to start NuoDB processes on nodes that have been provisioned. NuoDB
+has separated durability from memory caching and transaction processing. The durability processes
+are called SMs (for storage managers) and the transaction processing processes are called TEs 
+(for transaction engines). However, it seems from the blog post that the way you tested the system
+was to run a TE and an SM on each machine. I tested changes to the jepsen code and NuoDB against
+that configuration. However, when running with 5 TEs and 5 SMs, one must set the commit protocol
+to be 'remote:3' meaning that a change is confirmed committed only when it has been made durable
+on at least 3 SMs. I did this because I assumed that jepsen was testing writes that could not be
+lost. NuoDB supports a configurable commit protocol, so that applications can make whatever
+durability/performance trade-offs they want. However, I assumed that the application writes that
+jepsen was simulating were of the 100% durable variety.
+
+These changes were tested primarily with NuoDB. I definitely did not test with
+redis, riak, or the rest so I can't state that the node name changes will work in those
+cases. However, I hope that the map will be easy enough to migrate towards.
