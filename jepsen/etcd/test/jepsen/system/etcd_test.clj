@@ -28,6 +28,7 @@
                                               :linear checker/linearizable})
                  :nemesis   (nemesis/partition-random-halves)
                  :generator (gen/phases
+                              (gen/delay 100)
                               (->> gen/cas
                                    (gen/delay 1)
                                    (gen/nemesis

@@ -25,6 +25,10 @@
   [s]
   (Literal. s))
 
+(def |
+  "A literal pipe character."
+  (lit "|"))
+
 (defn escape
   "Escapes a thing for the shell.
 

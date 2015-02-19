@@ -43,14 +43,32 @@
   (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))]
     (every? (installed pkgs) (map name pkgs))))
 
+(defn installed-version
+  "Given a package name, determines the installed version of that package, or
+  nil if it is not installed."
+  [pkg]
+  (->> (c/exec :apt-cache :policy (name pkg))
+       (re-find #"Installed: ([^\s]+)")
+       second))
+
 (defn install
-  "Ensure the given packages are installed."
+  "Ensure the given packages are installed. Can take a flat collection of
+  packages, passed as symbols, strings, or keywords, or, alternatively, a map
+  of packages to version strings."
   [pkgs]
-  (let [pkgs    (set (map name pkgs))
-        missing (set/difference pkgs (installed pkgs))]
-    (when-not (empty? missing)
-      (c/su
-        (apply c/exec :apt-get :install :-y missing)))))
+  (if (map? pkgs)
+    ; Install specific versions
+    (dorun
+      (for [[pkg version] pkgs]
+        (when (not= version (installed-version pkg))
+          (c/exec :apt-get :install :-y (str (name pkg) "=" version)))))
+
+    ; Install any version
+    (let [pkgs    (set (map name pkgs))
+          missing (set/difference pkgs (installed pkgs))]
+      (when-not (empty? missing)
+        (c/su
+          (apply c/exec :apt-get :install :-y missing))))))
 
 (def os
   (reify os/OS
@@ -67,8 +85,6 @@
                   :iptables
                   :logrotate]))
 
-      (meh (net/heal))
-
-      (info node "debian set up"))
+      (meh (net/heal)))
 
     (teardown! [_ test node])))
