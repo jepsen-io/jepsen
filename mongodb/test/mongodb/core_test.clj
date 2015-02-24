@@ -13,4 +13,6 @@
                     [report    :as report]]))
 
 (deftest document-cas-test
-  (jepsen/run! (m/document-cas-test)))
+  (let [test (jepsen/run! (m/document-cas-test))]
+    (is (:valid? (:results test)))
+    (-> test :results :linear report/linearizability)))
