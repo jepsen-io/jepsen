@@ -129,6 +129,14 @@
     ~@body
      (nanos->ms (- (System/nanoTime) t0#))))
 
+(defmacro unwrap-exception
+  "Catches exceptions from body and re-throws their causes. Useful when you
+  don't want the wrapper from, say, a future's exception handler."
+  [& body]
+  `(try ~@body
+        (catch Throwable t#
+          (throw (.getCause t#)))))
+
 (defmacro timeout
   "Times out body after n millis, returning timeout-val."
   [millis timeout-val & body]
@@ -136,7 +144,8 @@
          worker# (future
                    (deliver thread# (Thread/currentThread))
                    ~@body)
-         retval# (deref worker# ~millis ::timeout)]
+         retval# (unwrap-exception
+                   (deref worker# ~millis ::timeout))]
      (if (= retval# ::timeout)
        (do ; Can never remember which does which
            (.interrupt @thread#)
