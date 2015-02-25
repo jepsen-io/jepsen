@@ -141,11 +141,21 @@
   (try
     (admin-command! conn :replSetInitiate config)
     (catch ExceptionInfo e
-      ; Some of the time (but not all the time; why?) Mongo returns this error
-      ; from replsetinitiate, which is, as far as I can tell, not actually an
-      ; error (?)
-      (when-not (= "Received replSetInitiate - should come online shortly."
-                   (get-in (ex-data e) [:result "errmsg"]))
+      (condp re-find (get-in (ex-data e) [:result "errmsg"])
+        ; Some of the time (but not all the time; why?) Mongo returns this error
+        ; from replsetinitiate, which is, as far as I can tell, not actually an
+        ; error (?)
+        #"Received replSetInitiate - should come online shortly."
+        nil
+
+        ; This is a hint we should back off and retry; one of the nodes probably
+        ; isn't fully alive yet.
+        #"need all members up to initiate, not ok"
+        (do (info "not all members alive yet; retrying replica set initiate"
+            (Thread/sleep 1000)
+            (replica-set-initiate! conn config)))
+
+        ; Or by default re-throw
         (throw e)))))
 
 (defn replica-set-master?
@@ -385,7 +395,7 @@
   (DocumentCASClient. "jepsen"
                       "jepsen"
                       (ObjectId.)
-                      WriteConcern/JOURNAL_SAFE
+                      WriteConcern/MAJORITY
                       nil
                       nil))
 
@@ -404,11 +414,10 @@
                       (->> gen/cas
                            (gen/delay 1)
                            (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep 30)
-                                              {:type :info :f :start}
-                                              (gen/sleep 30)
-                                              {:type :info :f :stop}])))
-                           (gen/time-limit 30))
+                             (gen/seq (cycle [(gen/sleep 45)
+                                              {:type :info :f :stop}
+                                              {:type :info :f :start}])))
+                           (gen/time-limit 200))
                       (gen/nemesis
                         (gen/once {:type :info :f :stop}))
                       (gen/clients

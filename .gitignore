@@ -19,8 +19,8 @@ build
 /site
 site/**
 bench/**
-target/**
-checkouts/**
+*/target/**
+*/checkouts/**
 */store/**
 */timeline.html
 */resources/datomic/download-key
