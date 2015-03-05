@@ -145,7 +145,7 @@
         ; Some of the time (but not all the time; why?) Mongo returns this error
         ; from replsetinitiate, which is, as far as I can tell, not actually an
         ; error (?)
-        #"Received replSetInitiate - should come online shortly."
+        #"Received replSetInitiate - should come online shortly"
         nil
 
         ; This is a hint we should back off and retry; one of the nodes probably
@@ -213,9 +213,9 @@
 (def mongo-conn-opts
   "Connection options for Mongo."
   (mongo/mongo-options
-    {:max-wait-time   10000
+    {:max-wait-time   20000
      :connect-timeout 5000
-     :socket-timeout  5000}))  ; a buncha simple ops in mongo take 1000+ ms (!?)
+     :socket-timeout  10000})) ; a buncha simple ops in mongo take 1000+ ms (!?)
 
 (defn await-conn
   "Block until we can connect to the given node. Returns a connection to the
@@ -391,34 +391,42 @@
 
 (defn document-cas-client
   "A client which implements a register on top of an entire document."
-  []
+  [write-concern]
   (DocumentCASClient. "jepsen"
                       "jepsen"
                       (ObjectId.)
-                      WriteConcern/MAJORITY
+                      write-concern
                       nil
                       nil))
 
-(defn document-cas-test
-  "Document-level compare and set."
+(defn test-
+  "Constructs a test with the given name prefixed by 'mongodb ', merging any
+  given options."
+  [name opts]
+  (merge
+    (assoc tests/noop-test
+           :name      (str "mongodb " name)
+           :os        debian/os
+           :db        (db "2.6.7")
+           :model     (model/cas-register)
+           :checker   (checker/compose {:linear checker/linearizable})
+           :nemesis   (nemesis/partition-random-halves)
+           :generator (gen/phases
+                        (->> gen/cas
+                             (gen/delay 1)
+                             (gen/nemesis
+                               (gen/seq (cycle [(gen/sleep 45)
+                                                {:type :info :f :stop}
+                                                {:type :info :f :start}])))
+                             (gen/time-limit 200))
+                        (gen/nemesis
+                          (gen/once {:type :info :f :stop}))
+                        (gen/clients
+                          (gen/once {:type :invoke :f :read}))))
+    opts))
+
+(defn document-cas-majority-test
+  "Document-level compare and set with WriteConcern MAJORITY"
   []
-  (assoc tests/noop-test
-         :name      "mongodb document cas"
-         :os        debian/os
-         :db        (db "2.6.7")
-         :client    (document-cas-client)
-         :model     (model/cas-register)
-         :checker   (checker/compose {:linear checker/linearizable})
-         :nemesis   (nemesis/partition-random-halves)
-         :generator (gen/phases
-                      (->> gen/cas
-                           (gen/delay 1)
-                           (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep 45)
-                                              {:type :info :f :stop}
-                                              {:type :info :f :start}])))
-                           (gen/time-limit 200))
-                      (gen/nemesis
-                        (gen/once {:type :info :f :stop}))
-                      (gen/clients
-                        (gen/once {:type :invoke :f :read})))))
+  (test- "document cas majority"
+         {:client (document-cas-client WriteConcern/MAJORITY)}))

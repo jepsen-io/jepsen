@@ -13,8 +13,7 @@
                     [report    :as report]]))
 
 (deftest document-cas-test
-  (let [test (jepsen/run! (m/document-cas-test))]
+  (let [test (jepsen/run! (m/document-cas-majority-test))]
     (is (:valid? (:results test)))
     (println "history is")
-    (pprint (:history test))
     (-> test :results :linear report/linearizability)))
