@@ -409,6 +409,7 @@
            :os        debian/os
            :db        (db "2.6.7")
            :model     (model/cas-register)
+           :client    (document-cas-client WriteConcern/MAJORITY)
            :checker   (checker/compose {:linear checker/linearizable})
            :nemesis   (nemesis/partition-random-halves)
            :generator (gen/phases
@@ -430,3 +431,9 @@
   []
   (test- "document cas majority"
          {:client (document-cas-client WriteConcern/MAJORITY)}))
+
+(defn document-cas-no-read-majority-test
+  "Document-level compare and set with MAJORITY, excluding reads because mongo
+  doesn't have linearizable reads."
+  []
+  )
