@@ -1,6 +1,7 @@
 (ns mongodb.core-test
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer :all]
+            [clojure.java.io :as io]
             [mongodb.core :as m]
             [jepsen [core      :as jepsen]
                     [util      :as util]
@@ -15,5 +16,5 @@
 (deftest document-cas-test
   (let [test (jepsen/run! (m/document-cas-majority-test))]
     (is (:valid? (:results test)))
-    (println "history is")
-    (-> test :results :linear report/linearizability)))
+    (report/to "report/linearizability.txt"
+               (-> test :results :linear report/linearizability))))
