@@ -24,17 +24,26 @@
 (def log-file "/var/log/etcd.log")
 
 (defn peer-addr [node]
-  (str (name node) ":7001"))
+  (str (name node) ":2380"))
 
 (defn addr [node]
-  (str (name node) ":4001"))
+  (str (name node) ":2380"))
+
+(defn cluster-url [node]
+  (str "http://" (name node) ":2380"))
+
+(defn listen-client-url [node]
+  (str "http://" (name node) ":2379"))
+
+(defn cluster-info [node]
+  (str (name node) "=http://" (name node) ":2380"))
 
 (defn peers
   "The command-line peer list for an etcd cluster."
   [test]
   (->> test
        :nodes
-       (map peer-addr)
+       (map cluster-info)
        (str/join ",")))
 
 (defn running?
@@ -58,14 +67,14 @@
           :--exec           binary
           :--no-close
           :--
-          :-peer-addr       (peer-addr node)
-          :-addr            (addr node)
-          :-peer-bind-addr  "0.0.0.0:7001"
-          :-bind-addr       "0.0.0.0:4001"
           :-data-dir        data-dir
           :-name            (name node)
-          (when-not (= node (core/primary test))
-            [:-peers        (peers test)])
+          :-advertise-client-urls (cluster-url node)
+          :-listen-peer-urls (cluster-url node)
+          :-listen-client-urls (listen-client-url node)
+          :-initial-advertise-peer-urls (cluster-url node)
+          :-initial-cluster-state "new"
+          :-initial-cluster (peers test)
           :>>               log-file
           (c/lit "2>&1")))
 
@@ -127,7 +136,7 @@
             (swap! running assoc node (running?)))
 
           ; And spin some more until Raft is ready
-          (let [c (v/connect (str "http://" (name node) ":4001"))]
+          (let [c (v/connect (str "http://" (name node) ":2379"))]
             (while (try+ (v/reset! c :test "ok") false
                          (catch [:status 500] e true)
                          (catch [:status 307] e true))
@@ -144,7 +153,7 @@
 (defrecord CASClient [k client]
   client/Client
   (setup! [this test node]
-    (let [client (v/connect (str "http://" (name node) ":4001"))]
+    (let [client (v/connect (str "http://" (name node) ":2379"))]
       (v/reset! client k (json/generate-string nil))
       (assoc this :client client)))
 
