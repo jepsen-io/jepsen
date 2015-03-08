@@ -117,6 +117,7 @@ cssh n1 n2 n3 n4 n5
 Set up hostfiles on each box with hardcoded IP addresses
 
 ```
+127.0.0.1 localhost n1 n1.local
 ::1       localhost ip6-localhost ip6-loopback
 fe00::0   ip6-localnet
 ff00::0   ip6-mcastprefix
