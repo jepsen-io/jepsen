@@ -22,7 +22,15 @@
 
 (extend-protocol Generator
   Object
-  (op [this test process] this))
+  (op [this test process] this)
+
+  ; Fns can generate ops by being called with test and process, or with no args
+  clojure.lang.AFunction
+  (op [f test process]
+    (try
+      (f test process)
+      (catch clojure.lang.ArityException e
+        (f)))))
 
 (def ^:dynamic *threads*
   "The set of threads which will execute a particular generator. Used
@@ -125,6 +133,15 @@
        {:type :info :f :start}
        (sleep t2)
        {:type :info :f :stop}))
+
+(defn mix
+  "A random mixture of operations. Takes any number of generators and chooses
+  between them uniformly."
+  [& gens]
+  (let [gens (vec gens)]
+    (reify Generator
+      (op [_ test process]
+        (op (rand-nth gens) test process)))))
 
 (def cas
   "Random cas/read ops for a compare-and-set register over a small field of
