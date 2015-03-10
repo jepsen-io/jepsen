@@ -16,5 +16,7 @@
 (deftest document-cas-test
   (let [test (jepsen/run! (m/document-cas-majority-test))]
     (is (:valid? (:results test)))
+    (report/to "report/history.edn"
+               (pprint (:history test)))
     (report/to "report/linearizability.txt"
                (-> test :results :linear report/linearizability))))
