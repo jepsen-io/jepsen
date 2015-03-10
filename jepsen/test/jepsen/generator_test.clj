@@ -23,6 +23,13 @@
            dorun))
     @ops))
 
+(deftest object-as-generators
+  (is (= (gen/op 2 a-test 1) 2))
+  (is (= (gen/op {:foo 2} a-test 1) {:foo 2})))
+
+(deftest fns-as-generators
+  (is (= (gen/op (fn [a b] [a b]) :test :process) [:test :process])))
+
 (deftest seq-test
   (is (= (set (ops (:nodes a-test)
               (gen/seq (range 100)))))
