@@ -83,6 +83,7 @@
                   :curl
                   :unzip
                   :iptables
+                  :iputils-ping
                   :logrotate]))
 
       (meh (net/heal)))

@@ -7,6 +7,11 @@
             [clj-time.local :as time.local])
   (:import (java.util.concurrent.locks LockSupport)))
 
+(defn majority
+  "Given a number, returns the smallest integer strictly greater than half."
+  [n]
+  (inc (int (Math/floor (/ n 2)))))
+
 (defn fraction
   "a/b, but if b is zero, returns unity."
   [a b]
