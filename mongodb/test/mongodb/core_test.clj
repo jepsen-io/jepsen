@@ -13,10 +13,16 @@
                     [store     :as store]
                     [report    :as report]]))
 
-(deftest document-cas-test
-  (let [test (jepsen/run! (m/document-cas-no-read-majority-test))]
+(defn run!
+  [test]
+  (let [test (jepsen/run! test)]
     (is (:valid? (:results test)))
     (report/to "report/history.edn"
                (pprint (:history test)))
     (report/to "report/linearizability.txt"
                (-> test :results :linear report/linearizability))))
+
+(deftest document-cas-tests
+;  (run! (m/document-cas-no-read-majority-test))
+  (run! (m/document-cas-majority-test))
+  )

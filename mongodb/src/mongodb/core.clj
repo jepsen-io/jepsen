@@ -24,6 +24,7 @@
             [monger.core :as mongo]
             [monger.collection :as mc]
             [monger.result :as mr]
+            [monger.query :as mq]
             [monger.command]
             [monger.conversion :refer [from-db-object]])
   (:import (clojure.lang ExceptionInfo)
@@ -350,12 +351,12 @@
                  :info)]
       (try
         (case (:f op)
-          ; Note that find-by-id and find-map-by-id do NOT return wrapper
-          ; objects with :ok/:err fields, so we can't check if they're OK or
-          ; not, AUGH
-          ;
-          ; What do they return in an error? Do they throw?
-          :read (let [res (mc/find-map-by-id db coll id)]
+          ; :read (let [res (mc/find-map-by-id db coll id)]
+          :read (let [res (->> (mq/with-collection db coll
+                                 (mq/find {:_id id})
+                                 (mq/fields [:_id :value])
+                                 (mq/read-preference (ReadPreference/primary)))
+                               first)]
                   (assoc op :type :ok, :value (:value res)))
 
           :write (let [res (parse-result
@@ -426,7 +427,7 @@
                                (gen/seq (cycle [(gen/sleep 45)
                                                 {:type :info :f :stop}
                                                 {:type :info :f :start}])))
-                             (gen/time-limit 300))
+                             (gen/time-limit 600))
                         (gen/nemesis
                           (gen/once {:type :info :f :stop}))
                         (gen/clients
@@ -460,6 +461,6 @@
                               (gen/seq (cycle [(gen/sleep 45)
                                                {:type :info :f :stop}
                                                {:type :info :f :start}])))
-                            (gen/time-limit 200))
+                            (gen/time-limit 300))
                        (gen/nemesis
                          (gen/once {:type :info :f :stop})))}))
