@@ -135,9 +135,9 @@
        {:type :info :f :stop}))
 
 (defn mix
-  "A random mixture of operations. Takes any number of generators and chooses
+  "A random mixture of operations. Takes a collection of generators and chooses
   between them uniformly."
-  [& gens]
+  [gens]
   (let [gens (vec gens)]
     (reify Generator
       (op [_ test process]
