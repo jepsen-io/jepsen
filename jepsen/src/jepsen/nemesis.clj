@@ -104,6 +104,27 @@
   []
   (partitioner (comp complete-grudge split-one)))
 
+(defn majorities-ring
+  "A grudge in which every node can see a majority, but no node sees the *same*
+  majority as any other."
+  [nodes]
+  (let [U (set nodes)
+        n (count nodes)
+        m (util/majority n)]
+    (->> nodes
+         shuffle                ; randomize
+         cycle                  ; form a ring
+         (partition m 1)        ; construct majorities
+         (take n)               ; one per node
+         (map (fn [majority]    ; invert into connections to *drop*
+                [(first majority) (set/difference U (set majority))]))
+         (into {}))))
+
+(defn partition-majorities-ring
+  "Every node can see a majority, but no node sees the *same* majority as any
+  other. Randomly orders nodes into a ring."
+  []
+  (partitioner majorities-ring))
 
 (defn set-time!
   "Set the local node time in POSIX seconds."
