@@ -30,7 +30,9 @@
            (org.bson BasicBSONObject
                      BasicBSONDecoder)
            (org.bson.types ObjectId)
-           (com.mongodb DB WriteConcern)))
+           (com.mongodb DB
+                        WriteConcern
+                        ReadPreference)))
 
 (defn install!
   "Installs the given version of MongoDB."
@@ -382,6 +384,11 @@
         (catch com.mongodb.MongoServerSelectionException e
           (assoc op :type :fail :value :no-server))
 
+        (catch com.mongodb.CommandFailureException e
+          (if (= "not master" (.. e getCommandResult getErrorMessage))
+            (assoc op :type :fail :value :not-master)
+            (throw e)))
+
         ; Could be incomplete, but we always treat reads as failures
         (catch com.mongodb.MongoException$Network e
           (assoc op :type fail :value :network-error)))))
@@ -419,7 +426,7 @@
                                (gen/seq (cycle [(gen/sleep 45)
                                                 {:type :info :f :stop}
                                                 {:type :info :f :start}])))
-                             (gen/time-limit 200))
+                             (gen/time-limit 300))
                         (gen/nemesis
                           (gen/once {:type :info :f :stop}))
                         (gen/clients
@@ -432,8 +439,27 @@
   (test- "document cas majority"
          {:client (document-cas-client WriteConcern/MAJORITY)}))
 
+; Generators
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn r   [_ _] {:type :invoke, :f :read})
+(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
+
 (defn document-cas-no-read-majority-test
   "Document-level compare and set with MAJORITY, excluding reads because mongo
   doesn't have linearizable reads."
   []
-  )
+  (test- "document cas no-read majority"
+         {:client (document-cas-client WriteConcern/MAJORITY)
+          :generator (gen/phases
+                       ; Initial write
+                       (gen/clients (gen/once w))
+                       ; Mix of writes and CAS ops
+                       (->> (gen/mix [w cas cas])
+                            (gen/delay 1)
+                            (gen/nemesis
+                              (gen/seq (cycle [(gen/sleep 45)
+                                               {:type :info :f :stop}
+                                               {:type :info :f :start}])))
+                            (gen/time-limit 200))
+                       (gen/nemesis
+                         (gen/once {:type :info :f :stop})))}))
