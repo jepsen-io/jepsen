@@ -323,76 +323,88 @@
       (wipe! node))))
 ;      )))
 
-;; Document CAS
+(defn cluster-client
+  "Returns a mongoDB connection for all nodes in a test."
+  [test]
+  (mongo/connect (->> test :nodes (map name) (mapv mongo/server-address))
+                 mongo-conn-opts))
+
+(defn upsert
+  "Ensures the existence of the given document."
+  [db coll doc write-concern]
+  (assert (:_id doc))
+  (mc/upsert db coll
+             {:_id (:_id doc)}
+             doc
+             {:write-concern write-concern}))
+
+(defmacro with-errors
+  "Takes an invocation operation, the type of an error operation (:fail or
+  :info), and a body to evaluate. Catches MongoDB errors and maps them to
+  failure ops matching the invocation."
+  [op error-type & body]
+  `(let [error-type# ~error-type]
+     (try
+       ~@body
+       ; A server selection error means we never attempted the operation in
+       ; the first place, so we know it didn't take place.
+       (catch com.mongodb.MongoServerSelectionException e#
+         (assoc ~op :type :fail :value :no-server))
+
+       ; Command failures also did not take place.
+       (catch com.mongodb.CommandFailureException e#
+         (if (= "not master" (.. e# getCommandResult getErrorMessage))
+           (assoc ~op :type :fail :value :not-master)
+           (throw e#)))
+
+       ; A network error is indeterminate
+       (catch com.mongodb.MongoException$Network e#
+         (assoc ~op :type ~error-type :value :network-error)))))
+
+;; Document CAS ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord DocumentCASClient [db-name coll id write-concern conn db]
   client/Client
   (setup! [this test node]
-    ; Connect to entire replica set
-    (let [conn (mongo/connect (->> test
-                                   :nodes
-                                   (map name)
-                                   (mapv mongo/server-address))
-                              mongo-conn-opts)
+    (let [conn (cluster-client test)
           db   (mongo/get-db conn db-name)]
-
       ; Create document
-      (mc/upsert db coll
-                 {:_id id}
-                 {:_id id, :value nil}
-                 {:write-concern write-concern})
+      (upsert db coll {:_id id, :value nil} write-concern)
 
       (assoc this :conn conn, :db db)))
 
   (invoke! [this test op]
     ; Reads are idempotent; we can treat their failure as an info.
-    (let [fail (if (= :read (:f op))
-                 :fail
-                 :info)]
-      (try
-        (case (:f op)
-          ; :read (let [res (mc/find-map-by-id db coll id)]
-          :read (let [res (->> (mq/with-collection db coll
-                                 (mq/find {:_id id})
-                                 (mq/fields [:_id :value])
-                                 (mq/read-preference (ReadPreference/primary)))
-                               first)]
-                  (assoc op :type :ok, :value (:value res)))
+    (with-errors op (if (= :read (:f op)) :fail :info)
+      (case (:f op)
+        ; :read (let [res (mc/find-map-by-id db coll id)]
+        :read (let [res (->> (mq/with-collection db coll
+                               (mq/find {:_id id})
+                               (mq/fields [:_id :value])
+                               (mq/read-preference (ReadPreference/primary)))
+                             first)]
+                (assoc op :type :ok, :value (:value res)))
 
-          :write (let [res (parse-result
-                             (mc/update-by-id db coll id
-                                              {:_id id, :value (:value op)}
-                                              {:write-concern write-concern}))]
-                   (assert (= 1 (.getN res)))
-                   (assoc op :type :ok))
+        :write (let [res (parse-result
+                           (mc/update-by-id db coll id
+                                            {:_id id, :value (:value op)}
+                                            {:write-concern write-concern}))]
+                 (assert (= 1 (.getN res)))
+                 (assoc op :type :ok))
 
-          :cas   (let [[value value'] (:value op)
-                       res (parse-result
-                             (mc/update db coll
-                                        {:_id id, :value value}
-                                        {:_id id, :value value'}
-                                        {:write-concern write-concern}))]
-                   ; Check how many documents we actually modified...
-                   (condp = (.getN res)
-                     0 (assoc op :type :fail)
-                     1 (assoc op :type :ok)
-                     2 (throw (ex-info "CAS unexpected number of modified docs"
-                                       {:n (.getN res)
-                                        :res res})))))
-
-        ; A server selection error means we never attempted the operation in
-        ; the first place, so we know it didn't take place.
-        (catch com.mongodb.MongoServerSelectionException e
-          (assoc op :type :fail :value :no-server))
-
-        (catch com.mongodb.CommandFailureException e
-          (if (= "not master" (.. e getCommandResult getErrorMessage))
-            (assoc op :type :fail :value :not-master)
-            (throw e)))
-
-        ; Could be incomplete, but we always treat reads as failures
-        (catch com.mongodb.MongoException$Network e
-          (assoc op :type fail :value :network-error)))))
+        :cas   (let [[value value'] (:value op)
+                     res (parse-result
+                           (mc/update db coll
+                                      {:_id id, :value value}
+                                      {:_id id, :value value'}
+                                      {:write-concern write-concern}))]
+                 ; Check how many documents we actually modified...
+                 (condp = (.getN res)
+                   0 (assoc op :type :fail)
+                   1 (assoc op :type :ok)
+                   2 (throw (ex-info "CAS unexpected number of modified docs"
+                                     {:n (.getN res)
+                                      :res res})))))))
 
   (teardown! [_ test]
     (mongo/disconnect conn)))
@@ -407,6 +419,44 @@
                       nil
                       nil))
 
+;; Bank account transfers ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrecord TransferClient [db-name coll ids write-concern conn db]
+  client/Client
+  (setup! [this test node]
+    (let [conn (cluster-client test)
+         db     (mongo/get-db conn db-name)]
+      ; Create accounts
+      (doseq [id ids] (upsert db coll {:_id id :balance 10} write-concern))
+
+      (assoc this :conn conn, :db db))))
+
+; Generators
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn r   [_ _] {:type :invoke, :f :read})
+(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
+
+(defn std-gen
+  "Takes a client generator and wraps it in a typical schedule and nemesis
+  causing failover."
+  [gen]
+  (gen/phases
+    (->> gen
+         (gen/delay 1)
+         (gen/nemesis
+           (gen/seq (cycle [(gen/sleep 45)
+                            {:type :info :f :stop}
+                            {:type :info :f :start}])))
+         (gen/time-limit 90))
+    ; Recover
+    (gen/nemesis
+      (gen/once {:type :info :f :stop}))
+    ; Wait for resumption of normal ops
+    (gen/clients
+      (->> gen
+           (gen/delay 1)
+           (gen/time-limit 30)))))
+
 (defn test-
   "Constructs a test with the given name prefixed by 'mongodb ', merging any
   given options."
@@ -417,33 +467,16 @@
            :os        debian/os
            :db        (db "2.6.7")
            :model     (model/cas-register)
-           :client    (document-cas-client WriteConcern/MAJORITY)
            :checker   (checker/compose {:linear checker/linearizable})
-           :nemesis   (nemesis/partition-random-halves)
-           :generator (gen/phases
-                        (->> gen/cas
-                             (gen/delay 1)
-                             (gen/nemesis
-                               (gen/seq (cycle [(gen/sleep 45)
-                                                {:type :info :f :stop}
-                                                {:type :info :f :start}])))
-                             (gen/time-limit 600))
-                        (gen/nemesis
-                          (gen/once {:type :info :f :stop}))
-                        (gen/clients
-                          (gen/once {:type :invoke :f :read}))))
+           :nemesis   (nemesis/partition-random-halves))
     opts))
 
 (defn document-cas-majority-test
   "Document-level compare and set with WriteConcern MAJORITY"
   []
   (test- "document cas majority"
-         {:client (document-cas-client WriteConcern/MAJORITY)}))
-
-; Generators
-(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
-(defn r   [_ _] {:type :invoke, :f :read})
-(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
+         {:client (document-cas-client WriteConcern/MAJORITY)
+          :generator (std-gen (gen/mix [r w cas cas]))}))
 
 (defn document-cas-no-read-majority-test
   "Document-level compare and set with MAJORITY, excluding reads because mongo
@@ -451,16 +484,4 @@
   []
   (test- "document cas no-read majority"
          {:client (document-cas-client WriteConcern/MAJORITY)
-          :generator (gen/phases
-                       ; Initial write
-                       (gen/clients (gen/once w))
-                       ; Mix of writes and CAS ops
-                       (->> (gen/mix [w cas cas])
-                            (gen/delay 1)
-                            (gen/nemesis
-                              (gen/seq (cycle [(gen/sleep 45)
-                                               {:type :info :f :stop}
-                                               {:type :info :f :start}])))
-                            (gen/time-limit 300))
-                       (gen/nemesis
-                         (gen/once {:type :info :f :stop})))}))
+          :generator (std-gen (gen/mix [w cas cas]))}))
