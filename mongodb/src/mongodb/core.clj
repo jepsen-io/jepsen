@@ -26,6 +26,7 @@
             [monger.result :as mr]
             [monger.query :as mq]
             [monger.command]
+            [monger.operators :refer :all]
             [monger.conversion :refer [from-db-object]])
   (:import (clojure.lang ExceptionInfo)
            (org.bson BasicBSONObject
@@ -339,11 +340,14 @@
              {:write-concern write-concern}))
 
 (defmacro with-errors
-  "Takes an invocation operation, the type of an error operation (:fail or
-  :info), and a body to evaluate. Catches MongoDB errors and maps them to
-  failure ops matching the invocation."
-  [op error-type & body]
-  `(let [error-type# ~error-type]
+  "Takes an invocation operation, a set of idempotent operation functions which
+  can be safely assumed to fail without altering the model state, and a body to
+  evaluate. Catches MongoDB errors and maps them to failure ops matching the
+  invocation."
+  [op idempotent-ops & body]
+  `(let [error-type# (if (~idempotent-ops (:f ~op))
+                       :fail
+                       :info)]
      (try
        ~@body
        ; A server selection error means we never attempted the operation in
@@ -359,82 +363,7 @@
 
        ; A network error is indeterminate
        (catch com.mongodb.MongoException$Network e#
-         (assoc ~op :type ~error-type :value :network-error)))))
-
-;; Document CAS ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defrecord DocumentCASClient [db-name coll id write-concern conn db]
-  client/Client
-  (setup! [this test node]
-    (let [conn (cluster-client test)
-          db   (mongo/get-db conn db-name)]
-      ; Create document
-      (upsert db coll {:_id id, :value nil} write-concern)
-
-      (assoc this :conn conn, :db db)))
-
-  (invoke! [this test op]
-    ; Reads are idempotent; we can treat their failure as an info.
-    (with-errors op (if (= :read (:f op)) :fail :info)
-      (case (:f op)
-        ; :read (let [res (mc/find-map-by-id db coll id)]
-        :read (let [res (->> (mq/with-collection db coll
-                               (mq/find {:_id id})
-                               (mq/fields [:_id :value])
-                               (mq/read-preference (ReadPreference/primary)))
-                             first)]
-                (assoc op :type :ok, :value (:value res)))
-
-        :write (let [res (parse-result
-                           (mc/update-by-id db coll id
-                                            {:_id id, :value (:value op)}
-                                            {:write-concern write-concern}))]
-                 (assert (= 1 (.getN res)))
-                 (assoc op :type :ok))
-
-        :cas   (let [[value value'] (:value op)
-                     res (parse-result
-                           (mc/update db coll
-                                      {:_id id, :value value}
-                                      {:_id id, :value value'}
-                                      {:write-concern write-concern}))]
-                 ; Check how many documents we actually modified...
-                 (condp = (.getN res)
-                   0 (assoc op :type :fail)
-                   1 (assoc op :type :ok)
-                   2 (throw (ex-info "CAS unexpected number of modified docs"
-                                     {:n (.getN res)
-                                      :res res})))))))
-
-  (teardown! [_ test]
-    (mongo/disconnect conn)))
-
-(defn document-cas-client
-  "A client which implements a register on top of an entire document."
-  [write-concern]
-  (DocumentCASClient. "jepsen"
-                      "jepsen"
-                      (ObjectId.)
-                      write-concern
-                      nil
-                      nil))
-
-;; Bank account transfers ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defrecord TransferClient [db-name coll ids write-concern conn db]
-  client/Client
-  (setup! [this test node]
-    (let [conn (cluster-client test)
-         db     (mongo/get-db conn db-name)]
-      ; Create accounts
-      (doseq [id ids] (upsert db coll {:_id id :balance 10} write-concern))
-
-      (assoc this :conn conn, :db db))))
-
-; Generators
-(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
-(defn r   [_ _] {:type :invoke, :f :read})
-(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
+         (assoc ~op :type error-type# :value :network-error)))))
 
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
@@ -470,18 +399,3 @@
            :checker   (checker/compose {:linear checker/linearizable})
            :nemesis   (nemesis/partition-random-halves))
     opts))
-
-(defn document-cas-majority-test
-  "Document-level compare and set with WriteConcern MAJORITY"
-  []
-  (test- "document cas majority"
-         {:client (document-cas-client WriteConcern/MAJORITY)
-          :generator (std-gen (gen/mix [r w cas cas]))}))
-
-(defn document-cas-no-read-majority-test
-  "Document-level compare and set with MAJORITY, excluding reads because mongo
-  doesn't have linearizable reads."
-  []
-  (test- "document cas no-read majority"
-         {:client (document-cas-client WriteConcern/MAJORITY)
-          :generator (std-gen (gen/mix [w cas cas]))}))
