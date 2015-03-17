@@ -2,7 +2,9 @@
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer :all]
             [clojure.java.io :as io]
-            [mongodb.core :as m]
+            [mongodb [core :as m]
+                     [document-cas :as dc]
+                     [transfer :as t]]
             [jepsen [core      :as jepsen]
                     [util      :as util]
                     [checker   :as checker]
@@ -22,7 +24,6 @@
     (report/to "report/linearizability.txt"
                (-> test :results :linear report/linearizability))))
 
-(deftest document-cas-tests
-;  (run! (m/document-cas-no-read-majority-test))
-  (run! (m/document-cas-majority-test))
-  )
+(deftest document-cas-majority-test         (run! (dc/majority-test)))
+(deftest document-cas-no-read-majority-test (run! (dc/no-read-majority-test)))
+(deftest transfer-majority-test             (run! (t/majority-test)))
