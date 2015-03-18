@@ -1,6 +1,7 @@
 (ns mongodb.transfer
   "Simulates bank account transfers between N accounts, as per
   From http://docs.mongodb.org/manual/tutorial/perform-two-phase-commits/"
+  (:refer-clojure :exclude [read])
   (:require [clojure [pprint :refer :all]
                      [string :as str]]
             [clojure.java.io :as io]
@@ -43,14 +44,22 @@
   "Creates a new transaction in state PENDING and returns it. txn should be a
   map with :from, :to, and :amount keys."
   [db txns write-concern txn]
-  (parse-result
-    (mc/insert db txns
-               {:_id (ObjectId.)
-                :state "pending"
-                :from   (:from txn)
-                :to     (:to txn)
-                :amount (:amount txn)}
-               write-concern)))
+  (let [txn (from-db-object
+              (mc/insert-and-return db txns
+                                    {:_id (ObjectId.)
+                                     :state       "pending"
+                                     :from        (:from txn)
+                                     :to          (:to txn)
+                                     :amount      (:amount txn)}
+                                    write-concern)
+              true)]
+    ; jfc mongo error handling is incomprehensibly inconsistent
+    ; - What does insert-and-return return for failure?
+    ; - Why doesn't insert-and-return return something that responds to
+    ;   result/ok? for the successful case?
+    (assert (map? txn))
+    (assert (= #{:_id :state :from :to :amount} (set (keys txn))))
+    txn))
 
 (defn p1-find-txn
   "Finds a single transaction ID in the INITIAL state."
@@ -58,57 +67,60 @@
   (:_id (mc/find-one-as-map db txns {:state "initial"})))
 
 (defn p2-begin-txn
-  "Updates the given transaction id from initial to pending."
-  [db txns write-concern id]
+  "Updates the given transaction from initial to pending. Returns the
+  transaction."
+  [db txns write-concern txn]
   (parse-result
     (mc/update db txns
-               {:_id id, :state "initial"}
+               {:_id (:_id txn), :state "initial"}
                {$set           {:state "pending"}
                 "$currentDate" {:lastModified true}}
-               {:write-concern write-concern})))
+               {:write-concern write-concern})
+    txn))
 
 (defn p3-apply-txn
-  "Applies the given transaction to both accounts. Returns the transaction ID."
+  "Applies the given transaction to both accounts. Returns the transaction."
   [db accts write-concern txn]
   (parse-result
     (mc/update db accts
-               {:_id (:from txn), :pendingTransactions {$ne (:_id txn)}}
-               {$inc  {:balance (- (:value txn))}
-                $push {:pendingTransactions (:_id txn)}}
+               {:_id (:from txn), :pendingTxns {$ne (:_id txn)}}
+               {$inc  {:balance (- (:amount txn))}
+                $push {:pendingTxns (:_id txn)}}
                {:write-concern write-concern}))
   (parse-result
     (mc/update db accts
-               {:_id (:to txn), :pendingTransactions {$ne (:_id txn)}}
-               {$inc  {:balance (:value txn)}
-                $push {:pendingTransactions (:_id txn)}}
+               {:_id (:to txn), :pendingTxns {$ne (:_id txn)}}
+               {$inc  {:balance (:amount txn)}
+                $push {:pendingTxns (:_id txn)}}
                {:write-concern write-concern}))
-  (:_id txn))
+  txn)
 
 (defn p4-applied-txn
   "Mark the transaction as successfully applied. Returns the transaction."
-  [db txns write-concern id]
+  [db txns write-concern txn]
   (parse-result
     (mc/update db txns
-               {:_id id, :state "pending"}
+               {:_id (:_id txn), :state "pending"}
                {$set {:state "applied"}
                 "$currentDate" {:lastModified true}}
-               {:write-concern write-concern})))
+               {:write-concern write-concern}))
+  txn)
 
 (defn p5-clear-pending
   "Clear the given transaction from the relevant account pending txn lists.
-  Returns the transaction ID."
+  Returns the transaction."
   [db accts write-concern txn]
   (parse-result
     (mc/update db accts
-               {:_id (:from txn), :pendingTransactions (:_id txn)}
-               {$pull {:pendingTransactions (:_id txn)}}
+               {:_id (:from txn), :pendingTxns (:_id txn)}
+               {$pull {:pendingTxns (:_id txn)}}
                {:write-concern write-concern}))
   (parse-result
     (mc/update db accts
-               {:_id (:to txn), :pendingTransactions (:_id txn)}
-               {$pull {:pendingTransactions (:_id txn)}}
-               {:write-concern write-concern})
-    (:_id txn)))
+               {:_id (:to txn), :pendingTxns (:_id txn)}
+               {$pull {:pendingTxns (:_id txn)}}
+               {:write-concern write-concern}))
+  txn)
 
 (defn p6-finish-txn
   "Marks the transaction as complete."
@@ -125,21 +137,31 @@
   (setup! [this test node]
     (let [conn (cluster-client test)
          db     (mongo/get-db conn db-name)]
-      ; Create accounts 
+      ; Create accounts
       (doseq [id acct-ids]
-        (upsert db accts {:_id id :balance starting-balance} write-concern))
+        (upsert db accts {:_id          id
+                          :balance      starting-balance
+                          :pendingTxns  []}
+                write-concern))
       (assoc this :conn conn, :db db)))
 
   (invoke! [this test op]
     (with-errors op #{:read}
       (case (:f op)
-        :read (let [res (->> (mq/with-collection db accts
-                               (mq/find {})
-                               (mq/fields [:_id :balance])
-                               (mq/read-preference (ReadPreference/primary)))
-                             (map (juxt :_id :balance))
-                             (into {}))]
-                (assoc op :type :ok, :value res))
+        :read (->> (mq/with-collection db accts
+                     (mq/find {})
+                     (mq/fields [:_id :balance])
+                     (mq/read-preference (ReadPreference/primary)))
+                   (map (juxt :_id :balance))
+                   (into {})
+                   (assoc op :type :ok, :value))
+
+        :partial-read (->> (mq/with-collection db accts
+                             (mq/find {:pendingTxns {$size 0}})
+                             (mq/read-preference (ReadPreference/primary)))
+                           (map (juxt :_id :balance))
+                           (into {})
+                           (assoc op :type :ok, :value))
 
         :transfer (do (->> (:value op)
                            (p0-create-txn    db txns  write-concern)
@@ -153,7 +175,8 @@
     (mongo/disconnect conn)))
 
 (defn client
-  "A client which transfers balances between a pool of n accounts."
+  "A client which transfers balances between a pool of n accounts, each
+  beginning with starting-balance."
   [n starting-balance write-concern]
   (Client. "jepsen"
            "txns"
@@ -164,26 +187,40 @@
            nil
            nil))
 
+(defrecord Accounts [accts]
+  Model
+  (step [m op]
+    (let [value (:value op)]
+      (condp = (:f op)
+        :read (if (= accts value)
+                m
+                (knossos/inconsistent
+                  (str "Can't read " value " from " accts)))
+
+        :partial-read (if (every? true?
+                                  (for [[acct-id balance] value]
+                                    (= balance (get accts acct-id))))
+                        m
+                        (knossos/inconsistent
+                          (str value " isn't consistent with " accts)))
+
+        :transfer (let [{:keys [from to amount]} value]
+                    (Accounts.
+                      (assoc accts
+                             from (- (get accts from) amount)
+                             to   (+ (get accts to)   amount))))))))
+
 (defn account-model
   "Given a map of account IDs to balances, models transfers between those
   accounts."
   [accts]
-  (reify Model
-    (step [m op]
-      (condp = (:f op)
-        :read (if (= accts (:value op))
-                m
-                (knossos/inconsistent
-                  (str "Can't read " (:value op) " from " accts)))
-        :transfer (let [{:keys [from to amount]} (:value op)]
-                    (account-model
-                      (assoc accts
-                             from (- (get accts from) amount)
-                             to   (+ (get accts to) amount))))))))
+  (Accounts. accts))
 
 ; Generators
-(defn r [_ _] {:type :invoke, :f :read})
-(defn t [test process]
+(defn read         [_ _] {:type :invoke, :f :read})
+(defn partial-read [_ _] {:type :invoke, :f :partial-read})
+(defn transfer
+  [test process]
   (let [acct-ids (-> test :client :acct-ids)]
     {:type  :invoke
      :f     :transfer
@@ -191,16 +228,31 @@
              :to     (rand-nth acct-ids)
              :amount (rand-int 5)}}))
 
-(defn majority-test
-  "Transfer with n (default 2) accounts and MAJORITY, excluding reads because
-  mongo doesn't have linearizable reads."
-  ([] (majority-test 2))
-  ([n]
-   (let [starting-balance 10]
-     (test- "transfer majority"
-            {:client    (client n WriteConcern/MAJORITY)
-             :model     (account-model (->> starting-balance
-                                            (repeat n)
-                                            (map-indexed vector)
-                                            (into {})))
-             :generator (std-gen (gen/mix [r t]))}))))
+; Tests
+(defn basic-read-test
+  "Transfer with 2 accounts and MAJORITY write concern, with a
+  mixture of simple reads and transfers."
+  []
+  (let [n                2
+        starting-balance 10]
+    (test- "transfer majority"
+           {:client    (client n starting-balance WriteConcern/MAJORITY)
+            :model     (account-model (->> starting-balance
+                                           (repeat n)
+                                           (map-indexed vector)
+                                           (into {})))
+            :generator (std-gen (gen/mix [read transfer]))})))
+
+(defn partial-read-test
+  "Transfer with 2 accounts and MAJORITY write concern, where reads
+  can only take place on records which don't have any pending transactions."
+  []
+  (let [n                 2
+        starting-balance  10]
+    (test- "transfer majority"
+           {:client    (client n starting-balance WriteConcern/MAJORITY)
+            :model     (account-model (->> starting-balance
+                                           (repeat n)
+                                           (map-indexed vector)
+                                           (into {})))
+            :generator (std-gen (gen/mix [partial-read transfer]))})))
