@@ -2,6 +2,7 @@
   "Persistent storage for test runs and later analysis."
   (:refer-clojure :exclude [load])
   (:require [clojure.data.fressian :as fress]
+            [clojure.pprint :refer [pprint]]
             [clojure.java.io :as io]
             [clj-time.core :as time]
             [clj-time.local :as time.local]

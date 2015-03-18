@@ -376,7 +376,7 @@
            (gen/seq (cycle [(gen/sleep 45)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 90))
+         (gen/time-limit 10))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -384,7 +384,7 @@
     (gen/clients
       (->> gen
            (gen/delay 1)
-           (gen/time-limit 30)))))
+           (gen/time-limit 5)))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'mongodb ', merging any
