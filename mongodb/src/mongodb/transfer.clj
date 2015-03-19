@@ -191,24 +191,28 @@
   Model
   (step [m op]
     (let [value (:value op)]
-      (condp = (:f op)
-        :read (if (= accts value)
-                m
-                (knossos/inconsistent
-                  (str "Can't read " value " from " accts)))
+      (try
+        (condp = (:f op)
+          :read (if (= accts value)
+                  m
+                  (knossos/inconsistent
+                    (str "Can't read " value " from " accts)))
 
-        :partial-read (if (every? true?
-                                  (for [[acct-id balance] value]
-                                    (= balance (get accts acct-id))))
-                        m
-                        (knossos/inconsistent
-                          (str value " isn't consistent with " accts)))
+          :partial-read (if (every? true?
+                                    (for [[acct-id balance] value]
+                                      (= balance (get accts acct-id))))
+                          m
+                          (knossos/inconsistent
+                            (str value " isn't consistent with " accts)))
 
-        :transfer (let [{:keys [from to amount]} value]
-                    (Accounts.
-                      (assoc accts
-                             from (- (get accts from) amount)
-                             to   (+ (get accts to)   amount))))))))
+          :transfer (let [{:keys [from to amount]} value]
+                      (Accounts.
+                        (assoc accts
+                               from (- (get accts from) amount)
+                               to   (+ (get accts to)   amount)))))
+        (catch Throwable t
+          (warn "Account model error:" :accts accts :op op)
+          (throw t))))))
 
 (defn account-model
   "Given a map of account IDs to balances, models transfers between those
@@ -217,9 +221,18 @@
   (Accounts. accts))
 
 ; Generators
-(defn read         [_ _] {:type :invoke, :f :read})
-(defn partial-read [_ _] {:type :invoke, :f :partial-read})
+(defn read
+  "Reads the current state of all accounts without any synchronization."
+  [_ _]
+  {:type :invoke, :f :read})
+
+(defn partial-read
+  "Reads the state of all accounts without a transaction in progress."
+  [_ _]
+  {:type :invoke, :f :partial-read})
+
 (defn transfer
+  "Transfers a random amount between two randomly selected accounts."
   [test process]
   (let [acct-ids (-> test :client :acct-ids)]
     {:type  :invoke
@@ -228,31 +241,41 @@
              :to     (rand-nth acct-ids)
              :amount (rand-int 5)}}))
 
+(def diff-transfer
+  "Like transfer, but only transfers between *different* accounts."
+  (gen/filter (fn [op] (not= (-> op :value :from)
+                             (-> op :value :to)))
+              transfer))
+
+(defn transfer-test
+  "Generic transfer test"
+  [name opts]
+  (let [n                 3
+        starting-balance  10]
+    (test- (str "transfer " name)
+           (merge {:client (client n starting-balance WriteConcern/MAJORITY)
+                   :model  (account-model (->> starting-balance
+                                               (repeat n)
+                                               (map-indexed vector)
+                                               (into {})))}
+                  opts))))
+
 ; Tests
 (defn basic-read-test
-  "Transfer with 2 accounts and MAJORITY write concern, with a
-  mixture of simple reads and transfers."
+  "Transfer test with a mix of simple reads and transfers."
   []
-  (let [n                2
-        starting-balance 10]
-    (test- "transfer majority"
-           {:client    (client n starting-balance WriteConcern/MAJORITY)
-            :model     (account-model (->> starting-balance
-                                           (repeat n)
-                                           (map-indexed vector)
-                                           (into {})))
-            :generator (std-gen (gen/mix [read transfer]))})))
+  (transfer-test "basic read"
+                 {:generator (std-gen (gen/mix [read transfer]))}))
 
 (defn partial-read-test
-  "Transfer with 2 accounts and MAJORITY write concern, where reads
-  can only take place on records which don't have any pending transactions."
+  "Reads can only take place on records which don't have any pending
+  transactions."
   []
-  (let [n                 2
-        starting-balance  10]
-    (test- "transfer majority"
-           {:client    (client n starting-balance WriteConcern/MAJORITY)
-            :model     (account-model (->> starting-balance
-                                           (repeat n)
-                                           (map-indexed vector)
-                                           (into {})))
-            :generator (std-gen (gen/mix [partial-read transfer]))})))
+  (transfer-test "partial read"
+                 {:generator (std-gen (gen/mix [partial-read transfer]))}))
+
+(defn diff-account-test
+  "Partial reads and only different-account transfers."
+  []
+  (transfer-test "diff account"
+                 {:generator (std-gen (gen/mix [partial-read diff-transfer]))}))

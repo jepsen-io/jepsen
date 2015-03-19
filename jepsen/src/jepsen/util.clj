@@ -31,7 +31,9 @@
   (str (:process op)         \tab
        (:type op)            \tab
        (pr-str (:f op))      \tab
-       (pr-str (:value op))))
+       (pr-str (:value op))
+       (when-let [err (:error op)]
+         (str \tab err))))
 
 (defn print-history
   "Prints a history to the console."
