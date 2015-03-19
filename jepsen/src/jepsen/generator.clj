@@ -10,7 +10,7 @@
   Every object may act as a generator, and constantly yields itself.
 
   Big ol box of monads, really."
-  (:refer-clojure :exclude [concat delay seq])
+  (:refer-clojure :exclude [concat delay seq filter])
   (:require [jepsen.util :as util]
             [clojure.core :as c]
             [clojure.tools.logging :refer [info]])
@@ -210,6 +210,18 @@
         (when (<= (util/linear-time-nanos) @t)
           (op source test process))))))
 
+(defn filter
+  "Takes a generator and yields a generator which emits only operations
+  satisfying `(f op)`."
+  [f gen]
+  (reify Generator
+    (op [_ test process]
+      (loop []
+        (when-let [op' (op gen test process)]
+          (if (f op')
+            op'
+            (recur)))))))
+
 (defn on
   [f source]
   "Forwards operations to source generator iff (f process) is true. Rebinds
@@ -217,7 +229,7 @@
   (reify Generator
     (op [gen test process]
       (when (f process)
-        (binding [*threads* (filter f *threads*)]
+        (binding [*threads* (c/filter f *threads*)]
           (op source test process))))))
 
 (defn concat

@@ -353,17 +353,17 @@
        ; A server selection error means we never attempted the operation in
        ; the first place, so we know it didn't take place.
        (catch com.mongodb.MongoServerSelectionException e#
-         (assoc ~op :type :fail :value :no-server))
+         (assoc ~op :type :fail :error :no-server))
 
        ; Command failures also did not take place.
        (catch com.mongodb.CommandFailureException e#
          (if (= "not master" (.. e# getCommandResult getErrorMessage))
-           (assoc ~op :type :fail :value :not-master)
+           (assoc ~op :type :fail :error :not-master)
            (throw e#)))
 
        ; A network error is indeterminate
        (catch com.mongodb.MongoException$Network e#
-         (assoc ~op :type error-type# :value :network-error)))))
+         (assoc ~op :type error-type# :error :network-error)))))
 
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
@@ -376,7 +376,7 @@
            (gen/seq (cycle [(gen/sleep 45)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 10))
+         (gen/time-limit 360))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -384,7 +384,7 @@
     (gen/clients
       (->> gen
            (gen/delay 1)
-           (gen/time-limit 5)))))
+           (gen/time-limit 30)))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'mongodb ', merging any
