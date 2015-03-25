@@ -253,7 +253,7 @@
   (let [n                 3
         starting-balance  10]
     (test- (str "transfer " name)
-           (merge {:client (client n starting-balance WriteConcern/MAJORITY)
+           (merge {:client (client n starting-balance WriteConcern/JOURNAL_SAFE)
                    :model  (account-model (->> starting-balance
                                                (repeat n)
                                                (map-indexed vector)
