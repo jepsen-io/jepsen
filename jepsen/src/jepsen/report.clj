@@ -24,15 +24,16 @@
     (do
       (println "Not linearizable. Linearizable prefix was:")
       (->> res :linearizable-prefix util/print-history)
-
       (println)
+
       (println "Followed by inconsistent operation:")
       (println (util/op->str (:inconsistent-op res)))
+      (println)
 
       (println "Causing inconsistent state transitions:")
       (pprint (distinct (map :error (:causes res))))
-
       (println)
+
       (println "-------------------------------------------------------------")
       (println "Just prior to that operation, possible interpretations of the")
       (println "linearizable prefix were:")
@@ -40,14 +41,18 @@
         (println "World with fixed history:")
         (util/print-history (:fixed world))
         (println)
+
         (println "with pending operations:")
         (util/print-history (:pending world))
         (println)
+
         (println "led to state:")
         (pprint (:model world))
         (println)
+
         (println "but applying" op)
         (println)
+
         (println "failed:" error)
         (println))
       (let [c (count (:causes res))]
