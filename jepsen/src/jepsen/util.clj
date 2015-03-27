@@ -210,3 +210,15 @@
        (.. Thread currentThread (setName (name ~thread-name)))
        ~@body
        (finally (.. Thread currentThread (setName old-name#))))))
+
+(defn maybe-number
+  "Tries reading a string as a long, then double, then string. Passes through
+  nil. Useful for getting nice values out of stats APIs that just dump a bunch
+  of heterogenously-typed strings at you."
+  [s]
+  (when s
+    (try (Long/parseLong s)
+         (catch java.lang.NumberFormatException e
+           (try (Double/parseDouble s)
+                (catch java.lang.NumberFormatException e
+                  s))))))
