@@ -17,7 +17,7 @@
                      str/split-lines
                      (map (fn [line]
                             (if (re-find #"^127\.0\.0\.1\tlocalhost$" line)
-                              (str "127.0.0.1\tlocalhost " name)
+                              (str "127.0.0.1\tlocalhost") ; name)
                               line)))
                      (str/join "\n"))]
     (when-not (= hosts hosts')
@@ -35,6 +35,13 @@
          (filter #(= "install" (second %)))
          (map first)
          set)))
+
+(defn uninstall!
+  "Removes a package or packages."
+  [pkg-or-pkgs]
+  (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))
+        pkgs (installed pkgs)]
+    (c/su (apply c/exec :apt-get :remove :-y pkgs))))
 
 (defn installed?
   "Are the given debian packages, or singular package, installed on the current
