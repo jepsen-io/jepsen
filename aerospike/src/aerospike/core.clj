@@ -32,83 +32,6 @@
            (com.aerospike.client.policy Policy
                                         WritePolicy)))
 
-
-(defn install!
-  "Installs aerospike on the given node."
-  [node version]
-  (when-not (= (str version "-1")
-               (debian/installed-version "aerospike-server-community"))
-               ; lol they don't package the same version of the tools
-               ; (debian/installed-version "aerospike-tools"))
-    (debian/install ["python"])
-    (c/su
-      (debian/uninstall! ["aerospike-server-community" "aerospike-tools"])
-      (info node "installing aerospike" version)
-      (c/cd "/tmp"
-            (c/exec :wget :-O "aerospike.tgz"
-                    (str "http://www.aerospike.com/download/server/" version
-                         "/artifact/debian7"))
-            (c/exec :tar :xvfz "aerospike.tgz"))
-      (c/cd (str "/tmp/aerospike-server-community-" version "-debian7")
-            (c/exec :dpkg :-i (c/lit "aerospike-server-community-*.deb"))
-            (c/exec :dpkg :-i (c/lit "aerospike-tools-*.deb"))))))
-
-(defn configure!
-  "Uploads configuration files to the given node."
-  [node]
-  (c/su
-    ; Config file
-    (c/exec :echo (-> "aerospike.conf" io/resource slurp)
-            :> "/etc/aerospike/aerospike.conf")))
-
-(defn dun!
-  "DUN DUN DUUUNNNNNN"
-  [nodes]
-  (c/su (c/exec :asinfo :-v "dun:nodes=" (str/join "," nodes))))
-
-(defn start!
-  "Starts aerospike."
-  [node]
-  (info node "starting aerospike")
-  (c/su
-    (c/exec :service :aerospike :start)
-
-    ; Enable auto-dunning as per
-    ; http://www.aerospike.com/docs/operations/troubleshoot/cluster/
-    ; This doesn't seem to actually do anything but ???
-    (c/exec :asinfo :-v
-      "config-set:context=service;paxos-recovery-policy=auto-dun-master"))
-
-(defn stop!
-  "Stops aerospike."
-  [node]
-  (info node "stopping aerospike")
-  (c/su
-    (meh (c/exec :service :aerospike :stop))
-    (meh (c/exec :killall :-9 :asd))))
-
-(defn wipe!
-  "Shuts down the server and wipes data."
-  [node]
-  (stop! node)
-  (info node "deleting data files")
-  (c/su
-    (doseq [dir ["data" "smd" "udf"]]
-      (c/exec :truncate :--size 0 "/var/log/aerospike/aerospike.log")
-      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
-
-(defn db [version]
-  "Aerospike for a particular version."
-  (reify db/DB
-    (setup! [_ test node]
-      (doto node
-        (install! version)
-        (configure!)
-        (start!)))
-
-    (teardown! [_ test node]
-      (wipe! node))))
-
 (defn nodes
   "Nodes known to a client."
   [^AerospikeClient client]
@@ -149,23 +72,127 @@
     (while (not (.isConnected client))
       (Thread/sleep 10))
     ; Wait for workable ops
-    (while (try (info node (with-out-str (pprint (server-info (first (nodes client))))))
+    (while (try (server-info (first (nodes client)))
                 false
                 (catch AerospikeException$Timeout e
                   true))
       (Thread/sleep 10))
     ; Wait more
-    (Thread/sleep 100000)
     client))
 
-(def write-policy
+(defn all-node-ids
+  "Given a test, finds the sorted list of node IDs across the cluster."
+  [test]
+  (->> test
+       :nodes
+       (pmap (fn [node]
+               (with-open [c (connect node)]
+                 (vec (.getNodeNames c)))))
+       flatten
+       sort))
+
+(defn install!
+  "Installs aerospike on the given node."
+  [node version]
+  (when-not (= (str version "-1")
+               (debian/installed-version "aerospike-server-community"))
+               ; lol they don't package the same version of the tools
+               ; (debian/installed-version "aerospike-tools"))
+    (debian/install ["python"])
+    (c/su
+      (debian/uninstall! ["aerospike-server-community" "aerospike-tools"])
+      (info node "installing aerospike" version)
+      (c/cd "/tmp"
+            (c/exec :wget :-O "aerospike.tgz"
+                    (str "http://www.aerospike.com/download/server/" version
+                         "/artifact/debian7"))
+            (c/exec :tar :xvfz "aerospike.tgz"))
+      (c/cd (str "/tmp/aerospike-server-community-" version "-debian7")
+            (c/exec :dpkg :-i (c/lit "aerospike-server-community-*.deb"))
+            (c/exec :dpkg :-i (c/lit "aerospike-tools-*.deb"))))))
+
+(defn configure!
+  "Uploads configuration files to the given node."
+  [node test]
+  (c/su
+    ; Config file
+    (c/exec :echo (-> "aerospike.conf"
+                      io/resource
+                      slurp
+                      (str/replace "$NODE_ADDRESS" (net/local-ip))
+                      (str/replace "$MESH_ADDRESS"
+                                   (net/ip (jepsen/primary test))))
+            :> "/etc/aerospike/aerospike.conf")))
+
+(defn dun!
+  "DUN DUN DUUUNNNNNN"
+  [nodes]
+  (c/su (c/exec :asinfo :-v (str "dun:nodes=" (str/join "," nodes)))))
+
+(defn start!
+  "Starts aerospike."
+  [node test]
+  (info node "starting aerospike")
+  (c/su
+    (c/exec :service :aerospike :start)
+
+    ; Enable auto-dunning as per
+    ; http://www.aerospike.com/docs/operations/troubleshoot/cluster/
+    ; This doesn't seem to actually do anything but ???
+    (c/exec :asinfo :-v
+      "config-set:context=service;paxos-recovery-policy=auto-dun-master")))
+
+;    (info node "waiting to dun")
+;    (Thread/sleep 10000)
+;    (let [nodes (all-node-ids test)]
+;      (info node "dunning" nodes)
+;      (dun! nodes))))
+
+    ; Try mtendjou's suggestion from
+    ; https://gist.github.com/aphyr/eba17ae87b16484621d1
+;    (c/exec :asadm :-e "cluster dun all")
+;    (Thread/sleep 20000)
+;    (c/exec :asadm :-e "cluster undun all")))
+
+(defn stop!
+  "Stops aerospike."
+  [node]
+  (info node "stopping aerospike")
+  (c/su
+    (meh (c/exec :service :aerospike :stop))
+    (meh (c/exec :killall :-9 :asd))))
+
+(defn wipe!
+  "Shuts down the server and wipes data."
+  [node]
+  (stop! node)
+  (info node "deleting data files")
+  (c/su
+    (doseq [dir ["data" "smd" "udf"]]
+      (c/exec :truncate :--size 0 "/var/log/aerospike/aerospike.log")
+      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
+
+(defn db [version]
+  "Aerospike for a particular version."
+  (reify db/DB
+    (setup! [_ test node]
+      (doto node
+        (install! version)
+        (configure! test)
+        (start! test)))
+
+    (teardown! [_ test node]
+      (wipe! node))))
+
+(def ^WritePolicy write-policy
   (let [p (WritePolicy.)]
     (set! (.timeout p) 50)
     p))
 
-(def policy
+(def ^Policy policy
   (let [p (Policy.)]
-    (set! (.timeout p) 50)))
+    (set! (.timeout p) 50)
+    p))
 
 (defn record->map
   "Converts a record to a map like
@@ -202,6 +229,7 @@
   client/Client
   (setup! [this test node]
     (let [client (connect node)]
+      (Thread/sleep 30000)
       (put! client namespace set key {:value 0})
       (assoc this :client client)))
 
@@ -235,10 +263,10 @@
     (->> gen
          (gen/delay 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 5)
+           (gen/seq (cycle [(gen/sleep 30)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 10))
+         (gen/time-limit 60))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))

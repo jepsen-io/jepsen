@@ -16,7 +16,7 @@
         hosts'  (->> hosts
                      str/split-lines
                      (map (fn [line]
-                            (if (re-find #"^127\.0\.0\.1\tlocalhost$" line)
+                            (if (re-find #"^127\.0\.0\.1\t" line)
                               (str "127.0.0.1\tlocalhost") ; name)
                               line)))
                      (str/join "\n"))]
