@@ -6,6 +6,14 @@
             [jepsen.control     :as c]
             [jepsen.control.net :as net]))
 
+(defn noop
+  "Does nothing."
+  []
+  (reify client/Client
+    (setup! [this test node] this)
+    (invoke! [this test op] op)
+    (teardown! [this test] this)))
+
 (defn snub-node!
   "Drops all packets from node."
   [node]

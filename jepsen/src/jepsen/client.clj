@@ -17,4 +17,4 @@
   (reify Client
     (setup!    [this test node] this)
     (teardown! [this test])
-    (invoke!   [this test op])))
+    (invoke!   [this test op] (assoc op :type :ok))))

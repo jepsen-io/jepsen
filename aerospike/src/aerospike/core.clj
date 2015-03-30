@@ -201,11 +201,12 @@
        :expiration date
        :bins {:k1 v1, :k2 v2}}"
   [^Record r]
-  {:generation (.generation r)
-   :expiration (.expiration r)
-   :bins       (->> (.bins r)
-                    (map (fn [[k v]] [(keyword k) v]))
-                    (into {}))})
+  (when r
+    {:generation (.generation r)
+     :expiration (.expiration r)
+     :bins       (->> (.bins r)
+                      (map (fn [[k v]] [(keyword k) v]))
+                      (into {}))}))
 
 (defn put!
   "Writes a map of bin names to values to the record at the given namespace,
@@ -225,22 +226,39 @@
       (.get policy (Key. namespace set key))
       record->map))
 
+(defmacro with-errors
+  "Takes an invocation operation, a set of idempotent operations :f's which can
+  safely be assumed to fail without altering the model state, and a body to
+  evaluate. Catches errors and maps them to failure ops matching the
+  invocation."
+  [op idempotent-ops & body]
+  `(let [error-type# (if (~idempotent-ops (:f ~op))
+                       :fail
+                       :info)]
+     (try
+       ~@body
+
+       ; Timeouts are mapped to :timeout
+       (catch AerospikeException$Timeout e#
+         (assoc ~op :type error-type#, :error :timeout)))))
+
 (defrecord CasRegisterClient [client namespace set key]
   client/Client
   (setup! [this test node]
     (let [client (connect node)]
       (Thread/sleep 30000)
-      (put! client namespace set key {:value 0})
+      (put! client namespace set key {:value nil})
       (assoc this :client client)))
 
   (invoke! [this test op]
-    (case (:f op)
-      :read (assoc op
-                   :type :ok,
-                   :value (-> client (fetch namespace set key) :bins :value))
+    (with-errors op #{:read}
+      (case (:f op)
+        :read (assoc op
+                     :type :ok,
+                     :value (-> client (fetch namespace set key) :bins :value))
 
-      :write (do (-> client (put! namespace set key {:value (:value op)}))
-                 (assoc op :type :ok))))
+        :write (do (-> client (put! namespace set key {:value (:value op)}))
+                   (assoc op :type :ok)))))
 
   (teardown! [this test]
     (close client)))
