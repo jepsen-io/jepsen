@@ -26,10 +26,11 @@
                                  Bin
                                  Info
                                  Key
-                                 Record
-                                 )
+                                 Record)
            (com.aerospike.client.cluster Node)
            (com.aerospike.client.policy Policy
+                                        ConsistencyLevel
+                                        GenerationPolicy
                                         WritePolicy)))
 
 (defn nodes
@@ -142,18 +143,6 @@
     (c/exec :asinfo :-v
       "config-set:context=service;paxos-recovery-policy=auto-dun-master")))
 
-;    (info node "waiting to dun")
-;    (Thread/sleep 10000)
-;    (let [nodes (all-node-ids test)]
-;      (info node "dunning" nodes)
-;      (dun! nodes))))
-
-    ; Try mtendjou's suggestion from
-    ; https://gist.github.com/aphyr/eba17ae87b16484621d1
-;    (c/exec :asadm :-e "cluster dun all")
-;    (Thread/sleep 20000)
-;    (c/exec :asadm :-e "cluster undun all")))
-
 (defn stop!
   "Stops aerospike."
   [node]
@@ -184,14 +173,24 @@
     (teardown! [_ test node]
       (wipe! node))))
 
-(def ^WritePolicy write-policy
-  (let [p (WritePolicy.)]
-    (set! (.timeout p) 50)
-    p))
 
 (def ^Policy policy
+  "General operation policy"
   (let [p (Policy.)]
     (set! (.timeout p) 50)
+    ; (set! (.consistencyLevel p) ConsistencyLevel/CONSISTENCY_ALL)
+    p))
+
+(def ^WritePolicy write-policy
+  (let [p (WritePolicy. policy)]
+    p))
+
+(defn ^WritePolicy generation-write-policy
+  "Write policy for a particular generation."
+  [^long g]
+  (let [p (WritePolicy. write-policy)]
+    (set! (.generationPolicy p) GenerationPolicy/EXPECT_GEN_EQUAL)
+    (set! (.generation p) (int g))
     p))
 
 (defn record->map
@@ -208,23 +207,46 @@
                       (map (fn [[k v]] [(keyword k) v]))
                       (into {}))}))
 
+(defn map->bins
+  "Takes a map of bin names (as symbols or strings) to values and emits an
+  array of Bins."
+  [bins]
+  (->> bins
+       (map (fn [[k v]] (Bin. (name k) v)))
+       (into-array Bin)))
+
 (defn put!
   "Writes a map of bin names to values to the record at the given namespace,
   set, and key."
-  [^AerospikeClient client namespace set key bins]
-  (->> bins
-       (map (fn [[k v]] (Bin. (name k) v)))
-       (into-array Bin)
-       (.put client write-policy
-             (Key. namespace set key))))
+  ([client namespace set key bins]
+   (put! client write-policy namespace set key bins))
+  ([^AerospikeClient client ^WritePolicy policy, namespace set key bins]
+   (.put client policy
+         (Key. namespace set key)
+         (map->bins bins))))
 
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
-  set, and key."
+  set, and key. Returns nil if no record found."
   [^AerospikeClient client namespace set key]
   (-> client
       (.get policy (Key. namespace set key))
       record->map))
+
+(defn cas!
+  "Atomically applies a function f to the current bins of a record."
+  [^AerospikeClient client namespace set key f]
+  (let [r (fetch client namespace set key)]
+    (when (nil? r)
+      (throw (ex-info "cas not found" {:namespace namespace
+                                       :set set
+                                       :key key})))
+    (put! client
+          (generation-write-policy (:generation r))
+          namespace
+          set
+          key
+          (f (:bins r)))))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operations :f's which can
@@ -238,15 +260,28 @@
      (try
        ~@body
 
-       ; Timeouts are mapped to :timeout
+       ; Timeouts could be either successful or failing
        (catch AerospikeException$Timeout e#
-         (assoc ~op :type error-type#, :error :timeout)))))
+         (assoc ~op :type error-type#, :error :timeout))
+
+       (catch ExceptionInfo e#
+         (case (.getMessage e#)
+           ; Skipping a CAS can't affect the DB state
+           "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
+           "cas not found" (assoc ~op :type :fail, :error :not-found)
+           (throw e#)))
+
+       (catch com.aerospike.client.AerospikeException e#
+         (case (.getResultCode e#)
+           ; Generation error; CAS can't have taken place.
+           3 (assoc ~op :type :fail, :error :generation-mismatch)
+           (throw e#))))))
 
 (defrecord CasRegisterClient [client namespace set key]
   client/Client
   (setup! [this test node]
     (let [client (connect node)]
-      (Thread/sleep 30000)
+      (Thread/sleep 3000)
       (put! client namespace set key {:value nil})
       (assoc this :client client)))
 
@@ -257,7 +292,17 @@
                      :type :ok,
                      :value (-> client (fetch namespace set key) :bins :value))
 
-        :write (do (-> client (put! namespace set key {:value (:value op)}))
+        :cas   (let [[v v'] (:value op)]
+                 (cas! client namespace set key
+                       (fn [r]
+                         ; Verify that the current value is what we're cas'ing
+                         ; from
+                         (when (not= v (:value r))
+                           (throw (ex-info "skipping cas" {})))
+                         {:value v'}))
+                 (assoc op :type :ok))
+
+        :write (do (put! client namespace set key {:value (:value op)})
                    (assoc op :type :ok)))))
 
   (teardown! [this test]
@@ -304,4 +349,4 @@
           :checker (checker/compose {:linear checker/linearizable})
           :nemesis (nemesis/partition-random-halves)
           :client  (cas-register-client)
-          :generator (std-gen (gen/mix [r w]))}))
+          :generator (std-gen (gen/mix [r cas cas w]))}))
