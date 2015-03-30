@@ -376,7 +376,7 @@
            (gen/seq (cycle [(gen/sleep 45)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 120))
+         (gen/time-limit 360))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
