@@ -29,28 +29,25 @@
       (println "Followed by inconsistent operation:")
       (println (util/op->str (:inconsistent-op res)))
 
-      (println "Causing inconsistent state transitions:")
-      (pprint (distinct (map :error (:causes res))))
-
       (println)
       (println "-------------------------------------------------------------")
       (println "Just prior to that operation, possible interpretations of the")
       (println "linearizable prefix were:")
-      (doseq [{:keys [world op error]} (take 32 (:causes res))]
+      (doseq [world (take 32 (shuffle (:last-consistent-worlds res)))]
         (println "World with fixed history:")
         (util/print-history (:fixed world))
         (println)
-        (println "with pending operations:")
-        (util/print-history (:pending world))
-        (println)
-        (println "led to state:")
+        (println "led to state: ")
         (pprint (:model world))
         (println)
-        (println "but applying" op)
-        (println)
-        (println "failed:" error)
+        (println "with pending operations:")
+        (util/print-history (:pending world))
         (println))
-      (let [c (count (:causes res))]
+      (let [c (count (:last-consistent-worlds res))]
         (when (< 32 c)
           (println "(and" (- c 32) "more worlds, elided here)")))
-      (println "--------------------------------------------------------------"))))
+      (println "--------------------------------------------------------------")
+
+      (println)
+      (println "Inconsistent state transitions:")
+      (pprint (distinct (:inconsistent-transitions res))))))
