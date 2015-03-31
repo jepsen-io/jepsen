@@ -221,9 +221,7 @@
   ([client namespace set key bins]
    (put! client write-policy namespace set key bins))
   ([^AerospikeClient client ^WritePolicy policy, namespace set key bins]
-   (.put client policy
-         (Key. namespace set key)
-         (map->bins bins))))
+   (.put client policy (Key. namespace set key) (map->bins bins))))
 
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
@@ -248,10 +246,11 @@
           key
           (f (:bins r)))))
 
-(defn inc!
-  "Increment a particular bin on the given key."
-  [^AerospikeClient client namespace set key bin-name]
-  ())
+(defn add!
+  "Takes a client, a key, and a map of bin names to numbers, and adds those
+  numbers to the corresponding bins on that record."
+  [^AerospikeClient client namespace set key bins]
+  (.add client write-policy (Key. namespace set key) (map->bins bins)))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operations :f's which can
@@ -318,6 +317,31 @@
   []
   (CasRegisterClient. nil "jepsen" "cats" "mew"))
 
+(defrecord CounterClient [client namespace set key]
+  client/Client
+  (setup! [this test node]
+    (let [client (connect node)]
+      (Thread/sleep 3000)
+      (put! client namespace set key {:value 0})
+      (assoc this :client client)))
+
+  (invoke! [this test op]
+    (with-errors op #{:read}
+      (case (:f op)
+        :read (assoc op :type :ok
+                     :value (-> client (fetch namespace set key) :bins :value))
+
+        :add  (do (add! client namespace set key {:value (:value op)})
+                  (assoc op :type :ok)))))
+
+  (teardown! [this test]
+    (close client)))
+
+(defn counter-client
+  "A basic counter."
+  []
+  (CounterClient. nil "jepsen" "counters" "pounce"))
+
 ; Nemeses
 
 (defn killer
@@ -349,6 +373,7 @@
 
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn r   [_ _] {:type :invoke, :f :read})
+(defn add [_ _] {:type :invoke, :f :add, :value 1})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
 (defn std-gen
@@ -357,31 +382,48 @@
   [gen]
   (gen/phases
     (->> gen
-         (gen/delay 1)
          (gen/nemesis
            (gen/seq (cycle [(gen/sleep 10)
                             {:type :info :f :start}
                             (gen/sleep 10)
                             {:type :info :f :stop}])))
-         (gen/time-limit 30))
+         (gen/time-limit 60))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
     ; Wait for resumption of normal ops
     (gen/clients
       (->> gen
-           (gen/delay 1)
            (gen/time-limit 5)))))
 
-(defn cas-register-test
-  []
+(defn aerospike-test
+  [name opts]
   (merge tests/noop-test
-         {:name    (str "aerospike cas register")
+         {:name    (str "aerospike " name)
           :os      debian/os
           :db      (db "3.5.4")
           :model   (model/cas-register)
           :checker (checker/compose {:linear checker/linearizable})
-          :nemesis (nemesis/partition-random-halves)
 ;          :nemesis (killer)
-          :client  (cas-register-client)
-          :generator (std-gen (gen/mix [r cas cas w]))}))
+          :nemesis (nemesis/partition-random-halves)}
+         opts))
+
+(defn cas-register-test
+  []
+  (aerospike-test "cas register"
+                  {:client    (cas-register-client)
+                   :generator (->> [r cas cas cas]
+                                   gen/mix
+                                   (gen/delay 1)
+                                   std-gen)}))
+
+(defn counter-test
+  []
+  (aerospike-test "counter"
+                  {:client    (counter-client)
+                   :generator (->> (repeat 100 add)
+                                   (cons r)
+                                   gen/mix
+                                   (gen/delay 1/100)
+                                   std-gen)
+                   :checker   (checker/compose {:counter checker/counter})}))
