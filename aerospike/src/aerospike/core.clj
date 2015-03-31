@@ -248,6 +248,11 @@
           key
           (f (:bins r)))))
 
+(defn inc!
+  "Increment a particular bin on the given key."
+  [^AerospikeClient client namespace set key bin-name]
+  ())
+
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operations :f's which can
   safely be assumed to fail without altering the model state, and a body to
@@ -313,9 +318,37 @@
   []
   (CasRegisterClient. nil "jepsen" "cats" "mew"))
 
+; Nemeses
+
+(defn killer
+  "Kills aerospike on a random node on start, restarts it on stop."
+  []
+  (let [node (atom nil)]
+    (reify client/Client
+      (setup! [this test _] this)
+
+      (invoke! [this test op]
+        (case (:f op)
+          :start (let [n (rand-nth (:nodes test))]
+                   (when (compare-and-set! node nil n)
+                     ; OK we can kill this node
+                     (c/on n (c/su (c/exec :killall :-9 :asd)))
+                     (assoc op :type :info, :value (str "Killed asd on " n))))
+
+          :stop  (if-let [n @node]
+                   (do (c/on n (start! n test))
+                       (compare-and-set! node n nil)
+                       (assoc op :type :info
+                              :value (str "Started asd on " n)))
+                   (assoc op :type :info
+                          :value (str "Haven't killed anyone. Yet.")))))
+
+      (teardown! [this test]))))
+
 ; Generators
-(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
-(defn r [_ _] {:type :invoke, :f :read})
+
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn r   [_ _] {:type :invoke, :f :read})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
 (defn std-gen
@@ -326,10 +359,11 @@
     (->> gen
          (gen/delay 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 30)
-                            {:type :info :f :stop}
-                            {:type :info :f :start}])))
-         (gen/time-limit 60))
+           (gen/seq (cycle [(gen/sleep 10)
+                            {:type :info :f :start}
+                            (gen/sleep 10)
+                            {:type :info :f :stop}])))
+         (gen/time-limit 30))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -348,5 +382,6 @@
           :model   (model/cas-register)
           :checker (checker/compose {:linear checker/linearizable})
           :nemesis (nemesis/partition-random-halves)
+;          :nemesis (killer)
           :client  (cas-register-client)
           :generator (std-gen (gen/mix [r cas cas w]))}))
