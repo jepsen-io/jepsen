@@ -7,7 +7,8 @@
             [clojure.set :as set]
             [jepsen.util :as util]
             [multiset.core :as multiset]
-            [knossos.core :as knossos]))
+            [knossos.core :as knossos]
+            [knossos.history :as history]))
 
 (defprotocol Checker
   (check [checker test model history]
@@ -165,6 +166,60 @@
          :unexpected-frac (util/fraction (count unexpected) (count attempts))
          :lost-frac       (util/fraction (count lost)       (count attempts))
          :recovered-frac  (util/fraction (count recovered)  (count attempts))}))))
+
+(def counter
+  "A counter starts at zero; add operations should increment it by that much,
+  and reads should return the present value. This checker validates that at
+  each read, the value is at greater than the sum of all :ok increments, and
+  lower than the sum of all attempted increments.
+
+  Note that this counter verifier assumes the value monotonically increases. If
+  you want to increment by negative amounts, you'll have to recalculate and
+  possibly widen the intervals for all pending reads with each invoke/ok write.
+
+  Returns a map:
+
+  {:valid?              Whether the counter remained within bounds
+   :reads               [[lower-bound read-value upper-bound] ...]
+   :errors              [[lower-bound read-value upper-bound] ...]
+   :max-absolute-error  The [lower read upper] where read falls furthest outside
+   :max-relative-error  Same, but with error computed as a fraction of the mean}
+  "
+  (reify Checker
+    (check [this test model history]
+      (loop [history            (seq (history/complete history))
+             lower              0             ; Current lower bound on counter
+             upper              0             ; Upper bound on counter value
+             pending-reads      {}            ; Process ID -> [lower read-val]
+             reads              []]           ; Completed [lower val upper]s
+          (if (nil? history)
+            ; We're done here
+            (let [errors (remove (partial apply <=) reads)]
+              {:valid?             (empty? errors)
+               :reads              reads
+               :errors             errors})
+            ; But wait, there's more
+            (let [op      (first history)
+                  history (next history)]
+              (case [(:type op) (:f op)]
+                [:invoke :read]
+                (recur history lower upper
+                       (assoc pending-reads (:process op) [lower (:value op)])
+                       reads)
+
+                [:ok :read]
+                (let [r (get pending-reads (:process op))]
+                  (recur history lower upper
+                         (dissoc pending-reads (:process op))
+                         (conj reads (conj r upper))))
+
+                [:invoke :add]
+                (recur history lower (+ upper (:value op)) pending-reads reads)
+
+                [:ok :add]
+                (recur history (+ lower (:value op)) upper pending-reads reads)
+
+                (recur history lower upper pending-reads reads))))))))
 
 (defn compose
   "Takes a map of names to checkers, and returns a checker which runs each
