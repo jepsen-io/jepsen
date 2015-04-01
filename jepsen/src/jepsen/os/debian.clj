@@ -88,6 +88,9 @@
         ; Packages!
         (install [:wget
                   :curl
+                  :vim
+                  :man
+                  :faketime
                   :unzip
                   :iptables
                   :iputils-ping

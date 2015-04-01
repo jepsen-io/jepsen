@@ -110,7 +110,13 @@
             (c/exec :tar :xvfz "aerospike.tgz"))
       (c/cd (str "/tmp/aerospike-server-community-" version "-debian7")
             (c/exec :dpkg :-i (c/lit "aerospike-server-community-*.deb"))
-            (c/exec :dpkg :-i (c/lit "aerospike-tools-*.deb"))))))
+            (c/exec :dpkg :-i (c/lit "aerospike-tools-*.deb")))
+
+      ; Replace /usr/bin/asd with a wrapper that skews time a bit
+      (c/exec :mv   "/usr/bin/asd" "/usr/local/bin/asd")
+      (c/exec :echo
+              "#!/bin/bash\nfaketime -m -f \"+$((RANDOM%100))s x1.${RANDOM}\" /usr/local/bin/asd" :> "/usr/bin/asd")
+      (c/exec :chmod "0755" "/usr/bin/asd"))))
 
 (defn configure!
   "Uploads configuration files to the given node."
@@ -370,7 +376,7 @@
                             {:type :info :f :start}
                             (gen/sleep 10)
                             {:type :info :f :stop}])))
-         (gen/time-limit 60))
+         (gen/time-limit 360))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -395,6 +401,7 @@
   (aerospike-test "cas register"
                   {:client    (cas-register-client)
 ;                   :nemesis   (nemesis/hammer-time "asd")
+;                   :nemesis   (nemesis/noop)
                    :generator (->> [r w cas cas cas]
                                    gen/mix
                                    (gen/delay 1)
