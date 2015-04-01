@@ -1,16 +1,24 @@
-(ns jepsen.system.elasticsearch
+(ns elasticsearch.core
   (:require [cheshire.core          :as json]
             [clojure.java.io        :as io]
             [clojure.string         :as str]
             [clojure.tools.logging  :refer [info]]
-            [jepsen.client          :as client]
-            [jepsen.control         :as c]
-            [jepsen.control.net     :as net]
-            [jepsen.db              :as db]
-            [jepsen.os.debian       :as debian]
-            [jepsen.util            :refer [meh timeout]]
-            [jepsen.nemesis         :as nemesis]
-            [clj-http.client        :as http]
+            [jepsen [core      :as jepsen]
+                    [db        :as db]
+                    [util      :as util :refer [meh timeout]]
+                    [control   :as c :refer [|]]
+                    [client    :as client]
+                    [checker   :as checker]
+                    [model     :as model]
+                    [generator :as gen]
+                    [nemesis   :as nemesis]
+                    [store     :as store]
+                    [report    :as report]
+                    [tests     :as tests]]
+            [jepsen.checker.timeline  :as timeline]
+            [jepsen.control.net       :as net]
+            [jepsen.os.debian         :as debian]
+            [clj-http.client          :as http]
             [clojurewerkz.elastisch.rest          :as es]
             [clojurewerkz.elastisch.rest.document :as esd]
             [clojurewerkz.elastisch.rest.index    :as esi]
@@ -68,60 +76,91 @@
                 ; Each self-primary in a different partition
                 (map list ps)))))))
 
-(def db
+(defn install!
+  "Install elasticsearch!"
+  [node version]
+  (c/su
+    (c/cd "/tmp"
+          (let [debfile (str "elasticsearch-" version ".deb")
+                uri     (str "https://download.elasticsearch.org/"
+                             "elasticsearch/elasticsearch/"
+                             debfile)]
+            (when-not (= (str version "-1")
+                         (debian/installed-version "elasticsearch"))
+              (debian/uninstall! ["elasticsearch"])
+
+              (loop []
+                (info node "downloading elasticsearch")
+                (c/exec :wget :-c uri)
+                (c/exec :wget :-c (str uri ".sha1.txt"))
+                (when (try
+                        (c/exec :sha1sum :-c (str debfile ".sha1.txt"))
+                        false
+                        (catch RuntimeException e
+                          (info "SHA failed" (.getMessage e))
+                          true))
+                  (recur)))
+
+              (info node "installing elasticsearch")
+              (debian/install ["openjdk-7-jre-headless"])
+              (c/exec :dpkg :-i :--force-confnew debfile))))))
+
+(defn configure!
+  "Configures elasticsearch."
+  [node test]
+  (c/su
+    (info node "configuring elasticsearch")
+    (c/exec :echo
+            (-> "default"
+                io/resource
+                slurp)
+            :> "/etc/default/elasticsearch")
+    (c/exec :echo
+            (-> "elasticsearch.yml"
+                io/resource
+                slurp
+                (str/replace "$NAME"  (name node))
+                (str/replace "$HOSTS" (json/generate-string
+                                        (vals (c/on-many (:nodes test)
+                                                         (net/local-ip))))))
+            :> "/etc/elasticsearch/elasticsearch.yml")))
+
+(defn start!
+  [node]
+  "Starts elasticsearch."
+  (info node "starting elasticsearch")
+  (c/su (c/exec :service :elasticsearch :restart))
+
+  (wait 60 :green)
+  (info node "elasticsearch ready"))
+
+(defn stop!
+  "Shuts down elasticsearch."
+  [node]
+  (c/su
+    (meh (c/exec :service :elasticsearch :stop))
+    (meh (c/exec :killall :-9 :elasticsearch)))
+  (info node "elasticsearch stopped"))
+
+(defn nuke!
+  "Shuts down server and destroys all data."
+  [node]
+  (stop! node)
+  (c/su (c/exec :rm :-rf "/var/lib/elasticsearch/elasticsearch"))
+  (info node "elasticsearch nuked"))
+
+(defn db
+  "Elasticsearch for a particular version."
+  [version]
   (reify db/DB
     (setup! [_ test node]
-      (c/su
-        (c/cd "/tmp"
-              (let [version "1.1.0"
-                    debfile (str "elasticsearch-" version ".deb")
-                    uri     (str "https://download.elasticsearch.org/"
-                                 "elasticsearch/elasticsearch/"
-                                 debfile)]
-                (when-not (debian/installed? :elasticsearch)
-                  (loop []
-                    (info node "downloading elasticsearch")
-                    (c/exec :wget :-c uri)
-                    (c/exec :wget :-c (str uri ".sha1.txt"))
-                    (when (try
-                            (c/exec :sha1sum :-c (str debfile ".sha1.txt"))
-                            false
-                            (catch RuntimeException e
-                              (info "SHA failed" (.getMessage e))
-                              true))
-                      (recur)))
-
-                  (info node "installing elasticsearch")
-                  (c/exec :apt-get :install :-y :openjdk-7-jre-headless)
-                  (c/exec :dpkg :-i :--force-confnew debfile))))
-
-        (info node "configuring elasticsearch")
-        (c/exec :echo
-                (-> "elasticsearch/default"
-                    io/resource
-                    slurp)
-                :> "/etc/default/elasticsearch")
-        (c/exec :echo
-                (-> "elasticsearch/elasticsearch.yml"
-                    io/resource
-                    slurp
-                    (str/replace "$NAME"  (name node))
-                    (str/replace "$HOSTS" (json/generate-string
-                                            (vals (c/on-many (:nodes test)
-                                                             (net/local-ip))))))
-                :> "/etc/elasticsearch/elasticsearch.yml")
-
-        (info node "starting elasticsearch")
-        (c/exec :service :elasticsearch :restart))
-
-      (wait 60 :green)
-      (info node "elasticsearch ready"))
+      (doto node
+        (install! version)
+        (configure! test)
+        (start!)))
 
     (teardown! [_ test node]
-      (c/su
-        (meh (c/exec :service :elasticsearch :stop))
-        (c/exec :rm :-rf "/var/lib/elasticsearch/elasticsearch"))
-      (info node "elasticsearch nuked"))))
+      (nuke! node))))
 
 (defn http-error
   "Takes an elastisch ExInfo exception and extracts the HTTP error response as
@@ -129,7 +168,7 @@
   [ex]
   ; AFIACT this is the shortest path to actual information about what went
   ; wrong
-  (-> ex .getData :object :body json/parse-string (get "error")))
+  (-> ex .getData :body json/parse-string (get "error")))
 
 (defn all-results
   "A sequence of all results from a search query."
@@ -181,8 +220,8 @@
                 ; Elasticsearch lies about cluster state during split brain
                 ; woooooooo
                 (c/on-many (:nodes test) (wait 1000 :green))
-                (info "Elasticsearch reports green, but it's probably lying, so waiting another 200s")
-                (Thread/sleep (* 200 1000))
+                (info "Elasticsearch reports green, but it's probably lying, so waiting another 10s")
+                (Thread/sleep (* 10 1000))
                 (info "Recovered; flushing index before read")
                 (esi/flush client index-name)
                 (assoc op :type :ok
@@ -206,18 +245,18 @@
   (setup! [_ test node]
     (let [; client (es/connect [[(name node) 9300]])]
           client (es/connect (str "http://" (name node) ":9200"))]
-        ; Create index
+      ; Create index
       (try
         (esi/create client index-name
                     :mappings {mapping-type {:properties {}}})
         (catch clojure.lang.ExceptionInfo e
-            ; Is this seriously how you're supposed to do idempotent
-            ; index creation? I've gotta be doing this wrong.
+          ; Is this seriously how you're supposed to do idempotent
+          ; index creation? I've gotta be doing this wrong.
           (let [err (http-error e)]
             (when-not (re-find #"IndexAlreadyExistsException" err)
               (throw (RuntimeException. err))))))
 
-                                        ; Initial empty set
+      ; Initial empty set
       (esd/create client index-name mapping-type {:values []} :id doc-id)
 
       (CASSetClient. mapping-type doc-id client)))
@@ -267,3 +306,40 @@
 
 (defn cas-set-client []
   (CASSetClient. "cas-sets" "0" nil))
+
+(defn es-test
+  "Defaults for testing elasticsearch."
+  [name opts]
+  (merge tests/noop-test
+         {:name (str "elasticsearch " name)
+          :os   debian/os
+          :db   (db "1.5.0")
+          :nemesis isolate-self-primaries-nemesis}
+         opts))
+
+(defn create-test
+  []
+  (es-test "create"
+           {:client (create-set-client)
+            :model  (model/set)
+            :checker (checker/compose {:html timeline/html
+                                       :set  checker/set})
+            :generator (gen/phases
+                         (->> (range)
+                              (map (fn [x] {:type  :invoke
+                                            :f     :add
+                                            :value x}))
+                              gen/seq
+                              (gen/stagger 1/10)
+                              (gen/delay 1)
+                              (gen/nemesis
+                                (gen/seq
+                                  [(gen/sleep 30)
+                                   {:type :info :f :start}
+                                   (gen/sleep 200)
+                                   {:type :info :f :stop}]))
+                              (gen/time-limit 300))
+                         (gen/nemesis
+                           (gen/once {:type :info :f :stop}))
+                         (gen/clients
+                           (gen/once {:type :invoke :f :read})))}))
