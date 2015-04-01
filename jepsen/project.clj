@@ -47,11 +47,7 @@
                                       ; Cool thanks for breaking my logging
                                       org.slf4j/slf4j-nop]]]
                        :source-paths ["datomic/src"]
-                       :test-paths ["datomic/test"]}
-             :elasticsearch {:dependencies
-                       [[clojurewerkz/elastisch "2.0.0-rc2"]]
-                             :source-paths ["elasticsearch/src"]
-                             :test-paths ["elasticsearch/test"]}}
+                       :test-paths ["datomic/test"]}}
   :main jepsen.repl
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
