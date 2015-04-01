@@ -285,7 +285,7 @@
   client/Client
   (setup! [this test node]
     (let [client (connect node)]
-      (Thread/sleep 3000)
+      (Thread/sleep 10000)
       (put! client namespace set key {:value nil})
       (assoc this :client client)))
 
@@ -347,27 +347,10 @@
 (defn killer
   "Kills aerospike on a random node on start, restarts it on stop."
   []
-  (let [node (atom nil)]
-    (reify client/Client
-      (setup! [this test _] this)
-
-      (invoke! [this test op]
-        (case (:f op)
-          :start (let [n (rand-nth (:nodes test))]
-                   (when (compare-and-set! node nil n)
-                     ; OK we can kill this node
-                     (c/on n (c/su (c/exec :killall :-9 :asd)))
-                     (assoc op :type :info, :value (str "Killed asd on " n))))
-
-          :stop  (if-let [n @node]
-                   (do (c/on n (start! n test))
-                       (compare-and-set! node n nil)
-                       (assoc op :type :info
-                              :value (str "Started asd on " n)))
-                   (assoc op :type :info
-                          :value (str "Haven't killed anyone. Yet.")))))
-
-      (teardown! [this test]))))
+  (nemesis/single-node-start-stopper
+    rand-nth
+    (fn start [test node] (c/su (c/exec :killall :-9 :asd)))
+    (fn stop  [test node] (start! node test))))
 
 ; Generators
 
@@ -404,7 +387,6 @@
           :db      (db "3.5.4")
           :model   (model/cas-register)
           :checker (checker/compose {:linear checker/linearizable})
-;          :nemesis (killer)
           :nemesis (nemesis/partition-random-halves)}
          opts))
 
@@ -412,7 +394,8 @@
   []
   (aerospike-test "cas register"
                   {:client    (cas-register-client)
-                   :generator (->> [r cas cas cas]
+;                   :nemesis   (nemesis/hammer-time "asd")
+                   :generator (->> [r w cas cas cas]
                                    gen/mix
                                    (gen/delay 1)
                                    std-gen)}))

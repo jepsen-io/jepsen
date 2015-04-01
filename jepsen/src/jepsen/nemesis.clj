@@ -154,3 +154,51 @@
     (teardown! [this test]
       (c/on-many (:nodes test)
                  (set-time! (/ (System/currentTimeMillis) 1000))))))
+
+(defn single-node-start-stopper
+  "Takes a function (start! test node) invoked on nemesis start, and one
+  invoked on nemesis stop, and a targeting function which, given a list of
+  nodes, picks the next one to experience bij. Returns a nemesis which responds
+  to :start and :stop by running the start! and stop! fns on a selected node.
+  During start!  and stop!, binds the jepsen.control session to the given node,
+  so you can just call (c/exec ...).
+
+  Re-selects a fresh node every start--if targeter returns nil, skips the
+  start. The return values from the start and stop fns will become the :value
+  of the returned :info operations from the nemesis."
+  [targeter start! stop!]
+  (let [node (atom nil)]
+    (reify client/Client
+      (setup! [this test _] this)
+
+      (invoke! [this test op]
+        (locking node
+          (assoc op :type :info, :value
+                 (case (:f op)
+                   :start (if-let [n (targeter (:nodes test))]
+                            (if (compare-and-set! node nil n)
+                              (c/on n (start! test n))
+                              (str "nemesis already disrupting " @node))
+                            :no-target)
+                   :stop (if-let [n @node]
+                           (let [value (c/on n (stop! test n))]
+                             (reset! node nil)
+                             value)
+                           :not-started)))))
+
+      (teardown! [this test]))))
+
+(defn hammer-time
+  "Responds to `{:f :start}` by pausing the given process on a given node using
+  SIGSTOP, and when `{:f :stop}` arrives, resumes it with SIGCONT. Picks the
+  node to pause using `(targeter list-of-nodes)`, which defaults to
+  `rand-nth`."
+  ([process] (hammer-time rand-nth process))
+  ([targeter process]
+   (single-node-start-stopper targeter
+                              (fn start [t n]
+                                (c/su (c/exec :killall :-s "STOP" process))
+                                [n process :paused])
+                              (fn stop [t n]
+                                (c/su (c/exec :killall :-s "CONT" process))
+                                [n process :resumed]))))
