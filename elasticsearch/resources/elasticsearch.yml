@@ -307,6 +307,20 @@ discovery.zen.minimum_master_nodes: 3
 #
 discovery.zen.ping.timeout: 3s
 
+# After joining, send a join request with this timeout? Docs are kinda unclear
+# here.
+discovery.zen.join_timeout: 5s
+
+# Fault detection timeouts. Our network is super reliable and uncongested
+# except when we explicitly simulate failure, so I'm gonna lower these to speed
+# up cluster convergence.
+discovery.zen.fd.ping_interval: 1s
+discovery.zen.fd.ping_timeout: 3s
+discovery.zen.fd.ping_retries: 3
+
+# Publish cluster state updates more frequently
+discovery.zen.publish_timeout: 5s
+
 # For more information, see
 # <http://elasticsearch.org/guide/en/elasticsearch/reference/current/modules-discovery-zen.html>
 

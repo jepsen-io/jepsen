@@ -24,6 +24,14 @@
             [clojurewerkz.elastisch.rest.index    :as esi]
             [clojurewerkz.elastisch.rest.response :as esr]))
 
+(defn http-error
+  "Takes an elastisch ExInfo exception and extracts the HTTP error response as
+  a string."
+  [ex]
+  ; AFIACT this is the shortest path to actual information about what went
+  ; wrong
+  (-> ex .getData :body json/parse-string (get "error")))
+
 (defn wait
   "Waits for elasticsearch to be healthy on the current node. Color is red,
   yellow, or green; timeout is in seconds."
@@ -49,12 +57,19 @@
   [nodes]
   (->> nodes
        (pmap (fn [node]
-               (let [res (-> (str "http://" (name node) ":9200/_cluster/state")
-                             (http/get {:as :json-string-keys})
-                             :body)
-                     primary (get res "master_node")]
-                 [node
-                  (keyword (get-in res ["nodes" primary "name"]))])))
+               (try
+                 (let [res (-> (str "http://" (name node)
+                                    ":9200/_cluster/state")
+                               (http/get {:as :json-string-keys})
+                               :body)
+                       primary (get res "master_node")]
+                   [node
+                    (keyword (get-in res ["nodes" primary "name"]))])
+                 (catch clojure.lang.ExceptionInfo e
+                   (when-not (re-find #"MasterNotDiscoveredException"
+                                      (http-error e))
+                     (throw e))
+                   [node nil]))))
        (into {})))
 
 (defn self-primaries
@@ -85,8 +100,7 @@
                 uri     (str "https://download.elasticsearch.org/"
                              "elasticsearch/elasticsearch/"
                              debfile)]
-            (when-not (= (str version "-1")
-                         (debian/installed-version "elasticsearch"))
+            (when-not (= version (debian/installed-version "elasticsearch"))
               (debian/uninstall! ["elasticsearch"])
 
               (loop []
@@ -161,14 +175,6 @@
 
     (teardown! [_ test node]
       (nuke! node))))
-
-(defn http-error
-  "Takes an elastisch ExInfo exception and extracts the HTTP error response as
-  a string."
-  [ex]
-  ; AFIACT this is the shortest path to actual information about what went
-  ; wrong
-  (-> ex .getData :body json/parse-string (get "error")))
 
 (defn all-results
   "A sequence of all results from a search query."
@@ -333,11 +339,11 @@
                               (gen/stagger 1/10)
                               (gen/delay 1)
                               (gen/nemesis
-                                (gen/seq
-                                  [(gen/sleep 30)
-                                   {:type :info :f :start}
-                                   (gen/sleep 200)
-                                   {:type :info :f :stop}]))
+                                (gen/seq (cycle
+                                           [(gen/sleep 10)
+                                            {:type :info :f :start}
+                                            (gen/sleep 120)
+                                            {:type :info :f :stop}])))
                               (gen/time-limit 300))
                          (gen/nemesis
                            (gen/once {:type :info :f :stop}))
