@@ -176,16 +176,6 @@
     (teardown! [_ test node]
       (nuke! node))))
 
-(defn all-results
-  "A sequence of all results from a search query."
-  [& search-args]
-  (let [res      (apply esd/search (concat search-args [:size 0]))
-        hitcount (esr/total-hits res)
-        res      (apply esd/search (concat search-args [:size hitcount]))]
-    (when (esr/timed-out? res)
-      (throw (RuntimeException. "Timed out")))
-    (esr/hits-from res)))
-
 (def index-name "jepsen-index")
 
 (defrecord CreateSetClient [client]
@@ -231,7 +221,11 @@
                 (info "Recovered; flushing index before read")
                 (esi/flush client index-name)
                 (assoc op :type :ok
-                       :value (->> (all-results client index-name "number")
+                       :value (->> (esd/search client index-name "number"
+                                               :search_type "query_then_fetch"
+                                               :scroll "1m"
+                                               :size 2)
+                                   (esd/scroll-seq client)
                                    (map (comp :num :_source))
                                    (into (sorted-set))))
                 (catch RuntimeException e
@@ -344,8 +338,10 @@
                                             {:type :info :f :start}
                                             (gen/sleep 120)
                                             {:type :info :f :stop}])))
-                              (gen/time-limit 300))
+                              (gen/time-limit 600))
                          (gen/nemesis
-                           (gen/once {:type :info :f :stop}))
+                           (gen/phases
+                             (gen/once {:type :info :f :stop})
+                             (gen/sleep 20)))
                          (gen/clients
                            (gen/once {:type :invoke :f :read})))}))
