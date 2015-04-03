@@ -315,8 +315,8 @@ discovery.zen.join_timeout: 5s
 # except when we explicitly simulate failure, so I'm gonna lower these to speed
 # up cluster convergence.
 discovery.zen.fd.ping_interval: 1s
-discovery.zen.fd.ping_timeout: 3s
-discovery.zen.fd.ping_retries: 3
+discovery.zen.fd.ping_timeout: 1s
+discovery.zen.fd.ping_retries: 2
 
 # Publish cluster state updates more frequently
 discovery.zen.publish_timeout: 5s
