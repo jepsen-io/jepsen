@@ -362,48 +362,71 @@
           :db   (db "1.5.0")}
          opts))
 
+(defn create-test
+  "A generic create test."
+  [name opts]
+  (es-test (str "create " name)
+           (merge {:client  (create-set-client)
+                   :model   (model/set)
+                   :checker (checker/compose {:html timeline/html
+                                              :set  checker/set})}
+                  opts)))
+
 (defn create-isolate-primaries-test
+  "Inserts docs into a set while isolating all primaries with a partition."
   []
-  (es-test "create isolate primaries"
-           {:client (create-set-client)
-            :model  (model/set)
-            :checker (checker/compose {:html timeline/html
-                                       :set  checker/set})
-            :nemesis   isolate-self-primaries-nemesis
-            :generator (gen/phases
-                         (->> (adds)
-                              (gen/stagger 1/10)
-                              (gen/delay 1)
-                              (gen/nemesis
-                                (gen/seq (cycle
-                                           [(gen/sleep 10)
-                                            {:type :info :f :start}
-                                            (gen/sleep 120)
-                                            {:type :info :f :stop}])))
-                              (gen/time-limit 600))
-                         (recover)
-                         (read-once))}))
+  (create-test "isolate primaries"
+               {:nemesis   isolate-self-primaries-nemesis
+                :generator (gen/phases
+                             (->> (adds)
+                                  (gen/stagger 1/10)
+                                  (gen/delay 1)
+                                  (gen/nemesis
+                                    (gen/seq (cycle
+                                               [(gen/sleep 10)
+                                                {:type :info :f :start}
+                                                (gen/sleep 120)
+                                                {:type :info :f :stop}])))
+                                  (gen/time-limit 600))
+                             (recover)
+                             (read-once))}))
 
 (defn create-pause-test
+  "Inserts docs into a set while pausing random primaries with SIGSTOP/SIGCONT."
   []
-  (es-test "create pause"
-           {:client (create-set-client)
-            :model  (model/set)
-            :checker (checker/compose {:html timeline/html
-                                       :set  checker/set})
-;            :nemesis   crash-nemesis
-            :nemesis   (nemesis/hammer-time (comp rand-nth self-primaries)
-                                            "java")
-            :generator (gen/phases
-                         (->> (adds)
-                              (gen/stagger 1/10)
-                              (gen/delay 1)
-                              (gen/nemesis
-                                (gen/seq (cycle
-                                           [(gen/sleep 0)
-                                            {:type :info :f :start}
-                                            (gen/sleep 120)
-                                            {:type :info :f :stop}])))
-                              (gen/time-limit 600))
-                         (recover)
-                         (read-once))}))
+  (create-test "pause"
+               {:nemesis   (nemesis/hammer-time
+                             (comp rand-nth self-primaries) "java")
+                :generator (gen/phases
+                             (->> (adds)
+                                  (gen/stagger 1/10)
+                                  (gen/delay 1)
+                                  (gen/nemesis
+                                    (gen/seq (cycle
+                                               [(gen/sleep 0)
+                                                {:type :info :f :start}
+                                                (gen/sleep 120)
+                                                {:type :info :f :stop}])))
+                                  (gen/time-limit 600))
+                             (recover)
+                             (read-once))}))
+
+(defn create-bridge-test
+  "Inserts docs into a set while weaving the network into happy little
+  intersecting majority rings"
+  []
+  (create-test "bridge"
+               {:nemesis   (nemesis/partitioner (comp nemesis/bridge shuffle))
+                :generator (gen/phases
+                             (->> (adds)
+                                  (gen/stagger 1/10)
+                                  (gen/delay 1)
+                                  (gen/nemesis
+                                    (gen/seq (cycle
+                                               [(gen/sleep 10)
+                                                {:type :info, :f :start}
+                                                (gen/sleep 120)
+                                                {:type :info, :f :stop}])))
+                                  (gen/time-limit 600))
+                             (recover)
+                             (read-once))}))
