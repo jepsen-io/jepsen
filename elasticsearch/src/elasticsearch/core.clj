@@ -65,6 +65,7 @@
                        primary (get res "master_node")]
                    [node
                     (keyword (get-in res ["nodes" primary "name"]))])
+                 (catch java.net.ConnectException e [node nil])
                  (catch clojure.lang.ExceptionInfo e
                    (when-not (re-find #"MasterNotDiscoveredException"
                                       (http-error e))
@@ -79,17 +80,6 @@
        primaries
        (filter (partial apply =))
        (map key)))
-
-(def isolate-self-primaries-nemesis
-  "A nemesis which completely isolates any node that thinks it is the primary."
-  (nemesis/partitioner
-    (fn [nodes]
-      (let [ps (self-primaries nodes)]
-        (nemesis/complete-grudge
-          ; All nodes that aren't self-primaries in one partition
-          (cons (remove (set ps) nodes)
-                ; Each self-primary in a different partition
-                (map list ps)))))))
 
 (defn install!
   "Install elasticsearch!"
@@ -160,7 +150,9 @@
   "Shuts down server and destroys all data."
   [node]
   (stop! node)
-  (c/su (c/exec :rm :-rf "/var/lib/elasticsearch/elasticsearch"))
+  (c/su
+    (c/exec :rm :-rf "/var/lib/elasticsearch/elasticsearch")
+    (c/exec :truncate :--size 0 "/var/log/elasticsearch/elasticsearch.log"))
   (info node "elasticsearch nuked"))
 
 (defn db
@@ -201,16 +193,22 @@
 
   (invoke! [this test op]
       (case (:f op)
-        :add (timeout 5000 (assoc op :type :info :value :timed-out)
-                (let [r (esd/create client index-name "number" {:num (:value op)})]
-                  (cond (esr/ok? r)
-                        (assoc op :type :ok)
+        :add (timeout 5000
+               (assoc op :type :info :value :timed-out)
+               (try
+                 (let [r (esd/create client index-name "number" {:num (:value op)})]
+                   (cond (esr/ok? r)
+                         (assoc op :type :ok)
 
-                        (esr/timed-out? r)
-                        (assoc op :type :info :value :timed-out)
+                         (esr/timed-out? r)
+                         (assoc op :type :info :value :timed-out)
 
-                        :else
-                        (assoc op :type :info :value r))))
+                         :else
+                         (assoc op :type :info :value r)))
+                 (catch java.net.SocketException e
+                   (assoc op :type :info :value (.getMessage e)))
+                 (catch java.net.ConnectException e
+                   (assoc op :type :fail :value (.getMessage e)))))
         :read (try
                 (info "Waiting for recovery before read")
                 ; Elasticsearch lies about cluster state during split brain
@@ -307,29 +305,73 @@
 (defn cas-set-client []
   (CASSetClient. "cas-sets" "0" nil))
 
+; Nemeses
+
+(def isolate-self-primaries-nemesis
+  "A nemesis which completely isolates any node that thinks it is the primary."
+  (nemesis/partitioner
+    (fn [nodes]
+      (let [ps (self-primaries nodes)]
+        (nemesis/complete-grudge
+          ; All nodes that aren't self-primaries in one partition
+          (cons (remove (set ps) nodes)
+                ; Each self-primary in a different partition
+                (map list ps)))))))
+
+(def crash-nemesis
+  "A nemesis that crashes a random node."
+  (nemesis/single-node-start-stopper
+    rand-nth
+    (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
+    (fn stop  [test node] (start! node) [:restarted node])))
+
+(def crash-primary-nemesis
+  "A nemesis that crashes a random primary node."
+  (nemesis/single-node-start-stopper
+    (comp rand-nth self-primaries)
+    (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
+    (fn stop  [test node] (start! node) [:restarted node])))
+
+(defn adds
+  "Generator that emits :add operations for sequential integers."
+  []
+  (->> (range)
+       (map (fn [x] {:type :invoke, :f :add, :value x}))
+       gen/seq))
+
+(defn recover
+  "A generator which stops the nemesis and allows some time for recovery."
+  []
+  (gen/nemesis
+    (gen/phases
+      (gen/once {:type :info, :f :stop})
+      (gen/sleep 20))))
+
+(defn read-once
+  "A generator which reads exactly once."
+  []
+  (gen/clients
+    (gen/once {:type :invoke, :f :read})))
+
 (defn es-test
   "Defaults for testing elasticsearch."
   [name opts]
   (merge tests/noop-test
          {:name (str "elasticsearch " name)
           :os   debian/os
-          :db   (db "1.5.0")
-          :nemesis isolate-self-primaries-nemesis}
+          :db   (db "1.5.0")}
          opts))
 
-(defn create-test
+(defn create-isolate-primaries-test
   []
-  (es-test "create"
+  (es-test "create isolate primaries"
            {:client (create-set-client)
             :model  (model/set)
             :checker (checker/compose {:html timeline/html
                                        :set  checker/set})
+            :nemesis   isolate-self-primaries-nemesis
             :generator (gen/phases
-                         (->> (range)
-                              (map (fn [x] {:type  :invoke
-                                            :f     :add
-                                            :value x}))
-                              gen/seq
+                         (->> (adds)
                               (gen/stagger 1/10)
                               (gen/delay 1)
                               (gen/nemesis
@@ -339,9 +381,29 @@
                                             (gen/sleep 120)
                                             {:type :info :f :stop}])))
                               (gen/time-limit 600))
-                         (gen/nemesis
-                           (gen/phases
-                             (gen/once {:type :info :f :stop})
-                             (gen/sleep 20)))
-                         (gen/clients
-                           (gen/once {:type :invoke :f :read})))}))
+                         (recover)
+                         (read-once))}))
+
+(defn create-pause-test
+  []
+  (es-test "create pause"
+           {:client (create-set-client)
+            :model  (model/set)
+            :checker (checker/compose {:html timeline/html
+                                       :set  checker/set})
+;            :nemesis   crash-nemesis
+            :nemesis   (nemesis/hammer-time (comp rand-nth self-primaries)
+                                            "java")
+            :generator (gen/phases
+                         (->> (adds)
+                              (gen/stagger 1/10)
+                              (gen/delay 1)
+                              (gen/nemesis
+                                (gen/seq (cycle
+                                           [(gen/sleep 0)
+                                            {:type :info :f :start}
+                                            (gen/sleep 120)
+                                            {:type :info :f :stop}])))
+                              (gen/time-limit 600))
+                         (recover)
+                         (read-once))}))

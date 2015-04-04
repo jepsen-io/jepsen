@@ -39,8 +39,18 @@
 ;    (is (:valid? (:results test)))
 ;    (pprint (:results test))))
 
-(deftest create
-  (let [test (jepsen/run! (create-test))]
+(defn run-set-test!
+  "Runs a test around set creation and dumps some results to the report/ dir"
+  [t]
+  (let [test (jepsen/run! t)]
     (is (:valid? (:results test)))
-    (report/to "report/history.edn" (pprint (:history test)))
-    (report/to "report/set.edn" (pprint (:set (:results test))))))
+    (report/to (str "report/" (:name test) "/history.edn")
+               (pprint (:history test)))
+    (report/to (str "report/" (:name test) "/set.edn")
+               (pprint (:set (:results test))))))
+
+(deftest create-isolate-primaries
+  (run-set-test! (create-isolate-primaries-test)))
+
+(deftest create-pause
+  (run-set-test! (create-pause-test)))
