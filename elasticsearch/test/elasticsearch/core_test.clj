@@ -54,3 +54,6 @@
 
 (deftest create-pause
   (run-set-test! (create-pause-test)))
+
+(deftest create-bridge
+  (run-set-test! (create-bridge-test)))
