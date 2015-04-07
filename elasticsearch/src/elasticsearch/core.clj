@@ -161,12 +161,14 @@
   (reify db/DB
     (setup! [_ test node]
       (doto node
+        (nuke!)
         (install! version)
         (configure! test)
         (start!)))
 
     (teardown! [_ test node]
-      (nuke! node))))
+      ;; Leave system up, to collect logs, analyze post mortem, etc
+      )))
 
 (def index-name "jepsen-index")
 
