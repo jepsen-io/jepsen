@@ -221,9 +221,8 @@
                 (esi/flush client index-name)
                 (assoc op :type :ok
                        :value (->> (esd/search client index-name "number"
-                                               :search_type "query_then_fetch"
-                                               :scroll "1m"
-                                               :size 2)
+                                               :scroll "10s"
+                                               :size 20)
                                    (esd/scroll-seq client)
                                    (map (comp :num :_source))
                                    (into (sorted-set))))
