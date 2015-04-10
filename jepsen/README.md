@@ -26,11 +26,11 @@ sudo apt-get install libjna-java
 ```
 
 For an overview of how a database test works, see
-`elasticsearch/src/jepsen/system/elasticsearch.clj` and its corresponding test
-`elasticsearch/test/jepsen/system/elasticsearch-test.clj`, which you can invoke via
+`aerospike/src/aerospike/core.clj` and its corresponding test
+`aerospike/test/aerospike/core-test.clj`, which you can invoke from the `aerospike` directory by running
 
 ```
-lein with-profile +elasticsearch test jepsen.system.elasticsearch-test
+lein test
 ```
 
 ## FAQ
