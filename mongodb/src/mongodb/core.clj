@@ -225,20 +225,24 @@
   "Block until we can connect to the given node. Returns a connection to the
   node."
   [node]
-  (or (try
-        (let [conn (mongo/connect (mongo/server-address (name node))
-                                  mongo-conn-opts)]
-          (try
-            (optime conn)
-            conn
-            (catch Throwable t
-              (mongo/disconnect conn)
-              (throw t))))
-        (catch com.mongodb.MongoServerSelectionException e
-          nil))
-      (do
-        (Thread/sleep 1000)
-        (recur node))))
+  (timeout 45000
+           (throw (ex-info "Timed out trying to connect to MongoDB"
+                           {:node node}))
+           (loop []
+             (or (try
+                   (let [conn (mongo/connect (mongo/server-address (name node))
+                                             mongo-conn-opts)]
+                     (try
+                       (optime conn)
+                       conn
+                       (catch Throwable t
+                         (mongo/disconnect conn)
+                         (throw t))))
+                   (catch com.mongodb.MongoServerSelectionException e
+                     nil))
+                 (do
+                   (Thread/sleep 1000)
+                   (recur))))))
 
 (defn await-primary
   "Block until a primary is known to the current node."
