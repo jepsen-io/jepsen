@@ -377,10 +377,10 @@
     (->> gen
          (gen/delay 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 45)
+           (gen/seq (cycle [(gen/sleep 60)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 360))
+         (gen/time-limit 600))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
