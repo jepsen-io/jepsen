@@ -28,7 +28,49 @@ lxc-checkconfig
 Create a VM or five
 
 ```
-lxc-create -n n1 -t debian
+lxc-create -n n1 -t debian -- --release jessie
+lxc-create -n n2 -t debian -- --release jessie
+lxc-create -n n3 -t debian -- --release jessie
+lxc-create -n n4 -t debian -- --release jessie
+lxc-create -n n5 -t debian -- --release jessie
+```
+
+Fire up each VM:
+
+```sh
+lxc-start --name n1
+```
+
+And set your root password--I use `root`/`root` by default in Jepsen.
+
+```sh
+passwd
+```
+
+Copy your SSH key
+
+```sh
+cat ~/.ssh/id_rsa.pub
+```
+
+and add it to root's `authorized_keys`:
+
+```sh
+apt-get install -y sudo vim
+mkdir ~/.ssh
+chmod 700 ~/.ssh
+touch ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+vim ~/.ssh/authorized_keys
+```
+
+Shut each one down with `poweroff` so we can set up the network.
+
+Drop entries in `~/.ssh/config` for nodes:
+
+```
+Host n*
+User root
 ```
 
 Edit /var/lib/lxc/n1/config, changing the network hwaddr to something unique. I suggest using sequential mac addresses for n1, n2, n3, ....
@@ -48,6 +90,7 @@ lxc.mount = /var/lib/lxc/n1/fstab
 lxc.utsname = n1
 lxc.arch = amd64
 
+# Stuff to add:
 lxc.network.type = veth
 lxc.network.flags = up
 lxc.network.link = virbr0
@@ -81,12 +124,6 @@ virsh net-edit default
 </network>
 ```
 
-Kill dnsmasq; libvirt will run it
-
-```
-sudo service dnsmasq stop
-```
-
 Drop an entry in `/etc/resolv.conf` to read from the libvirt network dns:
 
 ```
@@ -94,41 +131,24 @@ nameserver 192.168.122.1  # Local libvirt dnsmasq
 nameserver 192.168.1.1    # Regular network resolver
 ```
 
-Start network
+Kill the system default dnsmasq (if you have one), and start the network (which
+in turn will start a replacement dnsmasq with the LXC config. Then, start up
+all the nodes. I have this in a bash script called `jepsen-start`:
 
 ```sh
-virsh net-start default
+#!/bin/sh
+sudo service dnsmasq stop
+sudo virsh net-start default
+sudo lxc-start -d -n n1
+sudo lxc-start -d -n n2
+sudo lxc-start -d -n n3
+sudo lxc-start -d -n n4
+sudo lxc-start -d -n n5
 ```
 
-Drop entries in `~/.ssh/config` for nodes:
-
-```
-Host n*
-User root
-```
-
-Log into every box. LXC mentions the password at container creation; usually
-`root`.
 
 ```sh
 cssh n1 n2 n3 n4 n5
-```
-
-Set up hostfiles on each box with hardcoded IP addresses
-
-```
-127.0.0.1 localhost n1 n1.local
-::1       localhost ip6-localhost ip6-loopback
-fe00::0   ip6-localnet
-ff00::0   ip6-mcastprefix
-ff02::1   ip6-allnodes
-ff02::2   ip6-allrouters
-
-192.168.122.11 n1 n1.local
-192.168.122.12 n2 n2.local
-192.168.122.13 n3 n3.local
-192.168.122.14 n4 n4.local
-192.168.122.15 n5 n5.local
 ```
 
 And that should mostly do it, I think.
