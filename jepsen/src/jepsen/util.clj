@@ -4,7 +4,8 @@
             [clojure.core.reducers :as r]
             [clojure.string :as str]
             [clj-time.core :as time]
-            [clj-time.local :as time.local])
+            [clj-time.local :as time.local]
+            [knossos.history :as history])
   (:import (java.util.concurrent.locks LockSupport)))
 
 (defn majority
@@ -222,3 +223,35 @@
            (try (Double/parseDouble s)
                 (catch java.lang.NumberFormatException e
                   s))))))
+
+(defn history->latencies
+  "Takes a history--a sequence of operations--and emits the same history but
+  with every invocation containing a new key, :latency--the time in
+  milliseconds it took for the operation to complete."
+  [history]
+  (let [idx (->> history
+                 (map-indexed (fn [i op] [op i]))
+                 (into {}))]
+    (->> history
+         (reduce (fn [[history invokes] op]
+                   (if (= :invoke (:type op))
+                     ; New invocation!
+                     [(conj! history op)
+                      (assoc! invokes (:process op)
+                              (dec (count history)))]
+
+                     (if-let [invoke-idx (get invokes (:process op))]
+                       ; We have an invocation for this process
+                       (let [invoke (get history invoke-idx)
+                             ; Compute latency
+                             l    (- (:time op) (:time invoke))]
+                         [(-> history
+                              (assoc! invoke-idx (assoc invoke :latency l))
+                              (conj!  (assoc op :latency l)))
+                          (dissoc! invokes (:process op))])
+
+                       ; We have no invocation for this process
+                       [(conj! history op) invokes])))
+                 [(transient []) (transient {})])
+         first
+         persistent!)))
