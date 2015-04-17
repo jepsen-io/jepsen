@@ -173,6 +173,15 @@
 
 (def index-name "jepsen-index")
 
+(defn index-already-exists-error?
+  "Return true if the error is due to the index already existing, false
+  otherwise."
+  [error]
+  (and
+   (-> error .getData :status (= 400))
+   (re-find #"IndexAlreadyExistsException"
+            (http-error error))))
+
 (defrecord CreateSetClient [client]
   client/Client
   (setup! [_ test node]
@@ -185,11 +194,13 @@
                                          {:num {:type "integer"
                                                 :store "yes"}}}}
                     :settings {"index" {"refresh_interval" "1s"}})
-        (catch Throwable t))
+        (catch clojure.lang.ExceptionInfo e
+          (when-not (index-already-exists-error? e)
+            (throw e))))
       (esa/cluster-health client
                           {:index [index-name] :level "indices"
                            :wait_for_status "green"
-                           :wait_for_nodes "5"})
+                           :wait_for_nodes (count (:nodes test))})
       (CreateSetClient. client)))
 
   (invoke! [this test op]
@@ -247,11 +258,13 @@
       (try
         (esi/create client index-name
                     :mappings {mapping-type {:properties {}}})
-        (catch Throwable t))
+        (catch clojure.lang.ExceptionInfo e
+          (when-not (index-already-exists-error? e)
+            (throw e))))
       (esa/cluster-health client
                           {:index [index-name] :level "indices"
                            :wait_for_status "green"
-                           :wait_for_nodes "5"})
+                           :wait_for_nodes (count (:nodes test))})
 
       ; Initial empty set
       (esd/create client index-name mapping-type {:values []} :id doc-id)
