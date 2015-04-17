@@ -20,6 +20,7 @@
             [jepsen.os.debian         :as debian]
             [clj-http.client          :as http]
             [clojurewerkz.elastisch.rest          :as es]
+            [clojurewerkz.elastisch.rest.admin    :as esa]
             [clojurewerkz.elastisch.rest.document :as esd]
             [clojurewerkz.elastisch.rest.index    :as esi]
             [clojurewerkz.elastisch.rest.response :as esr]))
@@ -161,34 +162,45 @@
   (reify db/DB
     (setup! [_ test node]
       (doto node
+        (nuke!)
         (install! version)
         (configure! test)
         (start!)))
 
     (teardown! [_ test node]
-      (nuke! node))))
+      ;; Leave system up, to collect logs, analyze post mortem, etc
+      )))
 
 (def index-name "jepsen-index")
+
+(defn index-already-exists-error?
+  "Return true if the error is due to the index already existing, false
+  otherwise."
+  [error]
+  (and
+   (-> error .getData :status (= 400))
+   (re-find #"IndexAlreadyExistsException"
+            (http-error error))))
 
 (defrecord CreateSetClient [client]
   client/Client
   (setup! [_ test node]
     (let [; client (es/connect [[(name node) 9300]])]
           client (es/connect (str "http://" (name node) ":9200"))]
-      ; Create index
+      ;; Create index
       (try
         (esi/create client index-name
                     :mappings {"number" {:properties
                                          {:num {:type "integer"
                                                 :store "yes"}}}}
-                    :settings {"index" {"refresh_interval" "1"}})
+                    :settings {"index" {"refresh_interval" "1s"}})
         (catch clojure.lang.ExceptionInfo e
-          ; Is this seriously how you're supposed to do idempotent
-          ; index creation? I've gotta be doing this wrong.
-          (let [err (http-error e)]
-            (when-not (re-find #"IndexAlreadyExistsException" err)
-              (throw (RuntimeException. err))))))
-
+          (when-not (index-already-exists-error? e)
+            (throw e))))
+      (esa/cluster-health client
+                          {:index [index-name] :level "indices"
+                           :wait_for_status "green"
+                           :wait_for_nodes (count (:nodes test))})
       (CreateSetClient. client)))
 
   (invoke! [this test op]
@@ -220,9 +232,8 @@
                 (esi/flush client index-name)
                 (assoc op :type :ok
                        :value (->> (esd/search client index-name "number"
-                                               :search_type "query_then_fetch"
-                                               :scroll "1m"
-                                               :size 2)
+                                               :scroll "10s"
+                                               :size 20)
                                    (esd/scroll-seq client)
                                    (map (comp :num :_source))
                                    (into (sorted-set))))
@@ -243,16 +254,17 @@
   (setup! [_ test node]
     (let [; client (es/connect [[(name node) 9300]])]
           client (es/connect (str "http://" (name node) ":9200"))]
-      ; Create index
+      ;; Create index
       (try
         (esi/create client index-name
                     :mappings {mapping-type {:properties {}}})
         (catch clojure.lang.ExceptionInfo e
-          ; Is this seriously how you're supposed to do idempotent
-          ; index creation? I've gotta be doing this wrong.
-          (let [err (http-error e)]
-            (when-not (re-find #"IndexAlreadyExistsException" err)
-              (throw (RuntimeException. err))))))
+          (when-not (index-already-exists-error? e)
+            (throw e))))
+      (esa/cluster-health client
+                          {:index [index-name] :level "indices"
+                           :wait_for_status "green"
+                           :wait_for_nodes (count (:nodes test))})
 
       ; Initial empty set
       (esd/create client index-name mapping-type {:values []} :id doc-id)
