@@ -23,6 +23,10 @@
     (when-not (= hosts hosts')
       (c/su (c/exec :echo hosts' :> "/etc/hosts")))))
 
+(defn update!
+  "Apt-get update."
+  []
+  (c/su (c/exec :apt-get :update)))
 
 (defn installed
   "Given a list of debian packages (strings, symbols, keywords, etc), returns
