@@ -224,6 +224,23 @@
                 (catch java.lang.NumberFormatException e
                   s))))))
 
+(defn coll
+  "Wraps non-coll things into singleton lists, and leaves colls as themselves.
+  Useful when you can take either a single thing or a sequence of things."
+  [thing-or-things]
+  (cond (nil? thing-or-things)  nil
+        (coll? thing-or-things) thing-or-things
+        true                    (list thing-or-things)))
+
+(defn sequential
+  "Wraps non-sequential things into singleton lists, and leaves sequential
+  things or nil as themselves. Useful when you can take either a single thing
+  or a sequence of things."
+  [thing-or-things]
+  (cond (nil? thing-or-things)        nil
+        (sequential? thing-or-things) thing-or-things
+        true                          (list thing-or-things)))
+
 (defn history->latencies
   "Takes a history--a sequence of operations--and emits the same history but
   with every invocation containing a new key, :latency--the time in

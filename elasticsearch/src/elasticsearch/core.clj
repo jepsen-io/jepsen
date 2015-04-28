@@ -335,15 +335,15 @@
 
 (def crash-nemesis
   "A nemesis that crashes a random node."
-  (nemesis/single-node-start-stopper
+  (nemesis/node-start-stopper
     rand-nth
     (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
     (fn stop  [test node] (start! node) [:restarted node])))
 
 (def crash-primary-nemesis
-  "A nemesis that crashes a random primary node."
-  (nemesis/single-node-start-stopper
-    (comp rand-nth self-primaries)
+  "A nemesis that crashes all primary nodes."
+  (nemesis/node-start-stopper
+    self-primaries
     (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
     (fn stop  [test node] (start! node) [:restarted node])))
 
@@ -407,11 +407,10 @@
                              (read-once))}))
 
 (defn create-pause-test
-  "Inserts docs into a set while pausing random primaries with SIGSTOP/SIGCONT."
+  "Inserts docs into a set while pausing primaries with SIGSTOP/SIGCONT."
   []
   (create-test "pause"
-               {:nemesis   (nemesis/hammer-time
-                             (comp rand-nth self-primaries) "java")
+               {:nemesis   (nemesis/hammer-time self-primaries "java")
                 :generator (gen/phases
                              (->> (adds)
                                   (gen/stagger 1/10)
