@@ -39,7 +39,9 @@
   [timeout-secs color]
   (timeout (* 1000 timeout-secs)
            (throw (RuntimeException.
-                    "Timed out waiting for elasticsearch cluster recovery"))
+                    (str "Timed out after "
+                         timeout-secs
+                         " s waiting for elasticsearch cluster recovery")))
     (loop []
       (when
         (try
@@ -153,7 +155,8 @@
   (stop! node)
   (c/su
     (c/exec :rm :-rf "/var/lib/elasticsearch/elasticsearch")
-    (c/exec :truncate :--size 0 "/var/log/elasticsearch/elasticsearch.log"))
+    (meh
+      (c/exec :truncate :--size 0 "/var/log/elasticsearch/elasticsearch.log")))
   (info node "elasticsearch nuked"))
 
 (defn db
