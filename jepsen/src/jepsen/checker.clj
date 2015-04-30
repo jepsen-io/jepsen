@@ -7,6 +7,7 @@
             [clojure.set :as set]
             [jepsen.util :as util]
             [multiset.core :as multiset]
+            [gnuplot.core :as g]
             [knossos.core :as knossos]
             [knossos.history :as history]))
 
@@ -234,3 +235,58 @@
                                  [k (check checker test model history)]))
                          (into {}))]
         (assoc results :valid? (every? :valid? (vals results)))))))
+
+(defn latency-graph
+  "Spits out graphs of latency to the given output directory."
+  [dir]
+  (reify Checker
+    (check [this test model history]
+      (let [; Function to split up a seq of ops into OK, failed, and crashed ops
+            by-type (fn [ops]
+                      {:ok   (filter #(= :ok   (:type (:completion %))) ops)
+                       :fail (filter #(= :fail (:type (:completion %))) ops)
+                       :info (filter #(= :info (:type (:completion %))) ops)})
+
+            ; Function to extract a [time, latency] pair from an op
+            point   #(list (double (util/nanos->secs (:time %)))
+                           (double (util/nanos->ms   (:latency %))))
+
+            ; Preprocess history
+            history (util/history->latencies history)
+            invokes (filter #(= :invoke (:type %)) history)
+
+            ; Split up invocations by function, then ok/failed/crashed
+            datasets (->> invokes
+                          (group-by :f)
+                          (util/map-kv (fn [[f ops]]
+                                         [f (by-type ops)])))
+
+            ; What functions/types are we working with?
+            fs          (sort (keys datasets))
+            types       [:ok :info :fail]
+
+            ; How should we render types?
+            types->points {:ok   1
+                           :fail 2
+                           :info 3}
+
+            ; How should we render different fs?
+            fs->colors  (->> fs (map-indexed (fn [i f] [f i])) (into {}))]
+
+        (g/raw-plot!
+          ['[set title "Latency"]
+           '[set autoscale]
+           '[set xlabel "Time (s)"]
+           '[set ylabel "Latency (ms)"]
+           '[set key left top]
+           '[set logscale y]
+           ['plot (apply g/list
+                         (for [f fs, t types]
+                           ["-"
+                            'with 'points
+                            'pointtype (types->points t)
+                            'linetype  (fs->colors f)
+                            'title (str (name f) " "
+                                        (name t))]))]]
+          (for [f fs, t types]
+            (map point (get-in datasets [f t]))))))))
