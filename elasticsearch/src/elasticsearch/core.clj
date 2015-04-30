@@ -341,9 +341,9 @@
     (fn stop  [test node] (start! node) [:restarted node])))
 
 (def crash-primary-nemesis
-  "A nemesis that crashes all primary nodes."
+  "A nemesis that crashes a random primary node."
   (nemesis/node-start-stopper
-    self-primaries
+    (comp rand-nth self-primaries)
     (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
     (fn stop  [test node] (start! node) [:restarted node])))
 
@@ -383,8 +383,11 @@
   (es-test (str "create " name)
            (merge {:client  (create-set-client)
                    :model   (model/set)
-                   :checker (checker/compose {:html timeline/html
-                                              :set  checker/set})}
+                   :checker (checker/compose
+                              {:html    timeline/html
+                               :set     checker/set
+                               :latency (checker/latency-graph
+                                          "report/latency")})}
                   opts)))
 
 (defn create-isolate-primaries-test
@@ -407,17 +410,18 @@
                              (read-once))}))
 
 (defn create-pause-test
-  "Inserts docs into a set while pausing primaries with SIGSTOP/SIGCONT."
+  "Inserts docs into a set while pausing random primaries with SIGSTOP/SIGCONT."
   []
   (create-test "pause"
-               {:nemesis   (nemesis/hammer-time self-primaries "java")
+               {:nemesis   (nemesis/hammer-time
+                             (comp rand-nth self-primaries) "java")
                 :generator (gen/phases
                              (->> (adds)
                                   (gen/stagger 1/10)
                                   (gen/delay 1)
                                   (gen/nemesis
                                     (gen/seq (cycle
-                                               [(gen/sleep 0)
+                                               [(gen/sleep 10)
                                                 {:type :info :f :start}
                                                 (gen/sleep 120)
                                                 {:type :info :f :stop}])))

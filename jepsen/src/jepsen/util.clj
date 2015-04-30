@@ -243,8 +243,10 @@
 
 (defn history->latencies
   "Takes a history--a sequence of operations--and emits the same history but
-  with every invocation containing a new key, :latency--the time in
-  milliseconds it took for the operation to complete."
+  with every invocation containing two new keys:
+
+  :latency    the time in nanoseconds it took for the operation to complete.
+  :completion the next event for that process"
   [history]
   (let [idx (->> history
                  (map-indexed (fn [i op] [op i]))
@@ -261,10 +263,12 @@
                        ; We have an invocation for this process
                        (let [invoke (get history invoke-idx)
                              ; Compute latency
-                             l    (- (:time op) (:time invoke))]
+                             l    (- (:time op) (:time invoke))
+                             op (assoc op :latency l)]
                          [(-> history
-                              (assoc! invoke-idx (assoc invoke :latency l))
-                              (conj!  (assoc op :latency l)))
+                              (assoc! invoke-idx
+                                      (assoc invoke :latency l, :completion op))
+                              (conj! op))
                           (dissoc! invokes (:process op))])
 
                        ; We have no invocation for this process

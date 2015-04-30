@@ -43,7 +43,8 @@
   "Runs a test around set creation and dumps some results to the report/ dir"
   [t]
   (let [test (jepsen/run! t)]
-    (is (:valid? (:results test)))
+    (or (is (:valid? (:results test)))
+        (println (:error (:results test))))
     (report/to (str "report/" (:name test) "/history.edn")
                (pprint (:history test)))
     (report/to (str "report/" (:name test) "/set.edn")

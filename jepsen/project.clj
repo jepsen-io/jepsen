@@ -7,6 +7,7 @@
                  [clj-time "0.6.0"]
                  [knossos "0.2.1"]
                  [clj-ssh "0.5.7"]
+                 [gnuplot "0.1.0"]
                  [hiccup "1.0.5"]
                  [org.clojars.achim/multiset "0.1.0"]
                  [org.clojure/tools.cli "0.2.2"]
