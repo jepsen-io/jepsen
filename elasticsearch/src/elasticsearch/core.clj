@@ -387,7 +387,7 @@
                               {:html    timeline/html
                                :set     checker/set
                                :latency (checker/latency-graph
-                                          "report/latency")})}
+                                          "report")})}
                   opts)))
 
 (defn create-isolate-primaries-test
@@ -401,11 +401,11 @@
                                   (gen/delay 1)
                                   (gen/nemesis
                                     (gen/seq (cycle
-                                               [(gen/sleep 10)
+                                               [(gen/sleep 30)
                                                 {:type :info :f :start}
-                                                (gen/sleep 120)
+                                                (gen/sleep 200)
                                                 {:type :info :f :stop}])))
-                                  (gen/time-limit 600))
+                                  (gen/time-limit 800))
                              (recover)
                              (read-once))}))
 

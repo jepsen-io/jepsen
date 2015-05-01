@@ -271,22 +271,54 @@
                            :info 3}
 
             ; How should we render different fs?
-            fs->colors  (->> fs (map-indexed (fn [i f] [f i])) (into {}))]
+            fs->colors  (->> fs
+                             (map-indexed (fn [i f] [f i]))
+                             (into {}))
+
+            ; Extract nemesis start/stop pairs
+            final-time  (->> history
+                             rseq
+                             (filter :time)
+                             first
+                             :time
+                             util/nanos->secs
+                             double)
+            nemesis     (->> history
+                             util/nemesis-intervals
+                             (keep
+                               (fn [[start stop]]
+                                 (when start
+                                   [(-> start :time util/nanos->secs double)
+                                    (if stop
+                                      (-> stop :time util/nanos->secs double)
+                                      final-time)]))))]
 
         (g/raw-plot!
-          ['[set title "Latency"]
-           '[set autoscale]
-           '[set xlabel "Time (s)"]
-           '[set ylabel "Latency (ms)"]
-           '[set key left top]
-           '[set logscale y]
-           ['plot (apply g/list
-                         (for [f fs, t types]
-                           ["-"
-                            'with 'points
-                            'pointtype (types->points t)
-                            'linetype  (fs->colors f)
-                            'title (str (name f) " "
-                                        (name t))]))]]
+          (concat [[:set :output (str dir "/latency.png")]
+                   [:set :term :png, :truecolor, :size (g/list 900 400)]]
+                  '[[set title "Latency"]
+                    [set autoscale]
+                    [set xlabel "Time (s)"]
+                    [set ylabel "Latency (ms)"]
+                    [set key left top]
+                    [set logscale y]]
+                 ; Nemesis regions
+                 (map (fn [[start stop]]
+                        [:set :obj :rect
+                         :from (g/list start [:graph 0])
+                         :to   (g/list stop  [:graph 1])
+                         :fillcolor :rgb "#000000"
+                         :fillstyle :transparent :solid 0.05
+                         :noborder])
+                      nemesis)
+                 ; Plot ops
+                 [['plot (apply g/list
+                                (for [f fs, t types]
+                                  ["-"
+                                   'with 'points
+                                   'pointtype (types->points t)
+                                   'linetype  (fs->colors f)
+                                   'title (str (name f) " "
+                                               (name t))]))]])
           (for [f fs, t types]
             (map point (get-in datasets [f t]))))))))

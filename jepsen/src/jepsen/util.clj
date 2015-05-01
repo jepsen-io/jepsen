@@ -276,3 +276,22 @@
                  [(transient []) (transient {})])
          first
          persistent!)))
+
+(defn nemesis-intervals
+  "Given a history where a nemesis goes through :f :start and :f :stop
+  transitions, constructs a sequence of pairs of :start and :stop ops. Since a
+  nemesis usually goes :start :start :stop :stop, we construct pairs of the
+  first and third, then second and fourth events. Where no :stop op is present,
+  we emit a pair like [start nil]."
+  [history]
+  (let [[pairs starts] (->> history
+                            (filter #(= :nemesis (:process %)))
+                            (reduce (fn [[pairs starts] op]
+                                      (case (:f op)
+                                        :start [pairs (conj starts op)]
+                                        :stop  [(conj pairs [(peek starts)
+                                                             op])
+                                                (pop starts)]
+                                        [pairs starts]))
+                                    [[] (clojure.lang.PersistentQueue/EMPTY)]))]
+    (concat pairs (map vector starts (repeat nil)))))
