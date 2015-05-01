@@ -1,6 +1,7 @@
 .cake
 .lein-repl-history
 pom.xml
+pom.xml.asc
 repl-port
 *.jar
 *.tar
