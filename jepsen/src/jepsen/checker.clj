@@ -321,4 +321,7 @@
                                    'title (str (name f) " "
                                                (name t))]))]])
           (for [f fs, t types]
-            (map point (get-in datasets [f t]))))))))
+            (map point (get-in datasets [f t]))))
+
+        {:valid? true
+         :file   (str dir "/latency.png")}))))
