@@ -322,6 +322,27 @@
 
 ; Nemeses
 
+(defn mostly-small-nonempty-subset
+  "Returns a subset of the given collection, with a logarithmically decreasing
+  probability of selecting more elements. Always selects at least one element.
+
+      (->> #(mostly-small-nonempty-subset [1 2 3 4 5])
+           repeatedly
+           (map count)
+           (take 10000)
+           frequencies
+           sort)
+      ; => ([1 3824] [2 2340] [3 1595] [4 1266] [5 975])"
+  [xs]
+  (-> xs
+      count
+      inc
+      Math/log
+      rand
+      Math/exp
+      long
+      (take (shuffle xs))))
+
 (def isolate-self-primaries-nemesis
   "A nemesis which completely isolates any node that thinks it is the primary."
   (nemesis/partitioner
@@ -334,9 +355,9 @@
                 (map list ps)))))))
 
 (def crash-nemesis
-  "A nemesis that crashes a random node."
+  "A nemesis that crashes a random subset of nodes."
   (nemesis/node-start-stopper
-    rand-nth
+    mostly-small-nonempty-subset
     (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
     (fn stop  [test node] (start! node) [:restarted node])))
 
@@ -424,6 +445,25 @@
                                                [(gen/sleep 10)
                                                 {:type :info :f :start}
                                                 (gen/sleep 120)
+                                                {:type :info :f :stop}])))
+                                  (gen/time-limit 600))
+                             (recover)
+                             (read-once))}))
+
+(defn create-crash-test
+  "Inserts docs into a set while killing random nodes and restarting them."
+  []
+  (create-test "crash"
+               {:nemesis   crash-nemesis
+                :generator (gen/phases
+                             (->> (adds)
+                                  (gen/stagger 1/10)
+                                  (gen/delay 1/10)
+                                  (gen/nemesis
+                                    (gen/seq (cycle
+                                               [(gen/sleep 1)
+                                                {:type :info :f :start}
+                                                (gen/sleep 1)
                                                 {:type :info :f :stop}])))
                                   (gen/time-limit 600))
                              (recover)

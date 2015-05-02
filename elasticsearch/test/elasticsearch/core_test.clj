@@ -58,3 +58,6 @@
 
 (deftest create-bridge
   (run-set-test! (create-bridge-test)))
+
+(deftest create-crash
+  (run-set-test! (create-crash-test)))
