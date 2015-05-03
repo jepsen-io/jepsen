@@ -108,6 +108,9 @@ node.name: $NAME
 #
 index.number_of_replicas: 4
 
+# Force fsync for every op
+index.gateway.local.sync: 5
+
 # Note, that for development on a local machine, with small indices, it usually
 # makes sense to "disable" the distributed features:
 #
@@ -134,7 +137,6 @@ index.number_of_replicas: 4
 
 # Use the Index Status API (<http://localhost:9200/A/_status>) to inspect
 # the index status.
-
 
 #################################### Paths ####################################
 
