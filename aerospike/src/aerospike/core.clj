@@ -183,7 +183,7 @@
 (def ^Policy policy
   "General operation policy"
   (let [p (Policy.)]
-    (set! (.timeout p) 1000)
+    (set! (.timeout p) 100000)
     ; (set! (.consistencyLevel p) ConsistencyLevel/CONSISTENCY_ALL)
     p))
 
@@ -372,9 +372,9 @@
   (gen/phases
     (->> gen
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 1)
+           (gen/seq (cycle [(gen/sleep 2)
                             {:type :info :f :start}
-                            (gen/sleep 0)
+                            (gen/sleep 10)
                             {:type :info :f :stop}])))
          (gen/time-limit 60))
     ; Recover
