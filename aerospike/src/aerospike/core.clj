@@ -183,7 +183,7 @@
 (def ^Policy policy
   "General operation policy"
   (let [p (Policy.)]
-    (set! (.timeout p) 50)
+    (set! (.timeout p) 1000)
     ; (set! (.consistencyLevel p) ConsistencyLevel/CONSISTENCY_ALL)
     p))
 
@@ -353,7 +353,7 @@
 (defn killer
   "Kills aerospike on a random node on start, restarts it on stop."
   []
-  (nemesis/single-node-start-stopper
+  (nemesis/node-start-stopper
     rand-nth
     (fn start [test node] (c/su (c/exec :killall :-9 :asd)))
     (fn stop  [test node] (start! node test))))
@@ -372,11 +372,11 @@
   (gen/phases
     (->> gen
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 10)
+           (gen/seq (cycle [(gen/sleep 1)
                             {:type :info :f :start}
-                            (gen/sleep 10)
+                            (gen/sleep 0)
                             {:type :info :f :stop}])))
-         (gen/time-limit 360))
+         (gen/time-limit 60))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -392,7 +392,9 @@
           :os      debian/os
           :db      (db "3.5.4")
           :model   (model/cas-register)
-          :checker (checker/compose {:linear checker/linearizable})
+          :checker (checker/compose {:linear checker/linearizable
+                                     :latency (checker/latency-graph
+                                                "report/")})
           :nemesis (nemesis/partition-random-halves)}
          opts))
 
@@ -416,4 +418,5 @@
                                    gen/mix
                                    (gen/delay 1/100)
                                    std-gen)
-                   :checker   (checker/compose {:counter checker/counter})}))
+                   :checker   (checker/compose {:counter checker/counter
+                                                :latency (checker/latency-graph "report/")})}))

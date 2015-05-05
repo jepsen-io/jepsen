@@ -12,8 +12,8 @@
     (report/to "report/linearizability.txt"
                (-> test :results :linear report/linearizability))))
 
-;(deftest counter
-;  (let [test (jepsen/run! (counter-test))]
-;    (is (:valid? (:results test)))
-;    (report/to "report/counter.txt"
-;               (-> test :results :counter pprint))))
+(deftest counter
+  (let [test (jepsen/run! (counter-test))]
+    (is (:valid? (:results test)))
+    (report/to "report/counter.txt"
+               (-> test :results :counter pprint))))
