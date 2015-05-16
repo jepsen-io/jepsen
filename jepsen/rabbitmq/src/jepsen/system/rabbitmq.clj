@@ -174,7 +174,7 @@
                         (drop 1)                     ; except the initial one
                         (map (fn [completion]
                                (log-op completion)
-                               (core/conj-op! test op)))
+                               (core/conj-op! test completion)))
                         dorun)
                    (assoc op :type :ok :value :exhausted))))))
 
