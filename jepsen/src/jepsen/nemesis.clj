@@ -4,8 +4,8 @@
             [jepsen.util        :as util]
             [jepsen.client      :as client]
             [jepsen.control     :as c]
-            [jepsen.control.net :as jcn]
-            [jepsen.netcontrol  :as netcontrol]))
+            [jepsen.control.net :as controlnet]
+            [jepsen.net         :as net]))
 
 (defn noop
   "Does nothing."
@@ -17,23 +17,23 @@
 
 (defn snub-node!
   "Drops all packets from node."
-  [netcontroller node]
-  (netcontrol/drop-from! netcontroller (jcn/ip node)))
+  [net node]
+  (net/drop-from! net (controlnet/ip node)))
 
 (defn snub-nodes!
   "Drops all packets from the given nodes."
-  [netcontroller nodes]
-  (dorun (map (partial snub-node! netcontroller) nodes)))
+  [net nodes]
+  (dorun (map (partial snub-node! net) nodes)))
 
 (defn partition!
   "Takes a *grudge*: a map of nodes to the collection of nodes they should
   reject messages from, and makes the appropriate changes. Does not heal the
   network first, so repeated calls to partition! are cumulative right now."
-  [netcontroller grudge]
+  [net grudge]
   (->> grudge
        (map (fn [[node frenemies]]
               (future
-                (c/on node (snub-nodes! netcontroller frenemies)))))
+                (c/on node (snub-nodes! net frenemies)))))
        doall
        (map deref)
        dorun))
@@ -82,19 +82,19 @@
   [grudge]
   (reify client/Client
     (setup! [this test _]
-      (c/on-many (:nodes test) (netcontrol/heal! (:netcontroller test)))
+      (c/on-many (:nodes test) (net/heal! (:net test)))
       this)
 
     (invoke! [this test op]
       (case (:f op)
         :start (let [grudge (grudge (:nodes test))]
-                 (partition! (:netcontroller test) grudge)
+                 (partition! (:net test) grudge)
                  (assoc op :value (str "Cut off " (pr-str grudge))))
-        :stop  (do (c/on-many (:nodes test) (netcontrol/heal! (:netcontroller test)))
+        :stop  (do (c/on-many (:nodes test) (net/heal! (:net test)))
                    (assoc op :value "fully connected"))))
 
     (teardown! [this test]
-      (c/on-many (:nodes test) (netcontrol/heal! (:netcontroller test))))))
+      (c/on-many (:nodes test) (net/heal! (:net test))))))
 
 (defn partition-halves
   "Responds to a :start operation by cutting the network into two halves--first
