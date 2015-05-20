@@ -7,7 +7,7 @@
             [jepsen.generator :as gen]
             [jepsen.model :as model]
             [jepsen.checker :as checker]
-            [jepsen.netcontrol :as netcontrol]))
+            [jepsen.net :as net]))
 
 
 (def noop-test
@@ -17,7 +17,7 @@
   {:nodes     [:n1 :n2 :n3 :n4 :n5]
    :os        os/noop
    :db        db/noop
-   :netcontroller netcontrol/iptables
+   :net       net/iptables
    :client    client/noop
    :nemesis   client/noop
    :generator gen/void

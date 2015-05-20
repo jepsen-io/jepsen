@@ -21,4 +21,4 @@
       (is (= 1 (count ts)))
       (is (string? k))
       (is (= @t'
-             (dissoc t :db :os :netcontroller :client :checker :nemesis :generator :model))))))
+             (dissoc t :db :os :net :client :checker :nemesis :generator :model))))))
