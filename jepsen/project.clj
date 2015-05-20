@@ -17,6 +17,7 @@
                   :exclusions [org.slf4j/slf4j-api
                                org.slf4j-log4j12
                                com.google.guava/guava]]]
+  :classifiers [["rabbitmq" :rabbitmq]]
   :profiles {:consul {:source-paths ["consul/src"]
                       :test-paths   ["consul/test"]
                       :dependencies [[cheshire "5.4.0"]
