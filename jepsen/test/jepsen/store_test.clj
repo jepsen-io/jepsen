@@ -11,7 +11,7 @@
 (deftest roundtrip-test
   (delete! "store-test")
 
-  (let [t (core/run! (assoc core-test/noop-test
+  (let [t (core/run! (assoc noop-test
                             :name     "store-test"
                             :multiset (into (multiset/multiset)
                                             [1 1 2 3 5 8])))]
@@ -21,4 +21,4 @@
       (is (= 1 (count ts)))
       (is (string? k))
       (is (= @t'
-             (dissoc t :db :os :client :checker :nemesis :generator :model))))))
+             (dissoc t :db :os :netcontroller :client :checker :nemesis :generator :model))))))

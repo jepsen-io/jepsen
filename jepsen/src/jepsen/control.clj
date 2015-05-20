@@ -14,6 +14,7 @@
 (def ^:dynamic *sudo*     "User to sudo to"               nil)
 (def ^:dynamic *username* "Username"                      "root")
 (def ^:dynamic *password* "Password (for login and sudo)" "root")
+(def ^:dynamic *port*     "SSH listening port"            22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 
@@ -187,6 +188,7 @@
                        host
                        {:username *username*
                         :password *password*
+                        :port *port*
                         :strict-host-key-checking *strict-host-key-checking*})
       (ssh/connect))))
 
@@ -204,6 +206,7 @@
   [ssh & body]
   `(binding [*username*         (get ~ssh :username *username*)
              *password*         (get ~ssh :password *password*)
+             *port*             (get ~ssh :port *port*)
              *private-key-path* (get ~ssh :private-key-path *private-key-path*)
              *strict-host-key-checking* (get ~ssh :strict-host-key-checking
                                              *strict-host-key-checking*)]
