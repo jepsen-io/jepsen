@@ -4,7 +4,6 @@
             [jepsen.util        :as util]
             [jepsen.client      :as client]
             [jepsen.control     :as c]
-            [jepsen.control.net :as controlnet]
             [jepsen.net         :as net]))
 
 (defn noop
@@ -15,25 +14,20 @@
     (invoke! [this test op] op)
     (teardown! [this test] this)))
 
-(defn snub-node!
-  "Drops all packets from node."
-  [net node]
-  (net/drop-from! net (controlnet/ip node)))
-
 (defn snub-nodes!
   "Drops all packets from the given nodes."
-  [net nodes]
-  (dorun (map (partial snub-node! net) nodes)))
+  [test dest sources]
+  (doseq [src sources] (net/drop! (:net test) test src dest)))
 
 (defn partition!
   "Takes a *grudge*: a map of nodes to the collection of nodes they should
   reject messages from, and makes the appropriate changes. Does not heal the
   network first, so repeated calls to partition! are cumulative right now."
-  [net grudge]
+  [test grudge]
   (->> grudge
        (map (fn [[node frenemies]]
               (future
-                (c/on node (snub-nodes! net frenemies)))))
+                (snub-nodes! test node frenemies))))
        doall
        (map deref)
        dorun))
@@ -82,19 +76,19 @@
   [grudge]
   (reify client/Client
     (setup! [this test _]
-      (c/on-many (:nodes test) (net/heal! (:net test)))
+      (net/heal! (:net test) test)
       this)
 
     (invoke! [this test op]
       (case (:f op)
         :start (let [grudge (grudge (:nodes test))]
-                 (partition! (:net test) grudge)
+                 (partition! test grudge)
                  (assoc op :value (str "Cut off " (pr-str grudge))))
-        :stop  (do (c/on-many (:nodes test) (net/heal! (:net test)))
+        :stop  (do (net/heal! (:net test) test)
                    (assoc op :value "fully connected"))))
 
     (teardown! [this test]
-      (c/on-many (:nodes test) (net/heal! (:net test))))))
+      (net/heal! (:net test) test))))
 
 (defn partition-halves
   "Responds to a :start operation by cutting the network into two halves--first
