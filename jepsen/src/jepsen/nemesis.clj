@@ -17,7 +17,7 @@
 (defn snub-nodes!
   "Drops all packets from the given nodes."
   [test dest sources]
-  (doseq [src sources] (net/drop! (:net test) test src dest)))
+  (->> sources (pmap #(net/drop! (:net test) test % dest)) dorun))
 
 (defn partition!
   "Takes a *grudge*: a map of nodes to the collection of nodes they should
