@@ -1,24 +1,25 @@
 (ns jepsen.net
   "Controls network manipulation."
-  (:use jepsen.control))
+  (:use jepsen.control)
+  (:require [jepsen.control.net :as control.net]))
 
 (defprotocol Net
-  (drop-from! [net source] "Drop traffic originating from this source IP.")
-  (heal!      [net]        "Remove all partition-inducing rules."))
+  (drop! [net test src dest] "Drop traffic between nodes src and dest.")
+  (heal! [net test]          "End all traffic drops."))
 
 (def noop
   "Does nothing."
   (reify Net
-    (drop-from! [net source])
-    (heal!      [net])))
+    (drop! [net test src dest])
+    (heal! [net test])))
 
 (def iptables
   "Default iptables (assumes we control everything)."
   (reify Net
-    (drop-from! [net source]
-      (su (exec :iptables :-A :INPUT :-s source :-j :DROP)))
+    (drop! [net test src dest]
+      (on dest (su (exec :iptables :-A :INPUT :-s (control.net/ip src) :-j :DROP))))
 
-    (heal!      [net]
-      (su
-        (exec :iptables :-F)
-        (exec :iptables :-X)))))
+    (heal! [net test]
+      (on-many (:nodes test) (su
+                               (exec :iptables :-F)
+                               (exec :iptables :-X))))))
