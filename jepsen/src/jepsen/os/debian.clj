@@ -105,7 +105,7 @@
 
         ; Fucking systemd breaks a bunch of packages
         (if (installed? :systemd)
-          (c/exec :apt-get :remove :--purge :--auto-remove :systemd)))
+          (c/exec :apt-get :remove :-y :--purge :--auto-remove :systemd)))
 
       (meh (net/heal)))
 
