@@ -6,8 +6,8 @@
             [jepsen.client :as client]
             [jepsen.generator :as gen]
             [jepsen.model :as model]
-            [jepsen.checker :as checker]))
-
+            [jepsen.checker :as checker]
+            [jepsen.net :as net]))
 
 (def noop-test
   "Boring test stub.
@@ -16,6 +16,7 @@
   {:nodes     [:n1 :n2 :n3 :n4 :n5]
    :os        os/noop
    :db        db/noop
+   :net       net/iptables
    :client    client/noop
    :nemesis   client/noop
    :generator gen/void

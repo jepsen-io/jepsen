@@ -264,6 +264,7 @@
   :ssh        SSH credential information: a map containing...
     :username           The username to connect with   (root)
     :password           The password to use
+    :port               SSH listening port (22)
     :private-key-path   A path to an SSH identity file (~/.ssh/id_rsa)
     :strict-host-key-checking  Whether or not to verify host keys
   :os         The operating system; given by the OS protocol
