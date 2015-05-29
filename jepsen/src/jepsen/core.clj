@@ -1,6 +1,17 @@
 (ns jepsen.core
   "Entry point for all Jepsen tests. Coordinates the setup of servers, running
-  tests, creating and resolving failures, and interpreting results."
+  tests, creating and resolving failures, and interpreting results.
+
+  Jepsen tests a system by running a set of singlethreaded *processes*, each
+  representing a single client in the system, and a special *nemesis* process,
+  which induces failures across the cluster. Processes choose operations to
+  perform based on a *generator*. Each process uses a *client* to apply the
+  operation to the distributed system, and records the invocation and
+  completion of that operation in the *history* for the test. When the test is
+  complete, a *checker* analyzes the history to see if it made sense.
+
+  Jepsen automates the setup and teardown of the environment and distributed
+  system by using an *OS* and *client* respectively. See `run!` for details."
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
             [knossos.core :as knossos]
