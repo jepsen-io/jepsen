@@ -23,10 +23,22 @@
     (when-not (= hosts hosts')
       (c/su (c/exec :echo hosts' :> "/etc/hosts")))))
 
+(defn time-since-last-update
+  "When did we last run an apt-get update, in seconds ago"
+  []
+  (- (Long/parseLong (c/exec :date "+%s"))
+     (Long/parseLong (c/exec :stat :-c "%Y" "/var/cache/apt/pkgcache.bin"))))
+
 (defn update!
   "Apt-get update."
   []
   (c/su (c/exec :apt-get :update)))
+
+(defn maybe-update!
+  "Apt-get update if we haven't done so recently."
+  []
+  (when (< 86400 (time-since-last-update))
+    (update!)))
 
 (defn installed
   "Given a list of debian packages (strings, symbols, keywords, etc), returns
@@ -87,6 +99,8 @@
       (info node "setting up debian")
 
       (setup-hostfile!)
+
+      (maybe-update!)
 
       (c/su
         ; Packages!
