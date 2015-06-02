@@ -21,7 +21,7 @@ The image building is a multi-step process. Mainly because [docker doesn't let y
 1.  From this directory run 
 
     ````
-	docker build . -t jepsen
+	docker build -t jepsen .
     ````
 
 2.  Start the container and run build-dockerized-jepsen.sh
