@@ -1,9 +1,8 @@
 FROM kojiromike/dind
 MAINTAINER jake@apache.org
 
-ENV JEPSEN_GIT_URL http://github.com/riptano/jepsen
+ENV JEPSEN_GIT_URL http://github.com/aphyr/jepsen
 ENV LEIN_ROOT true
-
 
 #
 # Jepsen dependencies

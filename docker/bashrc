@@ -2,6 +2,8 @@
 if [ -f ~/.ssh/id_rsa.pub ] && [ ! -f ~/.started ];
 then
 
+touch ~/.started
+
 #import the image
 cat /root/jepsennode.tar.gz | docker import - jepsennode
 
