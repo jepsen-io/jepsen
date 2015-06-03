@@ -5,6 +5,7 @@
             [clojure.core :as core]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
+            [clojure.java.io :as io]
             [jepsen.util :as util]
             [multiset.core :as multiset]
             [gnuplot.core :as g]
@@ -291,10 +292,11 @@
                                    [(-> start :time util/nanos->secs double)
                                     (if stop
                                       (-> stop :time util/nanos->secs double)
-                                      final-time)]))))]
-
+                                      final-time)]))))
+            output-path (str dir "/latency.png")]
+        (io/make-parents output-path)
         (g/raw-plot!
-          (concat [[:set :output (str dir "/latency.png")]
+          (concat [[:set :output output-path]
                    [:set :term :png, :truecolor, :size (g/list 900 400)]]
                   '[[set title "Latency"]
                     [set autoscale]
