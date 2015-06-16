@@ -90,8 +90,10 @@ fi
        ~@body
        ; A server selection error means we never attempted the operation in
        ; the first place, so we know it didn't take place.
-       (catch Exception e#
-         (assoc ~op :type :fail)))))
+       (catch clojure.lang.ExceptionInfo e#
+         (condp get (:type (ex-data e#))
+           #{:op-indeterminate :unknown} (assoc ~op :type :info :error (str e#))
+           (assoc ~op :type :fail :error (str e#)))))))
 
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
