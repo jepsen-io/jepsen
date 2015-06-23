@@ -8,6 +8,5 @@
 (deftest basic
   (let [test (jepsen/run! (disque/basic-queue-test))]
     (is (:valid? (:results test)))
-    (report/to "report/queue.txt"
-               (-> test :results :linear report/linearizability))
+    (report/to "report/results.edn" (pprint (:results test)))
     (report/to "report/history.edn" (pprint (:history test)))))
