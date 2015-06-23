@@ -33,9 +33,10 @@
   (.await ^CyclicBarrier (:barrier test)))
 
 (defn conj-op!
-  "Add an operation to a tests's history."
+  "Add an operation to a tests's history, and returns the operation."
   [test op]
-  (swap! (:history test) conj op))
+  (swap! (:history test) conj op)
+  op)
 
 (defn primary
   "Given a test, returns the primary node."

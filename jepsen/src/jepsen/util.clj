@@ -43,9 +43,10 @@
     (println (op->str op))))
 
 (defn log-op
-  "Logs an operation."
+  "Logs an operation and returns it."
   [op]
-  (info (op->str op)))
+  (info (op->str op))
+  op)
 
 (def logger (agent nil))
 (defn log-print
