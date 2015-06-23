@@ -4,6 +4,7 @@
   (:require [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.client :as client]
+            [jepsen.nemesis :as nemesis]
             [jepsen.generator :as gen]
             [jepsen.model :as model]
             [jepsen.checker :as checker]
@@ -18,7 +19,7 @@
    :db        db/noop
    :net       net/iptables
    :client    client/noop
-   :nemesis   client/noop
+   :nemesis   nemesis/noop
    :generator gen/void
    :model     model/noop
    :checker   checker/linearizable})
