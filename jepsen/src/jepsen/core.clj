@@ -314,7 +314,7 @@
 
       ; Open SSH conns
       (control/with-ssh (:ssh test)
-        (with-resources [sessions control/session control/disconnect
+        (with-resources [sessions (bound-fn* control/session) control/disconnect
                          (:nodes test)]
 
           ; Index sessions by node name and add to test
