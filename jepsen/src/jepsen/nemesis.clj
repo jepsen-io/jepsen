@@ -6,9 +6,8 @@
             [jepsen.control     :as c]
             [jepsen.net         :as net]))
 
-(defn noop
+(def noop
   "Does nothing."
-  []
   (reify client/Client
     (setup! [this test node] this)
     (invoke! [this test op] op)
