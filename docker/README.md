@@ -16,7 +16,7 @@ To start run (note the required --privileged flag)
 Building the docker image
 =========================
 
-The image building is a multi-step process. Mainly because [docker doesn't let you build with --privileged operations](https://github.com/docker/docker/issues/1916)
+Alternatively, you can build the image yourself. This is a multi-step process, mainly because [docker doesn't let you build with --privileged operations](https://github.com/docker/docker/issues/1916)
 
 1.  From this directory run 
 
@@ -25,6 +25,7 @@ The image building is a multi-step process. Mainly because [docker doesn't let y
     ````
 
 2.  Start the container and run build-dockerized-jepsen.sh
+
     ````
     docker run --privileged -t -i jepsen
 
@@ -34,8 +35,11 @@ The image building is a multi-step process. Mainly because [docker doesn't let y
 3.  From another window commit the updated image
 
     ````
-    docker commit {above container-id} jepsen 
+    docker commit {above container-id} jepsen
     ````
+    
+4.  With the final image created, you can create a container to run Jepsen from
 
-
-
+    ```
+    docker run --privileged -t -i jepsen
+    ```
