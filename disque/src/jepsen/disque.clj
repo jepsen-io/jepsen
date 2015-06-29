@@ -23,7 +23,10 @@
             [knossos.core :as knossos])
   (:import (clojure.lang ExceptionInfo)
            (java.net URI)
-           (com.github.xetorthio.jedisque Jedisque)))
+           (com.github.xetorthio.jedisque Jedisque
+                                          JobParams)
+           (redis.clients.jedis.exceptions JedisConnectionException
+                                           JedisDataException)))
 
 (def dir          "/opt/disque")
 (def data-dir     "/var/lib/disque")
@@ -84,15 +87,19 @@
             :--no-close
             :--
             config-file
-            :>>         log-file)
-    (info node "started")
+            :>>         log-file
+            (c/lit "2>&1"))
+    (info node "started")))
 
-    ; Join everyone to primary
-    (jepsen/synchronize test)
-    (let [p (jepsen/primary test)]
-      (when-not (= node p)
-        (info node "joining" p)
-        (c/exec control "-p" port :cluster :meet (name p) port)))))
+(defn join!
+  "Joins cluster nodes together."
+  [node test]
+  ; Join everyone to primary
+  (jepsen/synchronize test)
+  (let [p (jepsen/primary test)]
+    (when-not (= node p)
+      (info node "joining" p)
+      (c/exec control "-p" port :cluster :meet (name p) port))))
 
 (defn stop!
   "Stops DB."
@@ -107,7 +114,7 @@
   [node]
   (stop! node)
   (info node "deleting data files")
-  (c/su (meh (c/exec :rm :-rf data-dir log-file))))
+  (c/su (meh (c/exec :rm :-rf (c/lit (str data-dir "/*")) log-file))))
 
 (defn db [version]
   "Disque for a particular version."
@@ -116,68 +123,137 @@
       (doto node
         (install! version)
         (configure! test)
-        (start! test)))
+        (start! test)
+        (join! test)))
 
     (teardown! [_ test node]
       (wipe! node))))
 
 ; Client
 
-(def client-timeout 100)
+; Gonna have to generalize disque a bit, and its type signatures are awkward
+(defprotocol Disque
+  (add-job! [client queue body timeout params])
+  (get-job! [client timeout count queues])
+  (ack-job! [client job-ids]))
+
+(extend-protocol Disque
+  Jedisque
+  (add-job! [client queue body timeout params]
+    (info "add-job" client queue body timeout params)
+    (.addJob client queue body timeout params))
+  (get-job! [client timeout count queues]
+    (.getJob client timeout count (into-array queues)))
+  (ack-job! [client job-ids]
+    (.ackjob client (into-array job-ids))))
+
+(defmacro with-conn-errors
+  "For use by reconnecting-client: takes an error-handling fn and evaluates
+  `body`; if a JedisConnectionException is thrown, invokes the fn and
+  rethrows."
+  [f & body]
+  `(try ~@body
+     (catch JedisConnectionException e#
+       (~f)
+       (throw e#))))
+
+(defn reconnecting-client
+  "For some reason, I can't get jedisque to ever recover from a server restart.
+  This wrapper asynchronously replaces dead clients with fresh ones, like a
+  parent surreptiously replacing your goldfish as they pass away. They don't
+  stop exceptions from being raised though. The process of loss is still
+  important.
+
+  Also your parents are poisoning the tank's water supply, muttering something
+  about \"testing\". You may want to call social services."
+  [uris]
+  (let [make-client #(Jedisque. (into-array uris))
+        replacing?  (atom false)
+        client      (atom (make-client))
+        replace!    (fn replace! []
+                      (when (compare-and-set! replacing? false true)
+                        (future
+                          (try
+                            (info "Initiating recovery...")
+                            (reset! client (make-client))
+                            (info "Recovery successful.")
+                            (catch Throwable t
+                              (info t "Couldn't reconnect"))
+                            (finally
+                              (reset! replacing? false))))))]
+
+    (reify Disque
+      (add-job! [_ q b t p] (with-conn-errors replace!
+                              (add-job! @client q b t p)))
+      (get-job! [_ t c q] (with-conn-errors replace! (get-job! @client t c q)))
+      (ack-job! [_ js]    (with-conn-errors replace! (ack-job! @client js))))))
 
 (defn dequeue!
   "Given a client and an :invoke :dequeue op, dequeues and acks a job."
-  [client queue op]
-  :dequeue (let [job (-> client
-                         (.getJob client-timeout 1 (into-array [queue]))
-                         first)]
-             (if (nil? job)
-               ; Nothing to dequeue.
-               (assoc op :type :fail)
+  [client queue client-timeout op]
+  (let [job (-> client
+                (get-job! client-timeout 1 [queue])
+                first)]
+    (if (nil? job)
+      ; Nothing to dequeue.
+      (assoc op :type :fail)
 
-               ; Ack job and return.
-               (do (.ackjob client (into-array [(.getId job)]))
-                   (assoc op
-                          :type  :ok
-                          :value (Long/parseLong (.getBody job)))))))
+      ; Ack job and return.
+      (do (ack-job! client [(.getId job)])
+          (assoc op
+                 :type  :ok
+                 :value (Long/parseLong (.getBody job)))))))
 
-(defrecord Client [^Jedisque client queue repl-factor]
+(defrecord Client [^Jedisque client queue client-timeout job-params]
   client/Client
   (setup! [this test node]
     (let [uri (URI. (str "disque://" (name node) ":7711"))]
-      (assoc this :client (Jedisque. (into-array [uri])))))
+      (assoc this :client (reconnecting-client [uri]))))
 
   (invoke! [this test op]
-    (case (:f op)
-      :enqueue (do
-                 (.addJob client queue (str (:value op)) client-timeout)
-                 (assoc op :type :ok))
-      :dequeue (dequeue! client queue op)
-      :drain   (loop []
-                 (let [op' (->> (assoc op
-                                       :f    :dequeue
-                                       :time (relative-time-nanos))
-                                util/log-op
-                                (jepsen/conj-op! test)
-                                (dequeue! client queue))]
-                   ; Log completion
-                   (->> (assoc op' :time (relative-time-nanos))
-                        util/log-op
-                        (jepsen/conj-op! test))
+    (try
+      (case (:f op)
+        :enqueue (do
+                   (add-job! client queue (str (:value op)) client-timeout
+                             job-params)
+                   (assoc op :type :ok))
+        :dequeue (dequeue! client queue client-timeout op)
+        :drain   (loop []
+                   (let [op' (->> (assoc op
+                                         :f    :dequeue
+                                         :time (relative-time-nanos))
+                                  util/log-op
+                                  (jepsen/conj-op! test)
+                                  (dequeue! client queue client-timeout))]
+                     ; Log completion
+                     (->> (assoc op' :time (relative-time-nanos))
+                          util/log-op
+                          (jepsen/conj-op! test))
 
-                   (if (= :fail (:type op'))
-                     ; Done
-                     (assoc op :type :ok :value :exhausted)
+                     (if (= :fail (:type op'))
+                       ; Done
+                       (assoc op :type :ok, :value :exhausted)
 
-                     ; Keep going.
-                     (recur))))))
+                       ; Keep going.
+                       (recur)))))
+      (catch JedisDataException e
+        (if (re-find #"^NOREPL" (.getMessage e))
+          (assoc op :type :info, :value :not-fully-replicated)
+          (throw e)))
+      (catch JedisConnectionException e
+        (assoc op :type :info, :value (.getMessage e)))))
 
   (teardown! [this test]
     (.close client)))
 
 (defn client
   []
-  (Client. nil "jepsen" 3))
+  (Client. nil
+           "jepsen"
+           1000
+           (-> (JobParams.)
+               (.setRetry (int 1000))
+               (.setReplicate (int 3)))))
 
 ; Nemeses
 
@@ -186,7 +262,7 @@
   []
   (nemesis/node-start-stopper
     rand-nth
-    (fn start [test node] (c/su (c/exec :killall :-9 :asd)))
+    (fn start [test node] (stop! node))
     (fn stop  [test node] (start! node test))))
 
 ; Generators
@@ -198,11 +274,11 @@
   (gen/phases
     (->> gen
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 5)
+           (gen/seq (cycle [(gen/sleep 10)
                             {:type :info :f :start}
-                            (gen/sleep 5)
+                            (gen/sleep 10)
                             {:type :info :f :stop}])))
-         (gen/time-limit 20))
+         (gen/time-limit 30))
     ; Recover
     (gen/nemesis (gen/once {:type :info :f :stop}))
     ; Wait for resumption of normal ops
@@ -232,6 +308,7 @@
   []
   (disque-test "basic"
                {:client    (client)
+                :nemesis   (killer)
                 :generator (->> (gen/queue)
                                 (gen/delay 1)
                                 std-gen)}))
