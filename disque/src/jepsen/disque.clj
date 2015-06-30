@@ -99,7 +99,9 @@
   (let [p (jepsen/primary test)]
     (when-not (= node p)
       (info node "joining" p)
-      (c/exec control "-p" port :cluster :meet (name p) port))))
+      (let [res (c/exec control "-p" port
+                        :cluster :meet (net/ip (name p)) port)]
+        (assert (re-find #"^OK$" res))))))
 
 (defn stop!
   "Stops DB."
@@ -140,7 +142,6 @@
 (extend-protocol Disque
   Jedisque
   (add-job! [client queue body timeout params]
-    (info "add-job" client queue body timeout params)
     (.addJob client queue body timeout params))
   (get-job! [client timeout count queues]
     (.getJob client timeout count (into-array queues)))
@@ -250,7 +251,7 @@
   []
   (Client. nil
            "jepsen"
-           1000
+           100
            (-> (JobParams.)
                (.setRetry (int 1000))
                (.setReplicate (int 3)))))
