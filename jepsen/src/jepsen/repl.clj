@@ -8,6 +8,6 @@
   [test-name]
   (->> (store/tests test-name)
        (sort-by key)
-       first
+       last
        val
        deref))
