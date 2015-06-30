@@ -283,7 +283,7 @@
     ; Recover
     (gen/nemesis (gen/once {:type :info :f :stop}))
     ; Wait for resumption of normal ops
-    (gen/clients (gen/time-limit 5 gen))
+    (gen/clients (gen/time-limit 20 gen))
     ; Drain
     (gen/log "Draining")
     (gen/clients (gen/each (gen/once {:type :invoke
