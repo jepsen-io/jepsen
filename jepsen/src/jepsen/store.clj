@@ -111,18 +111,31 @@
               in   (fress/create-reader file :handlers read-handlers)]
     (fress/read-object in)))
 
+(declare tests)
 (defn tests
-  "Returns a map of filenames to deref-able tests."
-  [test-name]
-  (assert test-name)
-  (->> test-name
-       name
-       (io/file dir)
-       file-seq
-       (keep #(second (re-matches #"(.+)\.fressian$" (.getName %))))
-       (map (fn [f]
-              [f (delay (load test-name f))]))
-       (into {})))
+  "If given a test name, returns a map of test runs to deref-able tests. With
+  no test name, returns a map of test names to maps of runs to deref-able
+  tests."
+  ([]
+   (->> (io/file dir)
+        (.listFiles)
+        (keep #(and (.isDirectory %)
+                    (let [name (.getName %)]
+                      (and (not= "." name)
+                           (not= ".." name)
+                           name))))
+        (map (juxt identity tests))
+        (into {})))
+  ([test-name]
+   (assert test-name)
+   (->> test-name
+        name
+        (io/file dir)
+        file-seq
+        (keep #(second (re-matches #"(.+)\.fressian$" (.getName %))))
+        (map (fn [f]
+               [f (delay (load test-name f))]))
+        (into {}))))
 
 (defn delete!
   "Deletes all tests under a given name, or, if given a date as well, a
