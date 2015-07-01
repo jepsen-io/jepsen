@@ -235,11 +235,11 @@
   "Downloads logs for a test."
   [test]
   ; Download logs
-  (when (seq (:log-files test))
+  (when (satisfies? db/LogFiles (:db test))
     (info "Snarfing log files")
     (on-nodes test
               (fn [test node]
-                (doseq [f (:log-files test)]
+                (doseq [f (db/log-files (:db test) test node)]
                   (control/download
                     f
                     (.getCanonicalPath (store/path! test (name node)

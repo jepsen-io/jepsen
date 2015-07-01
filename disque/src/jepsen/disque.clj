@@ -129,7 +129,10 @@
         (join! test)))
 
     (teardown! [_ test node]
-      (wipe! node))))
+      (wipe! node))
+
+    db/LogFiles
+    (log-files [_ _ _] [log-file])))
 
 ; Client
 

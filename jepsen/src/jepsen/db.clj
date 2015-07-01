@@ -8,6 +8,9 @@
 (defprotocol Primary
   (setup-primary! [db test node] "Performs one-time setup on a single node."))
 
+(defprotocol LogFiles
+  (log-files [db test node] "Returns a sequence of log files for this node."))
+
 (def noop
   "Does nothing."
   (reify DB

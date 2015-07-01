@@ -37,7 +37,6 @@
         nonce-file   "/tmp/jepsen-test"
         test (run! (assoc tst/noop-test
                           :name      "ssh test"
-                          :log-files ["/etc/hosts" nonce-file]
                           :os (reify os/OS
                                 (setup! [_ test node]
                                   (swap! os-startups assoc node
@@ -61,7 +60,11 @@
                                 db/Primary
                                 (setup-primary! [_ test node]
                                   (swap! db-primaries conj
-                                         (control/exec :hostname))))))]
+                                         (control/exec :hostname)))
+
+                                db/LogFiles
+                                (log-files [_ test node]
+                                  [nonce-file]))))]
 
     (is (:valid? (:results test)))
     (is (apply =
