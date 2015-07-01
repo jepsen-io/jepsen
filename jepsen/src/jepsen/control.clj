@@ -18,7 +18,6 @@
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 
-
 (defrecord Literal [string])
 
 (defn lit
@@ -139,7 +138,18 @@
 (defn scp*
   "Evaluates an SCP from the current host to the node."
   [current-path node-path]
+  (warn "scp* is deprecated: use (upload current-path node-path) instead.")
   (ssh/scp-to *session* current-path node-path))
+
+(defn upload
+  "Copies local path(s) to remote node. Takes arguments for clj-ssh/scp-to."
+  [& args]
+  (apply ssh/scp-to *session* args))
+
+(defn download
+  "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from."
+  [& args]
+  (apply ssh/scp-from *session* args))
 
 (defn expand-path
   "Expands path relative to the current directory."
