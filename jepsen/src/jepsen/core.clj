@@ -14,6 +14,7 @@
   system by using an *OS* and *client* respectively. See `run!` for details."
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
+            [clojure.string :as str]
             [knossos.core :as knossos]
             [jepsen.util :as util :refer [with-thread-name
                                           relative-time-nanos]]
@@ -230,8 +231,28 @@
        (finally
          (client/teardown! nemesis# ~test)))))
 
+(defn snarf-logs!
+  "Downloads logs for a test."
+  [test]
+  ; Download logs
+  (when (seq (:log-files test))
+    (info "Snarfing log files")
+    (on-nodes test
+              (fn [test node]
+                (doseq [f (:log-files test)]
+                  (control/download
+                    f
+                    (.getCanonicalPath (store/path! test (name node)
+                                                    ; strip leading /
+                                                    (str/replace f #"^/" "")))
+                    ; broken
+                    ; :recursive true
+                    ; :preserve true
+                    ))))))
+
 (defn run-case!
-  "Spawns clients, runs a single test case, and returns that case's history."
+  "Spawns clients, runs a single test case, snarf the logs, and returns that
+  case's history."
   [test]
   (let [history (atom [])
         test    (assoc test :history history)]
@@ -252,6 +273,9 @@
 
         ; Wait for workers to complete
         (dorun (map deref workers))
+
+        ; Download logs
+        (snarf-logs! test)
 
         ; Unregister our history
         (swap! (:active-histories test) disj history)
@@ -275,6 +299,8 @@
   :generator  A generator of operations to apply to the DB
   :model      The model used to verify the history is correct
   :checker    Verifies that the history is valid
+  :log-files  A list of paths to logfiles/dirs which should be captured at
+              the end of the test.
 
   Tests proceed like so:
 
@@ -294,11 +320,13 @@
     - The client executes the operation and returns a vector of history elements
       - which are appended to the operation history
 
-  6. Teardown the database
+  6. Capture log files
 
-  7. Teardown the operating system
+  7. Teardown the database
 
-  8. When the generator is finished, invoke the checker with the model and
+  8. Teardown the operating system
+
+  9. When the generator is finished, invoke the checker with the model and
      the history
     - This generates the final report"
   [test]
@@ -340,7 +368,6 @@
                                          :sessions)]
 
                         (info "Run complete, writing")
-
                         (when (:name test) (store/save! test))
 
                         (info "Analyzing")

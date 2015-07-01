@@ -15,6 +15,7 @@
   Typically used as a basis for writing more complex tests.
   "
   {:nodes     [:n1 :n2 :n3 :n4 :n5]
+   :name      "noop"
    :os        os/noop
    :db        db/noop
    :net       net/iptables
