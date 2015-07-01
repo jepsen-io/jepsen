@@ -33,8 +33,8 @@
 (def pidfile      "/var/run/disque.pid")
 (def binary       (str dir "/src/disque-server"))
 (def control      (str dir "/src/disque"))
-(def log-file     (str dir "/disque.log"))
 (def config-file  (str dir "/disque.conf"))
+(def log-file     (str data-dir "/log"))
 (def port         7711)
 
 (defn install!
