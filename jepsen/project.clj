@@ -5,7 +5,7 @@
 ;                            :exclusions [org.fressian/fressian]]
                  [org.clojure/tools.logging "0.2.6"]
                  [clj-time "0.6.0"]
-                 [knossos "0.2.1"]
+                 [knossos "0.2.2"]
                  [clj-ssh "0.5.7"]
                  [gnuplot "0.1.0"]
                  [hiccup "1.0.5"]
