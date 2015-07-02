@@ -59,6 +59,19 @@
          (filter #(= :invoke (:type %)))
          (map (juxt (comp n->m :time)
                     (comp n->m :latency)))
-         (map (fn [[time latency]]
-                (println (str time "," latency))))
+;         (map (fn [[time latency]]
+;                (println (str time "," latency))))
+         ;TODO: actually assert something
          dorun)))
+
+(deftest longest-common-prefix-test
+  (is (= nil (longest-common-prefix [])))
+  (is (= [] (longest-common-prefix [[1 2] [3 4]])))
+  (is (= [1 2] (longest-common-prefix [[1 2]])))
+  (is (= [1 2 3] (longest-common-prefix [[1 2 3] [1 2 3 4] [1 2 3 6]]))))
+
+(deftest drop-common-proper-prefix-test
+  (is (= [[3 4] [5 6]] (drop-common-proper-prefix [[1 3 4] [1 5 6]])))
+  (is (= [[1]] (drop-common-proper-prefix [[1]])))
+  (is (= [[2]] (drop-common-proper-prefix [[1 2]])))
+  (is (= [[2] [2]] (drop-common-proper-prefix [[1 2] [1 2]]))))

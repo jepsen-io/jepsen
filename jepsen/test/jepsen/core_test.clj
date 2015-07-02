@@ -72,7 +72,7 @@
                (->> test
                     :nodes
                     (map #(->> (store/path test (name %)
-                                           (str/replace nonce-file #"^/" ""))
+                                           (str/replace nonce-file #".+/" ""))
                                slurp
                                str/trim)))))
     (is (= @os-startups @os-teardowns @db-startups @db-teardowns
