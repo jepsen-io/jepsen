@@ -276,13 +276,13 @@
             types       [:ok :info :fail]
 
             ; How should we render types?
-            types->points {:ok   1
-                           :fail 2
-                           :info 3}
+            types->colors {:ok   3
+                           :fail 1
+                           :info 4}
 
             ; How should we render different fs?
-            fs->colors  (->> fs
-                             (map-indexed (fn [i f] [f i]))
+            fs->points  (->> fs
+                             (map-indexed (fn [i f] [f (* 2 (+ 2 i))]))
                              (into {}))
 
             ; Extract nemesis start/stop pairs
@@ -310,7 +310,7 @@
                     [set autoscale]
                     [set xlabel "Time (s)"]
                     [set ylabel "Latency (ms)"]
-                    [set key left top]
+                    [set key outside left right]
                     [set logscale y]]
                  ; Nemesis regions
                  (map (fn [[start stop]]
@@ -325,11 +325,11 @@
                  [['plot (apply g/list
                                 (for [f fs, t types]
                                   ["-"
-                                   'with 'points
-                                   'pointtype (types->points t)
-                                   'linetype  (fs->colors f)
-                                   'title (str (name f) " "
-                                               (name t))]))]])
+                                   'with        'points
+                                   'linetype    (types->colors t)
+                                   'pointtype   (fs->points f)
+                                   'title       (str (name f) " "
+                                                     (name t))]))]])
           (for [f fs, t types]
             (map point (get-in datasets [f t]))))
 
