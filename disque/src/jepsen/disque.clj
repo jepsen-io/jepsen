@@ -302,8 +302,7 @@
           :db      (db "5df8e1d7838d7bea0bd9cf187922a1469d1bb252")
           :model   (model/unordered-queue)
           :nemesis (nemesis/partition-random-halves)
-          :checker (checker/compose {:queue       checker/queue
-                                     :total-queue checker/total-queue
+          :checker (checker/compose {:queue       checker/total-queue
                                      :latency     (checker/latency-graph)})}
          opts))
 
