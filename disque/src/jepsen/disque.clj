@@ -178,9 +178,7 @@
                       (when (compare-and-set! replacing? false true)
                         (future
                           (try
-                            (info "Initiating recovery...")
                             (reset! client (make-client))
-                            (info "Recovery successful.")
                             (catch Throwable t
                               (info t "Couldn't reconnect"))
                             (finally
@@ -222,24 +220,26 @@
                              job-params)
                    (assoc op :type :ok))
         :dequeue (dequeue! client queue client-timeout op)
-        :drain   (loop []
-                   (let [op' (->> (assoc op
-                                         :f    :dequeue
-                                         :time (relative-time-nanos))
-                                  util/log-op
-                                  (jepsen/conj-op! test)
-                                  (dequeue! client queue client-timeout))]
-                     ; Log completion
-                     (->> (assoc op' :time (relative-time-nanos))
-                          util/log-op
-                          (jepsen/conj-op! test))
+        :drain   (timeout 10000 (assoc op :type :info :value :timeout)
+                          (loop []
+                            (let [op' (->> (assoc op
+                                                  :f    :dequeue
+                                                  :time (relative-time-nanos))
+                                           util/log-op
+                                           (jepsen/conj-op! test)
+                                           (dequeue!
+                                             client queue client-timeout))]
+                              ; Log completion
+                              (->> (assoc op' :time (relative-time-nanos))
+                                   util/log-op
+                                   (jepsen/conj-op! test))
 
-                     (if (= :fail (:type op'))
-                       ; Done
-                       (assoc op :type :ok, :value :exhausted)
+                              (if (= :fail (:type op'))
+                                ; Done
+                                (assoc op :type :ok, :value :exhausted)
 
-                       ; Keep going.
-                       (recur)))))
+                                ; Keep going.
+                                (recur))))))
       (catch JedisDataException e
         (if (re-find #"^NOREPL" (.getMessage e))
           (assoc op :type :info, :value :not-fully-replicated)
