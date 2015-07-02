@@ -4,11 +4,13 @@
   (:require [clojure.data.fressian :as fress]
             [clojure.pprint :refer [pprint]]
             [clojure.java.io :as io]
+            [clojure.tools.logging :refer :all]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clj-time.coerce :as time.coerce]
             [clj-time.format :as time.format]
-            [multiset.core :as multiset])
+            [multiset.core :as multiset]
+            [jepsen.util :as util])
   (:import (java.io File)
            (java.nio.file Files
                           FileSystems
@@ -186,15 +188,9 @@
         (map (fn [f] [f (delay (load test-name f))]))
         (into {}))))
 
-(defn save!
-  "Writes a test to disk and updates latest symlinks. Returns test."
+(defn update-symlinks!
+  "Creates `latest` symlinks to the given test."
   [test]
-  (let [test (apply dissoc test nonserializable-keys)]
-    (with-open [file   (io/output-stream (fressian-file! test))
-                out    (fress/create-writer file :handlers write-handlers)]
-      (fress/write-object out test)))
-
-  ; Make symlinks
   (doseq [dest [["latest"] [(:name test) "latest"]]]
     ; did you just tell me to go fuck myself
     (let [src  (.toPath (path test))
@@ -203,7 +199,47 @@
                    (getPath base-dir (into-array dest)))]
       (Files/deleteIfExists dest)
       (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
-                                (make-array FileAttribute 0))))
+                                (make-array FileAttribute 0)))))
+
+(defmacro with-out-file
+  "Binds stdout to a file for the duration of body."
+  [test filename & body]
+  `(let [filename# (path! ~test ~filename)]
+     (with-open [w# (io/writer filename#)]
+       (try
+         (binding [*out* w#] ~@body)
+         (finally
+           (info "Wrote" (.getCanonicalPath filename#)))))))
+
+(defn write-results!
+  "Writes out a results.edn file."
+  [test]
+  (with-out-file test "results.edn"
+    (pprint (:results test))))
+
+(defn write-history!
+  "Writes out a history.txt file."
+  [test]
+  (with-out-file test "history.txt"
+    (util/print-history (:history test))))
+
+(defn write-fressian!
+  "Write the entire test as a .fressian file"
+  [test]
+  (let [test (apply dissoc test nonserializable-keys)]
+    (with-open [file   (io/output-stream (fressian-file! test))
+                out    (fress/create-writer file :handlers write-handlers)]
+      (fress/write-object out test))))
+
+(defn save!
+  "Writes a test to disk and updates latest symlinks. Returns test."
+  [test]
+  (->> [(future (write-results! test))
+        (future (write-history! test))
+        (future (write-fressian! test))
+        (future (update-symlinks! test))]
+       (map deref)
+       dorun)
   test)
 
 (defn delete-file-recursively!

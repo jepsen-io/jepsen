@@ -15,6 +15,7 @@
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
+            [clojure.pprint :refer [pprint]]
             [knossos.core :as knossos]
             [jepsen.util :as util :refer [with-thread-name
                                           relative-time-nanos]]
@@ -291,6 +292,17 @@
 
         @history))))
 
+(defn log-results
+  "Logs info about the results of a test to stdout."
+  [test]
+  (info (str
+          (if (:valid? (:results test))
+            "Everything looks good! ヽ(‘ー`)ノ"
+            "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")
+          "\n\n"
+          (with-out-str
+            (pprint (:results test))))))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -388,5 +400,7 @@
 
                           (info "Analysis complete")
                           (when (:name test) (store/save! test))
+
+                          (log-results test)
 
                           test)))))))))))))
