@@ -293,7 +293,7 @@
         @history))))
 
 (defn log-results
-  "Logs info about the results of a test to stdout."
+  "Logs info about the results of a test to stdout, and returns test."
   [test]
   (info (str
           (if (:valid? (:results test))
@@ -301,7 +301,8 @@
             "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")
           "\n\n"
           (with-out-str
-            (pprint (:results test))))))
+            (pprint (:results test)))))
+  test)
 
 (defn run!
   "Runs a test. Tests are maps containing
@@ -351,56 +352,56 @@
      the history
     - This generates the final report"
   [test]
-  (with-thread-name "jepsen test runner"
-    (let [test (assoc test
-                      ; Initialization time
-                      :start-time (util/local-time)
+  (log-results
+    (with-thread-name "jepsen test runner"
+      (let [test (assoc test
+                        ; Initialization time
+                        :start-time (util/local-time)
 
-                      ; Synchronization point for nodes
-                      :barrier (CyclicBarrier. (count (:nodes test)))
-                      ; Currently running histories
-                      :active-histories (atom #{}))]
+                        ; Synchronization point for nodes
+                        :barrier (CyclicBarrier. (count (:nodes test)))
+                        ; Currently running histories
+                        :active-histories (atom #{}))]
 
-      ; Open SSH conns
-      (control/with-ssh (:ssh test)
-        (with-resources [sessions (bound-fn* control/session) control/disconnect
-                         (:nodes test)]
+        ; Open SSH conns
+        (control/with-ssh (:ssh test)
+          (with-resources [sessions
+                           (bound-fn* control/session)
+                           control/disconnect
+                           (:nodes test)]
 
-          ; Index sessions by node name and add to test
-          (let [test (->> sessions
-                          (map vector (:nodes test))
-                          (into {})
-                          (assoc test :sessions))]
+            ; Index sessions by node name and add to test
+            (let [test (->> sessions
+                            (map vector (:nodes test))
+                            (into {})
+                            (assoc test :sessions))]
 
-            ; Setup
-            (with-os test
-              (with-db test
-                (binding [generator/*threads*
-                          (cons :nemesis (range (count (:nodes test))))]
-                  (util/with-relative-time
-                    (with-nemesis test
+              ; Setup
+              (with-os test
+                (with-db test
+                  (binding [generator/*threads*
+                            (cons :nemesis (range (count (:nodes test))))]
+                    (util/with-relative-time
+                      (with-nemesis test
 
-                      ; Run a single case
-                      (let [test (assoc test :history (run-case! test))
-                            ; Remove state
-                            test (dissoc test
-                                         :barrier
-                                         :active-histories
-                                         :sessions)]
+                        ; Run a single case
+                        (let [test (assoc test :history (run-case! test))
+                              ; Remove state
+                              test (dissoc test
+                                           :barrier
+                                           :active-histories
+                                           :sessions)]
 
-                        (info "Run complete, writing")
-                        (when (:name test) (store/save! test))
-
-                        (info "Analyzing")
-                        (let [test (assoc test :results (checker/check-safe
-                                                          (:checker test)
-                                                          test
-                                                          (:model test)
-                                                          (:history test)))]
-
-                          (info "Analysis complete")
+                          (info "Run complete, writing")
                           (when (:name test) (store/save! test))
 
-                          (log-results test)
+                          (info "Analyzing")
+                          (let [test (assoc test :results (checker/check-safe
+                                                            (:checker test)
+                                                            test
+                                                            (:model test)
+                                                            (:history test)))]
 
-                          test)))))))))))))
+                            (info "Analysis complete")
+                            (when (:name test) (store/save! test))
+                          test))))))))))))))
