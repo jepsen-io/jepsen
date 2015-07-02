@@ -282,11 +282,11 @@
                             {:type :info :f :start}
                             (gen/sleep 10)
                             {:type :info :f :stop}])))
-         (gen/time-limit 120))
+         (gen/time-limit 60))
     ; Recover
     (gen/nemesis (gen/once {:type :info :f :stop}))
     ; Wait for resumption of normal ops
-    (gen/clients (gen/time-limit 20 gen))
+    (gen/clients (gen/time-limit 10 gen))
     ; Drain
     (gen/log "Draining")
     (gen/clients (gen/each (gen/once {:type :invoke
