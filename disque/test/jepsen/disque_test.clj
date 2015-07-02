@@ -5,6 +5,6 @@
                     [disque :as disque]
                     [report :as report]]))
 
-(deftest basic
-  (let [test (jepsen/run! (disque/basic-queue-test))]
+(deftest partitions
+  (let [test (jepsen/run! (disque/partitions-test))]
     (is (:valid? (:results test)))))

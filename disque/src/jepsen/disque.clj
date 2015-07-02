@@ -282,7 +282,7 @@
                             {:type :info :f :start}
                             (gen/sleep 10)
                             {:type :info :f :stop}])))
-         (gen/time-limit 30))
+         (gen/time-limit 120))
     ; Recover
     (gen/nemesis (gen/once {:type :info :f :stop}))
     ; Wait for resumption of normal ops
@@ -298,19 +298,23 @@
   [name opts]
   (merge tests/noop-test
          {:name    (str "disque " name)
+          :client  (client)
           :os      debian/os
           :db      (db "5df8e1d7838d7bea0bd9cf187922a1469d1bb252")
           :model   (model/unordered-queue)
-          :nemesis (nemesis/partition-random-halves)
+          :generator (->> (gen/queue)
+                          (gen/delay 1)
+                          std-gen)
           :checker (checker/compose {:queue       checker/total-queue
                                      :latency     (checker/latency-graph)})}
          opts))
 
-(defn basic-queue-test
+(defn single-node-restarts-test
   []
-  (disque-test "basic"
-               {:client    (client)
-                :nemesis   (killer)
-                :generator (->> (gen/queue)
-                                (gen/delay 1)
-                                std-gen)}))
+  (disque-test "single node restarts"
+               {:nemesis   (killer)}))
+
+(defn partitions-test
+  []
+  (disque-test "partitions"
+               {:nemesis (nemesis/partition-random-halves)}))
