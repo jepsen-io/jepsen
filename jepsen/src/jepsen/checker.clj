@@ -7,6 +7,7 @@
             [clojure.set :as set]
             [clojure.java.io :as io]
             [jepsen.util :as util]
+            [jepsen.store :as store]
             [multiset.core :as multiset]
             [gnuplot.core :as g]
             [knossos.core :as knossos]
@@ -238,8 +239,8 @@
         (assoc results :valid? (every? :valid? (vals results)))))))
 
 (defn latency-graph
-  "Spits out graphs of latency to the given output directory."
-  [dir]
+  "Spits out graphs of latency to store/.../latency.png."
+  []
   (reify Checker
     (check [this test model history]
       (let [; Function to split up a seq of ops into OK, failed, and crashed ops
@@ -293,8 +294,7 @@
                                     (if stop
                                       (-> stop :time util/nanos->secs double)
                                       final-time)]))))
-            output-path (str dir "/latency.png")]
-        (io/make-parents output-path)
+            output-path (.getCanonicalPath (store/path! test "latency.png"))]
         (g/raw-plot!
           (concat [[:set :output output-path]
                    [:set :term :png, :truecolor, :size (g/list 900 400)]]
@@ -326,4 +326,4 @@
             (map point (get-in datasets [f t]))))
 
         {:valid? true
-         :file   (str dir "/latency.png")}))))
+         :file   output-path}))))

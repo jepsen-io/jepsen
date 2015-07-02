@@ -304,8 +304,7 @@
           :nemesis (nemesis/partition-random-halves)
           :checker (checker/compose {:queue       checker/queue
                                      :total-queue checker/total-queue
-                                     :latency     (checker/latency-graph
-                                                    "report/")})}
+                                     :latency     (checker/latency-graph)})}
          opts))
 
 (defn basic-queue-test
