@@ -10,6 +10,11 @@
             [clj-time.format :as time.format]
             [multiset.core :as multiset])
   (:import (java.io File)
+           (java.nio.file Files
+                          FileSystems
+                          Path)
+           (java.nio.file.attribute FileAttribute
+                                    PosixFilePermissions)
            (org.fressian.handlers WriteHandler ReadHandler)
            (multiset.core MultiSet)))
 
@@ -120,15 +125,6 @@
   "What keys in a test can't be serialized to disk?"
   [:db :os :net :client :checker :nemesis :generator :model])
 
-(defn save!
-  "Writes a test to disk. Returns test."
-  [test]
-  (let [test (apply dissoc test nonserializable-keys)]
-    (with-open [file   (io/output-stream (fressian-file! test))
-                out    (fress/create-writer file :handlers write-handlers)]
-      (fress/write-object out test)))
-  test)
-
 (defn load
   "Loads a specific test by name and time."
   [test-name test-time]
@@ -154,12 +150,18 @@
     (or (= n ".")
         (= n ".."))))
 
+(defn symlink?
+  "Is this a symlink?"
+  [^File f]
+  (Files/isSymbolicLink (.toPath f)))
+
 (defn test-names
   "Returns a seq of all known test names."
   []
   (->> (io/file base-dir)
        (.listFiles)
        (remove virtual-dir?)
+       (remove symlink?)
        (filter dir?)
        (map file-name)))
 
@@ -178,10 +180,31 @@
         (io/file base-dir)
         (.listFiles)
         (remove virtual-dir?)
+        (remove symlink?)
         (filter dir?)
         (map file-name)
         (map (fn [f] [f (delay (load test-name f))]))
         (into {}))))
+
+(defn save!
+  "Writes a test to disk and updates latest symlinks. Returns test."
+  [test]
+  (let [test (apply dissoc test nonserializable-keys)]
+    (with-open [file   (io/output-stream (fressian-file! test))
+                out    (fress/create-writer file :handlers write-handlers)]
+      (fress/write-object out test)))
+
+  ; Make symlinks
+  (doseq [dest [["latest"] [(:name test) "latest"]]]
+    ; did you just tell me to go fuck myself
+    (let [src  (.toPath (path test))
+          dest (.. FileSystems
+                   getDefault
+                   (getPath base-dir (into-array dest)))]
+      (Files/deleteIfExists dest)
+      (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
+                                (make-array FileAttribute 0))))
+  test)
 
 (defn delete-file-recursively!
   [^File f]
