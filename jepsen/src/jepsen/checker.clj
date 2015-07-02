@@ -148,10 +148,16 @@
             ; The OK set is every dequeue which we attempted.
             ok         (multiset/intersect dequeues attempts)
 
-            ; Unexpected records are those we *never* attempted. Maybe
-            ; duplicates, maybe leftovers from some earlier state. Definitely
-            ; don't want your queue emitting records from nowhere!
-            unexpected (multiset/minus dequeues attempts)
+            ; Unexpected records are those we *never* tried to enqueue. Maybe
+            ; leftovers from some earlier state. Definitely don't want your
+            ; queue emitting records from nowhere!
+            unexpected (set/difference (core/set dequeues) (core/set attempts))
+
+            ; Duplicate records are those which were dequeued more times than
+            ; they could have been enqueued; but were attempted at least once.
+            duplicated (-> dequeues
+                           (multiset/minus attempts)
+                           (multiset/minus unexpected))
 
             ; lost records are ones which we definitely enqueued but never
             ; came out.
@@ -164,9 +170,11 @@
         {:valid?          (and (empty? lost) (empty? unexpected))
          :lost            lost
          :unexpected      unexpected
+         :duplicated      duplicated
          :recovered       recovered
          :ok-frac         (util/fraction (count ok)         (count attempts))
          :unexpected-frac (util/fraction (count unexpected) (count attempts))
+         :duplicated-frac (util/fraction (count duplicated) (count attempts))
          :lost-frac       (util/fraction (count lost)       (count attempts))
          :recovered-frac  (util/fraction (count recovered)  (count attempts))}))))
 
