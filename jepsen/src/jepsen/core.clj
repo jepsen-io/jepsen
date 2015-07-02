@@ -239,16 +239,25 @@
     (info "Snarfing log files")
     (on-nodes test
               (fn [test node]
-                (doseq [f (db/log-files (:db test) test node)]
-                  (control/download
-                    f
-                    (.getCanonicalPath (store/path! test (name node)
-                                                    ; strip leading /
-                                                    (str/replace f #"^/" "")))
-                    ; broken
-                    ; :recursive true
-                    ; :preserve true
-                    ))))))
+                (let [full-paths (db/log-files (:db test) test node)
+                      ; A map of full paths to short paths
+                      paths      (->> full-paths
+                                      (map #(str/split % #"/"))
+                                      util/drop-common-proper-prefix
+                                      (map (partial str/join "/"))
+                                      (zipmap full-paths))]
+                  (doseq [[remote local] paths]
+                    (info "downloading" remote "to" local)
+                    (control/download
+                      remote
+                      (.getCanonicalPath
+                        (store/path! test (name node)
+                                     ; strip leading /
+                                     (str/replace local #"^/" "")))
+                      ; broken
+                      ; :recursive true
+                      ; :preserve true
+                      )))))))
 
 (defn run-case!
   "Spawns clients, runs a single test case, snarf the logs, and returns that
