@@ -256,7 +256,7 @@
            "jepsen"
            100
            (-> (JobParams.)
-               (.setRetry (int 1000))
+               (.setRetry (int 1))
                (.setReplicate (int 3)))))
 
 ; Nemeses
