@@ -47,6 +47,7 @@
           (when-not (cu/file? "disque")
             (c/exec :git :clone "https://github.com/antirez/disque.git")))
     (c/cd dir
+          (c/exec :git :pull)
           (c/exec :git :reset :--hard version)
           (c/exec :make))
     ))
@@ -282,7 +283,7 @@
                             {:type :info :f :start}
                             (gen/sleep 10)
                             {:type :info :f :stop}])))
-         (gen/time-limit 60))
+         (gen/time-limit 100))
     ; Recover
     (gen/nemesis (gen/once {:type :info :f :stop}))
     ; Wait for resumption of normal ops
@@ -300,7 +301,7 @@
          {:name    (str "disque " name)
           :client  (client)
           :os      debian/os
-          :db      (db "5df8e1d7838d7bea0bd9cf187922a1469d1bb252")
+          :db      (db "f00dd0704128707f7a5effccd5837d796f2c01e3")
           :model   (model/unordered-queue)
           :generator (->> (gen/queue)
                           (gen/delay 1)
