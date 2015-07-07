@@ -254,12 +254,17 @@
   "Block until all nodes in the test are known to this connection's replset
   status"
   [test conn]
-  (while (not= (set (:nodes test))
-               (->> (replica-set-status conn)
-                    :members
-                    (map :name)
-                    (map node+port->node)
-                    set))
+  (while (try (not= (set (:nodes test))
+                    (->> (replica-set-status conn)
+                         :members
+                         (map :name)
+                         (map node+port->node)
+                         set))
+              (catch ExceptionInfo e
+                (if (re-find #"should come online shortly"
+                             (get-in (ex-data e) [:result "errmsg"]))
+                  true
+                  (throw e))))
     (Thread/sleep 1000)))
 
 (defn target-replica-set-config
@@ -400,6 +405,7 @@
            :os        debian/os
            :db        (db "2.6.7")
            :model     (model/cas-register)
-           :checker   (checker/compose {:linear checker/linearizable})
+           :checker   (checker/compose {:linear checker/linearizable
+                                        :latency (checker/latency-graph)})
            :nemesis   (nemesis/partition-random-halves))
     opts))
