@@ -1,4 +1,4 @@
-(ns mongodb.document-cas
+(ns jepsen.mongodb.document-cas
   "Compare-and-set against a single document."
   (:require [clojure [pprint :refer :all]
                      [string :as str]]
@@ -21,7 +21,7 @@
             [jepsen.checker.timeline :as timeline]
             [knossos.core :as knossos]
             [cheshire.core :as json]
-            [mongodb.core :refer :all]
+            [jepsen.mongodb.core :refer :all]
             [monger.core :as mongo]
             [monger.collection :as mc]
             [monger.result :as mr]

@@ -1,4 +1,4 @@
-(ns mongodb.transfer
+(ns jepsen.mongodb.transfer
   "Simulates bank account transfers between N accounts, as per
   From http://docs.mongodb.org/manual/tutorial/perform-two-phase-commits/"
   (:refer-clojure :exclude [read])
@@ -23,7 +23,7 @@
             [jepsen.checker.timeline :as timeline]
             [knossos.core :as knossos]
             [cheshire.core :as json]
-            [mongodb.core :refer :all]
+            [jepsen.mongodb.core :refer :all]
             [monger.core :as mongo]
             [monger.collection :as mc]
             [monger.result :as mr]
