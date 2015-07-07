@@ -1,4 +1,4 @@
-(defproject jepsen "0.0.4-SNAPSHOT"
+(defproject jepsen "0.0.4"
   :description "Call Me Maybe: Network Partitions in Practice"
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [org.clojure/data.fressian "0.2.0"]
@@ -50,7 +50,6 @@
                                       org.slf4j/slf4j-nop]]]
                        :source-paths ["datomic/src"]
                        :test-paths ["datomic/test"]}}
-  :main jepsen.repl
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"])
