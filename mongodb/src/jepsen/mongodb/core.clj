@@ -1,4 +1,4 @@
-(ns mongodb.core
+(ns jepsen.mongodb.core
   (:require [clojure [pprint :refer :all]
                      [string :as str]]
             [clojure.java.io :as io]

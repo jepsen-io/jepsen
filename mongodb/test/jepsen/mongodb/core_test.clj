@@ -1,10 +1,10 @@
-(ns mongodb.core-test
+(ns jepsen.mongodb.core-test
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer :all]
             [clojure.java.io :as io]
-            [mongodb [core :as m]
-                     [document-cas :as dc]
-                     [transfer :as t]]
+            [jepsen.mongodb [core :as m]
+                            [document-cas :as dc]
+                            [transfer :as t]]
             [jepsen [core      :as jepsen]
                     [util      :as util]
                     [checker   :as checker]
