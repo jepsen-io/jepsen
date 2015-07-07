@@ -18,11 +18,7 @@
 (defn run!
   [test]
   (let [test (jepsen/run! test)]
-    (is (:valid? (:results test)))
-    (report/to "report/history.edn"
-               (pprint (:history test)))
-    (report/to "report/linearizability.txt"
-               (-> test :results :linear report/linearizability))))
+    (is (:valid? (:results test)))))
 
 (deftest document-cas-majority-test         (run! (dc/majority-test)))
 ;(deftest document-cas-no-read-majority-test (run! (dc/no-read-majority-test)))
