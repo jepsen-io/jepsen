@@ -8,6 +8,7 @@
             [clojure.java.io :as io]
             [jepsen.util :as util]
             [jepsen.store :as store]
+            [jepsen.checker.latency :as latency]
             [multiset.core :as multiset]
             [gnuplot.core :as g]
             [knossos.core :as knossos]
@@ -250,88 +251,7 @@
   "Spits out graphs of latency to store/.../latency.png."
   []
   (reify Checker
-    (check [this test model history]
-      (let [; Function to split up a seq of ops into OK, failed, and crashed ops
-            by-type (fn [ops]
-                      {:ok   (filter #(= :ok   (:type (:completion %))) ops)
-                       :fail (filter #(= :fail (:type (:completion %))) ops)
-                       :info (filter #(= :info (:type (:completion %))) ops)})
-
-            ; Function to extract a [time, latency] pair from an op
-            point   #(list (double (util/nanos->secs (:time %)))
-                           (double (util/nanos->ms   (:latency %))))
-
-            ; Preprocess history
-            history (util/history->latencies history)
-            invokes (filter #(= :invoke (:type %)) history)
-
-            ; Split up invocations by function, then ok/failed/crashed
-            datasets (->> invokes
-                          (group-by :f)
-                          (util/map-kv (fn [[f ops]]
-                                         [f (by-type ops)])))
-
-            ; What functions/types are we working with?
-            fs          (sort (keys datasets))
-            types       [:ok :info :fail]
-
-            ; How should we render types?
-            types->colors {:ok   3
-                           :fail 1
-                           :info 4}
-
-            ; How should we render different fs?
-            fs->points  (->> fs
-                             (map-indexed (fn [i f] [f (* 2 (+ 2 i))]))
-                             (into {}))
-
-            ; Extract nemesis start/stop pairs
-            final-time  (->> history
-                             rseq
-                             (filter :time)
-                             first
-                             :time
-                             util/nanos->secs
-                             double)
-            nemesis     (->> history
-                             util/nemesis-intervals
-                             (keep
-                               (fn [[start stop]]
-                                 (when start
-                                   [(-> start :time util/nanos->secs double)
-                                    (if stop
-                                      (-> stop :time util/nanos->secs double)
-                                      final-time)]))))
-            output-path (.getCanonicalPath (store/path! test "latency.png"))]
-        (g/raw-plot!
-          (concat [[:set :output output-path]
-                   [:set :term :png, :truecolor, :size (g/list 900 400)]]
-                  '[[set title "Latency"]
-                    [set autoscale]
-                    [set xlabel "Time (s)"]
-                    [set ylabel "Latency (ms)"]
-                    [set key outside left right]
-                    [set logscale y]]
-                 ; Nemesis regions
-                 (map (fn [[start stop]]
-                        [:set :obj :rect
-                         :from (g/list start [:graph 0])
-                         :to   (g/list stop  [:graph 1])
-                         :fillcolor :rgb "#000000"
-                         :fillstyle :transparent :solid 0.05
-                         :noborder])
-                      nemesis)
-                 ; Plot ops
-                 [['plot (apply g/list
-                                (for [f fs, t types]
-                                  ["-"
-                                   'with        'points
-                                   'linetype    (types->colors t)
-                                   'pointtype   (fs->points f)
-                                   'title       (str (name f) " "
-                                                     (name t))]))]])
-          (for [f fs, t types]
-            (map point (get-in datasets [f t]))))
-
-        {:valid? true
-         :file   output-path}))))
+    (check [_ test model history]
+      (latency/point-graph! test history)
+      (latency/quantiles-graph! test history)
+      {:valid? true})))

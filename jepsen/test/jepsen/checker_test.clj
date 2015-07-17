@@ -4,7 +4,8 @@
         clojure.test)
   (:require [knossos.core :refer [ok-op invoke-op]]
             [multiset.core :as multiset]
-            [jepsen.model :as model]))
+            [jepsen.model :as model]
+            [jepsen.checker.latency :refer :all]))
 
 (deftest queue-test
   (testing "empty"
@@ -42,12 +43,14 @@
                    (invoke-op 3 :dequeue 2)
                    (ok-op     3 :dequeue 2)])
            {:valid?           true
+            :duplicated       (multiset/multiset)
             :lost             (multiset/multiset)
-            :unexpected       (multiset/multiset)
+            :unexpected       #{}
             :recovered        (multiset/multiset 1)
             :ok-frac          1
             :unexpected-frac  0
             :lost-frac        0
+            :duplicated-frac  0
             :recovered-frac   1/2})))
 
   (testing "pathological"
@@ -55,16 +58,24 @@
                   [(invoke-op 1 :enqueue :hung)
                    (invoke-op 2 :enqueue :enqueued)
                    (ok-op     2 :enqueue :enqueued)
-                   (invoke-op 3 :dequeue nil) ; nope
-                   (invoke-op 4 :dequeue nil)
-                   (ok-op     4 :dequeue :wtf)])
+                   (invoke-op 3 :enqueue :dup)
+                   (ok-op     3 :enqueue :dup)
+                   (invoke-op 4 :dequeue nil) ; nope
+                   (invoke-op 5 :dequeue nil)
+                   (ok-op     5 :dequeue :wtf)
+                   (invoke-op 6 :dequeue nil)
+                   (ok-op     6 :dequeue :dup)
+                   (invoke-op 7 :dequeue nil)
+                   (ok-op     7 :dequeue :dup)])
            {:valid?           false
             :lost             (multiset/multiset :enqueued)
-            :unexpected       (multiset/multiset :wtf)
+            :unexpected       #{:wtf}
             :recovered        (multiset/multiset)
-            :ok-frac          0
-            :lost-frac        1/2
-            :unexpected-frac  1/2
+            :duplicated       (multiset/multiset :dup)
+            :ok-frac          1/3
+            :lost-frac        1/3
+            :unexpected-frac  1/3
+            :duplicated-frac  1/3
             :recovered-frac   0}))))
 
 (deftest counter-test
@@ -136,3 +147,49 @@
          {:a {:valid? true}
           :b {:valid? true}
           :valid? true})))
+
+(deftest bucket-points-test
+  (is (= (bucket-points 2
+                        [[1 :a]
+                         [7 :g]
+                         [5 :e]
+                         [2 :b]
+                         [3 :c]
+                         [4 :d]
+                         [6 :f]])
+         {1 [[1 :a]]
+          3 [[2 :b]
+             [3 :c]]
+          5 [[5 :e]
+             [4 :d]]
+          7 [[7 :g]
+             [6 :f]]})))
+
+(deftest latencies->quantiles-test
+  (is (= {0 [[5/2 0]  [15/2 20] [25/2 25]]
+          1 [[5/2 10] [15/2 25] [25/2 25]]}
+         (latencies->quantiles 5 [0 1] (partition 2 [0 0
+                                                     1 10
+                                                     2 1
+                                                     3 1
+                                                     4 1
+                                                     5 20
+                                                     6 21
+                                                     7 22
+                                                     8 25
+                                                     9 25
+                                                     10 25])))))
+
+(deftest latency-graph-test
+  (check (latency-graph)
+         {:name       "latency graph test"
+          :start-time 0}
+         nil
+         (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
+              (mapcat (fn [latency]
+                        (let [f (rand-nth [:write :read])
+                              time (* 1e9 (rand-int 100))
+                              type (rand-nth [:ok :fail :info])]
+                          [{:type :invoke, :f f, :time time}
+                           {:type type,    :f f, :time (+ time latency)}])))
+              (take 10000))))
