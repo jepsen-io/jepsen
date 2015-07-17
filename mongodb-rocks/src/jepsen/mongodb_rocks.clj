@@ -41,7 +41,7 @@
                     (aget printable-ascii))))
     (.toString s)))
 
-(def payload (rand-str (* 10 1024)))
+(def payload (rand-str 1024))
 
 (defrecord Client [db-name coll write-concern conn db]
   client/Client
@@ -95,4 +95,4 @@
          :client  (client)
          :generator (->> (generator)
                          (gen/clients)
-                         (gen/time-limit 1000))))
+                         (gen/time-limit 10))))
