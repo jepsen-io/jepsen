@@ -36,31 +36,41 @@
                         WriteConcern
                         ReadPreference)))
 
+(defn apt-install!
+  "Does the apt-get install for a version"
+  [version]
+  (c/su
+    (debian/install {:mongodb-org version
+                     :mongodb-org-server version
+                     :mongodb-org-shell version
+                     :mongodb-org-mongos version
+                     :mongodb-org-tools version})))
+
 (defn install!
   "Installs the given version of MongoDB."
   [node version]
-  (when-not (debian/installed? "mongodb-org")
-    (c/su
-      (try
-        (info node "installing mongodb")
-        (debian/install {:mongodb-org version})
+  (c/su
+    (try
+      (apt-install! version)
 
-        (catch RuntimeException e
-          ; Add apt key
-          (c/exec :apt-key     :adv
-                  :--keyserver "keyserver.ubuntu.com"
-                  :--recv      "7F0CEB10")
+      (catch RuntimeException e
+        ; Add apt key
+        (c/exec :apt-key     :adv
+                :--keyserver "keyserver.ubuntu.com"
+                :--recv      "7F0CEB10")
 
-          ; Add repo
-          (c/exec :echo "deb http://downloads-distro.mongodb.org/repo/debian-sysvinit dist 10gen"
-                  :> "/etc/apt/sources.list.d/mongodb.list")
-          (c/exec :apt-get :update)
+        ; Add repos
+        (c/exec :echo "deb http://downloads-distro.mongodb.org/repo/debian-sysvinit dist 10gen"
+                :> "/etc/apt/sources.list.d/mongodb.list")
+        (c/exec :echo "deb http://repo.mongodb.org/apt/debian wheezy/mongodb-org/3.0 main"
+                :> "/etc/apt/sources.list.d/mongodb-3.0.list")
+        (c/exec :apt-get :update)
 
-          ; Try install again
-          (debian/install {:mongodb-org version})
+        ; Try install again
+        (apt-install! version)))
 
-      ; Make sure we don't start at startup
-      (c/exec :update-rc.d :mongod :remove :-f))))))
+    ; Make sure we don't start at startup
+    (c/exec :update-rc.d :mongod :remove :-f)))
 
 (defn configure!
   "Deploy configuration files to the node."

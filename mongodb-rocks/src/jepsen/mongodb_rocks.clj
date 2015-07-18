@@ -88,9 +88,9 @@
 (defn logger-perf-test
   []
   (assoc tests/noop-test
-         :name    "mongodb-rocks queue latency test"
+         :name    "mongodb stock 2.6.7 queue latency test"
          :os      debian/os
-         :db      (db "3.0.4~pre")
+         :db      (db "2.6.7")
          :checker (checker/compose {:latency (checker/latency-graph)})
          :client  (client)
          :generator (->> (generator)
