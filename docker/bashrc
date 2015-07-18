@@ -1,18 +1,30 @@
-
-if [ -f ~/.ssh/id_rsa.pub ] && [ ! -f ~/.started ];
+if [ -f ~/.ssh/id_rsa.pub ];
 then
 
-touch ~/.started
+  if [ ! -f ~/.started ];
+  then
 
-#import the image
-cat /root/jepsennode.tar.gz | docker import - jepsennode
+    touch ~/.started
 
-# start the 5 nodes
-docker run --privileged -d --name n1 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
-docker run --privileged -d --name n2 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
-docker run --privileged -d --name n3 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
-docker run --privileged -d --name n4 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
-docker run --privileged -d --name n5 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
+    #import the image
+    cat /root/jepsennode.tar.gz | docker import - jepsennode
+
+    # start the 5 nodes
+    docker run --privileged -d --name n1 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
+    docker run --privileged -d --name n2 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
+    docker run --privileged -d --name n3 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
+    docker run --privileged -d --name n4 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
+    docker run --privileged -d --name n5 -e ROOT_PASS="root" -e AUTHORIZED_KEYS="`cat ~/.ssh/id_rsa.pub`" jepsennode /run.sh
+
+  else
+
+    docker ps | grep -qw n1 || docker start n1
+    docker ps | grep -qw n2 || docker start n2
+    docker ps | grep -qw n3 || docker start n3
+    docker ps | grep -qw n4 || docker start n4
+    docker ps | grep -qw n5 || docker start n5
+
+  fi
 
 # note the ip address and add to /etc/hosts
 N1_IP=$(docker inspect --format '{{ .NetworkSettings.IPAddress }}' n1)
@@ -68,4 +80,3 @@ EOF
 cd /jepsen
 
 fi
-
