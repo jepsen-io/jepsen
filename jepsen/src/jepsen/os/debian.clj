@@ -84,13 +84,16 @@
     (dorun
       (for [[pkg version] pkgs]
         (when (not= version (installed-version pkg))
-          (c/exec :apt-get :install :-y (str (name pkg) "=" version)))))
+          (info "Installing" pkg version)
+          (c/exec :apt-get :install :-y :--force-yes
+                  (str (name pkg) "=" version)))))
 
     ; Install any version
     (let [pkgs    (set (map name pkgs))
           missing (set/difference pkgs (installed pkgs))]
       (when-not (empty? missing)
         (c/su
+          (info "Installing" missing)
           (apply c/exec :apt-get :install :-y missing))))))
 
 (def os
