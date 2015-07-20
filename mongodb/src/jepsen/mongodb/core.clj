@@ -25,7 +25,7 @@
             [monger.collection :as mc]
             [monger.result :as mr]
             [monger.query :as mq]
-            [monger.command]
+            [monger.command :as command]
             [monger.operators :refer :all]
             [monger.conversion :refer [from-db-object]])
   (:import (clojure.lang ExceptionInfo)
@@ -190,11 +190,6 @@
   [conn conf]
   (admin-command! conn :replSetReconfig conf))
 
-(defn optime
-  "The current optime"
-  [conn]
-  (admin-command! conn :getoptime 1))
-
 (defn node+port->node
   "Take a mongo \"n1:27107\" string and return just the node as a keyword:
   :n1."
@@ -243,7 +238,7 @@
                    (let [conn (mongo/connect (mongo/server-address (name node))
                                              mongo-conn-opts)]
                      (try
-                       (optime conn)
+                       (command/top conn)
                        conn
                        (catch Throwable t
                          (mongo/disconnect conn)
@@ -413,7 +408,7 @@
     (assoc tests/noop-test
            :name      (str "mongodb " name)
            :os        debian/os
-           :db        (db "2.6.7")
+           :db        (db "3.0.4")
            :model     (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable
                                         :latency (checker/latency-graph)})
