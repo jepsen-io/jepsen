@@ -98,6 +98,7 @@
   (stop! node)
   (info node "deleting data files")
   (c/su
+    (c/exec :rm :-rf (c/lit "/var/log/mongodb/*"))
     (c/exec :rm :-rf (c/lit "/var/lib/mongodb/*"))))
 
 (defn uninstall!
@@ -230,7 +231,7 @@
   "Block until we can connect to the given node. Returns a connection to the
   node."
   [node]
-  (timeout 45000
+  (timeout (* 100 1000)
            (throw (ex-info "Timed out trying to connect to MongoDB"
                            {:node node}))
            (loop []
@@ -285,7 +286,7 @@
 (defn join!
   "Join nodes into a replica set. Blocks until any primary is visible to all
   nodes which isn't really what we want but oh well."
-  [test node]
+  [node test]
   ; Gotta have all nodes online for this
   (jepsen/synchronize test)
 
@@ -324,19 +325,19 @@
     (info node "primary is" (primary conn))
     (jepsen/synchronize test)))
 
-(defn db [version]
+(defn db
   "MongoDB for a particular version."
+  [version]
   (reify db/DB
     (setup! [_ test node]
       (doto node
         (install! version)
         (configure!)
-        (start!))
-      (join! test node))
+        (start!)
+        (join! test)))
 
     (teardown! [_ test node]
       (wipe! node))))
-;      )))
 
 (defn cluster-client
   "Returns a mongoDB connection for all nodes in a test."
