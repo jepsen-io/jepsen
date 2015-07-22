@@ -8,7 +8,8 @@
                     [tests :as tests]
                     [control :as c]
                     [checker :as checker]
-                    [generator :as gen]]
+                    [generator :as gen]
+                    [util :refer [timeout]]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [monger [core :as m]
@@ -80,7 +81,7 @@
                     (aget printable-ascii))))
     (.toString s)))
 
-(def payload (rand-str 1024))
+(def payload (rand-str (* 100 1024)))
 
 (defrecord Client [db-name coll write-concern conn db]
   client/Client
@@ -88,6 +89,16 @@
   (setup! [this test node]
     (let [conn (mongo/cluster-client test)
           db   (m/get-db conn db-name)]
+      ; Ensure index exists
+      (timeout (* 20 1000)
+               (throw (ex-info "Timed out trying to ensure index" {:node node}))
+               (loop []
+                 (or (try
+                       (mc/ensure-index db coll (array-map :time 1))
+                       true
+                       (catch com.mongodb.MongoServerSelectionException e
+                         false))
+                     (recur))))
       (assoc this :conn conn, :db db)))
 
   (invoke! [this test op]
@@ -96,9 +107,18 @@
         :write (let [res (mongo/parse-result
                            (mc/insert db coll
                                       {:_id (:value op)
+                                       :time (System/currentTimeMillis)
                                        :payload payload}
                                       write-concern))]
-                 (assoc op :type :ok)))))
+                 (assoc op :type :ok))
+        :delete (let [res (mc/find-and-modify db coll
+                                              {}
+                                              {}
+                                              {:sort {:time 1}
+                                               :remove true})]
+                  (if-let [id (:_id res)]
+                    (assoc op :type :ok, :value id)
+                    (assoc op :type :fail))))))
 
   (teardown! [_ test]
     (m/disconnect conn)))
@@ -108,11 +128,11 @@
   []
   (Client. "jepsen"
            "logger"
-           WriteConcern/MAJORITY
+           WriteConcern/ACKNOWLEDGED
            nil
            nil))
 
-(defn generator
+(defn writes
   []
   (reify gen/Generator
     (op [_ test process]
@@ -124,6 +144,16 @@
                   long
                   (str "-oempa_" (rand-int Integer/MAX_VALUE)))})))
 
+(defn deletes
+  []
+  {:type :invoke
+   :f :delete
+   :value nil})
+
+(defn generator
+  []
+  (gen/mix [(writes) (writes) (deletes)]))
+
 (defn logger-perf-test
   [version engine]
   (assoc tests/noop-test
@@ -134,4 +164,4 @@
          :client  (client)
          :generator (->> (generator)
                          (gen/clients)
-                         (gen/time-limit 200))))
+                         (gen/time-limit 1000))))
