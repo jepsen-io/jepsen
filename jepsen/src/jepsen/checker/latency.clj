@@ -157,11 +157,11 @@
 
 (defn preamble
   "Gnuplot commands for setting up a latency plot."
-  [output-path]
+  [test output-path]
   (concat [[:set :output output-path]
-           [:set :term :png, :truecolor, :size (g/list 900 400)]]
-          '[[set title "Latency"]
-            [set autoscale]
+           [:set :term :png, :truecolor, :size (g/list 900 400)]
+           [:set :title (str (:name test) " latency")]]
+          '[[set autoscale]
             [set xlabel "Time (s)"]
             [set ylabel "Latency (ms)"]
             [set key outside left right]
@@ -176,7 +176,7 @@
         fs->points  (fs->points fs)
         output-path (.getCanonicalPath (store/path! test "latency-raw.png"))]
     (g/raw-plot!
-      (concat (preamble output-path)
+      (concat (preamble test output-path)
               (nemesis-regions history)
               ; Plot ops
               [['plot (apply g/list
@@ -213,7 +213,7 @@
         output-path (.getCanonicalPath
                       (store/path! test "latency-quantiles.png"))]
     (g/raw-plot!
-      (concat (preamble output-path)
+      (concat (preamble test output-path)
               (nemesis-regions history)
               ; Plot ops
               [['plot (apply g/list
