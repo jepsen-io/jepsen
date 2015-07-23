@@ -310,7 +310,8 @@
 (defn run!
   "Runs a test. Tests are maps containing
 
-  :nodes      A sequence of string node names involved in the test.
+  :nodes      A sequence of string node names involved in the test
+  :concurrency  (optional) How many processes to run concurrently
   :ssh        SSH credential information: a map containing...
     :username           The username to connect with   (root)
     :password           The password to use
