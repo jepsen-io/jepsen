@@ -148,7 +148,7 @@
                       ; The process is now free to attempt another execution.
                       process
                       ; Process hung; move on
-                      (+ process (count (:nodes test)))))
+                      (+ process (:concurrency test))))
 
                   (catch Throwable t
                     ; At this point all bets are off. If the client or network
@@ -170,7 +170,7 @@
                                                             getMessage)
                                                         (.getMessage t)))))
                     (warn t "Process" process "indeterminate")
-                    (+ process (count (:nodes test)))))))))
+                    (+ process (:concurrency test))))))))
         (info "Worker" process "done")))))
 
 (defn nemesis-worker
@@ -274,7 +274,10 @@
     (with-resources [clients
                      #(client/setup! (:client test) test %) ; Specialize to node
                      #(client/teardown! % test)
-                     (:nodes test)]
+                     (->> test
+                          :nodes
+                          cycle
+                          (take (:concurrency test)))]
 
       ; Begin workload
       (let [workers (mapv (partial worker test)
@@ -358,8 +361,13 @@
                         ; Initialization time
                         :start-time (util/local-time)
 
+                        ; Number of concurrent workers
+                        :concurrency (or (:concurrency test)
+                                         (count (:nodes test)))
+
                         ; Synchronization point for nodes
                         :barrier (CyclicBarrier. (count (:nodes test)))
+
                         ; Currently running histories
                         :active-histories (atom #{}))]
 
