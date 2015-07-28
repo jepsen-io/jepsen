@@ -160,8 +160,10 @@
          :name    (str "mongodb queue " version " " engine)
          :os      debian/os
          :db      (db version engine)
-         :checker (checker/compose {:latency (checker/latency-graph)})
+         :checker (checker/compose {:latency (checker/perf)})
          :client  (client)
+         :concurrency 100
          :generator (->> (generator)
                          (gen/clients)
+;                         (gen/delay 1)
                          (gen/time-limit 1000))))
