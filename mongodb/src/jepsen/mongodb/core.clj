@@ -89,8 +89,9 @@
   [node]
   (info node "stopping mongod")
   (c/su
-    (c/exec :service :mongod :stop))
-    (meh (c/exec :killall :-9 :mongod)))
+    (timeout 5000 nil
+      (c/exec :service :mongod :stop))
+    (meh (c/exec :killall :-9 :mongod))))
 
 (defn wipe!
   "Shuts down MongoDB and wipes data."

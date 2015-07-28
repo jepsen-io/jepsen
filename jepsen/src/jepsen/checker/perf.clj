@@ -1,5 +1,5 @@
-(ns jepsen.checker.latency
-  "Supporting functions for latency checkers"
+(ns jepsen.checker.perf
+  "Supporting functions for performance analysis."
   (:require [clojure.stacktrace :as trace]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
@@ -12,15 +12,20 @@
             [knossos.op :as op]
             [knossos.history :as history]))
 
+(defn bucket-time
+  "Given a bucket size dt and a time t, computes the time at the midpoint of
+  the bucket this time falls into."
+  [dt t]
+  (-> t (/ dt) long (* dt) (+ (/ dt 2))))
+
 (defn bucket-points
   "Takes a time window dt and a sequence of [time, _] points, and emits a
   seq of [time, points-in-window] buckets, ordered by time. Time is at the
   midpoint of the window."
   [dt points]
-  (let [offset (/ dt 2)]
-    (->> points
-         (group-by #(-> % first (/ dt) long (* dt) (+ offset)))
-         (into (sorted-map)))))
+  (->> points
+       (group-by #(->> % first (bucket-time dt)))
+       (into (sorted-map))))
 
 (defn quantiles
   "Takes a sequence of quantiles from 0 to 1 and a sequence of values, and
@@ -33,6 +38,17 @@
                       (let [idx (min (dec n) (long (Math/floor (* n q))))]
                         (nth sorted idx)))]
         (zipmap qs (map extract qs))))))
+
+(defn times->rates
+  "Takes a time window in seconds and a sequence of times. Bins times and emits
+  a sequence of [time, rate] pairs where rate is the mean number of events per
+  second in that window."
+  [dt times]
+  (assert (number? dt))
+  (->> times
+       (bucket-points dt)
+       (map (fn [[bucket-time times]]
+              [bucket-time (double (/ (count times) dt))]))))
 
 (defn latencies->quantiles
   "Takes a time window in seconds, a sequence of quantiles from 0 to 1, and a
@@ -58,7 +74,7 @@
                      buckets)))
          (zipmap qs))))
 
-(defn by-type
+(defn invokes-by-type
   "Splits up a sequence of invocations into ok, failed, and crashed ops by
   looking at their corresponding completions."
   [ops]
@@ -66,22 +82,31 @@
    :fail (filter #(= :fail (:type (:completion %))) ops)
    :info (filter #(= :info (:type (:completion %))) ops)})
 
-(defn by-f
+(defn invokes-by-f
   "Takes a history and returns a map of f -> ops, for all invocations."
   [history]
   (->> history
        (filter op/invoke?)
        (group-by :f)))
 
-(defn by-f-type
+(defn invokes-by-f-type
   "Takes a history and returns a map of f -> type -> ops, for all invocations."
   [history]
   (->> history
        (filter op/invoke?)
        (group-by :f)
-       (util/map-kv (fn [[f ops]] [f (by-type ops)]))))
+       (util/map-kv (fn [[f ops]] [f (invokes-by-type ops)]))))
 
-(defn point
+(defn completions-by-f-type
+  "Takes a history and returns a map of f -> type-> ops, for all completions in
+  history."
+  [history]
+  (->> history
+       (remove op/invoke?)
+       (group-by :f)
+       (util/map-kv (fn [[f ops]] [f (group-by :type ops)]))))
+
+(defn latency-point
   "Given an operation, returns a [time, latency] pair: times in seconds,
   latencies in ms."
   [op]
@@ -156,27 +181,32 @@
                :noborder]))))
 
 (defn preamble
-  "Gnuplot commands for setting up a latency plot."
-  [test output-path]
+  "Shared gnuplot preamble"
+  [output-path]
   (concat [[:set :output output-path]
-           [:set :term :png, :truecolor, :size (g/list 900 400)]
-           [:set :title (str (:name test) " latency")]]
+           [:set :term :png, :truecolor, :size (g/list 900 400)]]
           '[[set autoscale]
             [set xlabel "Time (s)"]
-            [set ylabel "Latency (ms)"]
-            [set key outside left right]
+            [set key outside top right]]))
+
+(defn latency-preamble
+  "Gnuplot commands for setting up a latency plot."
+  [test output-path]
+  (concat (preamble output-path)
+          [[:set :title (str (:name test) " latency")]]
+          '[[set ylabel "Latency (ms)"]
             [set logscale y]]))
 
 (defn point-graph!
   "Writes a plot of raw latency data points."
   [test history]
   (let [history     (util/history->latencies history)
-        datasets    (by-f-type history)
+        datasets    (invokes-by-f-type history)
         fs          (sort (keys datasets))
         fs->points  (fs->points fs)
         output-path (.getCanonicalPath (store/path! test "latency-raw.png"))]
     (g/raw-plot!
-      (concat (preamble test output-path)
+      (concat (latency-preamble test output-path)
               (nemesis-regions history)
               ; Plot ops
               [['plot (apply g/list
@@ -188,7 +218,7 @@
                                 'title       (str (name f) " "
                                                   (name t))]))]])
       (for [f fs, t types]
-        (map point (get-in datasets [f t]))))
+        (map latency-point (get-in datasets [f t]))))
 
     output-path))
 
@@ -199,12 +229,12 @@
         dt          30
         qs          [0.5 0.95 0.99 1]
         datasets    (->> history
-                         by-f
+                         invokes-by-f
                          ; For each f, emit a map of quantiles to points
                          (util/map-kv
                            (fn [[f ops]]
                              (->> ops
-                                  (map point)
+                                  (map latency-point)
                                   (latencies->quantiles dt qs)
                                   (vector f)))))
         fs          (sort (keys datasets))
@@ -213,7 +243,7 @@
         output-path (.getCanonicalPath
                       (store/path! test "latency-quantiles.png"))]
     (g/raw-plot!
-      (concat (preamble test output-path)
+      (concat (latency-preamble test output-path)
               (nemesis-regions history)
               ; Plot ops
               [['plot (apply g/list
@@ -228,3 +258,45 @@
         (get-in datasets [f q])))
 
     output-path))
+
+(defn rate-preamble
+  "Gnuplot commands for setting up a rate plot."
+  [test output-path]
+  (concat (preamble output-path)
+          [[:set :title (str (:name test) " rate")]]
+          '[[set ylabel "Throughput (hz)"]]))
+
+(defn rate-graph!
+  "Writes a plot of operation rate by their completion times."
+  [test history]
+  (let [dt          10
+        td          (double (/ dt))
+        datasets    (->> history
+                         (r/remove op/invoke?)
+                         ; Compute rates
+                         (reduce (fn [m op]
+                                   (update-in m [(:f op)
+                                                 (:type op)
+                                                 (bucket-time dt
+                                                              (util/nanos->secs
+                                                                (:time op)))]
+                                              #(+ td (or % 0))))
+                                 {}))
+        fs          (sort (keys datasets))
+        fs->points  (fs->points fs)
+        output-path (.getCanonicalPath (store/path! test "rate.png"))]
+    (g/raw-plot!
+      (concat (rate-preamble test output-path)
+              (nemesis-regions history)
+              ; Plot ops
+              [['plot (apply g/list
+                             (for [f fs, t types]
+                               ["-"
+                                'with         'linespoints
+                                'linetype     (type->color t)
+                                'pointtype    (fs->points f)
+                                'title        (str (name f) " "
+                                                   (name t))]))]])
+      (for [f fs, t types]
+        (sort (get-in datasets [f t]))))))
+

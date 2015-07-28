@@ -8,7 +8,7 @@
             [clojure.java.io :as io]
             [jepsen.util :as util]
             [jepsen.store :as store]
-            [jepsen.checker.latency :as latency]
+            [jepsen.checker.perf :as perf]
             [multiset.core :as multiset]
             [gnuplot.core :as g]
             [knossos.core :as knossos]
@@ -248,10 +248,24 @@
         (assoc results :valid? (every? :valid? (vals results)))))))
 
 (defn latency-graph
-  "Spits out graphs of latency to store/.../latency.png."
+  "Spits out graphs of latencies."
   []
   (reify Checker
     (check [_ test model history]
-      (latency/point-graph! test history)
-      (latency/quantiles-graph! test history)
+      (perf/point-graph! test history)
+      (perf/quantiles-graph! test history)
       {:valid? true})))
+
+(defn rate-graph
+  "Spits out graphs of throughput over time."
+  []
+  (reify Checker
+    (check [_ test model history]
+      (perf/rate-graph! test history)
+      {:valid? true})))
+
+(defn perf
+  "Assorted performance statistics"
+  []
+  (compose {:latency-graph (latency-graph)
+            :rate-graph    (rate-graph)}))
