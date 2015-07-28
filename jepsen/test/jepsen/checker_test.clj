@@ -5,7 +5,7 @@
   (:require [knossos.core :refer [ok-op invoke-op]]
             [multiset.core :as multiset]
             [jepsen.model :as model]
-            [jepsen.checker.latency :refer :all]))
+            [jepsen.checker.perf :refer :all]))
 
 (deftest queue-test
   (testing "empty"
@@ -180,9 +180,9 @@
                                                      9 25
                                                      10 25])))))
 
-(deftest latency-graph-test
-  (check (latency-graph)
-         {:name       "latency graph test"
+(deftest perf-test
+  (check (perf)
+         {:name       "perf test"
           :start-time 0}
          nil
          (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
@@ -192,4 +192,5 @@
                               type (rand-nth [:ok :fail :info])]
                           [{:type :invoke, :f f, :time time}
                            {:type type,    :f f, :time (+ time latency)}])))
-              (take 10000))))
+              (take 10000)
+              vec)))

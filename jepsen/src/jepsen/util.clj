@@ -20,6 +20,13 @@
     1
     (/ a b)))
 
+(defn inc*
+  "Like inc, but (inc nil) => 1."
+  [x]
+  (if (nil? x)
+    1
+    (inc x)))
+
 (defn local-time
   "Drops millisecond resolution"
   []
