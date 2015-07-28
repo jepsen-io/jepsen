@@ -27,11 +27,7 @@
                       :exclusions [com.fasterxml.jackson.core/jackson-core
                                    org.apache.httpcomponents/httpclient]]]
                     :source-paths ["riak/src"]
-                    :test-paths ["riak/test"]}
-             :etcd {:dependencies
-                    [[verschlimmbesserung "0.1.1"]]
-                    :source-paths ["etcd/src"]
-                    :test-paths ["etcd/test"]}}
+                    :test-paths ["riak/test"]}}
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"])
