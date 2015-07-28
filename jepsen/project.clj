@@ -31,19 +31,7 @@
              :etcd {:dependencies
                     [[verschlimmbesserung "0.1.1"]]
                     :source-paths ["etcd/src"]
-                    :test-paths ["etcd/test"]}
-             :datomic {:dependencies
-                       [[com.datomic/datomic-pro "0.9.4707"
-                         :exclusions [org.apache.httpcomponents/httpclient
-                                      ; Why on earth is this a dep here? It
-                                      ; causes circular dependencies with
-                                      ; slf4j-log4j, which is ALSO a datomic
-                                      ; dep via ZK...
-                                      org.slf4j/log4j-over-slf4j
-                                      ; Cool thanks for breaking my logging
-                                      org.slf4j/slf4j-nop]]]
-                       :source-paths ["datomic/src"]
-                       :test-paths ["datomic/test"]}}
+                    :test-paths ["etcd/test"]}}
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"])
