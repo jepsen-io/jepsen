@@ -1,4 +1,4 @@
-(ns jepsen.system.rabbitmq
+(ns jepsen.rabbitmq
   (:require [clojure.tools.logging :refer [debug info warn]]
             [clojure.java.io       :as io]
             [jepsen.core           :as core]

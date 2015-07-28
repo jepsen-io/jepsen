@@ -17,7 +17,6 @@
                   :exclusions [org.slf4j/slf4j-api
                                org.slf4j-log4j12
                                com.google.guava/guava]]]
-  :classifiers [["rabbitmq" :rabbitmq]]
   :profiles {:consul {:source-paths ["consul/src"]
                       :test-paths   ["consul/test"]
                       :dependencies [[cheshire "5.4.0"]
@@ -29,11 +28,6 @@
                                    org.apache.httpcomponents/httpclient]]]
                     :source-paths ["riak/src"]
                     :test-paths ["riak/test"]}
-             :rabbitmq {:dependencies
-                        [[com.novemberain/langohr "2.7.1"
-                          :exclusions [com.google.guava/guava]]]
-                        :source-paths ["rabbitmq/src"]
-                        :test-paths ["rabbitmq/test"]}
              :etcd {:dependencies
                     [[verschlimmbesserung "0.1.1"]]
                     :source-paths ["etcd/src"]

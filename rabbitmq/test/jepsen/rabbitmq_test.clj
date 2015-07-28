@@ -1,5 +1,5 @@
-(ns jepsen.system.rabbitmq-test
-  (:use jepsen.system.rabbitmq
+(ns jepsen.rabbitmq-test
+  (:use jepsen.rabbitmq
         jepsen.core
         jepsen.tests
         clojure.test
@@ -74,5 +74,4 @@
                                  (gen/each
                                    (gen/once {:type :invoke
                                               :f    :drain}))))))]
-    (is (:valid? (:results test)))
-    (pprint (:results test))))
+    (is (:valid? (:results test)))))
