@@ -1,4 +1,4 @@
-(defproject jepsen "0.0.5"
+(defproject jepsen "0.0.6-SNAPSHOT"
   :description "Call Me Maybe: Network Partitions in Practice"
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [org.clojure/data.fressian "0.2.0"]
@@ -12,11 +12,6 @@
                  [org.clojure/tools.cli "0.2.2"]
                  [myguidingstar/clansi "1.3.0"]
                  [byte-streams "0.1.4"]]
-  :profiles {:consul {:source-paths ["consul/src"]
-                      :test-paths   ["consul/test"]
-                      :dependencies [[cheshire "5.4.0"]
-                                     [clj-http "1.0.1"]
-                                     [base64-clj "0.1.1"]]}}
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"])

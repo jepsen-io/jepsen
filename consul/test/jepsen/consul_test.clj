@@ -1,5 +1,5 @@
-(ns jepsen.system.consul-test
-  (:use jepsen.system.consul
+(ns jepsen.consul-test
+  (:use jepsen.consul
         jepsen.core
         jepsen.tests
         clojure.test
