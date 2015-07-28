@@ -1,4 +1,4 @@
-(defproject jepsen.rabbitmq "0.1.0-SNAPSHOT"
+(defproject jepsen.rabbitmq "0.1.0"
   :description "RabbitMQ tests for Jepsen"
   :url "https://github.com/aphyr/jepsen"
   :license {:name "Eclipse Public License"
