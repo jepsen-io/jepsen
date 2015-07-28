@@ -12,11 +12,26 @@
             [knossos.op :as op]
             [knossos.history :as history]))
 
+(defn bucket-scale
+  "Given a bucket size dt, and a bucket number (e.g. 0, 1, ...), returns the
+  time at the midpoint of that bucket."
+  [dt b]
+  (-> b long (* dt) (+ (/ dt 2))))
+
 (defn bucket-time
   "Given a bucket size dt and a time t, computes the time at the midpoint of
   the bucket this time falls into."
   [dt t]
-  (-> t (/ dt) long (* dt) (+ (/ dt 2))))
+  (bucket-scale dt (/ t dt)))
+
+(defn buckets
+  "Given a bucket size dt, emits a lazy sequence of times at the midpoints of
+  each bucket."
+  ([dt]
+   (->> (iterate inc 0)
+       (map (partial bucket-scale dt))))
+  ([dt tmax]
+   (take-while (partial >= tmax) (buckets dt))))
 
 (defn bucket-points
   "Takes a time window dt and a sequence of [time, _] points, and emits a
@@ -38,17 +53,6 @@
                       (let [idx (min (dec n) (long (Math/floor (* n q))))]
                         (nth sorted idx)))]
         (zipmap qs (map extract qs))))))
-
-(defn times->rates
-  "Takes a time window in seconds and a sequence of times. Bins times and emits
-  a sequence of [time, rate] pairs where rate is the mean number of events per
-  second in that window."
-  [dt times]
-  (assert (number? dt))
-  (->> times
-       (bucket-points dt)
-       (map (fn [[bucket-time times]]
-              [bucket-time (double (/ (count times) dt))]))))
 
 (defn latencies->quantiles
   "Takes a time window in seconds, a sequence of quantiles from 0 to 1, and a
@@ -105,6 +109,22 @@
        (remove op/invoke?)
        (group-by :f)
        (util/map-kv (fn [[f ops]] [f (group-by :type ops)]))))
+
+(defn rate
+  "Map breaking down the mean rate of completions by f and type, plus totals at
+  each level."
+  [history]
+  (->> history
+       (r/remove op/invoke?)
+       (reduce (fn [m op]
+                 (let [f (:f op)
+                       t (:type op)]
+                   ; slow and bad
+                   (-> m
+                       (update-in [f t]         util/inc*)
+                       (update-in [f ::all]     util/inc*)
+                       (update-in [::all t]     util/inc*)
+                       (update-in [::all ::all] util/inc*)))))))
 
 (defn latency-point
   "Given an operation, returns a [time, latency] pair: times in seconds,
@@ -271,6 +291,7 @@
   [test history]
   (let [dt          10
         td          (double (/ dt))
+        t-max       (->> history (r/map :time) (reduce max 0) util/nanos->secs)
         datasets    (->> history
                          (r/remove op/invoke?)
                          ; Compute rates
@@ -298,5 +319,6 @@
                                 'title        (str (name f) " "
                                                    (name t))]))]])
       (for [f fs, t types]
-        (sort (get-in datasets [f t]))))))
-
+        (let [m (get-in datasets [f t])]
+          (->> (buckets dt t-max)
+               (map (juxt identity #(get m % 0)))))))))
