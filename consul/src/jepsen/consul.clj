@@ -1,4 +1,4 @@
-(ns jepsen.system.consul
+(ns jepsen.consul
   (:require [clojure.tools.logging    :refer [debug info warn]]
             [clojure.java.io          :as io]
             [clojure.string           :as str]
