@@ -26,8 +26,7 @@
             [cheshire.core :as json])
   (:import (clojure.lang ExceptionInfo)))
 
-;; TODO: soft durability as an option.
-(defrecord Client [db tbl id primary write_acks use_outdated]
+(defrecord Client [db tbl id primary write_acks read_mode]
   client/Client
   (setup! [this test node]
     (info node "Connecting CAS Client...")
@@ -60,7 +59,7 @@
                (rethinkdb.query-builder/term
                 :TABLE
                 [(r/db db) tbl]
-                {:use_outdated use_outdated})
+                {:read_mode read_mode})
                id)]
       (with-errors op #{:read}
        (case (:f op)
@@ -90,8 +89,8 @@
 
 (defn client
   "A client which implements a register on top of an entire document."
-  [write_acks use_outdated]
-  (Client. "jepsen" "cas" 0 "n5" write_acks use_outdated))
+  [write_acks read_mode]
+  (Client. "jepsen" "cas" 0 "n5" write_acks read_mode))
 
 ; Generators
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -101,6 +100,9 @@
 (defn safe-test
   "Document-level compare and set with safe settings."
   []
-  (test- "document {:write_acks 'majority' :use_outdated false}"
-         {:client (client "majority" false)
+  ;; This is the only safe read/write mode.  Changing either of
+  ;; these (or turning on soft durability) may produce a
+  ;; non-linearizable history.
+  (test- "document {:write_acks 'majority' :read_mode 'majority'}"
+         {:client (client "majority" "majority")
           :generator (std-gen (gen/mix [r w cas cas]))}))

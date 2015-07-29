@@ -34,17 +34,21 @@
 
     (setup! [_ test node]
       (debian/install [:libprotobuf7 :libicu48 :psmisc])
-      (let [file "rethinkdb/build/debug/rethinkdb"]
-        (info node (str "Copying ~/" file "..."))
-        (copy-from-home file)
-        (info node (str "Copying ~/" file " DONE!")))
       (info node "Starting...")
       ;; TODO: detect server failing to start.
       (c/ssh* {:cmd "killall rethinkdb bash"})
       (c/ssh* {:cmd "
+# Add a 100ms delay to help find edge cases.
+#tc qdisc add dev eth0 root netem delay 100ms \\
+#  || tc qdisc change dev eth0 root netem delay 100ms
 rm -rf /root/rethinkdb_data
-chmod a+x /root/rethinkdb
-nohup /root/rethinkdb \\
+base=http://download.rethinkdb.com/dev
+version=/2.1.0-0BETA2/rethinkdb_2.1.0%2b0BETA2~0precise_amd64.deb
+if [[ ! -f /root/rdb.deb ]]; then
+  curl $base/$version > /root/rdb.deb
+  dpkg -i /root/rdb.deb
+fi
+nohup /usr/bin/rethinkdb \\
   --bind all \\
   -n `hostname` \\
   -j n1:29015 -j n2:29015 -j n3:29015 -j n4:29015 -j n5:29015 \\
@@ -62,6 +66,7 @@ sleep 1 # You never know.
     (teardown! [_ test node]
       (info node "Tearing down db...")
       (c/ssh* {:cmd "
+#tc qdisc change dev eth0 root netem delay 0ms
 killall rethinkdb
 f=0
 # Wait for all rethinkdb instances to go away.
@@ -86,7 +91,6 @@ fi
                        :fail
                        :info)]
      (try
-       ;; TODO: catch actual RethinkDB errors here.
        ~@body
        ; A server selection error means we never attempted the operation in
        ; the first place, so we know it didn't take place.
@@ -127,6 +131,5 @@ fi
            :db        (db)
            :model     (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable})
-           ;; POINT
-           :nemesis   (nemesis/partition-halves))
+           :nemesis   (nemesis/partition-random-halves))
     opts))
