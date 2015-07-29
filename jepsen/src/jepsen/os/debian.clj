@@ -113,7 +113,7 @@
                   :sysvinit-utils
                   :curl
                   :vim
-                  :man
+                  :man-db
                   :faketime
                   :unzip
                   :iptables
