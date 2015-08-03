@@ -1,0 +1,187 @@
+(ns jepsen.chronos
+  "Sets up chronos"
+  (:require [clojure.tools.logging :refer :all]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.pprint :refer [pprint]]
+            [clj-http.client :as http]
+            [clj-time.core :as time]
+            [clj-time.format :as time.format]
+            [cheshire.core :as json]
+            [jepsen [client :as client]
+             [core :as jepsen]
+             [db :as db]
+             [tests :as tests]
+             [control :as c :refer [|]]
+             [checker :as checker]
+             [generator :as gen]
+             [util :refer [timeout]]
+             [mesosphere :as mesosphere]]
+            [jepsen.control.util :as cu]
+            [jepsen.os.debian :as debian]))
+
+(def port "docs say 8080 but the package binds to 4400 by default wooo" 4400)
+(def job-dir "/tmp/chronos-test/")
+
+(defn uri
+  "Constructs a chronos URI for a given path."
+  [node & path]
+  (str "http://" (name node) ":" port "/" (str/join "/" (map name path))))
+
+(defn jobs
+  "What jobs are there?"
+  [node]
+  (->> (http/get (uri node :scheduler :jobs)
+                 {:as :json})
+       :body))
+
+(defn db
+  "Sets up and tears down Chronos. You can get versions from
+
+      curl http://repos.mesosphere.com/debian/dists/wheezy/main/binary-amd64/Packages.bz2 | bunzip2 | egrep '^Package:|^Version:' | paste - - | sort"
+  [mesos-version chronos-version]
+  (let [mesosphere (mesosphere/db mesos-version)]
+    (reify db/DB
+      (setup! [_ test node]
+        (db/setup! mesosphere test node)
+        (debian/install {:chronos chronos-version})
+        (c/su (c/exec :mkdir :-p job-dir))
+        (info node "starting chronos")
+        (c/su (c/exec :service :chronos :start)))
+
+      (teardown! [_ test node]
+        (info node "stopping chronos")
+        (c/su (c/exec :service :chronos :stop))
+        (db/teardown! mesosphere test node)
+        (c/su (c/exec :rm :-rf job-dir)))
+
+      db/LogFiles
+      (log-files [_ test node]
+        (db/log-files mesosphere test node)))))
+
+(defn now-str
+  []
+  (time.format/unparse (time.format/formatters :date-time)
+                       (time/now)))
+
+; Job representation
+;
+; Jobs are maps with the following keys:
+; :name     - A globally unique name for the job
+; :start    - A datetime for when the job begins
+; :interval - How long between runs in seconds
+; :count    - How many times should we repeat the job
+; :epsilon  - Allowable tolerance, in seconds, for scheduling
+; :duration - How long should a run take, in seconds?
+
+(def formatter (time.format/formatters :date-time))
+
+(defn interval-str
+  "Given a job, emits an ISO8601 repeating interval representation."
+  [job]
+  (str "R" (:count job) "/"
+       (time.format/unparse formatter (:start job))
+       "/PT" (:interval job) "S"))
+
+(defn command
+  "Given a job, constructs a shell command that picks a tempfile and logs the
+  job name, invocation time, sleeps, then logs the completion time."
+  [job]
+  (str "MEW=$(mktemp -p " job-dir "); "
+       "echo \"" (:name job) "\" >> $MEW; "
+       "date -u -Ins >> $MEW; "
+       "sleep " (:duration job) "; "
+       "date -u -Ins >> $MEW;"))
+
+(defn add-job!
+  "Submits a new job to Chronos. See
+  https://mesos.github.io/chronos/docs/api.html."
+  [node job]
+  (http/post (uri node :scheduler :iso8601)
+             {:content-type :json
+              :body (json/generate-string
+                      {:name              (:name job)
+                       :command           (command job)
+                       :schedule          (interval-str job)
+                       :scheduleTimeZone  "UTC"
+                       :owner             "jepsen@jepsen.io"
+                       :epsilon           (str "PT" (:epsilon job) "S")
+                       :async             false})}
+             {:as :json}))
+
+(defn parse-file-time
+  "Date can (maybe depending on locale) emit datetimes with commas to separate
+  fractional seconds, which (even though it's valid ISO8601) confuses
+  clj-time, so we substitute dots for commas before parsing."
+  [t]
+  (when t
+    (time.format/parse formatter (str/replace t \, \.))))
+
+(defn parse-file
+  "Given a run logfile with a name, start time, and end time, returns a map for
+  that run."
+  [file-str]
+  (let [[name start end] (str/split file-str #"\n")]
+    {:name  (Long/parseLong name)
+     :start (parse-file-time start)
+     :end   (parse-file-time end)}))
+
+(defn read-runs
+  "Returns all runs from all nodes."
+  [test]
+  (->> (c/on-many
+         (:nodes test)
+         (->> (cu/ls-full job-dir)
+              (pmap (partial c/exec :cat))
+              (mapv parse-file)))
+       vals
+       (reduce concat)))
+
+(defrecord Client [node]
+  client/Client
+  (setup! [this test node]
+    (assoc this :node node))
+
+  (invoke! [this test op]
+    (case (:f op)
+      :add-job (do (add-job! node (:value op))
+                   (assoc op :type :ok))
+      :read-runs (assoc op
+                        :type :ok
+                        :value (read-runs test))))
+
+  (teardown! [_ test]))
+
+(defn add-job
+  "Generator for creating new jobs."
+  []
+  (let [id (atom 0)]
+    (reify gen/Generator
+      (op [_ test process]
+        {:type   :invoke
+         :f      :add-job
+         :value  {:name     (str (swap! id inc))
+                  :start    (time/plus (time/now) (time/seconds 2))
+                  :interval 2
+                  :count    100
+                  :epsilon  10
+                  :duration 1}}))))
+
+(defn simple-test
+  "Create some jobs, let em run, and do a final read to see which ran."
+  [mesos-version chronos-version]
+  (assoc tests/noop-test
+         :name      "chronos"
+         :os        debian/os
+         :db        (db mesos-version chronos-version)
+         :client    (->Client nil)
+         :generator (gen/phases
+                      (gen/sleep 5)
+                      (gen/clients
+                        (gen/once
+                          (add-job)))
+                      (gen/sleep 10)
+                      (gen/clients
+                        (gen/once
+                          {:type :invoke, :f :read-runs})))
+         :checker   (checker/perf)))
