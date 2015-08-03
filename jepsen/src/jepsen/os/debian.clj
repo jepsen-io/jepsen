@@ -5,6 +5,7 @@
             [jepsen.util :refer [meh]]
             [jepsen.os :as os]
             [jepsen.control :as c]
+            [jepsen.control.util :as cu]
             [jepsen.control.net :as net]
             [clojure.string :as str]))
 
@@ -95,6 +96,27 @@
         (c/su
           (info "Installing" missing)
           (apply c/exec :apt-get :install :-y missing))))))
+
+(defn add-key!
+  "Receives an apt key from the given keyserver."
+  [keyserver key]
+  (c/su
+    (c/exec :apt-key :adv
+            :--keyserver keyserver
+            :--recv key)))
+
+(defn add-repo!
+  "Adds an apt repo (and optionally a key from the given keyserver)."
+  ([repo-name apt-line]
+   (add-repo! repo-name apt-line nil nil))
+  ([repo-name apt-line keyserver key]
+   (let [list-file (str "/etc/apt/sources.list.d/" (name repo-name) ".list")]
+     (when-not (cu/file? list-file)
+       (info "setting up" repo-name "apt repo")
+       (when (or keyserver key)
+         (add-key! keyserver key))
+       (c/exec :echo apt-line :> list-file)
+       (update!)))))
 
 (def os
   (reify os/OS
