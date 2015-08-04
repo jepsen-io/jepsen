@@ -8,4 +8,5 @@
                  [jepsen "0.0.6-SNAPSHOT"]
                  [cheshire "5.5.0"]
                  [clj-http "2.0.0"]
-                 [clj-time "0.10.0"]])
+                 [clj-time "0.10.0"]
+                 [loco "0.3.0"]])
