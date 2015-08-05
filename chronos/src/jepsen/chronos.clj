@@ -187,12 +187,12 @@
          :client    (->Client nil)
          :generator (gen/phases
                       (->> (add-job)
-                           (gen/delay 10)
+                           (gen/delay 5)
                            (gen/stagger 30)
                            (gen/clients)
                            (gen/time-limit 60))
                       (gen/log "Waiting for executions")
-                      (gen/sleep 10)
+                      (gen/sleep 120)
                       (gen/clients
                         (gen/once
                           {:type :invoke, :f :read})))
