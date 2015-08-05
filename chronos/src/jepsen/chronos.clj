@@ -119,11 +119,12 @@
     (time.format/parse formatter (str/replace t \, \.))))
 
 (defn parse-file
-  "Given a run logfile with a name, start time, and end time, returns a map for
-  that run."
-  [file-str]
+  "Given a node name and a run logfile with a name, start time, and end time,
+  returns a map for that run."
+  [node file-str]
   (let [[name start end] (str/split file-str #"\n")]
-    {:name  (Long/parseLong name)
+    {:node  node
+     :name  (Long/parseLong name)
      :start (parse-file-time start)
      :end   (parse-file-time end)}))
 
@@ -134,7 +135,7 @@
          (:nodes test)
          (->> (cu/ls-full job-dir)
               (pmap (partial c/exec :cat))
-              (mapv parse-file)))
+              (mapv (partial parse-file c/*host*))))
        vals
        (reduce concat)))
 
@@ -190,7 +191,7 @@
                            (gen/delay 5)
                            (gen/stagger 30)
                            (gen/clients)
-                           (gen/time-limit 60))
+                           (gen/time-limit 300))
                       (gen/log "Waiting for executions")
                       (gen/sleep 120)
                       (gen/clients
