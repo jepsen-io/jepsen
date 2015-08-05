@@ -304,7 +304,9 @@
             "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")
           "\n\n"
           (with-out-str
-            (pprint (:results test)))))
+            (pprint (:results test)))
+          (when (:error (:results test))
+            (str "\n\n" (:error (:results test))))))
   test)
 
 (defn run!
