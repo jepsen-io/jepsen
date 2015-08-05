@@ -18,7 +18,8 @@
              [util :refer [timeout]]
              [mesosphere :as mesosphere]]
             [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian]
+            [jepsen.chronos.checker :refer [checker]]))
 
 (def port "docs say 8080 but the package binds to 4400 by default wooo" 4400)
 (def job-dir "/tmp/chronos-test/")
@@ -146,9 +147,9 @@
     (case (:f op)
       :add-job (do (add-job! node (:value op))
                    (assoc op :type :ok))
-      :read-runs (assoc op
-                        :type :ok
-                        :value (read-runs test))))
+      :read    (assoc op
+                      :type :ok
+                      :value (read-runs test))))
 
   (teardown! [_ test]))
 
@@ -160,11 +161,11 @@
       (op [_ test process]
         {:type   :invoke
          :f      :add-job
-         :value  {:name     (str (swap! id inc))
+         :value  {:name     (swap! id inc)
                   :start    (time/plus (time/now) (time/seconds 2))
                   :interval 2
                   :count    100
-                  :epsilon  10
+                  :epsilon  5
                   :duration 1}}))))
 
 (defn simple-test
@@ -183,5 +184,7 @@
                       (gen/sleep 10)
                       (gen/clients
                         (gen/once
-                          {:type :invoke, :f :read-runs})))
-         :checker   (checker/perf)))
+                          {:type :invoke, :f :read})))
+         :checker   (checker/compose
+                      {:chronos (checker)
+                       :perf (checker/perf)})))
