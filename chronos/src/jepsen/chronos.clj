@@ -19,7 +19,7 @@
              [mesosphere :as mesosphere]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
-            [jepsen.chronos.checker :refer [checker]]))
+            [jepsen.chronos.checker :refer [checker epsilon-forgiveness]]))
 
 (def port "docs say 8080 but the package binds to 4400 by default wooo" 4400)
 (def job-dir "/tmp/chronos-test/")
@@ -159,14 +159,23 @@
   (let [id (atom 0)]
     (reify gen/Generator
       (op [_ test process]
+        (let [head-start  10 ; Schedule a bit in the future
+              duration    (rand-int 10)
+              epsilon     (rand-int 30)
+              ; Chronos won't schedule tasks concurrently, so we ensure they'll
+              ; never overlap.
+              interval    (+ duration
+                             epsilon
+                             epsilon-forgiveness
+                             (rand-int 30))]
         {:type   :invoke
          :f      :add-job
          :value  {:name     (swap! id inc)
-                  :start    (time/plus (time/now) (time/seconds 2))
-                  :interval 2
-                  :count    100
-                  :epsilon  5
-                  :duration 1}}))))
+                  :start    (time/plus (time/now) (time/seconds head-start))
+                  :count    (inc (rand-int 99))
+                  :duration duration
+                  :epsilon  epsilon
+                  :interval interval}})))))
 
 (defn simple-test
   "Create some jobs, let em run, and do a final read to see which ran."
@@ -177,10 +186,12 @@
          :db        (db mesos-version chronos-version)
          :client    (->Client nil)
          :generator (gen/phases
-                      (gen/sleep 5)
-                      (gen/clients
-                        (gen/once
-                          (add-job)))
+                      (->> (add-job)
+                           (gen/delay 10)
+                           (gen/stagger 30)
+                           (gen/clients)
+                           (gen/time-limit 60))
+                      (gen/log "Waiting for executions")
                       (gen/sleep 10)
                       (gen/clients
                         (gen/once
