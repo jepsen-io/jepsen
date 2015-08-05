@@ -19,21 +19,28 @@
             [loco.core :as l]
             [loco.constraints :refer :all]))
 
+(def epsilon-forgiveness
+  "We let chronos miss its deadlines by a few seconds."
+  5)
+
 (defn job->targets
   "Given a job and the datetime of a final read, emits a sequence of
   [start-time stop-time] for targets that *must* have been begun at the time
   of the read."
   [read-time job]
   ; Because jobs are allowed to begin up to :epsilon seconds after the target
-  ; time, our true cutoff must be :epsilon seconds before the read.
+  ; time, our true cutoff must be :epsilon seconds before the read, and because
+  ; jobs take :duration seconds to complete, we need an additional :duration
+  ; there too.
   (let [interval (t/seconds (:interval job))
         epsilon  (t/seconds (:epsilon job))
-        finish   (t/minus read-time epsilon)]
+        duration (t/seconds (:duration job))
+        finish   (t/minus read-time epsilon duration)]
     (->> (:start job)
          (iterate #(t/plus % interval))
          (take (:count job))
          (take-while (partial t/after? finish))
-         (map #(vector % (t/plus % epsilon))))))
+         (map #(vector % (t/plus % epsilon (t/seconds epsilon-forgiveness)))))))
 
 (defn time->int
   "We need integers for the loco solver."
@@ -79,6 +86,11 @@
 
         ; Split off incomplete runs; they don't count
         [runs incomplete] (complete-incomplete-runs runs)
+        ; Sort, just to make results easier to read.
+        _ (prn runs)
+        _ (prn incomplete)
+        runs       (vec (sort-by :start runs))
+        incomplete (vec (sort-by :start incomplete))
 
         ; What times did the job actually run?
         run-times (map (comp time->int :start) runs)
@@ -86,10 +98,10 @@
         ; Index variables
         indices (mapv (partial vector :i) (range (count targets)))
 
-        _ (prn :job job)
-        _ (prn :run-times run-times)
-        _ (prn :incompletes incomplete)
-        _ (prn :targets targets)
+;        _ (prn :job job)
+;        _ (prn :run-times run-times)
+;        _ (prn :incompletes incomplete)
+;        _ (prn :targets targets)
 
         soln (if (empty? targets)
                ; Trivial case--loco will crash if we ask for 0 distinct vars
@@ -135,6 +147,7 @@
       {:valid?      false
        :job         job
        :solution    nil
+       :targets     targets
        :extra       nil
        :complete    runs
        :incomplete  incomplete})))
@@ -187,4 +200,5 @@
                            (filter #(and (= :ok (:type %))
                                          (= :add-job (:f %))))
                            (map :value))]
-      (solution read-time jobs runs)))))
+        (assert runs) ; If we can't find a read, this will be nil.
+        (solution read-time jobs runs)))))
