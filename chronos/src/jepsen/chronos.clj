@@ -162,7 +162,7 @@
       (op [_ test process]
         (let [head-start  10 ; Schedule a bit in the future
               duration    (rand-int 10)
-              epsilon     (rand-int 30)
+              epsilon     (+ 10 (rand-int 20))
               ; Chronos won't schedule tasks concurrently, so we ensure they'll
               ; never overlap.
               interval    (+ duration
