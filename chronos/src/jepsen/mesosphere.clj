@@ -142,7 +142,10 @@
       (teardown! [_ test node]
         (stop-slave! node)
         (stop-master! node)
-        (c/su (c/exec :rm :-rf (c/lit (str log-dir "/*"))))
+        (c/su (c/exec :rm :-rf
+                      (c/lit (str master-dir "/*"))
+                      (c/lit (str slave-dir "/*"))
+                      (c/lit (str log-dir "/*"))))
         (db/teardown! zk test node))
 
       db/LogFiles
