@@ -36,6 +36,13 @@
                  {:as :json})
        :body))
 
+(defn configure
+  [test node]
+  (c/su
+    ; Lower the scheduler horizon; otherwise Chronos will just forget to run
+    ; tasks that happen frequently
+    (c/exec :echo "1" :> "/etc/chronos/conf/schedule_horizon")))
+
 (defn db
   "Sets up and tears down Chronos. You can get versions from
 
@@ -45,8 +52,11 @@
     (reify db/DB
       (setup! [_ test node]
         (db/setup! mesosphere test node)
+
         (debian/install {:chronos chronos-version})
+        (configure test node)
         (c/su (c/exec :mkdir :-p job-dir))
+
         (info node "starting chronos")
         (c/su (c/exec :service :chronos :start)))
 
@@ -198,11 +208,11 @@
          :generator (gen/phases
                       (->> (add-job)
                            (gen/delay 5)
-                           (gen/stagger 30)
+                           (gen/stagger 10)
                            (gen/clients)
-                           (gen/time-limit 300))
+                           (gen/time-limit 500))
                       (gen/log "Waiting for executions")
-                      (gen/sleep 120)
+                      (gen/sleep 200)
                       (gen/clients
                         (gen/once
                           {:type :invoke, :f :read})))
