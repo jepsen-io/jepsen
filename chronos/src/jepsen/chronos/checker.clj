@@ -87,8 +87,6 @@
         ; Split off incomplete runs; they don't count
         [runs incomplete] (complete-incomplete-runs runs)
         ; Sort, just to make results easier to read.
-        _ (prn runs)
-        _ (prn incomplete)
         runs       (vec (sort-by :start runs))
         incomplete (vec (sort-by :start incomplete))
 
@@ -159,7 +157,8 @@
   {:valid?      true iff every job has a valid solution
    :jobs        A map of job names to job solutions, each with :valid?, etc.
    :extra       Runs which weren't needed to satisfy a job's constraints
-   :incomplete  Runs which did not complete}"
+   :incomplete  Runs which did not complete
+   :read-time   Time of the final read}"
   [read-time jobs runs]
   (let [jobs  (group-by :name jobs)
         runs  (group-by :name runs)
@@ -172,7 +171,8 @@
     {:valid?     (every? :valid? (vals solns))
      :jobs       solns
      :extra      (mapcat :extra (vals solns))
-     :incomplete (mapcat :incomplete (vals solns))}))
+     :incomplete (mapcat :incomplete (vals solns))
+     :read-time  read-time}))
 
 (defn checker
   "Constructs a Jepsen checker."
