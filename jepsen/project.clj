@@ -10,7 +10,6 @@
                  [hiccup "1.0.5"]
                  [org.clojars.achim/multiset "0.1.0"]
                  [org.clojure/tools.cli "0.2.2"]
-                 [myguidingstar/clansi "1.3.0"]
                  [byte-streams "0.1.4"]]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
