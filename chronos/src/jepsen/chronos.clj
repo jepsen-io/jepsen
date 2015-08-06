@@ -94,23 +94,28 @@
        "sleep " (:duration job) "; "
        "date -u -Ins >> $MEW;"))
 
+(defn job->json
+  "Transforms a job into a JSON string suitable for sending to Chronos."
+  [job]
+  (json/generate-string
+    {:name              (:name job)
+     :command           (command job)
+     :schedule          (interval-str job)
+     :scheduleTimeZone  "UTC"
+     :owner             "jepsen@jepsen.io"
+     :epsilon           (str "PT" (:epsilon job) "S")
+     :mem               1
+     :disk              1
+     :cpus              0.001
+     :async             false}))
+
 (defn add-job!
   "Submits a new job to Chronos. See
   https://mesos.github.io/chronos/docs/api.html."
   [node job]
   (http/post (uri node :scheduler :iso8601)
              {:content-type :json
-              :body (json/generate-string
-                      {:name              (:name job)
-                       :command           (command job)
-                       :schedule          (interval-str job)
-                       :scheduleTimeZone  "UTC"
-                       :owner             "jepsen@jepsen.io"
-                       :epsilon           (str "PT" (:epsilon job) "S")
-                       :mem               1
-                       :disk              1
-                       :cpus              0.001
-                       :async             false})}
+              :body (job->json job)}
              {:as :json}))
 
 (defn parse-file-time
