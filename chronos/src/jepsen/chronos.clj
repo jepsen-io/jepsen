@@ -15,7 +15,7 @@
              [control :as c :refer [|]]
              [checker :as checker]
              [generator :as gen]
-             [util :refer [timeout]]
+             [util :refer [timeout meh]]
              [mesosphere :as mesosphere]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
@@ -52,7 +52,7 @@
 
       (teardown! [_ test node]
         (info node "stopping chronos")
-        (c/su (c/exec :service :chronos :stop))
+        (c/su (meh (c/exec :service :chronos :stop)))
         (db/teardown! mesosphere test node)
         (c/su (c/exec :rm :-rf job-dir)))
 
