@@ -107,6 +107,9 @@
                        :scheduleTimeZone  "UTC"
                        :owner             "jepsen@jepsen.io"
                        :epsilon           (str "PT" (:epsilon job) "S")
+                       :mem               1
+                       :disk              1
+                       :cpus              0.001
                        :async             false})}
              {:as :json}))
 
@@ -148,9 +151,10 @@
     (case (:f op)
       :add-job (do (add-job! node (:value op))
                    (assoc op :type :ok))
-      :read    (assoc op
-                      :type :ok
-                      :value (read-runs test))))
+      :read    (do (info (with-out-str (pprint (jobs node))))
+                   (assoc op
+                          :type :ok
+                          :value (read-runs test)))))
 
   (teardown! [_ test]))
 
