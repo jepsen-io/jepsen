@@ -219,6 +219,7 @@
                                               (gen/sleep 200)
                                               {:type :info, :f :stop}])))
                            (gen/time-limit 1000))
+                      (gen/nemesis (gen/once {:type :info, :f :stop}))
                       (gen/log "Waiting for executions")
                       (gen/sleep 60)
                       (gen/clients
