@@ -140,6 +140,7 @@
                   :unzip
                   :iptables
                   :iputils-ping
+                  :rsyslog
                   :logrotate])
 
         ; Fucking systemd breaks a bunch of packages

@@ -65,11 +65,13 @@
         (info node "stopping chronos")
         (c/su (meh (c/exec :service :chronos :stop)))
         (db/teardown! mesosphere test node)
-        (c/su (c/exec :rm :-rf job-dir)))
+        (c/su (c/exec :rm :-rf job-dir)
+              (c/exec :truncate :--size 0 "/var/log/messages")))
 
       db/LogFiles
       (log-files [_ test node]
-        (db/log-files mesosphere test node)))))
+        (concat (db/log-files mesosphere test node)
+                ["/var/log/messages"])))))
 
 (defn now-str
   []
@@ -214,11 +216,11 @@
                            (gen/delay 5)
                            (gen/stagger 10)
                            (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep 200)
+                             (gen/seq (cycle [(gen/sleep 100)
                                               {:type :info, :f :start}
-                                              (gen/sleep 200)
+                                              (gen/sleep 100)
                                               {:type :info, :f :stop}])))
-                           (gen/time-limit 1000))
+                           (gen/time-limit 500))
                       (gen/nemesis (gen/once {:type :info, :f :stop}))
                       (gen/log "Waiting for executions")
                       (gen/sleep 60)

@@ -169,7 +169,7 @@
                     (job-solution read-time job (get runs (:name job)))))
                 jobs)]
     {:valid?     (every? :valid? (vals solns))
-     :jobs       solns
+     :jobs       (into (sorted-map) solns)
      :extra      (mapcat :extra (vals solns))
      :incomplete (mapcat :incomplete (vals solns))
      :read-time  read-time}))
