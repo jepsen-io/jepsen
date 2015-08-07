@@ -14,6 +14,7 @@
              [tests :as tests]
              [control :as c :refer [|]]
              [checker :as checker]
+             [nemesis :as nemesis]
              [generator :as gen]
              [util :refer [timeout meh]]
              [mesosphere :as mesosphere]]
@@ -163,13 +164,16 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (case (:f op)
-      :add-job (do (add-job! node (:value op))
-                   (assoc op :type :ok))
-      :read    (do (info (with-out-str (pprint (jobs node))))
-                   (assoc op
-                          :type :ok
-                          :value (read-runs test)))))
+    (try
+      (case (:f op)
+        :add-job (do (add-job! node (:value op))
+                     (assoc op :type :ok))
+        :read    (do (info (with-out-str (pprint (jobs node))))
+                     (assoc op
+                            :type :ok
+                            :value (read-runs test))))
+      (catch java.net.ConnectException e
+        (assoc op :type :fail, :value (.getMessage e)))))
 
   (teardown! [_ test]))
 
@@ -209,13 +213,18 @@
                       (->> (add-job)
                            (gen/delay 5)
                            (gen/stagger 10)
-                           (gen/clients)
-                           (gen/time-limit 500))
+                           (gen/nemesis
+                             (gen/seq (cycle [(gen/sleep 200)
+                                              {:type :info, :f :start}
+                                              (gen/sleep 200)
+                                              {:type :info, :f :stop}])))
+                           (gen/time-limit 1000))
                       (gen/log "Waiting for executions")
-                      (gen/sleep 200)
+                      (gen/sleep 60)
                       (gen/clients
-                        (gen/once
-                          {:type :invoke, :f :read})))
+                             (gen/once
+                               {:type :invoke, :f :read})))
+         :nemesis   (nemesis/partition-random-halves)
          :checker   (checker/compose
                       {:chronos (checker)
                        :perf (checker/perf)})))
