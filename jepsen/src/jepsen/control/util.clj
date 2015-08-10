@@ -37,3 +37,13 @@
       (exec :wget url))
     filename))
 
+(defn grepkill
+  "Kills processes by grepping for the given string."
+  ([pattern]
+   (grepkill 9 pattern))
+  ([signal pattern]
+   (exec :ps :aux
+         | :grep pattern
+         | :grep :-v "grep"
+         | :awk "{print $2}"
+         | :xargs :kill (str "-" signal))))
