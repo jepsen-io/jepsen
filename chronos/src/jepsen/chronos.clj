@@ -63,7 +63,8 @@
 
       (teardown! [_ test node]
         (info node "stopping chronos")
-        (c/su (meh (c/exec :service :chronos :stop)))
+        (c/su (meh (c/exec :service :chronos :stop))
+              (meh (cu/grepkill "/usr/bin/chronos")))
         (db/teardown! mesosphere test node)
         (c/su (c/exec :rm :-rf job-dir)
               (c/exec :truncate :--size 0 "/var/log/messages")))
@@ -166,16 +167,17 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (try
-      (case (:f op)
-        :add-job (do (add-job! node (:value op))
-                     (assoc op :type :ok))
-        :read    (do (info (with-out-str (pprint (jobs node))))
-                     (assoc op
-                            :type :ok
-                            :value (read-runs test))))
-      (catch java.net.ConnectException e
-        (assoc op :type :fail, :value (.getMessage e)))))
+    (timeout 10000 (assoc op :type :info, :value :timed-out)
+             (try
+               (case (:f op)
+                 :add-job (do (add-job! node (:value op))
+                              (assoc op :type :ok))
+                 :read    (do ; (info (with-out-str (pprint (jobs node))))
+                              (assoc op
+                                     :type :ok
+                                     :value (read-runs test))))
+               (catch java.net.ConnectException e
+                 (assoc op :type :fail, :value (.getMessage e))))))
 
   (teardown! [_ test]))
 
@@ -216,11 +218,11 @@
                            (gen/delay 5)
                            (gen/stagger 10)
                            (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep 100)
+                             (gen/seq (cycle [(gen/sleep 200)
                                               {:type :info, :f :start}
-                                              (gen/sleep 100)
+                                              (gen/sleep 200)
                                               {:type :info, :f :stop}])))
-                           (gen/time-limit 500))
+                           (gen/time-limit 1000))
                       (gen/nemesis (gen/once {:type :info, :f :stop}))
                       (gen/log "Waiting for executions")
                       (gen/sleep 60)

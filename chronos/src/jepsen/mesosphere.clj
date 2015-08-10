@@ -73,13 +73,15 @@
               :--make-pidfile
               :--pidfile        master-pidfile
               :--chdir          master-dir
-              :--exec           master-bin
               :--no-close
+              :--exec           "/usr/bin/env"
               :--
+              "GLOG_v=1"
+              master-bin
               (str "--hostname="  (name node))
               (str "--log_dir="   log-dir)
               (str "--quorum="    (util/majority master-count))
-              (str "--registry_fetch_timeout=30secs")
+              (str "--registry_fetch_timeout=120secs")
               (str "--registry_store_timeout=5secs")
               (str "--work_dir="  master-dir)
               (str "--zk="        (zk-uri test))
