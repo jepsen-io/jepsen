@@ -1,4 +1,4 @@
-(defproject jepsen "0.0.6"
+(defproject jepsen "0.0.7-SNAPSHOT"
   :description "Call Me Maybe: Network Partitions in Practice"
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [org.clojure/data.fressian "0.2.0"]
