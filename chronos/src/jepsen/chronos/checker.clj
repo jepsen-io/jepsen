@@ -14,7 +14,7 @@
   (:require [clj-time.core :as t]
             [clj-time.format :as tf]
             [clj-time.coerce :as tc]
-            [jepsen.util :as util]
+            [jepsen.util :as util :refer [meh]]
             [jepsen.checker :refer [Checker]]
             [loco.core :as l]
             [loco.constraints :refer :all]))
@@ -68,8 +68,43 @@
           (recur complete
                  (conj! incomplete r)
                  (next runs))))
-      [(persistent! complete)
-       (persistent! incomplete)])))
+      [(vec (sort-by :start (persistent! complete)))
+       (vec (sort-by :start (persistent! incomplete)))])))
+
+(defn disjoint-job-solution
+  "Given sorted lists of targets and runs, computes a sorted map of targets to
+  runs, where a satisfying run exists. Throws if targets are not disjoint."
+  [targets runs]
+  ; Both runs and targets are sorted by their start time, which allows us to
+  ; riffle the two together in O(n) time.
+  (loop [m       (sorted-map)
+         targets targets
+         runs    runs]
+    (let [target (first targets)
+          run   (first runs)]
+      ; Safety first
+      (when target
+        (when-let [target2 (second targets)]
+          (assert (t/before? (second target) (first target2)))))
+
+      (cond
+        ; If we're out of targets or runs, exit.
+        (nil? target) m
+        (nil? run)    m
+
+        ; This run started before the target began.
+        (t/before? (:start run) (first target))
+        (recur m targets (next runs))
+
+        ; This run started after the target ended.
+        (t/before? (second target) (:start run))
+        (recur (assoc m target nil) (next targets) runs)
+
+        ; This run falls into the target.
+        true
+        (recur (assoc m target run)
+               (next targets)
+               (next runs))))))
 
 (defn job-solution
   "Given a job, a read time, and a collection of runs, computes a solution to
@@ -77,7 +112,7 @@
 
   {:valid?     Whether the runs satisfied the targets for this job
    :job        The job itself
-   :solution   A map of target intervals to runs which satisfied those intervals
+   :solution   A sorted map of target intervals to runs which satisfied them
    :extra      Complete runs which weren't needed to satisfy the requirements
    :complete   Runs which did complete
    :incomplete Runs which did began but did not complete"
@@ -86,9 +121,6 @@
 
         ; Split off incomplete runs; they don't count
         [runs incomplete] (complete-incomplete-runs runs)
-        ; Sort, just to make results easier to read.
-        runs       (vec (sort-by :start runs))
-        incomplete (vec (sort-by :start incomplete))
 
         ; What times did the job actually run?
         run-times (map (comp time->int :start) runs)
@@ -144,8 +176,7 @@
        :incomplete incomplete}
       {:valid?      false
        :job         job
-       :solution    nil
-       :targets     targets
+       :solution    (meh (disjoint-job-solution targets runs))
        :extra       nil
        :complete    runs
        :incomplete  incomplete})))

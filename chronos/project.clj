@@ -1,4 +1,4 @@
-(defproject jepsen.chronos "0.1.0"
+(defproject jepsen.chronos "0.1.1-SNAPSHOT"
   :description "Jepsen Mesos/Chronos test"
   :url "https://github.com/aphyr/jepsen"
   :license {:name "Eclipse Public License"
