@@ -46,15 +46,31 @@
              :epsilon 10
              :interval 60
              :duration 0}]
-    (is (= (job-solution (t/date-time 2100 1 1 0 0 0) job [r1 r2 r3 r4 r5])
-           {:valid?   true
-            :job      job
-            :solution {[(t/date-time 2000 1 1 0 0 0)
-                        (t/date-time 2000 1 1 0 0 (+ ef 10))] r1
-                       [(t/date-time 2000 1 1 0 1 0)
-                        (t/date-time 2000 1 1 0 1 (+ ef 10))] r2
-                       [(t/date-time 2000 1 1 0 2 0)
-                        (t/date-time 2000 1 1 0 2 (+ ef 10))] r3}
-            :extra      [r4]
-            :complete   [r1 r2 r3 r4]
-            :incomplete [r5]}))))
+
+    (testing "valid"
+      (is (= (job-solution (t/date-time 2100 1 1 0 0 0) job [r1 r2 r3 r4 r5])
+             {:valid?   true
+              :job      job
+              :solution {[(t/date-time 2000 1 1 0 0 0)
+                          (t/date-time 2000 1 1 0 0 (+ ef 10))] r1
+                         [(t/date-time 2000 1 1 0 1 0)
+                          (t/date-time 2000 1 1 0 1 (+ ef 10))] r2
+                         [(t/date-time 2000 1 1 0 2 0)
+                          (t/date-time 2000 1 1 0 2 (+ ef 10))] r3}
+              :extra      [r4]
+              :complete   [r1 r2 r3 r4]
+              :incomplete [r5]})))
+
+    (testing "invalid"
+      (is (= (job-solution (t/date-time 2100 1 1 0 0 0) job [r1 r3 r4 r5])
+             {:valid?   false
+              :job      job
+              :solution {[(t/date-time 2000 1 1 0 0 0)
+                          (t/date-time 2000 1 1 0 0 (+ ef 10))] r1
+                         [(t/date-time 2000 1 1 0 1 0)
+                          (t/date-time 2000 1 1 0 1 (+ ef 10))] nil
+                         [(t/date-time 2000 1 1 0 2 0)
+                          (t/date-time 2000 1 1 0 2 (+ ef 10))] r3}
+              :extra      nil
+              :complete   [r1 r3 r4]
+              :incomplete [r5]})))))
