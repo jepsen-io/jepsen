@@ -192,7 +192,8 @@
               epsilon     (+ 10 (rand-int 20))
               ; Chronos won't schedule tasks concurrently, so we ensure they'll
               ; never overlap.
-              interval    (+ duration
+              interval    (+ 1
+                             duration
                              epsilon
                              epsilon-forgiveness
                              (rand-int 30))]
@@ -215,17 +216,17 @@
          :client    (->Client nil)
          :generator (gen/phases
                       (->> (add-job)
-                           (gen/delay 5)
-                           (gen/stagger 10)
+                           (gen/delay 10)
+                           (gen/stagger 30)
                            (gen/nemesis
                              (gen/seq (cycle [(gen/sleep 200)
                                               {:type :info, :f :start}
                                               (gen/sleep 200)
                                               {:type :info, :f :stop}])))
-                           (gen/time-limit 1000))
+                           (gen/time-limit 500))
                       (gen/nemesis (gen/once {:type :info, :f :stop}))
                       (gen/log "Waiting for executions")
-                      (gen/sleep 60)
+                      (gen/sleep 100)
                       (gen/clients
                              (gen/once
                                {:type :invoke, :f :read})))

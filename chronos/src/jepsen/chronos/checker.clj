@@ -14,10 +14,14 @@
   (:require [clj-time.core :as t]
             [clj-time.format :as tf]
             [clj-time.coerce :as tc]
+            [clojure.pprint :refer [pprint]]
             [jepsen.util :as util :refer [meh]]
             [jepsen.checker :refer [Checker]]
+            [jepsen.checker.perf :as perf]
+            [jepsen.store :as store]
             [loco.core :as l]
-            [loco.constraints :refer :all]))
+            [loco.constraints :refer :all]
+            [gnuplot.core :as g]))
 
 (def epsilon-forgiveness
   "We let chronos miss its deadlines by a few seconds."
@@ -88,9 +92,12 @@
           (assert (t/before? (second target) (first target2)))))
 
       (cond
-        ; If we're out of targets or runs, exit.
+        ; If we're out of targets, exit
         (nil? target) m
-        (nil? run)    m
+
+        ; If we're out of runs, zip through remaining targets
+        (nil? run)
+        (recur (assoc m target nil) (next targets) (next runs))
 
         ; This run started before the target began.
         (t/before? (:start run) (first target))
@@ -205,6 +212,85 @@
      :incomplete (mapcat :incomplete (vals solns))
      :read-time  read-time}))
 
+(defn time->secs
+  "Converts an absolute time to seconds relative to the given t0."
+  [t0 t]
+  (/ (t/in-millis (t/interval t0 t)) 1000.0))
+
+(def green "#00AB01")
+(def red   "#AB0001")
+
+(defn plot-targets
+  "Takes a start time and a [job solution] pair, and computes a sequence of
+  gnuplot shaded regions for all targets, colorized based on whether they were
+  satisfied."
+  [start-time [job solution]]
+  (->> solution
+       :solution
+       (map (fn [[target run]]
+              (let [start (time->secs start-time (first target))
+                    end   (time->secs start-time (second target))
+                    color (if run green red)]
+                [:set :obj :rect
+                 :from (g/list start (+ 0.1 job))
+                 :to   (g/list end (+ 0.9 job))
+                 :fillcolor :rgb color
+                 :fillstyle :transparent :solid 0.3
+                 :noborder])))))
+
+(defn plot-runs
+  "Takes a start time and a [job solution] pair, and computes a sequence of
+  gnuplot points for all run based on their start times, colorized based on
+  whether they completed."
+  [start-time [job solution]]
+  (->> (concat (:complete solution) (:incomplete solution))
+       (map (fn [run]
+              (let [start (time->secs start-time (:start run))
+                    end   (max (if-let [end (:end run)]
+                                 (time->secs start-time (:end run))
+                                 0)
+                               (+ 1 start)) ; ensure regions are always drawn
+                    color (if (:end run) green red)]
+                [:set :obj :rect
+                 :from (g/list start (+ job 0.4))
+                 :to   (g/list end   (+ job 0.6))
+                 :fillcolor :rgb color
+                 :fillstyle :solid
+                 :noborder])))))
+
+(defn plot!
+  [test solution]
+  "Given a test and a solution, dumps out a plot of targets colorized by
+  whether they were fulfilled or not. Returns solution."
+  (let [output-path (.getCanonicalPath (store/path! test "chronos.png"))
+        start-time  (:start-time test)
+        ; Compute a sequence of gnuplot shaded regions for each target
+        ; interval.
+        targets (->> solution
+                     :jobs
+                     (mapcat (partial plot-targets start-time)))
+        runs    (->> solution
+                     :jobs
+                     (mapcat (partial plot-runs start-time)))]
+    (g/raw-plot! (concat (perf/preamble output-path)
+                         [[:set :ylabel "Job"]
+                          [:set :key :off]
+                          [:set :xrange (g/range 0 (time->secs
+                                                    start-time
+                                                    (:read-time solution)))]
+                          [:set :yrange (g/range 0 (->> solution
+                                                       :jobs
+                                                       keys
+                                                       (reduce max 1)))]]
+                         (perf/nemesis-regions (:history test))
+
+                         targets
+                         runs
+                         [['plot (g/list ["-" 'with 'linespoints 'title "hi"])]])
+
+                 [[]])
+    solution))
+
 (defn checker
   "Constructs a Jepsen checker."
   []
@@ -232,4 +318,4 @@
                                          (= :add-job (:f %))))
                            (map :value))]
         (assert runs) ; If we can't find a read, this will be nil.
-        (solution read-time jobs runs)))))
+        (plot! test (solution read-time jobs runs))))))

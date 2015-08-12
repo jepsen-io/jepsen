@@ -1,6 +1,7 @@
 (ns jepsen.chronos.checker-test
   (:require [clj-time.core :as t]
             [jepsen.chronos.checker :refer :all]
+            [jepsen.checker :refer [check]]
             [clojure.test :refer :all]
             [clojure.pprint :refer [pprint]]))
 
