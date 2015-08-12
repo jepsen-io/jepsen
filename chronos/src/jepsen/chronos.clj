@@ -216,17 +216,17 @@
          :client    (->Client nil)
          :generator (gen/phases
                       (->> (add-job)
-                           (gen/delay 10)
+                           (gen/delay 30)
                            (gen/stagger 30)
                            (gen/nemesis
                              (gen/seq (cycle [(gen/sleep 200)
                                               {:type :info, :f :start}
                                               (gen/sleep 200)
                                               {:type :info, :f :stop}])))
-                           (gen/time-limit 500))
+                           (gen/time-limit 450))
                       (gen/nemesis (gen/once {:type :info, :f :stop}))
                       (gen/log "Waiting for executions")
-                      (gen/sleep 100)
+                      (gen/sleep 1500)
                       (gen/clients
                              (gen/once
                                {:type :invoke, :f :read})))
