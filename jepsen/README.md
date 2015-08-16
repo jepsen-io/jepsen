@@ -22,7 +22,7 @@ processes, so you shouldn't, you know, point jepsen at your prod machines. See l
 Your local machine needs a JVM and leiningen 2 installed. Probably want JNA for SSH auth too.
 
 ```sh
-sudo apt-get install libjna-java
+sudo apt-get install openjdk-8-jre openjdk-8-jre-headless libjna-java
 ```
 
 For an overview of how a database test works, see
