@@ -151,6 +151,12 @@ sudo lxc-start -d -n n5
 cssh n1 n2 n3 n4 n5
 ```
 
+Store the host keys unencrypted so that jsch can use them:
+
+```
+for n in $(seq 1 5); do ssh-keyscan -t rsa n$n; done >> ~/.ssh/known_hosts
+```
+
 And that should mostly do it, I think.
 
 ## Ubuntu 14.04 / trusty
