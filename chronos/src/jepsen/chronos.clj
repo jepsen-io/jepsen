@@ -184,6 +184,8 @@
                               (assoc op
                                      :type :ok
                                      :value (read-runs test))))
+               (catch org.apache.http.ConnectionClosedException e
+                 (assoc op :type :fail, :value (.getMessage e)))
                (catch java.net.ConnectException e
                  (assoc op :type :fail, :value (.getMessage e))))))
 
@@ -247,9 +249,9 @@
                            (gen/delay 30)
                            (gen/stagger 30)
                            (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep 20)
+                             (gen/seq (cycle [(gen/sleep 200)
                                               {:type :info, :f :start}
-                                              (gen/sleep 20)
+                                              (gen/sleep 200)
                                               {:type :info, :f :stop}
                                               {:type :info, :f :resurrect}])))
                            (gen/time-limit 450))
