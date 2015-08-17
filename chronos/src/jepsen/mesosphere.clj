@@ -74,6 +74,7 @@
               :--pidfile        master-pidfile
               :--chdir          master-dir
               :--no-close
+              :--oknodo
               :--exec           "/usr/bin/env"
               :--
               "GLOG_v=1"
@@ -84,6 +85,7 @@
               (str "--registry_fetch_timeout=120secs")
               (str "--registry_store_timeout=5secs")
               (str "--work_dir="  master-dir)
+              (str "--offer_timeout=30secs")
               (str "--zk="        (zk-uri test))
               :>> (str log-dir "/master.stdout")
               (c/lit "2>&1")))))
@@ -106,6 +108,7 @@
               :--chdir          slave-dir
               :--exec           slave-bin
               :--no-close
+              :--oknodo
               :--
               (str "--hostname="  (name node))
               (str "--log_dir="   log-dir)
