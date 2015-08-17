@@ -44,6 +44,15 @@
     ; tasks that happen frequently
     (c/exec :echo "1" :> "/etc/chronos/conf/schedule_horizon")))
 
+(defn start!
+  "Starts chronos if it's not already running."
+  [test node]
+  (c/su
+    (try (c/exec :service :chronos :status)
+         (catch RuntimeException e
+           (info node "starting chronos")
+           (c/exec :service :chronos :start)))))
+
 (defn db
   "Sets up and tears down Chronos. You can get versions from
 
@@ -58,8 +67,7 @@
         (configure test node)
         (c/su (c/exec :mkdir :-p job-dir))
 
-        (info node "starting chronos")
-        (c/su (c/exec :service :chronos :start)))
+        (start! test node))
 
       (teardown! [_ test node]
         (info node "stopping chronos")
@@ -167,7 +175,7 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (timeout 10000 (assoc op :type :info, :value :timed-out)
+    (timeout 20000 (assoc op :type :info, :value :timed-out)
              (try
                (case (:f op)
                  :add-job (do (add-job! node (:value op))
@@ -206,6 +214,26 @@
                   :epsilon  epsilon
                   :interval interval}})))))
 
+(defn resurrection-hub
+  "Mesos and Chronos like to crash all the time. We have to bring them back to
+  life regularly. Wraps another nemesis."
+  [nemesis]
+  (reify client/Client
+    (setup! [this test node]
+      (resurrection-hub (client/setup! nemesis test node)))
+
+    (invoke! [this test op]
+      (if (not= :resurrect (:f op))
+        (client/invoke! nemesis test op)
+        (do (c/on-many (:nodes test)
+                       (mesosphere/start-master! test c/*host*)
+                       (mesosphere/start-slave! test c/*host*)
+                       (start! test c/*host*))
+            (assoc op :value :resurrection-complete))))
+
+    (teardown! [this test]
+      (client/teardown! nemesis test))))
+
 (defn simple-test
   "Create some jobs, let em run, and do a final read to see which ran."
   [mesos-version chronos-version]
@@ -219,18 +247,21 @@
                            (gen/delay 30)
                            (gen/stagger 30)
                            (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep 200)
+                             (gen/seq (cycle [(gen/sleep 20)
                                               {:type :info, :f :start}
-                                              (gen/sleep 200)
-                                              {:type :info, :f :stop}])))
+                                              (gen/sleep 20)
+                                              {:type :info, :f :stop}
+                                              {:type :info, :f :resurrect}])))
                            (gen/time-limit 450))
                       (gen/nemesis (gen/once {:type :info, :f :stop}))
+                      (gen/nemesis (gen/once {:type :info, :f :resurrect}))
                       (gen/log "Waiting for executions")
-                      (gen/sleep 1500)
+                      (gen/sleep 400)
                       (gen/clients
                              (gen/once
                                {:type :invoke, :f :read})))
-         :nemesis   (nemesis/partition-random-halves)
+         :nemesis   (resurrection-hub
+                      (nemesis/partition-random-halves))
          :checker   (checker/compose
                       {:chronos (checker)
                        :perf (checker/perf)})))
