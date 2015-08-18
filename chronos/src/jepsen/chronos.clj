@@ -228,9 +228,10 @@
       (if (not= :resurrect (:f op))
         (client/invoke! nemesis test op)
         (do (c/on-many (:nodes test)
-                       (mesosphere/start-master! test c/*host*)
-                       (mesosphere/start-slave! test c/*host*)
-                       (start! test c/*host*))
+                       (let [node (keyword c/*host*)]
+                         (mesosphere/start-master! test node)
+                         (mesosphere/start-slave! test node)
+                         (start! test node)))
             (assoc op :value :resurrection-complete))))
 
     (teardown! [this test]
