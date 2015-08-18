@@ -65,7 +65,7 @@
   of code to DB concepts here; maybe change this back to \"primary\" or
   \"supervisor\" later?"
   [test node]
-  (when (some #{node} (take master-count (:nodes test)))
+  (when (some #{node} (take master-count (sort (:nodes test))))
     (info node "starting mesos-master")
     (c/su
       (c/exec :start-stop-daemon :--start
@@ -98,7 +98,7 @@
   of code to DB concepts here; maybe change this back to \"primary\" or
   \"supervisor\" later?"
   [test node]
-  (when-not (some #{node} (take master-count (:nodes test)))
+  (when-not (some #{node} (take master-count (sort (:nodes test))))
     (info node "starting mesos-slave")
     (c/su
       (c/exec :start-stop-daemon :--start
