@@ -42,8 +42,8 @@
 #tc qdisc add dev eth0 root netem delay 100ms \\
 #  || tc qdisc change dev eth0 root netem delay 100ms
 rm -rf /root/rethinkdb_data
-base=http://download.rethinkdb.com/dev
-version=/2.1.0-0BETA2/rethinkdb_2.1.0%2b0BETA2~0precise_amd64.deb
+base=http://download.rethinkdb.com/apt/pool
+version=/precise/main/r/rethinkdb/rethinkdb_2.1.2~0precise_amd64.deb
 if [[ ! -f /root/rdb.deb ]]; then
   curl $base/$version > /root/rdb.deb
   dpkg -i /root/rdb.deb
