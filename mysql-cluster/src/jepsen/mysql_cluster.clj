@@ -17,6 +17,8 @@
             [jepsen.control.net :as cn]
             [jepsen.os.debian :as debian]))
 
+(def user "mysql")
+
 (defn deb-version
   "Version of package in a deb file."
   [deb-file]
@@ -39,37 +41,58 @@
 (defn install!
   "Downloads and installs the mysql cluster packages."
   [node version]
+  (debian/install {:libaio1 "0.3.110-1"})
   (c/su
     (c/cd "/tmp"
           (deb-install! (cu/wget! (str "https://dev.mysql.com/get/Downloads/"
                                        "MySQL-Cluster-7.4/mysql-cluster-gpl-"
                                        version
-                                       "-debian7-x86_64.deb"))))))
+                                       "-debian7-x86_64.deb"))))
+    (meh (c/exec :adduser :--disabled-password :--gecos "" user))))
 
-(def mgmd-dir             "/var/lib/mysql/cluster")
-(def ndbd-dir             "/var/lib/mysql/data")
+(def mgmd-dir   "/var/lib/mysql/cluster")
+(def ndbd-dir   "/var/lib/mysql/data")
+(def mysqld-dir "/var/lib/mysql/mysql")
+(def ndb-mgmd-node-id-offset 1)
+(def ndbd-node-id-offset 11)
+(def mysqld-node-id-offset 21)
+
+(defn ndb-mgmd-node-id
+  [test node]
+  (+ ndb-mgmd-node-id-offset
+     (.indexOf (:nodes test) node)))
+
+(defn ndbd-node-id
+  [test node]
+  (+ ndbd-node-id-offset
+     (.indexOf (:nodes test) node)))
+
+(defn mysqld-node-id
+  [test node]
+  (+ mysqld-node-id-offset
+     (.indexOf (:nodes test) node)))
 
 (defn nbd-mgmd-conf
   "Config snippet for a management node"
-  [node-id node]
+  [test node]
   (str "[ndb_mgmd]\n"
-       "id=" (swap! node-id inc) "\n"
+       "NodeId=" (ndb-mgmd-node-id test node) "\n"
        "hostname=" (name node) "\n"
        "datadir=" mgmd-dir "\n"))
 
 (defn ndbd-conf
   "Config snippet for a storage node"
-  [node-id node]
+  [test node]
   (str "[ndbd]\n"
-       "id=" (swap! node-id inc) "\n"
+       "NodeId=" (ndbd-node-id test node) "\n"
        "hostname=" (name node) "\n"
        "datadir=" ndbd-dir "\n"))
 
 (defn mysqld-conf
   "Config snippet for a mysql node"
-  [node-id node]
+  [test node]
   (str "[mysqld]\n"
-       "id=" (swap! node-id inc) "\n"
+       "NodeId=" (mysqld-node-id test node) "\n"
        "hostname=" (name node) "\n"))
 
 (defn ndbd-nodes
@@ -81,11 +104,10 @@
   "Config snippet for all roles on all nodes."
   [test]
   (let [nodes (:nodes test)
-        nbds  (ndbd-nodes test)
-        node-id (atom -1)]
+        nbds  (ndbd-nodes test)]
     (str/join "\n"
               (mapcat (fn [gen nodes]
-                        (map (partial gen node-id) nodes))
+                        (map (partial gen test) nodes))
                       [nbd-mgmd-conf ndbd-conf mysqld-conf]
                       [nodes         nbds      nodes]))))
 
@@ -101,6 +123,9 @@
     ; my.cnf
     (c/exec :echo (-> (io/resource "my.cnf")
                       slurp
+                      (str/replace #"%NODE_ID%"
+                                   (str (mysqld-node-id test node)))
+                      (str/replace #"%DATA_DIR%" mysqld-dir)
                       (str/replace #"%NDB_CONNECT_STRING%"
                                    (ndb-connect-string test)))
             :> "/etc/my.cnf")
@@ -110,14 +135,15 @@
     (c/exec :echo (-> (io/resource "config.ini")
                       slurp
                       (str (nodes-conf test)))
-            :> (str mgmd-dir "/config.ini"))))
+            :> "/etc/my.config.ini")))
 
 (defn start-mgmd!
   "Starts management daemon."
-  [node]
+  [test node]
   (info node "starting mgmd")
   (c/su (c/exec "/opt/mysql/server-5.6/bin/ndb_mgmd"
-                :-f (str mgmd-dir "/config.ini"))))
+                (str "--ndb-nodeid=" (ndb-mgmd-node-id test node))
+                :-f "/etc/my.config.ini")))
 
 (defn start-ndbd!
   "Starts storage daemon."
@@ -126,14 +152,19 @@
     (info node "starting ndbd")
     (c/su
       (c/exec :mkdir :-p ndbd-dir)
-      (c/exec "/opt/mysql/server-5.6/bin/ndbd"))))
+      (c/exec "/opt/mysql/server-5.6/bin/ndbd"
+              (str "--ndb-nodeid=" (ndbd-node-id test node))))))
 
-(defn start!
-  "Starts all services on a node."
-  [test node]
-  (start-mgmd! node)
-  (jepsen/synchronize test)
-  (start-ndbd! test node))
+(defn start-mysqld!
+  "Starts mysql daemon."
+  [node]
+  (info node "starting mysqld")
+  (c/su
+    (c/exec :mkdir :-p mysqld-dir)
+    (c/exec :chown :-R (str user ":" user) mysqld-dir))
+  (c/sudo user
+    (c/exec "/opt/mysql/server-5.6/bin/mysqld_safe"
+            "--defaults-file=/etc/my.cnf")))
 
 (defn stop-mgmd!
   "Stops management daemon."
@@ -147,14 +178,11 @@
   (info node "stopping ndbd")
   (meh (cu/grepkill "ndbd")))
 
-(defn wipe!
-  "Nukes mysql cluster on this node."
+(defn stop-mysqld!
+  "Stops sql daemon."
   [node]
-  (stop-ndbd! node)
-  (stop-mgmd! node)
-  (c/su (c/exec :rm :-rf
-                (c/lit (str mgmd-dir "/*"))
-                (c/lit (str ndbd-dir "/*")))))
+  (info node "stopping mysqld")
+  (meh (cu/grepkill "mysqld")))
 
 (defn db
   "Sets up and tears down MySQL Cluster."
@@ -163,16 +191,33 @@
     (setup! [_ test node]
       (install! node version)
       (configure! test node)
-      (start! test node)
-      (Thread/sleep 20000))
+
+      (Thread/sleep 5000)
+
+      (start-mgmd! test node)
+      (jepsen/synchronize test)
+      (start-ndbd! test node)
+      (jepsen/synchronize test)
+      (start-mysqld! node)
+
+      (Thread/sleep 60000))
 
     (teardown! [_ test node]
-      (wipe! node))
+      (stop-mysqld! node)
+      (stop-ndbd! node)
+      (stop-mgmd! node)
+      (c/su (c/exec :rm :-rf
+                    (c/lit (str mgmd-dir "/*"))
+                    (c/lit (str ndbd-dir "/*"))
+                    (c/lit (str mysqld-dir "/*")))))
 
     db/LogFiles
     (log-files [_ test node]
-      (filter (partial re-find #"\.log$")
-              (cu/ls-full mgmd-dir)))))
+      (concat
+      (filter (partial re-find #"\.(log|err)$")
+              (concat
+                (cu/ls-full mgmd-dir)
+                (cu/ls-full mysqld-dir)))))))
 
 (defn simple-test
   [version]
