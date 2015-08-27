@@ -94,15 +94,8 @@
   "Adds a jepsen database to the cluster."
   [node]
   (eval! "create database if not exists jepsen;")
-  (eval! "GRANT ALL PRIVILEGES ON jepsen.* TO 'jepsen'@'%' IDENTIFIED BY 'jepsen';")
-
-  (j/with-db-connection [c (conn-spec node)]
-    (doto c
-      (j/execute! ["create table if not exists jepsen
-                   (id int not null auto_increment primary key,
-                    value  bigint not null)"])
-      (j/insert! :jepsen {:value 5}))
-      (info (j/query c ["select * from jepsen"]))))
+  (eval! (str "GRANT ALL PRIVILEGES ON jepsen.* "
+              "TO 'jepsen'@'%' IDENTIFIED BY 'jepsen';")))
 
 (defn db
   "Sets up and tears down Galera."
@@ -135,9 +128,51 @@
     db/LogFiles
     (log-files [_ test node] log-files)))
 
+(defn set-client
+  [node]
+  (reify client/Client
+    (setup! [this test node]
+      (j/with-db-connection [c (conn-spec node)]
+        (j/execute! c ["create table if not exists jepsen
+                       (id     int not null auto_increment primary key,
+                       value  bigint not null)"]))
+
+      (set-client node))
+
+    (invoke! [this test op]
+      (timeout 5000 (assoc op :type :info, :value :timed-out)
+               (j/with-db-connection [c (conn-spec node)]
+                 (try
+                   (case (:f op)
+                     :add  (do (j/insert! c :jepsen (select-keys op [:value]))
+                               (assoc op :type :ok))
+                     :read (->> (j/query c ["select * from jepsen"])
+                                (mapv :value)
+                                (into (sorted-set))
+                                (assoc op :type :ok, :value)))))))
+
+    (teardown! [_ test])))
+
 (defn simple-test
   [version]
   (assoc tests/noop-test
          :name "galera"
          :os   debian/os
-         :db   (db version)))
+         :db   (db version)
+         :client (set-client nil)
+         :generator (gen/phases
+                      (->> (range)
+                           (map (partial array-map
+                                         :type :invoke
+                                         :f :add
+                                         :value))
+                           gen/seq
+                           (gen/delay 1)
+                           gen/clients
+                           (gen/time-limit 10))
+                      (->> {:type :invoke, :f :read, :value nil}
+                           gen/once
+                           gen/clients))
+         :checker (checker/compose
+                    {:perf (checker/perf)
+                     :set  checker/set})))
