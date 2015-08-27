@@ -15,7 +15,10 @@
              [util :refer [timeout meh]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian]
+            [clojure.java.jdbc :as j]
+            [honeysql [core :as sql]
+                      [helpers :as h]]))
 
 (def log-files
   ["/var/log/syslog"
@@ -73,6 +76,34 @@
   (info node "stopping mysqld")
   (meh (cu/grepkill "mysqld")))
 
+(defn eval!
+  "Evals a mysql string from the command line."
+  [s]
+  (c/exec :mysql :-u "root" "--password=jepsen" :-e s))
+
+(defn conn-spec
+  "jdbc connection spec for a node."
+  [node]
+  {:classname   "org.mariadb.jdbc.Driver"
+   :subprotocol "mariadb"
+   :subname     (str "//" (name node) ":3306/jepsen")
+   :user        "jepsen"
+   :password    "jepsen"})
+
+(defn setup-db!
+  "Adds a jepsen database to the cluster."
+  [node]
+  (eval! "create database if not exists jepsen;")
+  (eval! "GRANT ALL PRIVILEGES ON jepsen.* TO 'jepsen'@'%' IDENTIFIED BY 'jepsen';")
+
+  (j/with-db-connection [c (conn-spec node)]
+    (doto c
+      (j/execute! ["create table if not exists jepsen
+                   (id int not null auto_increment primary key,
+                    value  bigint not null)"])
+      (j/insert! :jepsen {:value 5}))
+      (info (j/query c ["select * from jepsen"]))))
+
 (defn db
   "Sets up and tears down Galera."
   [version]
@@ -87,6 +118,9 @@
       (jepsen/synchronize test)
       (when (not= node (jepsen/primary test))
         (c/su (c/exec :service :mysql :start)))
+
+      (jepsen/synchronize test)
+      (setup-db! node)
 
       (info "Install complete")
       (Thread/sleep 30000))
