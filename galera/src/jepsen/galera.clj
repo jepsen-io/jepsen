@@ -168,11 +168,18 @@
                                          :value))
                            gen/seq
                            (gen/delay 1)
-                           gen/clients
-                           (gen/time-limit 10))
+                           (gen/nemesis
+                             (gen/seq (cycle [(gen/sleep 10)
+                                              {:type :info, :f :start}
+                                              (gen/sleep 30)
+                                              {:type :info, :f :stop}])))
+                           (gen/time-limit 60))
+                      (gen/nemesis (gen/once {:type :info, :f :stop}))
+                      (gen/sleep 5)
                       (->> {:type :invoke, :f :read, :value nil}
                            gen/once
                            gen/clients))
+         :nemesis (nemesis/partition-random-halves)
          :checker (checker/compose
                     {:perf (checker/perf)
                      :set  checker/set})))
