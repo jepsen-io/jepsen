@@ -3,5 +3,10 @@
             [jepsen.core :refer [run!]]
             [jepsen.galera :refer :all]))
 
-(deftest simple-test-test
-  (is (:valid? (:results (run! (simple-test "7.4.7"))))))
+(def version "7.4.7")
+
+;(deftest sets-test'
+;  (is (:valid? (:results (run! (sets-test version))))))
+
+(deftest bank-test'
+  (is (:valid? (:results (run! (bank-test version 2 10))))))
