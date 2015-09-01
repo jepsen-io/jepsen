@@ -25,8 +25,8 @@
 (def log-files
   ["/var/log/syslog"
    "/var/log/mysql.log"
-   "/var/log/mysql.err"])
-;   "/var/log/mysql/mariadb-slow.log"])
+   "/var/log/mysql.err"
+   "/var/lib/mysql/queries.log"])
 
 (def dir "/var/lib/mysql")
 (def stock-dir "/var/lib/mysql-stock")
@@ -195,7 +195,7 @@
                               {:type :info, :f :start}
                               (gen/sleep 10)
                               {:type :info, :f :stop}])))
-           (gen/time-limit 60))
+           (gen/time-limit 30))
       (gen/nemesis (gen/once {:type :info, :f :stop}))
       (gen/sleep 5))))
 
@@ -360,6 +360,7 @@
      :generator (->> (gen/mix [bank-read bank-diff-transfer])
                      (gen/delay 1/10)
                      with-nemesis)
+     :nemesis nemesis/noop
      :checker (checker/compose
                 {:perf (checker/perf)
                  :bank (bank-checker)})}))
