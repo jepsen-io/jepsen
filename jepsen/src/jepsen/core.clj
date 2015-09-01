@@ -391,7 +391,7 @@
               (with-os test
                 (with-db test
                   (binding [generator/*threads*
-                            (cons :nemesis (range (count (:nodes test))))]
+                            (cons :nemesis (range (:concurrency test)))]
                     (util/with-relative-time
                       (with-nemesis test
 
