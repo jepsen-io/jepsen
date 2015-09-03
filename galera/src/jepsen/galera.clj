@@ -134,35 +134,46 @@
   "mariadb drivers have a few exception classes that use this message"
   "Deadlock found when trying to get lock; try restarting transaction")
 
+(defmacro capture-txn-abort
+  "Converts aborted transactions to an ::abort keyword"
+  [& body]
+  `(try ~@body
+        (catch java.sql.SQLTransactionRollbackException e#
+          (if (= (.getMessage e#) rollback-msg)
+            ::abort
+            (throw e#)))
+        (catch java.sql.BatchUpdateException e#
+          (if (= (.getMessage e#) rollback-msg)
+            ::abort
+            (throw e#)))))
 
 (defmacro with-txn-retries
   "Retries body on rollbacks."
   [& body]
   `(loop []
-     (let [res# (try ~@body
-                    (catch java.sql.SQLTransactionRollbackException e#
-                      (if (= (.getMessage e#) rollback-msg)
-                        ::retry
-                        (throw e#)))
-                    (catch java.sql.BatchUpdateException e#
-                      (if (= (.getMessage e#) rollback-msg)
-                        ::retry
-                        (throw e#))))]
-       (if (= ::retry res#)
+     (let [res# (capture-txn-abort ~@body)]
+       (if (= ::abort res#)
          (recur)
          res#))))
 
-(defmacro with-error-handling
-  "Common error handling, including transactional retries."
+(defmacro with-txn-aborts
+  "Aborts body on rollbacks."
   [op & body]
-  `(with-txn-retries
-     (try ~@body
-          (catch java.sql.SQLNonTransientConnectionException e#
-            (condp = (.getMessage e#)
-              "WSREP has not yet prepared node for application use"
-              (assoc ~op :type :fail, :value (.getMessage e#))
+  `(let [res# (capture-txn-abort ~@body)]
+     (if (= ::abort res#)
+       (assoc ~op :type :fail)
+       res#)))
 
-              (throw e#))))))
+(defmacro with-error-handling
+  "Common error handling for Galera errors"
+  [op & body]
+  `(try ~@body
+        (catch java.sql.SQLNonTransientConnectionException e#
+          (condp = (.getMessage e#)
+            "WSREP has not yet prepared node for application use"
+            (assoc ~op :type :fail, :value (.getMessage e#))
+
+            (throw e#)))))
 
 (defmacro with-txn
   "Executes body in a transaction, with a timeout, automatically retrying
@@ -170,9 +181,10 @@
   [op [c node] & body]
   `(timeout 5000 (assoc ~op :type :info, :value :timed-out)
            (with-error-handling ~op
-             (j/with-db-transaction [~c (conn-spec ~node)
-                                     :isolation :serializable]
-               ~@body))))
+             (with-txn-retries
+               (j/with-db-transaction [~c (conn-spec ~node)
+                                       :isolation :serializable]
+                 ~@body)))))
 
 (defn basic-test
   [opts]
@@ -355,7 +367,7 @@
     {:name "bank"
      :concurrency 20
      :version version
-     :model  {:n 2 :total (* n initial-balance)}
+     :model  {:n n :total (* n initial-balance)}
      :client (bank-client n initial-balance)
      :generator (gen/phases
                   (->> (gen/mix [bank-read bank-diff-transfer])
