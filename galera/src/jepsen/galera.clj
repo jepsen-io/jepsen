@@ -353,13 +353,14 @@
   [version n initial-balance]
   (basic-test
     {:name "bank"
-     :concurrency 50
+     :concurrency 20
      :version version
      :model  {:n 2 :total (* n initial-balance)}
      :client (bank-client n initial-balance)
      :generator (->> (gen/mix [bank-read bank-diff-transfer])
                      (gen/delay 1/10)
-                     with-nemesis)
+                     (gen/clients)
+                     (gen/time-limit 30))
      :nemesis nemesis/noop
      :checker (checker/compose
                 {:perf (checker/perf)
