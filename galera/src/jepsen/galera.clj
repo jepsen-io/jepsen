@@ -357,10 +357,14 @@
      :version version
      :model  {:n 2 :total (* n initial-balance)}
      :client (bank-client n initial-balance)
-     :generator (->> (gen/mix [bank-read bank-diff-transfer])
-                     (gen/delay 1/10)
-                     (gen/clients)
-                     (gen/time-limit 30))
+     :generator (gen/phases
+                  (->> (gen/mix [bank-read bank-diff-transfer])
+                       (gen/clients)
+                       (gen/stagger 1/10)
+                       (gen/time-limit 100))
+                  (gen/log "waiting for quiescence")
+                  (gen/sleep 30)
+                  (gen/clients (gen/once bank-read)))
      :nemesis nemesis/noop
      :checker (checker/compose
                 {:perf (checker/perf)
