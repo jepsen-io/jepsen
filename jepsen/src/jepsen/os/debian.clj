@@ -58,7 +58,7 @@
   [pkg-or-pkgs]
   (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))
         pkgs (installed pkgs)]
-    (c/su (apply c/exec :apt-get :remove :-y pkgs))))
+    (c/su (apply c/exec :apt-get :remove :--purge :-y pkgs))))
 
 (defn installed?
   "Are the given debian packages, or singular package, installed on the current
