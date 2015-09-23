@@ -108,12 +108,12 @@
   [version n]
   (galera/basic-test
     {:name "dirty reads"
-     :concurrency 20
+     :concurrency 50
      :version version
      :client (client n)
      :generator (->> (gen/mix [reads writes])
                      gen/clients
-                     (gen/time-limit 30))
+                     (gen/time-limit 1000))
      :nemesis nemesis/noop
      :checker (checker/compose
                 {:perf (checker/perf)
