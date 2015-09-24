@@ -10,7 +10,7 @@
 ;  (is (:valid? (:results (run! (sets-test version))))))
 
 (deftest bank-test'
-  (is (:valid? (:results (run! (bank-test version 2 10))))))
+  (is (:valid? (:results (run! (bank-test version 2 10 " for update" false))))))
 
 ;(deftest dirty-reads-test
 ;  (is (:valid? (:results (run! (dirty-reads/test- version 4))))))

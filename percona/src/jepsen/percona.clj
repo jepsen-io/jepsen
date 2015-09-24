@@ -228,7 +228,7 @@
       (gen/nemesis (gen/once {:type :info, :f :stop}))
       (gen/sleep 5))))
 
-(defrecord BankClient [node n starting-balance]
+(defrecord BankClient [node n starting-balance lock-type in-place?]
   client/Client
   (setup! [this test node]
     (j/with-db-connection [c (conn-spec node)]
@@ -256,13 +256,17 @@
           :transfer
           (let [{:keys [from to amount]} (:value op)
                 b1 (-> c
-                       (j/query ["select * from accounts where id = ?" from]
-                                :row-fn :balance)
+                       (j/query [(str "select * from accounts where id = ?"
+                                      lock-type)
+                                 from]
+                         :row-fn :balance)
                        first
                        (- amount))
                 b2 (-> c
-                       (j/query ["select * from accounts where id = ?" to]
-                                :row-fn :balance)
+                       (j/query [(str "select * from accounts where id = ?"
+                                      lock-type)
+                                 to]
+                         :row-fn :balance)
                        first
                        (+ amount))]
             (cond (neg? b1)
@@ -272,17 +276,21 @@
                   (assoc op :type :fail, :value [:negative to b2])
 
                   true
-                  (do (j/update! c :accounts {:balance b1} ["id = ?" from])
-                      (j/update! c :accounts {:balance b2} ["id = ?" to])
-                      (assoc op :type :ok))))))))
+                  (if in-place?
+                    (do (j/execute! c ["update accounts set balance = balance - ? where id = ?" amount from])
+                        (j/execute! c ["update accounts set balance = balance + ? where id = ?" amount to])
+                        (assoc op :type :ok))
+                    (do (j/update! c :accounts {:balance b1} ["id = ?" from])
+                        (j/update! c :accounts {:balance b2} ["id = ?" to])
+                        (assoc op :type :ok)))))))))
 
   (teardown! [_ test]))
 
 (defn bank-client
   "Simulates bank account transfers between n accounts, each starting with
   starting-balance."
-  [n starting-balance]
-  (BankClient. nil n starting-balance))
+  [n starting-balance lock-type in-place?]
+  (BankClient. nil n starting-balance lock-type in-place?))
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
@@ -333,20 +341,20 @@
          :bad-reads bad-reads}))))
 
 (defn bank-test
-  [version n initial-balance]
+  [version n initial-balance lock-type in-place?]
   (basic-test
     {:name "bank"
      :concurrency 20
      :version version
      :model  {:n n :total (* n initial-balance)}
-     :client (bank-client n initial-balance)
+     :client (bank-client n initial-balance lock-type in-place?)
      :generator (gen/phases
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/clients)
                        (gen/stagger 1/10)
                        (gen/time-limit 100))
                   (gen/log "waiting for quiescence")
-                  (gen/sleep 30)
+                  (gen/sleep 10)
                   (gen/clients (gen/once bank-read)))
      :nemesis nemesis/noop
      :checker (checker/compose
