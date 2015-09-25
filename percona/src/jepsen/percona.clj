@@ -231,7 +231,7 @@
 (defrecord BankClient [node n starting-balance lock-type in-place?]
   client/Client
   (setup! [this test node]
-    (j/with-db-connection [c (conn-spec node)]
+    (j/with-db-connection [c (conn-spec (first (:nodes test)))]
       ; Create table
       (j/execute! c ["create table if not exists accounts
                      (id      int not null primary key,
@@ -246,10 +246,10 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (with-txn op [c node]
+    (with-txn op [c (first (:nodes test))]
       (try
         (case (:f op)
-          :read (->> (j/query c ["select * from accounts"])
+          :read (->> (j/query c [(str "select * from accounts" lock-type)])
                      (mapv :balance)
                      (assoc op :type :ok, :value))
 
