@@ -166,7 +166,9 @@ for n in $(seq 1 5); do ssh-keyscan -t rsa n$n; done >> ~/.ssh/known_hosts
 And that should mostly do it, I think.
 
 ## Ubuntu 14.04 / trusty
+
 Follow generally the same steps as for Debian, but the process is easier. Reference: https://help.ubuntu.com/lts/serverguide/lxc.html
+
 * right after you have installed LXC, create or open /etc/lxc/dnsmasq.conf and add the following contents:
 
   ```
@@ -176,7 +178,9 @@ dhcp-host=n3,10.0.3.103
 dhcp-host=n4,10.0.3.104
 dhcp-host=n5,10.0.3.105
   ```
-  10.0.3.* is LXC's default network. If you want others, go for it but you'll have to change it in the main configuration for lxc as well.
+
+10.0.3.* is LXC's default network. If you want others, go for it but you'll have to change it in the main configuration for lxc as well.
+
 * you may not need to add cgroup to fstab and/or mount it. /sys/fs/cgroups may already be there.
 * Then, go and run the lxc-create command, but...
 * no need to edit /var/lib/lxc/*/config or set up a bridge, LXC does that for you.
