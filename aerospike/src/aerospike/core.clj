@@ -393,8 +393,7 @@
           :db      (db "3.5.4")
           :model   (model/cas-register)
           :checker (checker/compose {:linear checker/linearizable
-                                     :latency (checker/latency-graph
-                                                "report/")})
+                                     :perf (checker/perf)})
           :nemesis (nemesis/partition-random-halves)}
          opts))
 
@@ -419,4 +418,4 @@
                                    (gen/delay 1/100)
                                    std-gen)
                    :checker   (checker/compose {:counter checker/counter
-                                                :latency (checker/latency-graph "report/")})}))
+                                                :perf    (checker/perf)})}))
