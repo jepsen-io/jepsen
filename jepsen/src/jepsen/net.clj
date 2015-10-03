@@ -23,3 +23,12 @@
       (on-many (:nodes test) (su
                                (exec :iptables :-F :-w)
                                (exec :iptables :-X :-w))))))
+
+(def ipfilter
+  "IPFilter rules"
+  (reify Net
+    (drop! [net test src dest]
+      (on dest (su (exec :echo :block :in :from src :to :any | :ipf :-f :-))))
+    (heal! [net test]
+      (on-many (:nodes test) (su
+                              (exec :ipf :-Fa))))))
