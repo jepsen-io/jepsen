@@ -32,7 +32,8 @@
   "A synchronization primitive for tests. When invoked, blocks until all
   nodes have arrived at the same point."
   [test]
-  (.await ^CyclicBarrier (:barrier test)))
+  (or (= ::no-barrier (:barrier test))
+      (.await ^CyclicBarrier (:barrier test))))
 
 (defn conj-op!
   "Add an operation to a tests's history, and returns the operation."
@@ -369,7 +370,10 @@
                                          (count (:nodes test)))
 
                         ; Synchronization point for nodes
-                        :barrier (CyclicBarrier. (count (:nodes test)))
+                        :barrier (let [c (count (:nodes test))]
+                                   (if (pos? c)
+                                     (CyclicBarrier. (count (:nodes test)))
+                                     ::no-barrier))
 
                         ; Currently running histories
                         :active-histories (atom #{}))]
