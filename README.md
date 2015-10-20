@@ -392,7 +392,7 @@ setting up a fresh client. Add a client to your test by merging in `:client
 
 ### Writing a checker
 
-See [jepsen/src/jepsen/checker.clj](jepsen.checker) for some example checkers;
+See [jepsen/src/jepsen/checker.clj](jepsen/src/jepsen/checker.clj) for some example checkers;
 Jepsen ships with checkers for counters, eventually consistent sets, queues,
 and linearizable systems, as well as some visualizations--for instance, latency
 and throughput graphs, both as scatterplots and quantiles. You can also write
