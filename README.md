@@ -9,7 +9,7 @@ been used to verify everything from eventually-consistent commutative databases
 to linearizable coordination systems to distributed task schedulers. It can
 also generate graphs of performance and availability, helping you characterize
 how a system responds to different faults. See
-[https://aphyr.com/tags/jepsen](aphyr.com) for examples of the sorts of
+[aphyr.com](https://aphyr.com/tags/jepsen) for examples of the sorts of
 analyses you can carry out with Jepsen.
 
 ## Design overview
