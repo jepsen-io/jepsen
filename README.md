@@ -9,7 +9,7 @@ been used to verify everything from eventually-consistent commutative databases
 to linearizable coordination systems to distributed task schedulers. It can
 also generate graphs of performance and availability, helping you characterize
 how a system responds to different faults. See
-[https://aphyr.com/tags/jepsen](aphyr.com) for examples of the sorts of
+[aphyr.com](https://aphyr.com/tags/jepsen) for examples of the sorts of
 analyses you can carry out with Jepsen.
 
 ## Design overview
@@ -392,7 +392,7 @@ setting up a fresh client. Add a client to your test by merging in `:client
 
 ### Writing a checker
 
-See [jepsen/src/jepsen/checker.clj](jepsen.checker) for some example checkers;
+See [jepsen/src/jepsen/checker.clj](jepsen/src/jepsen/checker.clj) for some example checkers;
 Jepsen ships with checkers for counters, eventually consistent sets, queues,
 and linearizable systems, as well as some visualizations--for instance, latency
 and throughput graphs, both as scatterplots and quantiles. You can also write

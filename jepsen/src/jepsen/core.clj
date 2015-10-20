@@ -32,7 +32,8 @@
   "A synchronization primitive for tests. When invoked, blocks until all
   nodes have arrived at the same point."
   [test]
-  (.await ^CyclicBarrier (:barrier test)))
+  (or (= ::no-barrier (:barrier test))
+      (.await ^CyclicBarrier (:barrier test))))
 
 (defn conj-op!
   "Add an operation to a tests's history, and returns the operation."
@@ -274,10 +275,14 @@
     (with-resources [clients
                      #(client/setup! (:client test) test %) ; Specialize to node
                      #(client/teardown! % test)
-                     (->> test
+                     (if (empty? (:nodes test))
+                       ; If you've specified an empty node set, we'll still
+                       ; give you `concurrency` clients, with nil.
+                       (repeat (:concurrency test) nil)
+                       (->> test
                           :nodes
                           cycle
-                          (take (:concurrency test)))]
+                          (take (:concurrency test))))]
 
       ; Begin workload
       (let [workers (mapv (partial worker test)
@@ -369,8 +374,10 @@
                                          (count (:nodes test)))
 
                         ; Synchronization point for nodes
-                        :barrier (CyclicBarrier. (count (:nodes test)))
-
+                        :barrier (let [c (count (:nodes test))]
+                                   (if (pos? c)
+                                     (CyclicBarrier. (count (:nodes test)))
+                                     ::no-barrier))
                         ; Currently running histories
                         :active-histories (atom #{}))]
 
