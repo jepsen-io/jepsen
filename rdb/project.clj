@@ -1,8 +1,6 @@
-(defproject mongodb "0.1.0-SNAPSHOT"
+(defproject rethinkdb "0.1.0-SNAPSHOT"
   :description "RethinkDB Jepsen Tests"
-;  :url "http://github.com/rethinkdb/jepsen"
-;  :license {:name "Eclipse Public License"
-;            :url "http://www.eclipse.org/legal/epl-v10.html"}
+  :url "http://github.com/rethinkdb/jepsen"
   :dependencies [[org.clojure/clojure "1.6.0"]
 
                  ;; [rethinkdb "0.9.40-SNAPSHOT"]

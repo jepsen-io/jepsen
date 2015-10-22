@@ -37,48 +37,18 @@
       (info node "Starting...")
       ;; TODO: detect server failing to start.
       (c/ssh* {:cmd "killall rethinkdb bash"})
-      (c/ssh* {:cmd "
-# Add a 100ms delay to help find edge cases.
-#tc qdisc add dev eth0 root netem delay 100ms \\
-#  || tc qdisc change dev eth0 root netem delay 100ms
-rm -rf /root/rethinkdb_data
-base=http://download.rethinkdb.com/apt/pool
-version=/precise/main/r/rethinkdb/rethinkdb_2.1.2~0precise_amd64.deb
-if [[ ! -f /root/rdb.deb ]]; then
-  curl $base/$version > /root/rdb.deb
-  dpkg -i /root/rdb.deb
-fi
-nohup /usr/bin/rethinkdb \\
-  --bind all \\
-  -n `hostname` \\
-  -j n1:29015 -j n2:29015 -j n3:29015 -j n4:29015 -j n5:29015 \\
-  >/root/1.out 2>/root/2.out &
-sleep 1 # Wait to make sure we've actually cleared out `1.out` and `2.out`.
-# Wait until we see /^Server ready/ in the log file.
-tail -n+0 -F /root/1.out \\
-  | grep --line-buffered '^Server ready' \\
-  | while read line; do pkill -P $$ tail; exit 0; done
-sleep 1 # You never know.
-"})
-      (info node "Starting DONE!")
-)
+      (c/ssh* {:cmd (clojure.string/join
+                     ["JOINLINE='",
+                      (clojure.string/join
+                       " "
+                       (map (fn [x] (format "-j %s:29015" (name x))) (:nodes test))),
+                      "'\n",
+                      (slurp (io/resource "setup.sh"))])})
+      (info node "Starting DONE!"))
 
     (teardown! [_ test node]
       (info node "Tearing down db...")
-      (c/ssh* {:cmd "
-#tc qdisc change dev eth0 root netem delay 0ms
-killall rethinkdb
-f=0
-# Wait for all rethinkdb instances to go away.
-while [[ \"`ps auxww | grep rethinkdb | grep -v grep`\" ]] && [[ \"$f\" -lt 10 ]]; do
-  sleep 1
-  f=$((f+1))
-done
-# If it takes more than 10 seconds, murder them.
-if [[ \"$f\" -ge 10 ]]; then
-  killall -9 rethinkdb
-fi
-"})
+      (c/ssh* {:cmd (slurp (io/resource "teardown.sh"))})
       (info node "Tearing down db DONE!"))))
 
 (defmacro with-errors
