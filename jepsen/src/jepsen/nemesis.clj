@@ -141,9 +141,10 @@
       this)
 
     (invoke! [this test op]
-      (c/on-many (:nodes test)
-                 (set-time! (+ (/ (System/currentTimeMillis) 1000)
-                               (- (rand-int (* 2 dt)) dt)))))
+      (assoc op :value
+                (c/on-many (:nodes test)
+                           (set-time! (+ (/ (System/currentTimeMillis) 1000)
+                                         (- (rand-int (* 2 dt)) dt))))))
 
     (teardown! [this test]
       (c/on-many (:nodes test)
