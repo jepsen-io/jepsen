@@ -10,4 +10,4 @@
   (let [test (jepsen/run! test)]
     (is (:valid? (:results test)))))
 
-(deftest document-safe-test (run! (dc/safe-test)))
+(deftest document-safe-test (run! (dc/safe-test "2.1.5+2~0jessie")))
