@@ -15,8 +15,7 @@
                     [store     :as store]
                     [report    :as report]
                     [tests     :as tests]]
-            [jepsen.control [net :as net]
-                            [util :as net/util]]
+            [jepsen.control [util :as cu]]
             [jepsen.os.debian :as debian]
             [jepsen.checker.timeline :as timeline]
             [rethinkdb.core :refer [connect close]]
@@ -28,29 +27,35 @@
 (defn copy-from-home [file]
     (c/scp* (str (System/getProperty "user.home") "/" file) "/root"))
 
-(defn db
-  "Rethinkdb (ignores version)."
-  []
-  (reify db/DB
+(defn install!
+  "Install RethinkDB on a node"
+  [node version]
+  (debian/add-repo! "rethinkdb"
+                    "deb http://download.rethinkdb.com/apt jessie main")
+  (c/su (c/exec :wget :-qO :- "https://download.rethinkdb.com/apt/pubkey.gpg" |
+                :apt-key :add :-))
+  (debian/install {"rethinkdb" version}))
 
+(defn join-line
+  "Command-line arguments for nodes to join the cluster."
+  [test]
+  (->> test
+       :nodes
+       (map name)
+       (map (partial format "-j %s:29015"))
+       (clojure.string/join " ")))
+
+(defn db
+  "Set up and tear down RethinkDB"
+  [version]
+  (reify db/DB
     (setup! [_ test node]
-      (debian/install [:libprotobuf7 :libicu48 :psmisc])
-      (info node "Starting...")
-      ;; TODO: detect server failing to start.
-      (c/exec :killall :rethinkdb :bash)
-      (c/exec (clojure.string/join
-                     ["JOINLINE='",
-                      (clojure.string/join
-                       " "
-                       (map (fn [x] (format "-j %s:29015" (name x))) (:nodes test))),
-                      "'\n",
-                      (slurp (io/resource "setup.sh"))]))
-      (info node "Starting DONE!"))
+      (install! node version))
 
     (teardown! [_ test node]
-      (info node "Tearing down db...")
-      (c/ssh* {:cmd (slurp (io/resource "teardown.sh"))})
-      (info node "Tearing down db DONE!"))))
+      (info node "Nuking RethinkDB")
+      (cu/grepkill! "rethinkdb")
+      (info node "RethinkDB dead"))))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operation
@@ -63,12 +68,10 @@
                        :info)]
      (try
        ~@body
-       ; A server selection error means we never attempted the operation in
-       ; the first place, so we know it didn't take place.
        (catch clojure.lang.ExceptionInfo e#
          (condp get (:type (ex-data e#))
            #{:op-indeterminate :unknown} (assoc ~op :type :info :error (str e#))
-           (assoc ~op :type :fail :error (str e#)))))))
+           (assoc ~op :type :fail error-type# (str e#)))))))
 
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
@@ -99,8 +102,8 @@
     (assoc tests/noop-test
            :name      (str "rethinkdb " name)
            :os        debian/os
-           :db        (db)
+           :db        (db (:version opts))
            :model     (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable})
            :nemesis   (nemesis/partition-random-halves))
-    opts))
+    (dissoc opts :version)))

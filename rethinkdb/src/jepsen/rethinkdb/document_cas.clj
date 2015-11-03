@@ -99,10 +99,11 @@
 
 (defn safe-test
   "Document-level compare and set with safe settings."
-  []
+  [version]
   ;; This is the only safe read/write mode.  Changing either of
   ;; these (or turning on soft durability) may produce a
   ;; non-linearizable history.
   (test- "document {:write_acks 'majority' :read_mode 'majority'}"
-         {:client (client "majority" "majority")
+         {:version version
+          :client (client "majority" "majority")
           :generator (std-gen (gen/mix [r w cas cas]))}))
