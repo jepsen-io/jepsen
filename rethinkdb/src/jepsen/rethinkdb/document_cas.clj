@@ -1,6 +1,6 @@
-(ns rdb.document-cas
+(ns jepsen.rethinkdb.document-cas
   "Compare-and-set against a single document."
-  (:require [clojure [pprint :refer :all]
+  (:require [clojure [pprint :refer [pprint]]
                      [string :as str]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [debug info warn]]
@@ -19,7 +19,7 @@
                             [util :as net/util]]
             [jepsen.os.debian :as debian]
             [jepsen.checker.timeline :as timeline]
-            [rdb.core :refer :all]
+            [jepsen.rethinkdb :refer :all]
             [rethinkdb.core :refer [connect close]]
             [rethinkdb.query :as r]
             [knossos.core :as knossos]

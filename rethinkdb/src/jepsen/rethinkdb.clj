@@ -1,4 +1,4 @@
-(ns rdb.core
+(ns jepsen.rethinkdb
   (:require [clojure [pprint :refer :all]
                      [string :as str]]
             [clojure.java.io :as io]
@@ -28,22 +28,23 @@
 (defn copy-from-home [file]
     (c/scp* (str (System/getProperty "user.home") "/" file) "/root"))
 
-(defn db []
+(defn db
   "Rethinkdb (ignores version)."
+  []
   (reify db/DB
 
     (setup! [_ test node]
       (debian/install [:libprotobuf7 :libicu48 :psmisc])
       (info node "Starting...")
       ;; TODO: detect server failing to start.
-      (c/ssh* {:cmd "killall rethinkdb bash"})
-      (c/ssh* {:cmd (clojure.string/join
+      (c/exec :killall :rethinkdb :bash)
+      (c/exec (clojure.string/join
                      ["JOINLINE='",
                       (clojure.string/join
                        " "
                        (map (fn [x] (format "-j %s:29015" (name x))) (:nodes test))),
                       "'\n",
-                      (slurp (io/resource "setup.sh"))])})
+                      (slurp (io/resource "setup.sh"))]))
       (info node "Starting DONE!"))
 
     (teardown! [_ test node]
@@ -96,7 +97,7 @@
   [name opts]
   (merge
     (assoc tests/noop-test
-           :name      (str "rdb " name)
+           :name      (str "rethinkdb " name)
            :os        debian/os
            :db        (db)
            :model     (model/cas-register)
