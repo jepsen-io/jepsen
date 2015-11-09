@@ -24,38 +24,70 @@
             [cheshire.core :as json])
   (:import (clojure.lang ExceptionInfo)))
 
-(defn copy-from-home [file]
-    (c/scp* (str (System/getProperty "user.home") "/" file) "/root"))
+(def log-file "/var/log/rethinkdb")
 
 (defn install!
   "Install RethinkDB on a node"
   [node version]
+  ; Install package
   (debian/add-repo! "rethinkdb"
                     "deb http://download.rethinkdb.com/apt jessie main")
   (c/su (c/exec :wget :-qO :- "https://download.rethinkdb.com/apt/pubkey.gpg" |
                 :apt-key :add :-))
-  (debian/install {"rethinkdb" version}))
+  (debian/install {"rethinkdb" version})
 
-(defn join-line
-  "Command-line arguments for nodes to join the cluster."
+  ; Set up logfile
+  (c/exec :touch log-file)
+  (c/exec :chown "rethinkdb:rethinkdb" log-file))
+
+(defn join-lines
+  "A string of config file lines for nodes to join the cluster"
   [test]
   (->> test
        :nodes
-       (map name)
-       (map (partial format "-j %s:29015"))
-       (clojure.string/join " ")))
+       (map (fn [node] (str "join=" (name node) :29015)))
+       (clojure.string/join "\n")))
+
+(defn configure!
+  "Set up configuration files"
+  [test node]
+  (info "Configuring" node)
+  (c/su
+    (c/exec :echo (-> "jepsen.conf"
+                      io/resource
+                      slurp
+                      (str "\n" (join-lines test)))
+            :> "/etc/rethinkdb/instances.d/jepsen.conf")))
+
+(defn start!
+  "Starts the rethinkdb service"
+  [node]
+  (c/su
+    (info "Starting rethinkdb")
+    (c/exec :service :rethinkdb :start)
+    (info "Started rethinkdb")))
 
 (defn db
   "Set up and tear down RethinkDB"
   [version]
   (reify db/DB
     (setup! [_ test node]
-      (install! node version))
+      (install! node version)
+      (configure! test node)
+      (start! node)
+
+      (Thread/sleep 30000))
 
     (teardown! [_ test node]
       (info node "Nuking RethinkDB")
       (cu/grepkill! "rethinkdb")
-      (info node "RethinkDB dead"))))
+      (c/su
+        (c/exec :rm :-rf "/var/lib/rethinkdb/jepsen")
+        (c/exec :truncate :-c :--size 0 log-file))
+      (info node "RethinkDB dead"))
+
+    db/LogFiles
+    (log-files [_ test node] [log-file])))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operation
@@ -69,9 +101,9 @@
      (try
        ~@body
        (catch clojure.lang.ExceptionInfo e#
-         (condp get (:type (ex-data e#))
-           #{:op-indeterminate :unknown} (assoc ~op :type :info :error (str e#))
-           (assoc ~op :type :fail error-type# (str e#)))))))
+         (case (:e (:data (ex-data e#)))
+           4100000 (assoc ~op :type :fail,       :error (:cause (ex-data e#)))
+                   (assoc ~op :type error-type#, :error (str e#)))))))
 
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
@@ -81,10 +113,10 @@
     (->> gen
          (gen/delay 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 60)
+           (gen/seq (cycle [(gen/sleep 40)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 600))
+         (gen/time-limit 100))
     ;; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
