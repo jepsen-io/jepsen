@@ -1,11 +1,11 @@
 (ns jepsen.model
   "Functional abstract models of database behavior."
   (:refer-clojure :exclude [set])
-  (:import knossos.core.Model
+  (:import knossos.model.Model
            (clojure.lang PersistentQueue))
   (:use clojure.tools.logging)
   (:require [clojure.core :as core]
-            [knossos.core :as knossos]
+            [knossos.model :as knossos]
             [multiset.core :as multiset]))
 
 (def inconsistent knossos/inconsistent)

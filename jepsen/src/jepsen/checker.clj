@@ -11,8 +11,10 @@
             [jepsen.checker.perf :as perf]
             [multiset.core :as multiset]
             [gnuplot.core :as g]
-            [knossos.core :as knossos]
-            [knossos.history :as history]))
+            [knossos [model :as model]
+                     [op :as op]
+                     [linear :as linear]
+                     [history :as history]]))
 
 (defprotocol Checker
   (check [checker test model history]
@@ -47,7 +49,7 @@
   "Validates linearizability with Knossos."
   (reify Checker
     (check [this test model history]
-      (knossos/analysis model history))))
+      (linear/analysis model history))))
 
 (def queue
   "Every dequeue must come from somewhere. Validates queue operations by
@@ -60,11 +62,11 @@
       (let [final (->> history
                        (r/filter (fn select [op]
                                    (condp = (:f op)
-                                     :enqueue (knossos/invoke? op)
-                                     :dequeue (knossos/ok? op)
+                                     :enqueue (op/invoke? op)
+                                     :dequeue (op/ok? op)
                                      false)))
-                                 (reduce knossos/step model))]
-        (if (knossos/inconsistent? final)
+                                 (reduce model/step model))]
+        (if (model/inconsistent? final)
           {:valid? false
            :error  (:msg final)}
           {:valid?      true
@@ -77,17 +79,17 @@
   (reify Checker
     (check [this test model history]
       (let [attempts (->> history
-                          (r/filter knossos/invoke?)
+                          (r/filter op/invoke?)
                           (r/filter #(= :add (:f %)))
                           (r/map :value)
                           (into #{}))
             adds (->> history
-                      (r/filter knossos/ok?)
+                      (r/filter op/ok?)
                       (r/filter #(= :add (:f %)))
                       (r/map :value)
                       (into #{}))
             final-read (->> history
-                          (r/filter knossos/ok?)
+                          (r/filter op/ok?)
                           (r/filter #(= :read (:f %)))
                           (r/map :value)
                           (reduce (fn [_ x] x) nil))]
@@ -132,17 +134,17 @@
   (reify Checker
     (check [this test model history]
       (let [attempts (->> history
-                          (r/filter knossos/invoke?)
+                          (r/filter op/invoke?)
                           (r/filter #(= :enqueue (:f %)))
                           (r/map :value)
                           (into (multiset/multiset)))
             enqueues (->> history
-                          (r/filter knossos/ok?)
+                          (r/filter op/ok?)
                           (r/filter #(= :enqueue (:f %)))
                           (r/map :value)
                           (into (multiset/multiset)))
             dequeues (->> history
-                          (r/filter knossos/ok?)
+                          (r/filter op/ok?)
                           (r/filter #(= :dequeue (:f %)))
                           (r/map :value)
                           (into (multiset/multiset)))

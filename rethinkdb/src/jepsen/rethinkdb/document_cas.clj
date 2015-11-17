@@ -103,7 +103,7 @@
   ;; This is the only safe read/write mode.  Changing either of
   ;; these (or turning on soft durability) may produce a
   ;; non-linearizable history.
-  (test- "document {:write_acks 'majority' :read_mode 'majority'}"
+  (test- "document write-majority read-majority"
          {:version version
           :client (client "majority" "majority")
           :generator (std-gen (gen/mix [r w cas cas]))}))

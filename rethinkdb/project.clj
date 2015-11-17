@@ -5,4 +5,13 @@
                  [com.apa512/rethinkdb "0.11.0"]
                  [clj-time "0.9.0"]
                  [jepsen "0.0.7-SNAPSHOT"]
-                 [cheshire "5.4.0"]])
+                 [cheshire "5.4.0"]]
+  :jvm-opts ["-Xmx24g"
+             "-XX:+UseConcMarkSweepGC"
+             "-XX:+UseParNewGC"
+             "-XX:+CMSParallelRemarkEnabled"
+             "-XX:+AggressiveOpts"
+             "-XX:+UseFastAccessorMethods"
+             "-XX:MaxInlineLevel=32"
+             "-XX:MaxRecursiveInlineLevel=2"
+             "-server"])

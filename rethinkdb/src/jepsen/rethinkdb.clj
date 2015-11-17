@@ -101,7 +101,7 @@
      (try
        ~@body
        (catch clojure.lang.ExceptionInfo e#
-         (case (:e (:data (ex-data e#)))
+         (case (:e (ex-data e#))
            4100000 (assoc ~op :type :fail,       :error (:cause (ex-data e#)))
                    (assoc ~op :type error-type#, :error (str e#)))))))
 
@@ -113,10 +113,10 @@
     (->> gen
          (gen/delay 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 40)
+           (gen/seq (cycle [(gen/sleep 35)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 100))
+         (gen/time-limit 200))
     ;; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -127,7 +127,7 @@
            (gen/time-limit 30)))))
 
 (defn test-
-  "Constructs a test with the given name prefixed by 'rdb ', merging any
+  "Constructs a test with the given name prefixed by 'rethinkdb ', merging any
   given options."
   [name opts]
   (merge
@@ -136,6 +136,7 @@
            :os        debian/os
            :db        (db (:version opts))
            :model     (model/cas-register)
-           :checker   (checker/compose {:linear checker/linearizable})
+           :checker   (checker/compose {:linear checker/linearizable
+                                        :perf   (checker/perf)})
            :nemesis   (nemesis/partition-random-halves))
     (dissoc opts :version)))
