@@ -21,6 +21,9 @@
   (op [gen test process] "Yields an operation to apply."))
 
 (extend-protocol Generator
+  nil
+  (op [this test process] nil)
+
   Object
   (op [this test process] this)
 

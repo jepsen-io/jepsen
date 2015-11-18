@@ -32,8 +32,8 @@
 
 (deftest seq-test
   (is (= (set (ops (:nodes a-test)
-              (gen/seq (range 100)))))
-      (set (range 100))))
+                   (gen/seq (range 100))))
+         (set (range 100)))))
 
 (deftest complex-test
   (let [ops (ops (:nodes a-test)
