@@ -25,10 +25,11 @@
   (reify db/DB
     (setup! [_ test node]
       (c/cd "/tmp"
-            (let [file "rabbitmq-server_3.2.4-1_all.deb"]
+            (let [version "3.5.6"
+                  file (str "rabbitmq-server_" version "-1_all.deb")]
               (when-not (cu/file? file)
                 (info "Fetching deb package")
-                (c/exec :wget (str "http://www.rabbitmq.com/releases/rabbitmq-server/v3.2.4/" file)))
+                (c/exec :wget (str "http://www.rabbitmq.com/releases/rabbitmq-server/v" version "/" file)))
 
               (c/su
                 ; Install package
@@ -93,6 +94,7 @@
         (info node "Nuking rabbit")
         (meh (c/exec :killall :-9 "beam.smp" "epmd"))
         (c/exec :rm :-rf "/var/lib/rabbitmq/mnesia/")
+        (c/exec :service :rabbitmq-server :stop)
         (info node "Rabbit dead")))))
 
 (def queue "jepsen.queue")
