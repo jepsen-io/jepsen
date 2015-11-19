@@ -3,6 +3,7 @@
             [clojure.pprint :refer [pprint]]
             [clojure.set :as set]
             [jepsen.independent :refer :all]
+            [jepsen.checker :as checker]
             [jepsen.generator :as gen]
             [jepsen.generator-test :as gen-test :refer [ops]]))
 
@@ -42,3 +43,22 @@
                   (map :value)
                   set))))))
 
+(deftest checker-test
+  (let [even-checker (reify checker/Checker
+                       (check [this test model history]
+                         {:valid? (even? (count history))}))
+        history (->> (fn [k] (->> (range k)
+                                  (map (partial array-map :value))
+                                  gen/seq))
+                     (sequential-generator [0 1 2 3])
+                     (ops [:a :b :c])
+                     (concat [{:value :not-sharded}]))]
+    (is (= {:valid? false
+            :results {1 {:valid? true}
+                      2 {:valid? false}
+                      3 {:valid? true}}
+            :failures {2 {:valid? false}}}
+           (checker/check (checker even-checker)
+                          nil
+                          nil
+                          history)))))
