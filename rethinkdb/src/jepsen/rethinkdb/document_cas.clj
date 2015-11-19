@@ -90,7 +90,6 @@
                                  {:val value'}
                                  (r/error "abort"))))
                            (:conn this))]
-                 (info res)
                  (assoc op :type (if (and (= (:errors res) 0)
                                           (= (:replaced res) 1))
                                    :ok
@@ -122,8 +121,10 @@
           :generator (std-gen (independent/sequential-generator
                                 (range)
                                 (fn [k]
-                                  (gen/mix [r w cas cas]))))
+                                  ; Do a mix of reads, writes, and CAS ops in
+                                  ; quick succession
+                                  (->> (gen/mix [r r w cas cas])
+                                       (gen/limit 100)))))
           :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)
                       :perf   (checker/perf)})}))
-                                  

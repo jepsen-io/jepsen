@@ -111,20 +111,12 @@
   [gen]
   (gen/phases
     (->> gen
-         (gen/delay 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 35)
+           (gen/seq (cycle [{:type :info :f :start}
+                            (gen/sleep 40)
                             {:type :info :f :stop}
-                            {:type :info :f :start}])))
-         (gen/time-limit 0))
-    ;; Recover
-    (gen/nemesis
-      (gen/once {:type :info :f :stop}))
-    ;; Wait for resumption of normal ops
-    (gen/clients
-      (->> gen
-           (gen/delay 1)
-           (gen/time-limit 30)))))
+                            (gen/sleep 5)])))
+         (gen/time-limit 160))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'rethinkdb ', merging any
