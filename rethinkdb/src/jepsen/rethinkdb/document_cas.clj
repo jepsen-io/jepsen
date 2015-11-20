@@ -32,14 +32,14 @@
   (info (with-out-str (pprint x)))
   x)
 
-(defrecord Client [db tbl primary write_acks read_mode]
+(defrecord Client [db tbl-created? tbl primary write_acks read_mode]
   client/Client
   (setup! [this test node]
-    (info node "Connecting CAS Client...")
+    (info node "Connecting...")
     (info node (str `(connect :host ~(name node) :port 28015)))
     (let [conn (connect :host (name node) :port 28015)]
-      (info node "Connecting CAS Client DONE!")
-      (when (= node (jepsen/primary test))
+      (info node "Client connected")
+      (when (compare-and-set! tbl-created? false true)
         (info node "Creating table...")
         (r/run (r/db-create db) conn)
         (r/run (r/table-create (r/db db) tbl {:replicas 5}) conn)
@@ -54,7 +54,7 @@
         (r/run
           (rethinkdb.query-builder/term :WAIT [(r/table (r/db db) tbl)] {})
           conn)
-        (info node "Creating table DONE!"))
+        (info node "Table created"))
 
       (assoc this :conn conn :node node)))
 
@@ -102,29 +102,27 @@
 (defn client
   "A client which implements a register on top of an entire document."
   [write_acks read_mode]
-  (Client. "jepsen" "cas" "n5" write_acks read_mode))
+  (Client. "jepsen" (atom false) "cas" "n5" write_acks read_mode))
 
 ; Generators
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn r   [_ _] {:type :invoke, :f :read})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defn safe-test
-  "Document-level compare and set with safe settings."
-  [version]
-  ;; This is the only safe read/write mode.  Changing either of
-  ;; these (or turning on soft durability) may produce a
-  ;; non-linearizable history.
-  (test- "document write-majority read-majority"
+(defn cas-test
+  "Document-level compare and set with the given read and write mode."
+  [version write-acks read-mode]
+  (test- (str "document write-" write-acks " read-" read-mode)
          {:version version
-          :client (client "majority" "majority")
+          :client (client write-acks read-mode)
+          :concurrency 20
           :generator (std-gen (independent/sequential-generator
                                 (range)
                                 (fn [k]
                                   ; Do a mix of reads, writes, and CAS ops in
                                   ; quick succession
                                   (->> (gen/mix [r r w cas cas])
-                                       (gen/limit 100)))))
+                                       (gen/limit 2000)))))
           :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)
                       :perf   (checker/perf)})}))
