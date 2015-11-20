@@ -115,14 +115,15 @@
   (test- (str "document write-" write-acks " read-" read-mode)
          {:version version
           :client (client write-acks read-mode)
-          :concurrency 20
+          :concurrency 10
           :generator (std-gen (independent/sequential-generator
                                 (range)
                                 (fn [k]
                                   ; Do a mix of reads, writes, and CAS ops in
                                   ; quick succession
                                   (->> (gen/mix [r r w cas cas])
-                                       (gen/limit 2000)))))
+                                       (gen/stagger 0.05)
+                                       (gen/limit 4000)))))
           :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)
                       :perf   (checker/perf)})}))

@@ -11,6 +11,6 @@
     (is (:valid? (:results test)))))
 
 (deftest document-safe-test
-  (run! (dc/cas-test "2.1.5+2~0jessie" "single" "majority")))
+  (run! (dc/cas-test "2.1.5+2~0jessie" "single" "single")))
 ;(deftest document-unsafe-test
 ;  (run! (dc/cas-test "2.1.5+2~0jessie" "majority" "majority")))
