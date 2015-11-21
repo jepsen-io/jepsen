@@ -5,7 +5,7 @@
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen [core      :as jepsen]
                     [db        :as db]
-                    [util      :as util :refer [meh timeout]]
+                    [util      :as util :refer [meh timeout retry]]
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
@@ -56,16 +56,26 @@
     (c/exec :echo (-> "jepsen.conf"
                       io/resource
                       slurp
-                      (str "\n" (join-lines test)))
+                      (str "\n" (join-lines test))
+                      (str "\n\n" "server-name=" (name node)))
             :> "/etc/rethinkdb/instances.d/jepsen.conf")))
 
 (defn start!
   "Starts the rethinkdb service"
   [node]
   (c/su
-    (info "Starting rethinkdb")
+    (info node "Starting rethinkdb")
     (c/exec :service :rethinkdb :start)
-    (info "Started rethinkdb")))
+    (info node "Started rethinkdb")))
+
+(defn wait-for-conn
+  "Wait until a connection can be opened to the given node."
+  [node]
+  (info "Waiting for connection to" node)
+  (retry 5
+         (let [c (connect :host (name node) :port 28015)]
+           (close c)))
+  (info node "ready"))
 
 (defn db
   "Set up and tear down RethinkDB"
@@ -76,10 +86,10 @@
       (configure! test node)
       (start! node)
 
-      (Thread/sleep 30000))
+      (wait-for-conn node))
 
     (teardown! [_ test node]
-      (info node "Nuking RethinkDB")
+      (info node "Nuking" node "RethinkDB")
       (cu/grepkill! "rethinkdb")
       (c/su
         (c/exec :rm :-rf "/var/lib/rethinkdb/jepsen")
@@ -113,10 +123,10 @@
     (->> gen
          (gen/nemesis
            (gen/seq (cycle [{:type :info :f :start}
-                            (gen/sleep 30)
+                            (gen/sleep 40)
                             {:type :info :f :stop}
-                            (gen/sleep 0)])))
-         (gen/time-limit 400))))
+                            (gen/sleep 40)])))
+         (gen/time-limit 200))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'rethinkdb ', merging any

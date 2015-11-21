@@ -1,11 +1,12 @@
 (ns jepsen.rethinkdb.document-cas
   "Compare-and-set against a single document."
+  (:refer-clojure :exclude [run!])
   (:require [clojure [pprint :refer [pprint]]
                      [string :as str]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen [core      :as jepsen]
-                    [util      :as util :refer [meh timeout]]
+                    [util      :as util :refer [meh timeout retry]]
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
@@ -28,33 +29,52 @@
             [cheshire.core :as json])
   (:import (clojure.lang ExceptionInfo)))
 
-(defn spy [x]
-  (info (with-out-str (pprint x)))
-  x)
+(defn run!
+  "Like rethinkdb.query/run, but asserts that there were no errors."
+  [query conn]
+  (let [result (r/run query conn)]
+    (when (contains? result :errors)
+      (assert (zero? (:errors result)) (:first_error result)))
+    result))
 
-(defrecord Client [db tbl-created? tbl primary write_acks read_mode]
+(defn set-write-acks!
+  "Updates the write-acks mode for a cluster. Spins until successful."
+  [conn test write-acks]
+  (retry 5
+         (run!
+           (r/update
+             (r/table (r/db "rethinkdb") "table_config")
+             {:write_acks write-acks
+              :shards [{:primary_replica (jepsen/primary test)
+                        :replicas (map name (:nodes test))}]})
+           conn)))
+
+(defn set-heartbeat
+  "Set the heartbeat on a cluster to dt seconds"
+  [conn dt]
+; r.db('rethinkdb').table('cluster_config').get("heartbeat").update({heartbeat_timeout_secs: 2})
+)
+
+(defn wait-table
+  "Wait for all replicas for a table to be ready"
+  [conn db tbl]
+  (run! (term :WAIT [(r/table (r/db db) tbl)] {}) conn))
+
+(defrecord Client [db tbl-created? tbl primary write-acks read_mode]
   client/Client
   (setup! [this test node]
     (info node "Connecting...")
-    (info node (str `(connect :host ~(name node) :port 28015)))
     (let [conn (connect :host (name node) :port 28015)]
-      (info node "Client connected")
-      (when (compare-and-set! tbl-created? false true)
-        (info node "Creating table...")
-        (r/run (r/db-create db) conn)
-        (r/run (r/table-create (r/db db) tbl {:replicas 5}) conn)
-;        (r/run (r/insert (r/table (r/db db) tbl) {:id id :val nil}) conn)
-        (pr (r/run
-              (r/update
-                (r/table (r/db "rethinkdb") "table_config")
-                {:write_acks write_acks
-                 :shards [{:primary_replica primary
-                           :replicas ["n1" "n2" "n3" "n4" "n5"]}]})
-              conn))
-        (r/run
-          (rethinkdb.query-builder/term :WAIT [(r/table (r/db db) tbl)] {})
-          conn)
-        (info node "Table created"))
+      (info node "Connected")
+      ; Everyone's gotta block until we've made the table.
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (info node "Creating table...")
+          (run! (r/db-create db) conn)
+          (run! (r/table-create (r/db db) tbl {:replicas 5}) conn)
+          (set-write-acks! conn test write-acks)
+          (wait-table conn db tbl)
+          (info node "Table created")))
 
       (assoc this :conn conn :node node)))
 
@@ -96,7 +116,7 @@
                                    :fail)))))))
 
   (teardown! [this test]
-    (r/run (r/db-drop db) (:conn this))
+    (meh (r/run (r/db-drop db) (:conn this)))
     (close (:conn this))))
 
 (defn client
@@ -121,9 +141,9 @@
                                 (fn [k]
                                   ; Do a mix of reads, writes, and CAS ops in
                                   ; quick succession
-                                  (->> (gen/mix [r r w cas cas])
-                                       (gen/stagger 0.05)
-                                       (gen/limit 4000)))))
+                                  (->> (gen/mix [r w])
+                                       (gen/stagger 1/2)
+                                       (gen/limit 1000)))))
           :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)
                       :perf   (checker/perf)})}))
