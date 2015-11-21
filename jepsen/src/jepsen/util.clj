@@ -3,8 +3,10 @@
   (:require [clojure.tools.logging :refer [info]]
             [clojure.core.reducers :as r]
             [clojure.string :as str]
+            [clojure.pprint :refer [pprint]]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
+            [clojure.tools.logging :refer [debug info warn]]
             [knossos.history :as history])
   (:import (java.util.concurrent.locks LockSupport)))
 
@@ -145,6 +147,10 @@
     ~@body
      (nanos->ms (- (System/nanoTime) t0#))))
 
+(defn spy [x]
+  (info (with-out-str (pprint x)))
+  x)
+
 (defmacro unwrap-exception
   "Catches exceptions from body and re-throws their causes. Useful when you
   don't want the wrapper from, say, a future's exception handler."
@@ -168,6 +174,19 @@
            (future-cancel worker#)
            ~timeout-val)
        retval#)))
+
+(defmacro retry
+  "Evals body repeatedly until it doesn't throw, sleeping dt seconds."
+  [dt & body]
+  `(loop []
+     (let [res# (try ~@body
+                     (catch Throwable e#
+;                      (warn e# "retrying in" ~dt "seconds")
+                       ::failed))]
+       (if (= res# ::failed)
+         (do (Thread/sleep (* ~dt 1000))
+             (recur))
+         res#))))
 
 (defn map-kv
   "Takes a function (f [k v]) which returns [k v], and builds a new map by

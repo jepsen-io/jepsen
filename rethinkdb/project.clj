@@ -14,4 +14,5 @@
              "-XX:+UseFastAccessorMethods"
              "-XX:MaxInlineLevel=32"
              "-XX:MaxRecursiveInlineLevel=2"
+             "-XX:-OmitStackTraceInFastThrow"
              "-server"])
