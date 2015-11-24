@@ -49,11 +49,15 @@
                         :replicas (map name (:nodes test))}]})
            conn)))
 
-(defn set-heartbeat
+(defn set-heartbeat!
   "Set the heartbeat on a cluster to dt seconds"
   [conn dt]
+  (-> (r/table (r/db "rethinkdb") "cluster_config")
+      (r/get "heartbeat")
+      (r/update {:heartbeat_timeout_secs dt})
+      (run! conn)))
+
 ; r.db('rethinkdb').table('cluster_config').get("heartbeat").update({heartbeat_timeout_secs: 2})
-)
 
 (defn wait-table
   "Wait for all replicas for a table to be ready"
@@ -73,6 +77,7 @@
           (run! (r/db-create db) conn)
           (run! (r/table-create (r/db db) tbl {:replicas 5}) conn)
           (set-write-acks! conn test write-acks)
+          (set-heartbeat! conn 2)
           (wait-table conn db tbl)
           (info node "Table created")))
 
@@ -95,10 +100,10 @@
                                 (r/run (term :DEFAULT
                                              [(r/get-field row "val") nil])
                                        (:conn this))))
-          :write (do (r/run (r/insert (r/table (r/db db) tbl)
-                                      {:id id, :val value}
-                                      {"conflict" "update"})
-                            (:conn this))
+          :write (do (run! (r/insert (r/table (r/db db) tbl)
+                                     {:id id, :val value}
+                                     {"conflict" "update"})
+                           (:conn this))
                      (assoc op :type :ok))
           :cas (let [[value value'] value
                      res (r/run
@@ -135,15 +140,17 @@
   (test- (str "document write-" write-acks " read-" read-mode)
          {:version version
           :client (client write-acks read-mode)
-          :concurrency 10
+          :concurrency 5
           :generator (std-gen (independent/sequential-generator
                                 (range)
                                 (fn [k]
-                                  ; Do a mix of reads, writes, and CAS ops in
-                                  ; quick succession
-                                  (->> (gen/mix [r w])
-                                       (gen/stagger 1/2)
-                                       (gen/limit 1000)))))
-          :checker (checker/compose
+                                  ; Pick a random timescale between 10 seconds
+                                  ; and a hundred micros
+                                  (let [dt (Math/pow 10 (- (rand 5)))]
+                                    (->> (gen/mix [r w cas cas])
+                                         (gen/stagger dt)
+                                         (gen/limit 500)
+                                         (gen/time-limit 60))))))
+                                  :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)
                       :perf   (checker/perf)})}))
