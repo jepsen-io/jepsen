@@ -123,10 +123,10 @@
     (->> gen
          (gen/nemesis
            (gen/seq (cycle [{:type :info :f :start}
-                            (gen/sleep 40)
+                            (gen/sleep 10)
                             {:type :info :f :stop}
-                            (gen/sleep 40)])))
-         (gen/time-limit 200))))
+                            (gen/sleep 15)])))
+         (gen/time-limit 300))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'rethinkdb ', merging any

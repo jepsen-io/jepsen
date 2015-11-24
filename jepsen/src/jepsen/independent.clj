@@ -90,9 +90,9 @@
     (check [this test model history]
       (let [ks       (history-keys history)
             results  (->> ks
-                          (map (fn [k]
-                                 (let [h (subhistory k history)]
-                                   [k (check checker test model h)])))
+                          (pmap (fn [k]
+                                  (let [h (subhistory k history)]
+                                    [k (check checker test model h)])))
                           (into {}))
             failures (->> results
                           (reduce (fn [failures [k result]]
