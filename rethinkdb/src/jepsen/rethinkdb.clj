@@ -123,9 +123,9 @@
     (->> gen
          (gen/nemesis
            (gen/seq (cycle [{:type :info :f :start}
-                            (gen/sleep 10)
+                            (gen/sleep 5)
                             {:type :info :f :stop}
-                            (gen/sleep 15)])))
+                            (gen/sleep 5)])))
          (gen/time-limit 300))))
 
 (defn test-
