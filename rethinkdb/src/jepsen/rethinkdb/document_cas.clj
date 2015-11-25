@@ -24,18 +24,8 @@
             [jepsen.rethinkdb :refer :all]
             [rethinkdb.core :refer [connect close]]
             [rethinkdb.query :as r]
-            [rethinkdb.query-builder :refer [term]]
-            [knossos.core :as knossos]
-            [cheshire.core :as json])
+            [rethinkdb.query-builder :refer [term]])
   (:import (clojure.lang ExceptionInfo)))
-
-(defn run!
-  "Like rethinkdb.query/run, but asserts that there were no errors."
-  [query conn]
-  (let [result (r/run query conn)]
-    (when (contains? result :errors)
-      (assert (zero? (:errors result)) (:first_error result)))
-    result))
 
 (defn set-write-acks!
   "Updates the write-acks mode for a cluster. Spins until successful."
@@ -64,11 +54,10 @@
   [conn db tbl]
   (run! (term :WAIT [(r/table (r/db db) tbl)] {}) conn))
 
-(defrecord Client [db tbl-created? tbl primary write-acks read_mode]
+(defrecord Client [tbl-created? db tbl write-acks read_mode]
   client/Client
   (setup! [this test node]
-    (info node "Connecting...")
-    (let [conn (connect :host (name node) :port 28015)]
+    (let [conn (conn node)]
       (info node "Connected")
       ; Everyone's gotta block until we've made the table.
       (locking tbl-created?
@@ -127,7 +116,7 @@
 (defn client
   "A client which implements a register on top of an entire document."
   [write_acks read_mode]
-  (Client. "jepsen" (atom false) "cas" "n5" write_acks read_mode))
+  (Client. (atom false) "jepsen" "cas" write_acks read_mode))
 
 ; Generators
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -149,7 +138,7 @@
                                   (let [dt (Math/pow 10 (- (rand 5)))]
                                     (->> (gen/mix [r w cas cas])
                                          (gen/stagger dt)
-                                         (gen/limit 500)
+                                         (gen/limit 250)
                                          (gen/time-limit 60))))))
                                   :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)

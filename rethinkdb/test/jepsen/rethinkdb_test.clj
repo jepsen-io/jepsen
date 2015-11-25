@@ -10,7 +10,9 @@
   (let [test (jepsen/run! test)]
     (is (:valid? (:results test)))))
 
-(deftest document-safe-test
-  (run! (dc/cas-test "2.1.5+2~0jessie" "single" "single")))
-;(deftest document-unsafe-test
-;  (run! (dc/cas-test "2.1.5+2~0jessie" "majority" "majority")))
+;(deftest single-single-test
+;  (run! (dc/cas-test "2.1.5+2~0jessie" "single" "single")))
+;(deftest majority-single-test
+;  (run! (dc/cas-test "2.1.5+2~0jessie" "majority" "single")))
+(deftest single-majority-test
+  (run! (dc/cas-test "2.1.5+2~0jessie" "single" "majority")))

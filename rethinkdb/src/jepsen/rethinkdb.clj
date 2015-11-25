@@ -1,4 +1,5 @@
 (ns jepsen.rethinkdb
+  (:refer-clojure :exclude [run!])
   (:require [clojure [pprint :refer :all]
                      [string :as str]]
             [clojure.java.io :as io]
@@ -68,14 +69,25 @@
     (c/exec :service :rethinkdb :start)
     (info node "Started rethinkdb")))
 
+(defn conn
+  "Open a connection to the given node."
+  [node]
+  (connect :host (name node) :port 28015))
+
 (defn wait-for-conn
   "Wait until a connection can be opened to the given node."
   [node]
   (info "Waiting for connection to" node)
-  (retry 5
-         (let [c (connect :host (name node) :port 28015)]
-           (close c)))
+  (retry 5 (close (conn node)))
   (info node "ready"))
+
+(defn run!
+  "Like rethinkdb.query/run, but asserts that there were no errors."
+  [query conn]
+  (let [result (r/run query conn)]
+    (when (contains? result :errors)
+      (assert (zero? (:errors result)) (:first_error result)))
+    result))
 
 (defn db
   "Set up and tear down RethinkDB"
@@ -115,6 +127,21 @@
            4100000 (assoc ~op :type :fail,       :error (:cause (ex-data e#)))
                    (assoc ~op :type error-type#, :error (str e#)))))))
 
+(defn primaries
+  "All nodes that think they're primaries for the given db and table"
+  [nodes db table]
+  (->> nodes
+       (pmap (fn [node]
+               (-> (r/db db)
+                   (r/table table)
+                   (r/status)
+                   (run! (conn node))
+                   :shards
+                   (->> (mapcat :primary_replicas)
+                        (some #{(name node)}))
+                   (when node))))
+       (remove nil?)))
+
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
   causing failover."
@@ -122,11 +149,11 @@
   (gen/phases
     (->> gen
          (gen/nemesis
-           (gen/seq (cycle [{:type :info :f :start}
+           (gen/seq (cycle [(gen/sleep 5)
+                            {:type :info :f :start}
                             (gen/sleep 5)
-                            {:type :info :f :stop}
-                            (gen/sleep 5)])))
-         (gen/time-limit 300))))
+                            {:type :info :f :stop}])))
+         (gen/time-limit 200))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'rethinkdb ', merging any
@@ -140,5 +167,7 @@
            :model     (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable
                                         :perf   (checker/perf)})
+;           :nemesis   (nemesis/hammer-time #(primaries % "jepsen" "cas")
+;                                           "rethinkdb"))
            :nemesis   (nemesis/partition-random-halves))
     (dissoc opts :version)))
