@@ -27,6 +27,25 @@
 
 (def log-file "/var/log/rethinkdb")
 
+(defn faketime-script
+  "A sh script which invokes cmd with a faketime wrapper."
+  [cmd]
+  (str "#!/bin/bash\n"
+       "faketime -m -f \"+$((RANDOM%100))s x1.${RANDOM}\" "
+       cmd
+       " \"$@\""))
+
+(defn faketime-wrapper!
+  "Replaces an executable with a faketime wrapper. Idempotent."
+  [cmd]
+  (let [cmd'    (str cmd ".no-faketime")
+        wrapper (faketime-script cmd')]
+    (when-not (cu/file? cmd')
+      (info "Installing faketime wrapper.")
+      (c/exec :mv cmd cmd')
+      (c/exec :echo wrapper :> cmd)
+      (c/exec :chmod "a+x" cmd))))
+
 (defn install!
   "Install RethinkDB on a node"
   [node version]
@@ -36,6 +55,7 @@
   (c/su (c/exec :wget :-qO :- "https://download.rethinkdb.com/apt/pubkey.gpg" |
                 :apt-key :add :-))
   (debian/install {"rethinkdb" version})
+  (faketime-wrapper! "/usr/bin/rethinkdb")
 
   ; Set up logfile
   (c/exec :touch log-file)
@@ -153,7 +173,7 @@
                             {:type :info :f :start}
                             (gen/sleep 5)
                             {:type :info :f :stop}])))
-         (gen/time-limit 200))))
+         (gen/time-limit 500))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'rethinkdb ', merging any

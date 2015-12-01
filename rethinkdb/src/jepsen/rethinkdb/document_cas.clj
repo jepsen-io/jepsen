@@ -129,17 +129,15 @@
   (test- (str "document write-" write-acks " read-" read-mode)
          {:version version
           :client (client write-acks read-mode)
-          :concurrency 5
+          :concurrency 20
           :generator (std-gen (independent/sequential-generator
                                 (range)
                                 (fn [k]
-                                  ; Pick a random timescale between 10 seconds
-                                  ; and a hundred micros
-                                  (let [dt (Math/pow 10 (- (rand 5)))]
-                                    (->> (gen/mix [r w cas cas])
-                                         (gen/stagger dt)
-                                         (gen/limit 250)
-                                         (gen/time-limit 60))))))
-                                  :checker (checker/compose
+                                  (->> (gen/reserve 10 cas
+                                                    5  w
+                                                       r)
+                                       (gen/delay 1)
+                                       (gen/limit 250)))))
+          :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)
                       :perf   (checker/perf)})}))
