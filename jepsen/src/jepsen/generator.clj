@@ -36,8 +36,28 @@
         (f)))))
 
 (def ^:dynamic *threads*
-  "The set of threads which will execute a particular generator. Used
-  where all threads must synchronize.")
+  "The ordered collection of threads which will execute a particular generator.
+  The special thread :nemesis is used for the nemesis; other threads are 0-n,
+  where n is the test concurrency. Processes map to threads: process mod n is
+  the thread ID.
+
+  The set of threads is used where multiple parts of a test must synchronize.")
+
+(defmacro with-threads
+  "Binds *threads* for duration of body. Safety check: asserts threads are
+  sorted."
+  [threads & body]
+  `(let [threads# ~threads]
+     (assert (= threads# (sort-by < threads#)))
+     (binding [*threads* threads#]
+       ~@body)))
+
+(defn process->thread
+  "Given a process identifier, return the corresponding thread identifier."
+  [test process]
+  (if (number? process)
+    (mod process (:concurrency test))
+    process))
 
 (def void
   "A generator which terminates immediately"
@@ -227,13 +247,58 @@
 
 (defn on
   [f source]
-  "Forwards operations to source generator iff (f process) is true. Rebinds
+  "Forwards operations to source generator iff (f thread) is true. Rebinds
   *threads* appropriately."
   (reify Generator
     (op [gen test process]
-      (when (f process)
+      (when (f (process->thread test process))
         (binding [*threads* (c/filter f *threads*)]
           (op source test process))))))
+
+(defn reserve
+  "Takes a series of count, generator pairs, and a final default generator.
+
+      (reserve 5 write 10 cas read)
+
+  The first 5 threads will call the `write` generator, the next 10 will emit
+  CAS operations, and the remaining threads will perform reads. This is
+  particularly useful when you want to ensure that two classes of operations
+  have a chance to proceed concurrently--for instance, if writes begin
+  blocking, you might like reads to proceed concurrently without every thread
+  getting tied up in a write.
+
+  Rebinds *threads* appropriately. Assumes that every invocation of this
+  generator arrives with the same binding for *threads*."
+  [& args]
+  (let [gens (->> args
+                   drop-last
+                   (partition 2)
+                   ; Construct [lower upper gen] tuples defining the range of
+                   ; thread indices covering a given generator, lower
+                   ; inclusive, upper exclusive.
+                   (reduce (fn [[n gens] [thread-count gen]]
+                             (let [n' (+ n thread-count)]
+                               [n' (conj gens [n n' gen])]))
+                           [0 []])
+                   second)
+        default (last args)]
+    (assert default)
+    (reify Generator
+      (op [_ test process]
+        (let [threads (vec *threads*)
+              thread  (process->thread test process)
+              ; If our thread is smaller than some upper bound in gens, we've
+              ; found our generator, since both *threads* and gens are ordered.
+              [lower upper gen] (or (some (fn [[lower upper gen :as tuple]]
+                                            (and (< thread (nth threads upper))
+                                                 tuple))
+                                          gens)
+                                    ; Default fallback
+                                    [(second (peek gens))
+                                     (count threads)
+                                     default])]
+          (with-threads (subvec threads lower upper)
+            (op gen test process)))))))
 
 (defn concat
   "Takes n generators and yields the first non-nil operation from any, in
