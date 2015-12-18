@@ -12,6 +12,7 @@
   Big ol box of monads, really."
   (:refer-clojure :exclude [concat delay seq filter])
   (:require [jepsen.util :as util]
+            [knossos.history :as history]
             [clojure.core :as c]
             [clojure.tools.logging :refer [info]])
   (:import (java.util.concurrent.atomic AtomicBoolean)
@@ -48,7 +49,7 @@
   sorted."
   [threads & body]
   `(let [threads# ~threads]
-     (assert (= threads# (sort-by < threads#)))
+     (assert (= threads# (history/sort-processes threads#)))
      (binding [*threads* threads#]
        ~@body)))
 

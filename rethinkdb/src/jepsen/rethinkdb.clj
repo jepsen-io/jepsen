@@ -173,7 +173,7 @@
                             {:type :info :f :start}
                             (gen/sleep 5)
                             {:type :info :f :stop}])))
-         (gen/time-limit 500))))
+         (gen/time-limit 200))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'rethinkdb ', merging any

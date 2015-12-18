@@ -397,8 +397,8 @@
               ; Setup
               (with-os test
                 (with-db test
-                  (binding [generator/*threads*
-                            (cons :nemesis (range (:concurrency test)))]
+                  (generator/with-threads (cons :nemesis
+                                                (range (:concurrency test)))
                     (util/with-relative-time
                       (with-nemesis test
 
