@@ -14,7 +14,8 @@
             [knossos [model :as model]
                      [op :as op]
                      [linear :as linear]
-                     [history :as history]]))
+                     [history :as history]]
+            [knossos.linear.report :as linear.report]))
 
 (defprotocol Checker
   (check [checker test model history]
@@ -49,7 +50,14 @@
   "Validates linearizability with Knossos."
   (reify Checker
     (check [this test model history]
-      (linear/analysis model history))))
+      (let [a (linear/analysis model history)]
+        (when-not (:valid? a)
+          (linear.report/render-analysis!
+            history a (.getCanonicalPath (store/path! test "linear.svg"))))
+        ; Writing these can take *hours*
+        (assoc a
+               :final-paths (take 100 (:final-paths a))
+               :configs     (take 100 (:configs a)))))))
 
 (def queue
   "Every dequeue must come from somewhere. Validates queue operations by

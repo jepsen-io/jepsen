@@ -6,7 +6,7 @@
                  [clj-time "0.9.0"]
                  [jepsen "0.0.7-SNAPSHOT"]
                  [cheshire "5.4.0"]]
-  :jvm-opts ["-Xmx24g"
+  :jvm-opts ["-Xmx64g"
              "-XX:+UseConcMarkSweepGC"
              "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled"
@@ -14,5 +14,5 @@
              "-XX:+UseFastAccessorMethods"
              "-XX:MaxInlineLevel=32"
              "-XX:MaxRecursiveInlineLevel=2"
-             "-XX:-OmitStackTraceInFastThrow"
+;             "-XX:-OmitStackTraceInFastThrow"
              "-server"])
