@@ -228,10 +228,14 @@
        (let [worker# (nemesis-worker ~test nemesis#)
              result# ~@body]
          ; Wait for nemesis worker to complete
+         (info "Waiting for nemesis to complete")
          (deref worker#)
+         (info "nemesis done.")
          result#)
        (finally
-         (client/teardown! nemesis# ~test)))))
+         (info "Tearing down nemesis")
+         (client/teardown! nemesis# ~test)
+         (info "Nemesis torn down")))))
 
 (defn snarf-logs!
   "Downloads logs for a test."
@@ -262,8 +266,8 @@
                       )))))))
 
 (defn run-case!
-  "Spawns clients, runs a single test case, snarf the logs, and returns that
-  case's history."
+  "Spawns nemesis and clients, runs a single test case, snarf the logs, and
+  returns that case's history."
   [test]
   (let [history (atom [])
         test    (assoc test :history history)]
@@ -271,34 +275,36 @@
     ; Register history with test's active set.
     (swap! (:active-histories test) conj history)
 
-    ; Initialize clients
-    (with-resources [clients
-                     #(client/setup! (:client test) test %) ; Specialize to node
-                     #(client/teardown! % test)
-                     (if (empty? (:nodes test))
-                       ; If you've specified an empty node set, we'll still
-                       ; give you `concurrency` clients, with nil.
-                       (repeat (:concurrency test) nil)
-                       (->> test
-                          :nodes
-                          cycle
-                          (take (:concurrency test))))]
+    ; Launch nemesis
+    (with-nemesis test
+      ; Launch clients
+      (with-resources [clients
+                       #(client/setup! (:client test) test %) ; Specialize to node
+                       #(client/teardown! % test)
+                       (if (empty? (:nodes test))
+                         ; If you've specified an empty node set, we'll still
+                         ; give you `concurrency` clients, with nil.
+                         (repeat (:concurrency test) nil)
+                         (->> test
+                              :nodes
+                              cycle
+                              (take (:concurrency test))))]
 
-      ; Begin workload
-      (let [workers (mapv (partial worker test)
-                          (iterate inc 0) ; PIDs
-                          clients)]       ; Clients
+        ; Begin workload
+        (let [workers (mapv (partial worker test)
+                            (iterate inc 0) ; PIDs
+                            clients)]       ; Clients
 
-        ; Wait for workers to complete
-        (dorun (map deref workers))
+          ; Wait for workers to complete
+          (dorun (map deref workers)))))
 
-        ; Download logs
-        (snarf-logs! test)
+    ; Download logs
+    (snarf-logs! test)
 
-        ; Unregister our history
-        (swap! (:active-histories test) disj history)
+    ; Unregister our history
+    (swap! (:active-histories test) disj history)
 
-        @history))))
+    @history))
 
 (defn log-results
   "Logs info about the results of a test to stdout, and returns test."
@@ -400,8 +406,6 @@
                   (generator/with-threads (cons :nemesis
                                                 (range (:concurrency test)))
                     (util/with-relative-time
-                      (with-nemesis test
-
                         ; Run a single case
                         (let [test (assoc test :history (run-case! test))
                               ; Remove state
@@ -422,4 +426,4 @@
 
                             (info "Analysis complete")
                             (when (:name test) (store/save! test))
-                          test))))))))))))))
+                          test)))))))))))))
