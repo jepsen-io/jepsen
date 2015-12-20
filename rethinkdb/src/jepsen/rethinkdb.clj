@@ -10,7 +10,6 @@
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
-                    [model     :as model]
                     [generator :as gen]
                     [nemesis   :as nemesis]
                     [store     :as store]
@@ -22,6 +21,7 @@
             [rethinkdb.core :refer [connect close]]
             [rethinkdb.query :as r]
             [knossos.core :as knossos]
+            [knossos.model :as model]
             [cheshire.core :as json])
   (:import (clojure.lang ExceptionInfo)))
 
