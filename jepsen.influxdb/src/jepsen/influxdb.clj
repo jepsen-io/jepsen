@@ -54,8 +54,16 @@
       )
 
 
-    (teardown! [_ test node]
-      (info node "tore down"))))
+    (teardown! [_ test node]\
+      (c/su
+ 		(info node "Stopping influxdb...")
+ 		(meh (c/exec :killall :-9 "influxd"))
+ 		(c/exec :service :influxdb :stop)
+ 		(info node "Removing influxdb...")
+ 		(c/exec :dpkg :--purge "influxdb")
+ 		(info node "Removed influxdb")
+       )
+     )))
 
 (defn basic-test
   "A simple test of InfluxDB's safety."
