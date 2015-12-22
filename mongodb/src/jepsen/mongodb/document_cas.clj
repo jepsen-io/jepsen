@@ -103,7 +103,8 @@
   []
   (test- "document cas majority"
          {:client (client WriteConcern/MAJORITY)
-          :generator (std-gen (gen/mix [r w cas cas]))}))
+          :concurrency 10
+          :generator (std-gen (gen/reserve 5 (gen/mix [w cas cas]) r))}))
 
 (defn no-read-majority-test
   "Document-level compare and set with MAJORITY, excluding reads because mongo

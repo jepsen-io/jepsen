@@ -31,7 +31,7 @@
             [monger.command]
             [monger.operators :refer :all]
             [monger.conversion :refer [from-db-object]])
-  (:import (knossos.core Model)
+  (:import (knossos.model Model)
            (clojure.lang ExceptionInfo)
            (org.bson BasicBSONObject
                      BasicBSONDecoder)
