@@ -9,7 +9,6 @@
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
-                    [model     :as model]
                     [generator :as gen]
                     [nemesis   :as nemesis]
                     [store     :as store]
@@ -19,7 +18,8 @@
                             [util :as net/util]]
             [jepsen.os.debian :as debian]
             [jepsen.checker.timeline :as timeline]
-            [knossos.core :as knossos]
+            [knossos [core :as knossos]
+                     [model :as model]]
             [cheshire.core :as json]
             [monger.core :as mongo]
             [monger.collection :as mc]
@@ -121,14 +121,14 @@
   mongo.result/from-db-object), unless it contains an error, in which case an
   ex-info exception of :type :mongo is raised."
   [res]
-  (if (mr/ok? res)
-    (from-db-object res true)
-    (throw (ex-info (str "Mongo error: "
-                         (get res "errmsg")
-                         " - "
-                         (get res "info"))
-                    {:type   :mongo
-                     :result res}))))
+;  (if (mr/acknowledged? res)
+    (from-db-object res true))
+;    (throw (ex-info (str "Mongo error: "
+;                         (get res "errmsg")
+;                         " - "
+;                         (get res "info"))
+;                    {:type   :mongo
+;                     :result res}))))
 
 (defn command!
   "Wrapper for monger's admin command API where the command
@@ -244,9 +244,9 @@
                        conn
                        (catch Throwable t
                          (mongo/disconnect conn)
-                         (throw t))))
-                   (catch com.mongodb.MongoServerSelectionException e
-                     nil))
+                         (throw t)))))
+;                   (catch com.mongodb.MongoServerSelectionException e
+;                     nil))
                  (do
                    (Thread/sleep 1000)
                    (recur))))))
@@ -288,7 +288,12 @@
   "Join nodes into a replica set. Blocks until any primary is visible to all
   nodes which isn't really what we want but oh well."
   [node test]
-  ; Gotta have all nodes online for this
+  ; Gotta have all nodes online for this. Delightfully, Mongo won't actually
+  ; bind to the port until well *after* the init script startup process
+  ; returns. This would be fine, except that  if a node isn't ready to join,
+  ; the initiating node will just hang indefinitely, instead of figuring out
+  ; that the node came online a few seconds later.
+  (.close (await-conn node))
   (jepsen/synchronize test)
 
   ; Initiate RS
@@ -366,20 +371,15 @@
                        :info)]
      (try
        ~@body
-       ; A server selection error means we never attempted the operation in
-       ; the first place, so we know it didn't take place.
-       (catch com.mongodb.MongoServerSelectionException e#
-         (assoc ~op :type :fail :error :no-server))
-
-       ; Command failures also did not take place.
-       (catch com.mongodb.CommandFailureException e#
-         (if (= "not master" (.. e# getCommandResult getErrorMessage))
-           (assoc ~op :type :fail :error :not-master)
-           (throw e#)))
+       (catch com.mongodb.MongoNotPrimaryException e#
+         (assoc ~op :type :fail, :error :not-primary))
 
        ; A network error is indeterminate
-       (catch com.mongodb.MongoException$Network e#
-         (assoc ~op :type error-type# :error :network-error)))))
+       (catch com.mongodb.MongoSocketReadException e#
+         (assoc ~op :type error-type# :error :socket-read))
+
+       (catch com.mongodb.MongoSocketReadTimeoutException e#
+         (assoc ~op :type error-type# :error :socket-read)))))
 
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
@@ -392,7 +392,7 @@
            (gen/seq (cycle [(gen/sleep 60)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 600))
+        (gen/time-limit 120))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
