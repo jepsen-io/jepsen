@@ -8,6 +8,9 @@
   "What influxdb version should we test?"
   "0.9.6")
 
+
+
+
 (deftest basic-test
   (is (:valid? (:results (run! (influxdb/basic-test version))))))
 
