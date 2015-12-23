@@ -2,7 +2,7 @@
 
  "Tests for InfluxDB"
   (:require [clojure.tools.logging :refer :all]
-            [clojure.core.reducers :as r]
+            [clojure.core.reducers :as r]            
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -52,16 +52,35 @@
                  :> "/etc/influxdb/influxdb.conf")
                   
                 ; first stab at clustering -- doesn't really work yet
-            	(c/exec :echo 
-            		(-> (io/resource "peers.json")  slurp) :> "/var/lib/influxdb/meta/peers.json")
+            ;	(c/exec :echo 
+            ;		(-> (io/resource "peers.json")  slurp) :> "/var/lib/influxdb/meta/peers.json")
+
+              (c/exec :rm :-f "/var/lib/influxdb/meta/peers.json")
+            	(try (c/exec :service :influxdb :stop)
+                    (catch Exception _ 
+                      (info node "no need to stop")
+                    )
+              )
+
             	
-            	 (info node "Waiting for each other...")          
-            	(jepsen/synchronize test)
-           		; Ensure node is running
-                (try (c/exec :service :influxdb :status)
-                     (catch RuntimeException _
-                     (info "Starting influxdb...")
-                     (c/exec :service :influxdb :start)))
+               ; (c/exec :echo 
+               ; (-> (io/resource "infxludb")  slurp (str/replace #"%NODES_TO_JOIN%" (str (name node) ":8088")))  :> "/etc/default/influxdb")      
+
+            	;(jepsen/synchronize test);
+
+              (locking test 
+                (dosync
+                  (ref-set (:nodeOrder test) (conj (deref (:nodeOrder test)) node))
+                  (info node "I have the lock! nodeOrder: " (:nodeOrder test))    
+             		; Ensure node is running
+                  (try (c/exec :service :influxdb :status)
+                       (catch RuntimeException _
+                       (info node "Starting influxdb...")
+                       (c/exec :service :influxdb :start)))
+                  
+                  (info node "InfluxDB started!") 
+                  )
+              )
 
             )
 		
@@ -77,10 +96,10 @@
     	(try
 	      (c/su
 	 		(info node "Stopping influxdb...")
-	 		(meh (c/exec :killall :-9 "influxd"))
-	 		(c/exec :service :influxdb :stop)
+	 		;(meh (c/exec :killall :-9 "influxd"))
+	 		;(c/exec :service :influxdb :stop)
 	 		(info node "Removing influxdb...")
-	 		(c/exec :dpkg :--purge "influxdb")
+	 		;(c/exec :dpkg :--purge "influxdb")
 	 		(info node "Removed influxdb")
 	       )
 	      (catch RuntimeException e
@@ -101,7 +120,7 @@
   	 	{ :username "root"
   	 	  :private-key-path "~/.ssh/id_rsa"
   	 	}
-
+      :nodeOrder (ref [])
   	 	:nodes     [:n5 :n4 :n1 :n2 :n3  ]
   	   :concurrency 3
   	   :os debian/os

@@ -395,7 +395,7 @@
                         :active-histories (atom #{}))]
 
         (info "== Concurrency level:" (:concurrency test))
-        (info "== Real concurrency level:" (+ 2 (.availableProcessors (Runtime/getRuntime))))
+        (info "== Real concurrency level:" (+ 2 (cp/ncpus)))
         (info "== barrier :" (:barrier test))
         (info "== start-time :" (:start-time test))
         ; Open SSH conns
