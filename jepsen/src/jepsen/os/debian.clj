@@ -127,6 +127,7 @@
 
       (maybe-update!)
 
+     (info node "making sure packages are installed...")
       (c/su
         ; Packages!
         (install [:wget
@@ -142,11 +143,16 @@
                   :iputils-ping
                   :rsyslog
                   :logrotate])
+    
+      (info node "checking on systemd...")
 
         ; Fucking systemd breaks a bunch of packages
         (if (installed? :systemd)
           (c/exec :apt-get :remove :-y :--purge :--auto-remove :systemd)))
 
-      (meh (net/heal)))
+      (info node "healing network...")
+      (meh (net/heal))
+      (info node "debian setup done.")
+      )
 
     (teardown! [_ test node])))

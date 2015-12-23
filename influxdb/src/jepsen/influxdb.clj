@@ -26,6 +26,8 @@
   [version]
   (reify db/DB
     (setup! [_ test node]
+     (info node "Starting influxdb setup.")
+     (try    
       (c/cd "/tmp"
             (let [version "0.9.6.1"
                   file (str "influxdb_" version "_amd64.deb")]
@@ -42,28 +44,54 @@
 
             	(c/exec :cp "/usr/lib/influxdb/scripts/init.sh" "/etc/init.d/influxdb")
 
-            		  ; Ensure node is running
+            	; preparing for the clustering, hostname should be the node's name
+                (info node "Copying influxdb configuration...")              
+            	(c/exec :echo (-> (io/resource "influxdb.conf")
+                      slurp
+                      (str/replace #"%HOSTNAME%" (name node)))
+                 :> "/etc/influxdb/influxdb.conf")
+                  
+                ; first stab at clustering -- doesn't really work yet
+            	(c/exec :echo 
+            		(-> (io/resource "peers.json")  slurp) :> "/var/lib/influxdb/meta/peers.json")
+            	
+            	 (info node "Waiting for each other...")          
+            	(jepsen/synchronize test)
+           		; Ensure node is running
                 (try (c/exec :service :influxdb :status)
                      (catch RuntimeException _
                      (info "Starting influxdb...")
                      (c/exec :service :influxdb :start)))
 
             )
-
-
+		
+	      (catch RuntimeException e
+	      		(error node "Error at Setup: " e (.getMessage e))
+	      		(throw e)
+	      	)
+	      )
       )
 
 
-    (teardown! [_ test node]\
-      (c/su
- 		(info node "Stopping influxdb...")
- 		(meh (c/exec :killall :-9 "influxd"))
- 		(c/exec :service :influxdb :stop)
- 		(info node "Removing influxdb...")
- 		(c/exec :dpkg :--purge "influxdb")
- 		(info node "Removed influxdb")
-       )
-     )))
+    (teardown! [_ test node]
+    	(try
+	      (c/su
+	 		(info node "Stopping influxdb...")
+	 		(meh (c/exec :killall :-9 "influxd"))
+	 		(c/exec :service :influxdb :stop)
+	 		(info node "Removing influxdb...")
+	 		(c/exec :dpkg :--purge "influxdb")
+	 		(info node "Removed influxdb")
+	       )
+	      (catch RuntimeException e
+	      		(error node "Error at TearDown: " e (.getMessage e))
+	      		(throw e)
+	      	)
+      )
+     ))
+
+
+    )
 
 (defn basic-test
   "A simple test of InfluxDB's safety."
@@ -73,6 +101,9 @@
   	 	{ :username "root"
   	 	  :private-key-path "~/.ssh/id_rsa"
   	 	}
+
+  	 	:nodes     [:n5 :n4 :n1 :n2 :n3  ]
+  	   :concurrency 3
   	   :os debian/os
        :db (db version)
   	 }

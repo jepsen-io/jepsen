@@ -6,9 +6,7 @@
 
 (def version
   "What influxdb version should we test?"
-  "0.9.6")
-
-
+  "0.9.6.1")
 
 
 (deftest basic-test
