@@ -1,0 +1,3 @@
+influx <<EOF
+exit
+EOF
