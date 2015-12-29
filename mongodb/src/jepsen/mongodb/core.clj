@@ -74,8 +74,9 @@
 
 (defn configure!
   "Deploy configuration files to the node."
-  [node]
-  (c/exec :echo (-> "mongod.conf" io/resource slurp)
+  [node test]
+  (c/exec :echo (-> "mongod.conf" io/resource slurp
+                    (str/replace #"%STORAGE_ENGINE%" (:storage-engine test)))
           :> "/etc/mongod.conf"))
 
 (defn start!
@@ -338,7 +339,7 @@
     (setup! [_ test node]
       (doto node
         (install! version)
-        (configure!)
+        (configure! test)
         (start!)
         (join! test)))
 
@@ -355,10 +356,21 @@
   "Ensures the existence of the given document."
   [db coll doc write-concern]
   (assert (:_id doc))
-  (mc/upsert db coll
-             {:_id (:_id doc)}
-             doc
-             {:write-concern write-concern}))
+  (let [res (try
+              (mc/upsert db coll
+                         {:_id (:_id doc)}
+                         doc
+                         {:write-concern write-concern})
+              (catch com.mongodb.DuplicateKeyException e
+                ; This is probably
+                ; https://jira.mongodb.org/browse/SERVER-14322; we back off
+                ; randomly and retry.
+                (info "Retrying duplicate key collision")
+                (Thread/sleep (rand-int 100))
+                ::retry))]
+    (if (= ::retry res)
+      (recur db coll doc write-concern)
+      res)))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operation functions which
@@ -392,7 +404,7 @@
            (gen/seq (cycle [(gen/sleep 60)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-        (gen/time-limit 120))
+        (gen/time-limit 12))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -408,11 +420,12 @@
   [name opts]
   (merge
     (assoc tests/noop-test
-           :name      (str "mongodb " name)
-           :os        debian/os
-           :db        (db "3.0.4")
-           :model     (model/cas-register)
+           :name            (str "mongodb " name)
+           :os              debian/os
+           :db              (db "3.0.4" )
+           :storage-engine  "wiredTiger"
+           :model           (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable
                                         :latency (checker/latency-graph)})
-           :nemesis   (nemesis/partition-random-halves))
+           :nemesis         (nemesis/partition-random-halves))
     opts))
