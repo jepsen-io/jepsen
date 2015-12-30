@@ -47,17 +47,16 @@
   ; Download tarball
   (let [file (c/cd "/tmp" (cu/wget! url))]
     (try
-      (c/trace
-        (c/cd "/opt"
-              ; Clean up old dir
-              (c/exec :rm :-rf "mongodb")
-              ; Extract and rename
-              (c/exec :tar :xvf (str "/tmp/" file))
-              (c/exec :mv (c/lit "mongodb-linux-*") "mongodb")
-              ; Create data dir
-              (c/exec :mkdir :-p "mongodb/data")
-              ; Permissions
-              (c/exec :chown :-R (str username ":" username) "mongodb")))
+      (c/cd "/opt"
+            ; Clean up old dir
+            (c/exec :rm :-rf "mongodb")
+            ; Extract and rename
+            (c/exec :tar :xvf (str "/tmp/" file))
+            (c/exec :mv (c/lit "mongodb-linux-*") "mongodb")
+            ; Create data dir
+            (c/exec :mkdir :-p "mongodb/data")
+            ; Permissions
+            (c/exec :chown :-R (str username ":" username) "mongodb"))
     (catch RuntimeException e
       (condp re-find (.getMessage e)
         #"tar: Unexpected EOF" (do (info "Retrying corrupt tarball download")
