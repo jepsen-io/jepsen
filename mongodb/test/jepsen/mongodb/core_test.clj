@@ -20,7 +20,7 @@
   (let [test (jepsen/run! test)]
     (is (:valid? (:results test)))))
 
-(deftest document-cas-majority-test         (run! (dc/majority-test)))
+(deftest document-cas-majority-test         (run! (dc/majority-test {})))
 ;(deftest document-cas-no-read-majority-test (run! (dc/no-read-majority-test)))
 ;(deftest transfer-basic-read-test           (run! (t/basic-read-test)))
 ;(deftest transfer-partial-read-test         (run! (t/partial-read-test)))

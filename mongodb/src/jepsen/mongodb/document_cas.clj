@@ -100,16 +100,19 @@
 
 (defn majority-test
   "Document-level compare and set with WriteConcern MAJORITY"
-  []
+  [opts]
   (test- "document cas majority"
-         {:client (client WriteConcern/MAJORITY)
-          :concurrency 10
-          :generator (std-gen (gen/reserve 5 (gen/mix [w cas cas]) r))}))
+         (merge
+           {:client (client WriteConcern/MAJORITY)
+            :concurrency 10
+            :generator (std-gen (gen/reserve 5 (gen/mix [w cas cas]) r))}
+           opts)))
 
 (defn no-read-majority-test
   "Document-level compare and set with MAJORITY, excluding reads because mongo
   doesn't have linearizable reads."
-  []
+  [opts]
   (test- "document cas no-read majority"
-         {:client (client WriteConcern/MAJORITY)
-          :generator (std-gen (gen/mix [w cas cas]))}))
+         (merge {:client (client WriteConcern/MAJORITY)
+                 :generator (std-gen (gen/mix [w cas cas]))}
+                opts)))
