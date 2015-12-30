@@ -15,7 +15,7 @@
                     [report    :as report]
                     [tests     :as tests]]
             [jepsen.control [net :as net]
-                            [util :as net/util]]
+                            [util :as cu]]
             [jepsen.os.debian :as debian]
             [jepsen.checker.timeline :as timeline]
             [knossos [core :as knossos]
@@ -36,63 +36,56 @@
                         WriteConcern
                         ReadPreference)))
 
-(defn apt-install!
-  "Does the apt-get install for a version"
-  [version]
-  (c/su
-    (debian/install {:mongodb-org version
-                     :mongodb-org-server version
-                     :mongodb-org-shell version
-                     :mongodb-org-mongos version
-                     :mongodb-org-tools version})))
+(def username "mongodb")
 
 (defn install!
-  "Installs the given version of MongoDB."
-  [node version]
-  (c/su
+  "Installs a tarball from an HTTP URL"
+  [node url]
+  ; Add user
+  (cu/ensure-user! username)
+
+  ; Download tarball
+  (let [file (c/cd "/tmp" (cu/wget! url))]
     (try
-      (apt-install! version)
-
-      (catch RuntimeException e
-        ; Add apt key
-        (c/exec :apt-key     :adv
-                :--keyserver "keyserver.ubuntu.com"
-                :--recv      "7F0CEB10")
-
-        ; Add repos
-        (c/exec :echo "deb http://downloads-distro.mongodb.org/repo/debian-sysvinit dist 10gen"
-                :> "/etc/apt/sources.list.d/mongodb.list")
-        (c/exec :echo "deb http://repo.mongodb.org/apt/debian wheezy/mongodb-org/3.0 main"
-                :> "/etc/apt/sources.list.d/mongodb-3.0.list")
-        (c/exec :apt-get :update)
-
-        ; Try install again
-        (apt-install! version)))
-
-    ; Make sure we don't start at startup
-    (c/exec :update-rc.d :mongod :remove :-f)))
+      (c/trace
+        (c/cd "/opt"
+              ; Clean up old dir
+              (c/exec :rm :-rf "mongodb")
+              ; Extract and rename
+              (c/exec :tar :xvf (str "/tmp/" file))
+              (c/exec :mv (c/lit "mongodb-linux-*") "mongodb")
+              ; Create data dir
+              (c/exec :mkdir :-p "mongodb/data")
+              ; Permissions
+              (c/exec :chown :-R (str username ":" username) "mongodb")))
+    (catch RuntimeException e
+      (condp re-find (.getMessage e)
+        #"tar: Unexpected EOF" (do (info "Retrying corrupt tarball download")
+                                   (c/exec :rm :-rf (str "/tmp/" file))
+                                   (install! node url))
+        (throw e))))))
 
 (defn configure!
   "Deploy configuration files to the node."
   [node test]
   (c/exec :echo (-> "mongod.conf" io/resource slurp
                     (str/replace #"%STORAGE_ENGINE%" (:storage-engine test)))
-          :> "/etc/mongod.conf"))
+          :> "/opt/mongodb/mongod.conf"))
 
 (defn start!
   "Starts Mongod"
   [node]
-  (info node "starting mongod")
-  (c/su (c/exec :service :mongod :start)))
+  (c/sudo username
+          (cu/start-daemon! {:logfile "/opt/mongodb/stdout.log"
+                             :pidfile "/opt/mongodb/pidfile"
+                             :chdir   "/opt/mongodb"}
+                            "/opt/mongodb/bin/mongod"
+                            :--config "/opt/mongodb/mongod.conf")))
 
 (defn stop!
   "Stops Mongod"
   [node]
-  (info node "stopping mongod")
-  (c/su
-    (timeout 5000 nil
-      (c/exec :service :mongod :stop))
-    (meh (c/exec :killall :-9 :mongod))))
+  (cu/stop-daemon! "mongod" "/opt/mongodb/pidfile"))
 
 (defn wipe!
   "Shuts down MongoDB and wipes data."
@@ -100,16 +93,8 @@
   (stop! node)
   (info node "deleting data files")
   (c/su
-    (c/exec :rm :-rf (c/lit "/var/log/mongodb/*"))
-    (c/exec :rm :-rf (c/lit "/var/lib/mongodb/*"))))
-
-(defn uninstall!
-  "Uninstallys the current version of mongodb"
-  [node]
-  (info node "uninstalling mongodb")
-  (c/su
-    (c/exec :apt-get :remove :--purge :-y "mongodb-org")
-    (c/exec :apt-get :autoremove :-y)))
+    (c/exec :rm :-rf (c/lit "/opt/mongodb/*.log"))
+    (c/exec :rm :-rf (c/lit "/opt/mongodb/data/*"))))
 
 (defn mongo!
   "Run a Mongo shell command. Spits back an unparsable kinda-json string,
@@ -333,12 +318,12 @@
     (jepsen/synchronize test)))
 
 (defn db
-  "MongoDB for a particular version."
-  [version]
+  "MongoDB for a particular HTTP URL"
+  [url]
   (reify db/DB
     (setup! [_ test node]
       (doto node
-        (install! version)
+        (install! url)
         (configure! test)
         (start!)
         (join! test)))
@@ -422,7 +407,7 @@
     (assoc tests/noop-test
            :name            (str "mongodb " name)
            :os              debian/os
-           :db              (db "3.0.4" )
+           :db              (db "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-debian71-3.2.0.tgz")
            :storage-engine  "wiredTiger"
            :model           (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable
