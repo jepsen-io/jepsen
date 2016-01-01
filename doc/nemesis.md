@@ -152,3 +152,6 @@ Only 241 operations into the history, we've accrued 10^34 possible orders to
 explore. So, we need *short* histories, but we want *lots of them*. That's
 where `jepsen.independent` comes into play--but that's a discussion for another
 time.
+
+For now, take a break. Congratulations! You've written your first Jepsen test
+from scratch!

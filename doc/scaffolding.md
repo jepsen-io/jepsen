@@ -133,4 +133,4 @@ $ cat store/latest/results.edn
 {:valid? true, :configs ({:model {}, :pending []}), :final-paths ()}
 ```
 
-With the groundwork in place, we'll write the code to [set up and tear down the database](/doc/db.md)
+With the groundwork in place, we'll write the code to [set up and tear down the database](db.md)
