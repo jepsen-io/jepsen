@@ -87,4 +87,4 @@ $ open store/latest/latency-raw.png
 ```
 
 Now that we've got a passing test, it's time to [introduce
-failures](doc/nemesis.md) into the system.
+failures](nemesis.md) into the system.

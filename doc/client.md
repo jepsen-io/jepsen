@@ -329,4 +329,4 @@ current value, but a few (~1/5, since there are 5 possible values) should
 succeed.
 
 With our client performing operations, it's time to analyze results using a
-[checker](doc/checker.md).
+[checker](checker.md).

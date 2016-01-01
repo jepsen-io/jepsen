@@ -439,4 +439,4 @@ download at the end of a test.
       ["/var/log/zookeeper/zookeeper.log"])))
 ```
 
-With the database ready, it's time to [write a client](doc/client.md).
+With the database ready, it's time to [write a client](client.md).
