@@ -12,6 +12,7 @@
 
   Jepsen automates the setup and teardown of the environment and distributed
   system by using an *OS* and *client* respectively. See `run!` for details."
+  (:refer-clojure :exclude [run!])
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
