@@ -1,32 +1,31 @@
 (ns jepsen.zookeeper
-  (:require [clojure.tools.logging :refer :all]
-            [clojure.java.io :as io]
-            [clojure.string :as str]
-            [jepsen [client :as client]
-             [db :as db]
-             [tests :as tests]
-             [control :as c :refer [|]]
-             [checker :as checker]
-             [generator :as gen]
-             [util :refer [timeout]]
-             [nemesis :as nemesis]]
-            [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]
-            [knossos.model :as model]
-            [avout.core :as avout]))
+  (:require [avout.core         :as avout]
+            [clojure.tools.logging :refer :all]
+            [clojure.java.io    :as io]
+            [clojure.string     :as str]
+            [jepsen [db         :as db]
+                    [checker    :as checker]
+                    [client     :as client]
+                    [control    :as c]
+                    [generator  :as gen]
+                    [nemesis    :as nemesis]
+                    [tests      :as tests]
+                    [util       :refer [timeout]]]
+            [jepsen.os.debian   :as debian]
+            [knossos.model      :as model]))
 
 (defn zk-node-ids
-  "We number nodes in reverse order so the leader is the first node. Returns a
-  map of node names to node ids."
+  "Returns a map of node names to node ids."
   [test]
   (->> test
        :nodes
-       (map-indexed (fn [i node] [node (- (count (:nodes test)) i)]))
+       (map-indexed (fn [i node] [node i]))
        (into {})))
 
 (defn zk-node-id
+  "Given a test and a node name from that test, returns the ID for that node."
   [test node]
-  (get (zk-node-ids test) node))
+  ((zk-node-ids test) node))
 
 (defn zoo-cfg-servers
   "Constructs a zoo.cfg fragment for servers."
@@ -42,13 +41,11 @@
   (reify db/DB
     (setup! [_ test node]
       (c/su
-        (info node "Setting up ZK")
-        ; Install zookeeper
+        (info node "installing ZK" version)
         (debian/install {:zookeeper version
                          :zookeeper-bin version
                          :zookeeperd version})
 
-        ; Set up zookeeper
         (c/exec :echo (zk-node-id test node) :> "/etc/zookeeper/conf/myid")
 
         (c/exec :echo (str (slurp (io/resource "zoo.cfg"))
@@ -56,12 +53,12 @@
                            (zoo-cfg-servers test))
                 :> "/etc/zookeeper/conf/zoo.cfg")
 
-        ; Restart
         (info node "ZK restarting")
         (c/exec :service :zookeeper :restart)
         (info node "ZK ready")))
 
     (teardown! [_ test node]
+      (info node "tearing down ZK")
       (c/su
         (c/exec :service :zookeeper :stop)
         (c/exec :rm :-rf
@@ -69,10 +66,15 @@
                 (c/lit "/var/log/zookeeper/*"))))
 
     db/LogFiles
-    (log-files [_ _ _]
+    (log-files [_ test node]
       ["/var/log/zookeeper/zookeeper.log"])))
 
+(defn r   [_ _] {:type :invoke, :f :read, :value nil})
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
+
 (defn client
+  "A client for a single compare-and-set register"
   [conn a]
   (reify client/Client
     (setup! [_ test node]
@@ -99,16 +101,14 @@
     (teardown! [_ test]
       (.close conn))))
 
-(defn r [_ _] {:type :invoke, :f :read, :value nil})
-(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
-(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
-
-(defn simple-test
+(defn zk-test
   [version]
   (assoc tests/noop-test
-         :name "zookeeper"
-         :os   debian/os
-         :db   (db version)
+         :name    "zookeeper"
+         :os      debian/os
+         :db      (db version)
+         :client  (client nil nil)
+         :nemesis (nemesis/partition-random-halves)
          :generator (->> (gen/mix [r w cas])
                          (gen/stagger 1)
                          (gen/nemesis
@@ -116,8 +116,8 @@
                                             {:type :info, :f :start}
                                             (gen/sleep 5)
                                             {:type :info, :f :stop}])))
-                         (gen/time-limit 15))
-         :nemesis (nemesis/partition-random-halves)
-         :client  (client nil nil)
+                         (gen/time-limit 60))
          :model   (model/cas-register 0)
-         :checker checker/linearizable))
+         :checker (checker/compose
+                    {:perf   (checker/perf)
+                     :linear checker/linearizable})))
