@@ -14,7 +14,7 @@ $ cd jepsen.zookeeper
 We'll need a few Clojure libraries for this test. Open `project.clj`, which
 specifies the project's dependencies and other metadata. In addition to
 depending on the Clojure language itself, we'll pull in the Jepsen library (at
-version 0.0.8), and Avout: a library for working with Zookeeper.
+version 0.0.9), and Avout: a library for working with Zookeeper.
 
 ```clj
 (defproject jepsen.zookeeper "0.1.0-SNAPSHOT"
@@ -23,7 +23,7 @@ version 0.0.8), and Avout: a library for working with Zookeeper.
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.7.0"]
-                 [jepsen "0.0.8"]
+                 [jepsen "0.0.9"]
                  [avout "0.5.4"]])
 ```
 
@@ -64,7 +64,7 @@ them.
   tests/noop-test)
 ```
 
-Remember, `tests/noop-test` refers to the `noop-test` var in the `jepsen.tests`
+`tests/noop-test` refers to the `noop-test` var in the `jepsen.tests`
 namespace--which we aliased to `tests` in the `:require` section of our
 namespace declaration.
 
