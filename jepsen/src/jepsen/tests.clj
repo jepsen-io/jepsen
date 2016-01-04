@@ -1,12 +1,11 @@
 (ns jepsen.tests
   "Provide utilities for writing tests using jepsen."
-  (:use jepsen.core)
   (:require [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.client :as client]
             [jepsen.nemesis :as nemesis]
             [jepsen.generator :as gen]
-            [jepsen.model :as model]
+            [knossos.model :as model]
             [jepsen.checker :as checker]
             [jepsen.net :as net]))
 

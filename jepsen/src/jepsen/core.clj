@@ -12,6 +12,7 @@
 
   Jepsen automates the setup and teardown of the environment and distributed
   system by using an *OS* and *client* respectively. See `run!` for details."
+  (:refer-clojure :exclude [run!])
   (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
@@ -261,16 +262,21 @@
                                       (zipmap full-paths))]
                   (doseq [[remote local] paths]
                     (info "downloading" remote "to" local)
-                    (control/download
-                      remote
-                      (.getCanonicalPath
-                        (store/path! test (name node)
-                                     ; strip leading /
-                                     (str/replace local #"^/" "")))
-                      ; broken
-                      ; :recursive true
-                      ; :preserve true
-                      )))))))
+                    (try
+                      (control/download
+                        remote
+                        (.getCanonicalPath
+                          (store/path! test (name node)
+                                       ; strip leading /
+                                       (str/replace local #"^/" ""))))
+                      (catch java.io.IOException e
+                        (if (= "Pipe closed" (.getMessage e))
+                          (info remote "pipe closed")
+                          (throw e)))
+                      (catch java.lang.IllegalArgumentException e
+                        ; This is a jsch bug where the file is just being
+                        ; created
+                        (info remote "doesn't exist")))))))))
 
 (defn run-case!
   "Spawns nemesis and clients, runs a single test case, snarf the logs, and

@@ -10,19 +10,11 @@
                     [util      :as util :refer [meh timeout]]
                     [control   :as c :refer [|]]
                     [client    :as client]
-                    [checker   :as checker]
-                    [model     :as model]
-                    [generator :as gen]
-                    [nemesis   :as nemesis]
-                    [store     :as store]
-                    [report    :as report]
-                    [tests     :as tests]]
+                    [generator :as gen]]
             [jepsen.control [net :as net]
                             [util :as net/util]]
             [jepsen.os.debian :as debian]
-            [jepsen.checker.timeline :as timeline]
-            [knossos.core :as knossos]
-            [cheshire.core :as json]
+            [knossos.model :as model]
             [jepsen.mongodb.core :refer :all]
             [monger.core :as mongo]
             [monger.collection :as mc]
@@ -31,7 +23,7 @@
             [monger.command]
             [monger.operators :refer :all]
             [monger.conversion :refer [from-db-object]])
-  (:import (knossos.core Model)
+  (:import (knossos.model Model)
            (clojure.lang ExceptionInfo)
            (org.bson BasicBSONObject
                      BasicBSONDecoder)
@@ -195,14 +187,14 @@
         (condp = (:f op)
           :read (if (= accts value)
                   m
-                  (knossos/inconsistent
+                  (model/inconsistent
                     (str "Can't read " value " from " accts)))
 
           :partial-read (if (every? true?
                                     (for [[acct-id balance] value]
                                       (= balance (get accts acct-id))))
                           m
-                          (knossos/inconsistent
+                          (model/inconsistent
                             (str value " isn't consistent with " accts)))
 
           :transfer (let [{:keys [from to amount]} value]

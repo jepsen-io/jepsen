@@ -9,17 +9,17 @@
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
-                    [model     :as model]
                     [generator :as gen]
                     [nemesis   :as nemesis]
                     [store     :as store]
                     [report    :as report]
                     [tests     :as tests]]
             [jepsen.control [net :as net]
-                            [util :as net/util]]
+                            [util :as cu]]
             [jepsen.os.debian :as debian]
             [jepsen.checker.timeline :as timeline]
-            [knossos.core :as knossos]
+            [knossos [core :as knossos]
+                     [model :as model]]
             [cheshire.core :as json]
             [monger.core :as mongo]
             [monger.collection :as mc]
@@ -36,62 +36,55 @@
                         WriteConcern
                         ReadPreference)))
 
-(defn apt-install!
-  "Does the apt-get install for a version"
-  [version]
-  (c/su
-    (debian/install {:mongodb-org version
-                     :mongodb-org-server version
-                     :mongodb-org-shell version
-                     :mongodb-org-mongos version
-                     :mongodb-org-tools version})))
+(def username "mongodb")
 
 (defn install!
-  "Installs the given version of MongoDB."
-  [node version]
-  (c/su
+  "Installs a tarball from an HTTP URL"
+  [node url]
+  ; Add user
+  (cu/ensure-user! username)
+
+  ; Download tarball
+  (let [file (c/cd "/tmp" (cu/wget! url))]
     (try
-      (apt-install! version)
-
-      (catch RuntimeException e
-        ; Add apt key
-        (c/exec :apt-key     :adv
-                :--keyserver "keyserver.ubuntu.com"
-                :--recv      "7F0CEB10")
-
-        ; Add repos
-        (c/exec :echo "deb http://downloads-distro.mongodb.org/repo/debian-sysvinit dist 10gen"
-                :> "/etc/apt/sources.list.d/mongodb.list")
-        (c/exec :echo "deb http://repo.mongodb.org/apt/debian wheezy/mongodb-org/3.0 main"
-                :> "/etc/apt/sources.list.d/mongodb-3.0.list")
-        (c/exec :apt-get :update)
-
-        ; Try install again
-        (apt-install! version)))
-
-    ; Make sure we don't start at startup
-    (c/exec :update-rc.d :mongod :remove :-f)))
+      (c/cd "/opt"
+            ; Clean up old dir
+            (c/exec :rm :-rf "mongodb")
+            ; Extract and rename
+            (c/exec :tar :xvf (str "/tmp/" file))
+            (c/exec :mv (c/lit "mongodb-linux-*") "mongodb")
+            ; Create data dir
+            (c/exec :mkdir :-p "mongodb/data")
+            ; Permissions
+            (c/exec :chown :-R (str username ":" username) "mongodb"))
+    (catch RuntimeException e
+      (condp re-find (.getMessage e)
+        #"tar: Unexpected EOF" (do (info "Retrying corrupt tarball download")
+                                   (c/exec :rm :-rf (str "/tmp/" file))
+                                   (install! node url))
+        (throw e))))))
 
 (defn configure!
   "Deploy configuration files to the node."
-  [node]
-  (c/exec :echo (-> "mongod.conf" io/resource slurp)
-          :> "/etc/mongod.conf"))
+  [node test]
+  (c/exec :echo (-> "mongod.conf" io/resource slurp
+                    (str/replace #"%STORAGE_ENGINE%" (:storage-engine test)))
+          :> "/opt/mongodb/mongod.conf"))
 
 (defn start!
   "Starts Mongod"
   [node]
-  (info node "starting mongod")
-  (c/su (c/exec :service :mongod :start)))
+  (c/sudo username
+          (cu/start-daemon! {:logfile "/opt/mongodb/stdout.log"
+                             :pidfile "/opt/mongodb/pidfile"
+                             :chdir   "/opt/mongodb"}
+                            "/opt/mongodb/bin/mongod"
+                            :--config "/opt/mongodb/mongod.conf")))
 
 (defn stop!
   "Stops Mongod"
   [node]
-  (info node "stopping mongod")
-  (c/su
-    (timeout 5000 nil
-      (c/exec :service :mongod :stop))
-    (meh (c/exec :killall :-9 :mongod))))
+  (cu/stop-daemon! "mongod" "/opt/mongodb/pidfile"))
 
 (defn wipe!
   "Shuts down MongoDB and wipes data."
@@ -99,16 +92,8 @@
   (stop! node)
   (info node "deleting data files")
   (c/su
-    (c/exec :rm :-rf (c/lit "/var/log/mongodb/*"))
-    (c/exec :rm :-rf (c/lit "/var/lib/mongodb/*"))))
-
-(defn uninstall!
-  "Uninstallys the current version of mongodb"
-  [node]
-  (info node "uninstalling mongodb")
-  (c/su
-    (c/exec :apt-get :remove :--purge :-y "mongodb-org")
-    (c/exec :apt-get :autoremove :-y)))
+    (c/exec :rm :-rf (c/lit "/opt/mongodb/*.log"))
+    (c/exec :rm :-rf (c/lit "/opt/mongodb/data/*"))))
 
 (defn mongo!
   "Run a Mongo shell command. Spits back an unparsable kinda-json string,
@@ -121,14 +106,14 @@
   mongo.result/from-db-object), unless it contains an error, in which case an
   ex-info exception of :type :mongo is raised."
   [res]
-  (if (mr/ok? res)
-    (from-db-object res true)
-    (throw (ex-info (str "Mongo error: "
-                         (get res "errmsg")
-                         " - "
-                         (get res "info"))
-                    {:type   :mongo
-                     :result res}))))
+;  (if (mr/acknowledged? res)
+    (from-db-object res true))
+;    (throw (ex-info (str "Mongo error: "
+;                         (get res "errmsg")
+;                         " - "
+;                         (get res "info"))
+;                    {:type   :mongo
+;                     :result res}))))
 
 (defn command!
   "Wrapper for monger's admin command API where the command
@@ -244,9 +229,9 @@
                        conn
                        (catch Throwable t
                          (mongo/disconnect conn)
-                         (throw t))))
-                   (catch com.mongodb.MongoServerSelectionException e
-                     nil))
+                         (throw t)))))
+;                   (catch com.mongodb.MongoServerSelectionException e
+;                     nil))
                  (do
                    (Thread/sleep 1000)
                    (recur))))))
@@ -288,7 +273,12 @@
   "Join nodes into a replica set. Blocks until any primary is visible to all
   nodes which isn't really what we want but oh well."
   [node test]
-  ; Gotta have all nodes online for this
+  ; Gotta have all nodes online for this. Delightfully, Mongo won't actually
+  ; bind to the port until well *after* the init script startup process
+  ; returns. This would be fine, except that  if a node isn't ready to join,
+  ; the initiating node will just hang indefinitely, instead of figuring out
+  ; that the node came online a few seconds later.
+  (.close (await-conn node))
   (jepsen/synchronize test)
 
   ; Initiate RS
@@ -327,13 +317,13 @@
     (jepsen/synchronize test)))
 
 (defn db
-  "MongoDB for a particular version."
-  [version]
+  "MongoDB for a particular HTTP URL"
+  [url]
   (reify db/DB
     (setup! [_ test node]
       (doto node
-        (install! version)
-        (configure!)
+        (install! url)
+        (configure! test)
         (start!)
         (join! test)))
 
@@ -350,10 +340,21 @@
   "Ensures the existence of the given document."
   [db coll doc write-concern]
   (assert (:_id doc))
-  (mc/upsert db coll
-             {:_id (:_id doc)}
-             doc
-             {:write-concern write-concern}))
+  (let [res (try
+              (mc/upsert db coll
+                         {:_id (:_id doc)}
+                         doc
+                         {:write-concern write-concern})
+              (catch com.mongodb.DuplicateKeyException e
+                ; This is probably
+                ; https://jira.mongodb.org/browse/SERVER-14322; we back off
+                ; randomly and retry.
+                (info "Retrying duplicate key collision")
+                (Thread/sleep (rand-int 100))
+                ::retry))]
+    (if (= ::retry res)
+      (recur db coll doc write-concern)
+      res)))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operation functions which
@@ -366,20 +367,15 @@
                        :info)]
      (try
        ~@body
-       ; A server selection error means we never attempted the operation in
-       ; the first place, so we know it didn't take place.
-       (catch com.mongodb.MongoServerSelectionException e#
-         (assoc ~op :type :fail :error :no-server))
-
-       ; Command failures also did not take place.
-       (catch com.mongodb.CommandFailureException e#
-         (if (= "not master" (.. e# getCommandResult getErrorMessage))
-           (assoc ~op :type :fail :error :not-master)
-           (throw e#)))
+       (catch com.mongodb.MongoNotPrimaryException e#
+         (assoc ~op :type :fail, :error :not-primary))
 
        ; A network error is indeterminate
-       (catch com.mongodb.MongoException$Network e#
-         (assoc ~op :type error-type# :error :network-error)))))
+       (catch com.mongodb.MongoSocketReadException e#
+         (assoc ~op :type error-type# :error :socket-read))
+
+       (catch com.mongodb.MongoSocketReadTimeoutException e#
+         (assoc ~op :type error-type# :error :socket-read)))))
 
 (defn std-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
@@ -392,7 +388,7 @@
            (gen/seq (cycle [(gen/sleep 60)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-         (gen/time-limit 600))
+        (gen/time-limit 120))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -408,11 +404,12 @@
   [name opts]
   (merge
     (assoc tests/noop-test
-           :name      (str "mongodb " name)
-           :os        debian/os
-           :db        (db "3.0.4")
-           :model     (model/cas-register)
+           :name            (str "mongodb " name)
+           :os              debian/os
+           :db              (db "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-debian71-3.2.0.tgz")
+           :storage-engine  "wiredTiger"
+           :model           (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable
                                         :latency (checker/latency-graph)})
-           :nemesis   (nemesis/partition-random-halves))
+           :nemesis         (nemesis/partition-random-halves))
     opts))
