@@ -1,7 +1,9 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
+            [jepsen.util :refer [meh]]
             [clojure.java.io :refer [file]]
+            [clojure.tools.logging :refer [info]]
             [clojure.string :as str]))
 
 (defn file?
@@ -37,6 +39,15 @@
       (exec :wget url))
     filename))
 
+(defn ensure-user!
+  "Make sure a user exists."
+  [username]
+  (try (su (exec :adduser :--disabled-password :--gecos (lit "''") username))
+       (catch RuntimeException e
+         (when-not (re-find #"already exists" (.getMessage e))
+           (throw e))))
+  username)
+
 (defn grepkill!
   "Kills processes by grepping for the given string."
   ([pattern]
@@ -47,3 +58,30 @@
          | :grep :-v "grep"
          | :awk "{print $2}"
          | :xargs :kill (str "-" signal))))
+
+(defn start-daemon!
+  "Starts a daemon process, logging stdout and stderr to the given file.
+  Invokes `bin` with `args`. Options are:
+
+  :logfile
+  :pidfile
+  :chdir"
+  [opts bin & args]
+  (info "starting" (.getName (file bin)))
+  (apply exec :start-stop-daemon :--start
+         :--background
+         :--make-pidfile
+         :--pidfile  (:pidfile opts)
+         :--chdir    (:chdir opts)
+         :--no-close
+         :--oknodo
+         :--exec     bin
+         :--
+         (concat args [:>> (:logfile opts) (lit "2>&1")])))
+
+(defn stop-daemon!
+  "Kills a daemon process by command name, and cleans up pidfile."
+  [cmd pidfile]
+  (info "Stopping" cmd)
+  (meh (exec :killall :-9 cmd))
+  (meh (exec :rm :-rf pidfile)))
