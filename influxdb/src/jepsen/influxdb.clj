@@ -20,10 +20,10 @@
             [jepsen.control.net :as cn]
             [jepsen.os.debian :as debian]))
 	
-(defn getNodeOrder [node test]    
+(defn getNodeOrder [node noRef]    
     (dosync
-        (let [norder  (cons node (deref (:nodeOrder test)) )]
-           (ref-set (:nodeOrder test) norder)        
+        (let [norder  (cons node (deref noRef))]
+           (ref-set noRef norder)        
            norder
            )
       )
@@ -37,121 +37,126 @@
 (defn db
   "Sets up and tears down InfluxDB"
   [version]
-  (reify db/DB
-    (setup! [_ test node]
-     (info node "Starting influxdb setup.")
-     (try    
-      (c/cd "/tmp"
-            (let [version "0.9.6.1"
-                  file (str "influxdb_" version "_amd64.deb")]
-              (when-not (cu/file? file)
-                (info "Fetching deb package from influxdb repo")
-                (c/exec :wget (str "https://s3.amazonaws.com/influxdb/" file)))
+   (let [nodeOrderRef (ref [])]
+    (reify db/DB
+      (setup! [_ test node]
+       (info node "Starting influxdb setup.")
+       (try    
+        (c/cd "/tmp"
+              (let [file (str "influxdb_" version "_amd64.deb")]
+                (when-not (cu/file? file)
+                  (info "Fetching deb package from influxdb repo")
+                  (c/exec :wget (str "https://s3.amazonaws.com/influxdb/" file)))
 
-              (c/su
-                
-
-                ; Install package
-                (try (c/exec :dpkg-query :-l :influxdb)
-                     (catch RuntimeException _
-                       (info "Installing influxdb...")                    
-                       (c/exec :dpkg :-i file)))))
-
-            	(c/exec :cp "/usr/lib/influxdb/scripts/init.sh" "/etc/init.d/influxdb")
-
-            	; preparing for the clustering, hostname should be the node's name
-                (info node "Copying influxdb configuration...")              
-            	(c/exec :echo (-> (io/resource "influxdb.conf")
-                      slurp
-                      (str/replace #"%HOSTNAME%" (name node)))
-                 :> "/etc/influxdb/influxdb.conf")
-
-
+                (c/su
                   
-                ; first stab at clustering -- doesn't really work yet
-            	(c/exec :echo 
-            		(-> (io/resource "servers.sh")  slurp) :> "/root/servers.sh")
-              (c/exec :echo 
-                (-> (io/resource "test_cluster.sh")  slurp) :> "/root/test_cluster.sh")
-                  (c/exec :echo 
-                (-> (io/resource "test_influx_up.sh")  slurp) :> "/root/test_influx_up.sh")
 
-             
-            	(try (c/exec :service :influxdb :stop)
-                    (catch Exception _ 
-                      (info node "no need to stop")
-                    )
-              )
+                  ; Install package
+                  (try (c/exec :dpkg-query :-l :influxdb)
+                       (catch RuntimeException _
+                         (info "Installing influxdb...")                    
+                         (c/exec :dpkg :-i file)))))
 
-              ; clearing out clustering info
-              (c/exec :rm :-rf "/var/lib/influxdb/meta/*")
-   
-            
-            (info node "I am waiting for the lock...")
-             (locking (:nodeOrder  test) 
-                (info node "I have the lock!")
-                (let [norder (getNodeOrder node test)]                              
-                 
-                     (info node "nodes to join: " (nodesToJoin norder) norder (deref (:nodeOrder test)) )    
-                     
-                     (c/exec :echo 
-                        (-> (io/resource "influxdb")  slurp 
-                          (str/replace #"%NODES_TO_JOIN%" (nodesToJoin norder)))  
-                        :> "/etc/default/influxdb")      
+              	(c/exec :cp "/usr/lib/influxdb/scripts/init.sh" "/etc/init.d/influxdb")
 
-               		    ; Ensure node is running
-                     (try (c/exec :service :influxdb :status)
-                         (catch RuntimeException _
-                         (info node "Starting influxdb...")
-                         (c/exec :service :influxdb :start)))
+              	; preparing for the clustering, hostname should be the node's name
+                  (info node "Copying influxdb configuration...")              
+              	(c/exec :echo (-> (io/resource "influxdb.conf")
+                        slurp
+                        (str/replace #"%HOSTNAME%" (name node)))
+                   :> "/etc/influxdb/influxdb.conf")
+
+
                     
-                      (info node "InfluxDB started!")                    
-                 )
-               )
+                  ; first stab at clustering -- doesn't really work yet
+              	(c/exec :echo 
+              		(-> (io/resource "servers.sh")  slurp) :> "/root/servers.sh")
+                (c/exec :echo 
+                  (-> (io/resource "test_cluster.sh")  slurp) :> "/root/test_cluster.sh")
+                    (c/exec :echo 
+                  (-> (io/resource "test_influx_up.sh")  slurp) :> "/root/test_influx_up.sh")
 
-             (while 
-              (try (c/exec :bash "/root/test_cluster.sh") 
-                      false
-                   (catch Exception _
-                      true
-                    )
-               )
-               (do 
-                    (info node "waiting for influx to start...")
-                    (Thread/sleep 1000)
+               
+              	(try (c/exec :service :influxdb :stop)
+                      (catch Exception _ 
+                        (info node "no need to stop")
+                      )
                 )
-              )
-             (jepsen/synchronize test)
-             (c/exec :bash "/root/test_cluster.sh") 
-             (info node "This node is OK, sees 3 members in the raft cluster")
-		      )
-	      (catch RuntimeException e
-	      		(error node "Error at Setup: " e (.getMessage e))
-	      		(throw e)
-	      	)
-	      )
+
+                ; clearing out clustering info
+                (c/exec :rm :-rf "/var/lib/influxdb/meta/*")
+     
+              
+              (info node "I am waiting for the lock...")
+               (locking nodeOrderRef 
+                  (info node "I have the lock!")
+                  (let [norder (getNodeOrder node nodeOrderRef)]                              
+                   
+                       (info node "nodes to join: " (nodesToJoin norder) norder (deref nodeOrderRef) )    
+                       (let [joinParams (str "'" (-> (io/resource "influxdb")  slurp 
+                            (str/replace #"%NODES_TO_JOIN%" (nodesToJoin norder))) "'")]
+                         (info node "joinParams: " joinParams)
+                          (c/su 
+                            (c/exec :echo
+                              joinParams
+                              :>
+                              "/etc/default/influxdb"
+                              )   
+                           )   
+                       ) 
+                 		    ; Ensure node is running
+                       (try (c/exec :service :influxdb :status)
+                           (catch RuntimeException _
+                           (info node "Starting influxdb...")
+                           (c/exec :service :influxdb :start)))
+                      
+                        (info node "InfluxDB started!")                    
+                   )
+                 )
+
+               (while 
+                (try (c/exec :bash "/root/test_cluster.sh") 
+                        false
+                     (catch Exception _
+                        true
+                      )
+                 )
+                 (do 
+                      (info node "waiting for influx to start...")
+                      (Thread/sleep 1000)
+                  )
+                )
+               (jepsen/synchronize test)
+               (c/exec :bash "/root/test_cluster.sh") 
+               (info node "This node is OK, sees 3 members in the raft cluster")
+  		      )
+  	      (catch RuntimeException e
+  	      		(error node "Error at Setup: " e (.getMessage e))
+  	      		(throw e)
+  	      	)
+  	      )
+        )
+
+
+      (teardown! [_ test node]
+      	(try
+  	      (c/su
+  	 		(info node "Stopping influxdb...")
+  	 		(meh (c/exec :killall :-9 "influxd"))
+  	 		(c/exec :service :influxdb :stop)
+  	 		(info node "Removing influxdb...")
+  	 		(c/exec :dpkg :--purge "influxdb")
+  	 		(info node "Removed influxdb")
+
+  	       )
+  	      (catch RuntimeException e
+  	      		(error node "Error at TearDown: " e (.getMessage e))
+  	      		(throw e)
+  	      	)
+        )
+       ))
+
       )
-
-
-    (teardown! [_ test node]
-    	(try
-	      (c/su
-	 		(info node "Stopping influxdb...")
-	 		(meh (c/exec :killall :-9 "influxd"))
-	 		(c/exec :service :influxdb :stop)
-	 		(info node "Removing influxdb...")
-	 		(c/exec :dpkg :--purge "influxdb")
-	 		(info node "Removed influxdb")
-
-	       )
-	      (catch RuntimeException e
-	      		(error node "Error at TearDown: " e (.getMessage e))
-	      		(throw e)
-	      	)
-      )
-     ))
-
-
     )
 
 (defn basic-test
@@ -161,8 +166,7 @@
   	 {:ssh 
   	 	{ :username "root"
   	 	  :private-key-path "~/.ssh/id_rsa"
-  	 	}
-      :nodeOrder (ref [])
+  	 	}      
   	 	:nodes     [:n1 :n2 :n3 ]
   	   :concurrency 3
   	   :os debian/os
