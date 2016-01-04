@@ -20,11 +20,11 @@
             [jepsen.control.net :as cn]
             [jepsen.os.debian :as debian]))
 	
-(defn getNodeOrder [node noRef]    
+(defn consToRef [element theRef]    
     (dosync
-        (let [norder  (cons node (deref noRef))]
-           (ref-set noRef norder)        
-           norder
+        (let [newSeq  (cons element (deref theRef))]
+           (ref-set theRef newSeq)        
+           newSeq
            )
       )
 )
@@ -56,41 +56,41 @@
                        (catch RuntimeException _
                          (info "Installing influxdb...")                    
                          (c/exec :dpkg :-i file)))))
+                (c/su
+                	(c/exec :cp "/usr/lib/influxdb/scripts/init.sh" "/etc/init.d/influxdb")
 
-              	(c/exec :cp "/usr/lib/influxdb/scripts/init.sh" "/etc/init.d/influxdb")
-
-              	; preparing for the clustering, hostname should be the node's name
-                  (info node "Copying influxdb configuration...")              
-              	(c/exec :echo (-> (io/resource "influxdb.conf")
-                        slurp
-                        (str/replace #"%HOSTNAME%" (name node)))
-                   :> "/etc/influxdb/influxdb.conf")
+                	; preparing for the clustering, hostname should be the node's name
+                    (info node "Copying influxdb configuration...")              
+                	(c/exec :echo (-> (io/resource "influxdb.conf")
+                          slurp
+                          (str/replace #"%HOSTNAME%" (name node)))
+                     :> "/etc/influxdb/influxdb.conf")
 
 
-                    
-                  ; first stab at clustering -- doesn't really work yet
-              	(c/exec :echo 
-              		(-> (io/resource "servers.sh")  slurp) :> "/root/servers.sh")
-                (c/exec :echo 
-                  (-> (io/resource "test_cluster.sh")  slurp) :> "/root/test_cluster.sh")
-                    (c/exec :echo 
-                  (-> (io/resource "test_influx_up.sh")  slurp) :> "/root/test_influx_up.sh")
+                      
+                    ; first stab at clustering -- doesn't really work yet
+                	(c/exec :echo 
+                		(-> (io/resource "servers.sh")  slurp) :> "/root/servers.sh")
+                  (c/exec :echo 
+                    (-> (io/resource "test_cluster.sh")  slurp) :> "/root/test_cluster.sh")
+                      (c/exec :echo 
+                    (-> (io/resource "test_influx_up.sh")  slurp) :> "/root/test_influx_up.sh")
 
-               
-              	(try (c/exec :service :influxdb :stop)
-                      (catch Exception _ 
-                        (info node "no need to stop")
-                      )
-                )
+                 
+                	(try (c/exec :service :influxdb :stop)
+                        (catch Exception _ 
+                          (info node "no need to stop")
+                        )
+                  )
 
-                ; clearing out clustering info
-                (c/exec :rm :-rf "/var/lib/influxdb/meta/*")
-     
+                  ; clearing out clustering info
+                  (c/exec :rm :-rf "/var/lib/influxdb/meta/*")
+                 )
               
               (info node "I am waiting for the lock...")
                (locking nodeOrderRef 
                   (info node "I have the lock!")
-                  (let [norder (getNodeOrder node nodeOrderRef)]                              
+                  (let [norder (consToRef node nodeOrderRef)]                              
                    
                        (info node "nodes to join: " (nodesToJoin norder) norder (deref nodeOrderRef) )    
                        (let [joinParams (str "'" (-> (io/resource "influxdb")  slurp 
