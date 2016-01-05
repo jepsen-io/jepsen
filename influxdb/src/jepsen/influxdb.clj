@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [knossos.op :as op]
+            [knossos.model      :as model]
             [jepsen [client :as client]
                     [core :as jepsen]
                     [db :as db]
@@ -18,14 +19,15 @@
                     [util :refer [timeout meh]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
-            [jepsen.os.debian :as debian])
-  (:import (org.influxdb InfluxDB InfluxDBFactory))
-  (:import (org.influxdb.dto Point Query))
+            [jepsen.os.debian :as debian]
+            )
+  (:import (org.influxdb InfluxDB InfluxDB$ConsistencyLevel InfluxDBFactory))
+  (:import (org.influxdb.dto Point Query BatchPoints))
   (:import (java.util.concurrent.TimeUnit))
   )
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
-(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn w   [_ _] {:type :invoke, :f :write, :value (double (rand-int 5))})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 	
 (defn consToRef [element theRef]    
@@ -41,7 +43,7 @@
   (if (>= 1 (count nodes)) "" 
     (str "-join " (clojure.string/join "," (map (fn [n] (str (name n) ":8088")) (rest nodes)))))   
 )
-
+(def dbName "jepsen")
 (defn connect [node]
     (let [
             c (InfluxDBFactory/connect (str "http://" (name node) ":8086") "root" "root")
@@ -50,17 +52,26 @@
    
       (.enableBatch c 1 1 java.util.concurrent.TimeUnit/MILLISECONDS)
       (.setLogLevel c org.influxdb.InfluxDB$LogLevel/FULL)
-      (.createDatabase c "jepsen")
-      (.write c "jepsen" "default" initialPoint)
+      (.createDatabase c dbName)
+      (.write c dbName "default" initialPoint)
       c
     )
 )
+
+(defn batchPoints [] 
+  (-> 
+      (BatchPoints/database dbName)
+      (.consistency InfluxDB$ConsistencyLevel/ALL)
+      (.build)
+  )
+)
 (defn writeToInflux [conn value]
+  
   (.write 
     conn
-    "jepsen" 
-    "default" 
-    (.build (.field (.time (Point/measurement "answers") 1 java.util.concurrent.TimeUnit/NANOSECONDS) "answer" value))
+    (.point (batchPoints)
+     (.build (.field (.time (Point/measurement "answers") 1 java.util.concurrent.TimeUnit/NANOSECONDS) "answer" value))  
+    )
   )
 )
 (defn client
@@ -237,6 +248,10 @@
                          (gen/stagger 1)
                          (gen/clients)
                          (gen/time-limit 15))
+       :model   (model/cas-register 42)
+       :checker (checker/compose
+                    {:perf   (checker/perf)
+                     :linear checker/linearizable})
   	 }
   	)
  )
