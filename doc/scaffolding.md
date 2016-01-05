@@ -86,7 +86,7 @@ runs the test that function returns, looks at the results, and ensures that the
 We can run this test to confirm that everything's hooked up correctly:
 
 ```bash
-$ ein test
+$ lein test
 WARNING: run! already refers to: #'clojure.core/run! in namespace: jepsen.core, being replaced by: #'jepsen.core/run!
 WARNING: run! already refers to: #'clojure.core/run! in namespace: jepsen.tests, being replaced by: #'jepsen.core/run!
 
