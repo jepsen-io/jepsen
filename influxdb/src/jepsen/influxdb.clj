@@ -51,11 +51,18 @@
       (.enableBatch c 1 1 java.util.concurrent.TimeUnit/MILLISECONDS)
       (.setLogLevel c org.influxdb.InfluxDB$LogLevel/FULL)
       (.createDatabase c "jepsen")
-      (.write c "jepsen", "default", initialPoint)
+      (.write c "jepsen" "default" initialPoint)
       c
     )
 )
-
+(defn writeToInflux [conn value]
+  (.write 
+    conn
+    "jepsen" 
+    "default" 
+    (.build (.field (.time (Point/measurement "answers") 1 java.util.concurrent.TimeUnit/NANOSECONDS) "answer" value))
+  )
+)
 (defn client
   "A client for a single compare-and-set register"
   [conn]
@@ -80,7 +87,10 @@
                         (.get 1)
                       )
                   )
-              ))
+              )
+             :write (do (writeToInflux conn (:value op))
+                            (assoc op :type :ok))
+             )
 
       )
     )
@@ -223,7 +233,7 @@
   	   :os debian/os
        :client (client nil)
        :db (db version)
-       :generator (->> r
+       :generator (->>   (gen/mix [r w])
                          (gen/stagger 1)
                          (gen/clients)
                          (gen/time-limit 15))
