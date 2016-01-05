@@ -120,8 +120,13 @@
           (c/exec :service :influxdb :stop)
           (info node "Removing influxdb...")
           (c/exec :dpkg :--purge "influxdb")
+          (c/exec :rm :-rf "/var/lib/influxdb")
           (info node "Removed influxdb")
-
+          (c/cd "/var/log/influxdb"
+             (try (c/exec  :gzip :-S (str  (java.lang.System/currentTimeMillis)) "influxd.log" )
+                (catch Exception _)
+              )
+          )
           )
           (catch Throwable _)
         )
@@ -169,8 +174,7 @@
                         )
                   )
 
-                  ; clearing out clustering info
-                  (c/exec :rm :-rf "/var/lib/influxdb/meta/*")
+                  
                  )
               
               (info node "I am waiting for the lock...")
@@ -179,8 +183,8 @@
                   (let [norder (consToRef node nodeOrderRef)]                              
                    
                        (info node "nodes to join: " (nodesToJoin norder) norder (deref nodeOrderRef) )    
-                       (let [joinParams (str "'" (-> (io/resource "influxdb")  slurp 
-                            (str/replace #"%NODES_TO_JOIN%" (nodesToJoin norder))) "'")]
+                       (let [joinParams  (-> (io/resource "influxdb")  slurp 
+                            (str/replace #"%NODES_TO_JOIN%" (nodesToJoin norder)) )]
                          (info node "joinParams: " joinParams)
                           (c/su 
                             (c/exec :echo
@@ -208,7 +212,7 @@
                       )
                  )
                  (do 
-                      (info node "waiting for influx to start...")
+                      (info node "waiting for influx cluster members to join up...")
                       (Thread/sleep 1000)
                   )
                 )
