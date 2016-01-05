@@ -217,7 +217,7 @@ writes to the generator by replacing `r` with `(gen/mix [r w])`:
          :os      debian/os
          :db      (db version)
          :client  (client nil nil)
-         :generator (->> (gen/mix [r w]
+         :generator (->> (gen/mix [r w])
                          (gen/stagger 1)
                          (gen/clients)
                          (gen/time-limit 15))))
