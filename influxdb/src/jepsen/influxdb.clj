@@ -18,7 +18,15 @@
                     [util :refer [timeout meh]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian])
+  (:import (org.influxdb InfluxDB InfluxDBFactory))
+  (:import (org.influxdb.dto Point Query))
+  (:import (java.util.concurrent.TimeUnit))
+  )
+
+(defn r   [_ _] {:type :invoke, :f :read, :value nil})
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 	
 (defn consToRef [element theRef]    
     (dosync
@@ -34,12 +42,69 @@
     (str "-join " (clojure.string/join "," (map (fn [n] (str (name n) ":8088")) (rest nodes)))))   
 )
 
+(defn connect [node]
+    (let [
+            c (InfluxDBFactory/connect (str "http://" (name node) ":8086") "root" "root")
+            initialPoint (.build (.field (.time (Point/measurement "answers") 1 java.util.concurrent.TimeUnit/NANOSECONDS) "answer" 42))
+          ]
+   
+      (.enableBatch c 1 1 java.util.concurrent.TimeUnit/MILLISECONDS)
+      (.setLogLevel c org.influxdb.InfluxDB$LogLevel/FULL)
+      (.createDatabase c "jepsen")
+      (.write c "jepsen", "default", initialPoint)
+      c
+    )
+)
+
+(defn client
+  "A client for a single compare-and-set register"
+  [conn]
+  (reify client/Client
+    (setup! [_ test node]
+      (info node "setting up client")
+      (client (connect node)))
+
+    (invoke! [this test op]
+      (timeout 5000 (assoc op :type :info, :error :timeout)
+           (case (:f op)
+             :read (assoc op :type :ok, :value 
+                (let [q (Query. "SELECT answer from answers where time = 1" "jepsen")]
+                    (-> conn 
+                        (.query q) 
+                        (.getResults)
+                        (.get 0)
+                        (.getSeries)
+                        (.get 0)
+                        (.getValues)
+                        (.get 0)
+                        (.get 1)
+                      )
+                  )
+              ))
+
+      )
+    )
+    (teardown! [_ test])))
+
 (defn db
   "Sets up and tears down InfluxDB"
   [version]
    (let [nodeOrderRef (ref [])]
     (reify db/DB
       (setup! [_ test node]
+        (try
+          (c/su
+          (info node "Stopping influxdb...")
+          (meh (c/exec :killall :-9 "influxd"))
+          (c/exec :service :influxdb :stop)
+          (info node "Removing influxdb...")
+          (c/exec :dpkg :--purge "influxdb")
+          (info node "Removed influxdb")
+
+          )
+          (catch Throwable _)
+        )
+
        (info node "Starting influxdb setup.")
        (try    
         (c/cd "/tmp"
@@ -139,21 +204,7 @@
 
 
       (teardown! [_ test node]
-      	(try
-  	      (c/su
-  	 		(info node "Stopping influxdb...")
-  	 		(meh (c/exec :killall :-9 "influxd"))
-  	 		(c/exec :service :influxdb :stop)
-  	 		(info node "Removing influxdb...")
-  	 		(c/exec :dpkg :--purge "influxdb")
-  	 		(info node "Removed influxdb")
-
-  	       )
-  	      (catch RuntimeException e
-  	      		(error node "Error at TearDown: " e (.getMessage e))
-  	      		(throw e)
-  	      	)
-        )
+      	;; nothing for now for examination of running nodes
        ))
 
       )
@@ -170,7 +221,12 @@
   	 	:nodes     [:n1 :n2 :n3 ]
   	   :concurrency 3
   	   :os debian/os
+       :client (client nil)
        :db (db version)
+       :generator (->> r
+                         (gen/stagger 1)
+                         (gen/clients)
+                         (gen/time-limit 15))
   	 }
   	)
  )

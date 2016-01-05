@@ -6,7 +6,8 @@
   :dependencies [
   					[org.clojure/clojure "1.7.0"]
   					[capacitor "0.4.3"]
-  					[jepsen "0.0.7"]                
+  					[jepsen "0.0.8"]     
+            [org.influxdb/influxdb-java "2.1"]           
   				]
  :plugins [[lein-auto "0.1.2"]]
   				)
