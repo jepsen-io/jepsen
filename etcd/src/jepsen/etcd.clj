@@ -82,9 +82,18 @@
   (let [running (atom nil)] ; A map of nodes to whether they're running
     (reify db/DB
       (setup! [this test node]
-        ; You'll need debian testing for this, cuz etcd relies on go 1.2
-        (debian/install [:golang :git-core])
+        ; You'll need debian testing for this
+        (debian/install [:git-core])
 
+        ; Install golang 1.5.2
+        (c/su
+          (c/cd "/opt"
+                (when-not (cu/file? "go")
+                  (info node "installing golang 1.5.2")
+                  (c/exec :wget :-c "https://storage.googleapis.com/golang/go1.5.2.linux-amd64.tar.gz")
+                  (c/exec :tar :xzf "go1.5.2.linux-amd64.tar.gz")
+                  (c/exec :rm :-f "go1.5.2.linux-amd64.tar.gz"))))
+        
         (c/su
           (c/cd "/opt"
                 (when-not (cu/file? "etcd")
@@ -94,7 +103,8 @@
           (c/cd "/opt/etcd"
                 (when-not (cu/file? "bin/etcd")
                   (info node "building etcd")
-                  (c/exec (c/lit "./build"))))
+                  (c/exec :env (c/lit "GOROOT=/opt/go") (c/lit "PATH=$PATH:/opt/go/bin")
+                          (c/lit "./build"))))
 
           ; There's a race condition in cluster join we gotta work around by
           ; restarting the process until it doesn't crash; see
