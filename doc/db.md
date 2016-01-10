@@ -6,7 +6,7 @@ the setup and teardown by hand, but letting Jepsen handle it lets us run tests
 in a CI system, parameterize database configuration, run multiple tests
 back-to-back with a clean slate, and so on.
 
-In `src/jepsen/zookeeper.clj`, we'll require the `jepsen.db`, `jepsen.control,
+In `src/jepsen/zookeeper.clj`, we'll require the `jepsen.db`, `jepsen.control`,
 and `jepsen.os.debian` namespaces, aliasing each to a short name. We'll also
 pull in every function from `clojure.tools.logging`, giving us log functions
 like `info`, `warn`, etc.
