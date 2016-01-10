@@ -149,7 +149,7 @@ needs an *id* number, so we need a way to generate a number for each node name.
 ```
 
 The `->>` threading macro takes each form and inserts it into the next form as
-a final argument. So `(->> test :nodes)` becomes `(:node test)`, and `(->> test
+a final argument. So `(->> test :nodes)` becomes `(:nodes test)`, and `(->> test
 :nodes (map-indexed (fn ...)))` becomes `(map-indexed (fn ...) (:nodes test))`,
 and so on. Normal function calls often look "inside out", but the `->>` macro
 lets us write a chain of operations "in order"--like an object-oriented
