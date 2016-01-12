@@ -252,7 +252,7 @@
                          (gen/stagger 1)
                          (gen/clients)
                          (gen/time-limit 15))
-       :model   (model/cas-register 42)
+       :model   (model/register 42.0)
        :checker (checker/compose
                     {:perf   (checker/perf)
                      :linear checker/linearizable})
