@@ -20,6 +20,7 @@
             [jepsen.checker.timeline :as timeline]
             [rethinkdb.core :refer [connect close]]
             [rethinkdb.query :as r]
+            [rethinkdb.query-builder :refer [term]]
             [knossos.core :as knossos]
             [knossos.model :as model]
             [cheshire.core :as json])
@@ -77,8 +78,10 @@
     (c/exec :echo (-> "jepsen.conf"
                       io/resource
                       slurp
-                      (str "\n" (join-lines test))
-                      (str "\n\n" "server-name=" (name node)))
+                      (str "\n\n"
+                           (join-lines test) "\n\n"
+                           "server-name=" (name node) "\n"
+                           "server-tag=" (name node) "\n"))
             :> "/etc/rethinkdb/instances.d/jepsen.conf")))
 
 (defn start!
@@ -108,6 +111,11 @@
     (when (contains? result :errors)
       (assert (zero? (:errors result)) (:first_error result)))
     result))
+
+(defn wait-table
+  "Wait for all replicas for a table to be ready"
+  [conn db tbl]
+  (run! (term :WAIT [(r/table (r/db db) tbl)] {}) conn))
 
 (defn db
   "Set up and tear down RethinkDB"
@@ -143,9 +151,11 @@
      (try
        ~@body
        (catch clojure.lang.ExceptionInfo e#
-         (case (:e (ex-data e#))
-           4100000 (assoc ~op :type :fail,       :error (:cause (ex-data e#)))
-                   (assoc ~op :type error-type#, :error (str e#)))))))
+         (let [code# (-> e# ex-data :response :e)]
+           (assert (integer? code#))
+           (case code#
+             4100000 (assoc ~op :type :fail,       :error (:cause (ex-data e#)))
+                     (assoc ~op :type error-type#, :error (str e#))))))))
 
 (defn primaries
   "All nodes that think they're primaries for the given db and table"
@@ -162,9 +172,46 @@
                    (when node))))
        (remove nil?)))
 
-(defn std-gen
+(defn reconfigure-nemesis
+  "A nemesis which randomly reconfigures the cluster topology for the given db
+  and table names."
+  [db table]
+  (reify client/Client
+    (setup! [this _ _] this)
+
+    (invoke! [_ test op]
+      (assert (= :reconfigure (:f op)))
+      (let [size     (inc (rand-int (count (:nodes test))))
+            replicas (->> (:nodes test)
+                          shuffle
+                          (take size)
+                          (map name))
+            primary  (rand-nth replicas)
+            conn     (conn (rand-nth (:nodes test)))]
+        (try
+          ; Reconfigure
+          (let [res (-> (r/db db)
+                        (r/table table)
+                        (r/reconfigure {:shards   1
+                                        :replicas (->> replicas
+                                                       (map #(vector % 1))
+                                                       (into {}))
+                                        :primary_replica_tag primary})
+                        (run! conn))]
+            (assert (= 1 (:reconfigured res))))
+;            (info (with-out-str (pprint res))))
+          ; Wait for completion
+          (wait-table conn db table)
+          ; Return
+          (assoc op :value {:replicas replicas :primary primary})
+
+          (finally (close conn)))))
+
+    (teardown! [_ test])))
+
+(defn partition-gen
   "Takes a client generator and wraps it in a typical schedule and nemesis
-  causing failover."
+  causing failover for partitions."
   [gen]
   (gen/phases
     (->> gen
@@ -173,6 +220,22 @@
                             {:type :info :f :start}
                             (gen/sleep 5)
                             {:type :info :f :stop}])))
+         (gen/time-limit 500))))
+
+(defn reconfigure-gen
+  "Takes a client generator and wraps it in a nemesis generator for
+  reconfiguration."
+  [gen]
+  (gen/phases
+    (->> gen
+         (gen/nemesis
+           (->> [(gen/sleep 5)
+                 {:type :info :f :start}
+                 (gen/sleep 5)
+                 {:type :info :f :stop}]
+                cycle
+                (interpose {:type :info :f :reconfigure})
+                gen/seq))
          (gen/time-limit 500))))
 
 (defn test-
@@ -189,5 +252,8 @@
                                         :perf   (checker/perf)})
 ;           :nemesis   (nemesis/hammer-time #(primaries % "jepsen" "cas")
 ;                                           "rethinkdb"))
-           :nemesis   (nemesis/partition-random-halves))
+;           :nemesis   (nemesis/partition-random-halves))
+           :nemesis  (nemesis/compose
+                       {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
+                        #{:start :stop} (nemesis/partition-random-halves)}))
     (dissoc opts :version)))

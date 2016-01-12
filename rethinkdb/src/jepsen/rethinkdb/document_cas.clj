@@ -49,11 +49,6 @@
 
 ; r.db('rethinkdb').table('cluster_config').get("heartbeat").update({heartbeat_timeout_secs: 2})
 
-(defn wait-table
-  "Wait for all replicas for a table to be ready"
-  [conn db tbl]
-  (run! (term :WAIT [(r/table (r/db db) tbl)] {}) conn))
-
 (defrecord Client [tbl-created? db tbl write-acks read_mode]
   client/Client
   (setup! [this test node]
@@ -123,6 +118,14 @@
 (defn r   [_ _] {:type :invoke, :f :read})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
+(defn start-stop
+  "Infinite seq of start and stop generators separated by 5 seconds of sleeps."
+  []
+  (cycle [(gen/sleep 5)
+          {:type :info :f :start}
+          (gen/sleep 5)
+          {:type :info :f :stop}]))
+
 (defn cas-test
   "Document-level compare and set with the given read and write mode."
   [version write-acks read-mode]
@@ -130,13 +133,38 @@
          {:version version
           :client (client write-acks read-mode)
           :concurrency 10
-          :generator (std-gen (independent/sequential-generator
-                                (range)
-                                (fn [k]
-                                  (->> (gen/reserve 5 (gen/mix [w cas])
-                                                      r)
-                                       (gen/delay 1)
-                                       (gen/limit 60)))))
+          :generator (->> (independent/sequential-generator
+                            (range)
+                            (fn [k]
+                              (->> (gen/reserve 5 (gen/mix [w cas])
+                                                r)
+                                   (gen/delay 1)
+                                   (gen/limit 60))))
+                          (gen/nemesis (gen/seq (start-stop)))
+                          (gen/time-limit 500))
+          :nemesis (nemesis/partition-random-halves)
           :checker (checker/compose
                      {:linear (independent/checker checker/linearizable)
                       :perf   (checker/perf)})}))
+
+(defn cas-reconfigure-test
+  "Document-level compare and set with majority reads and writes *and* a
+  combination of topology changes and network partitions. Performs only writes
+  and cas ops to prove that data loss isn't just due to stale reads."
+  [version]
+  (assoc (cas-test version "majority" "majority")
+         :name      "rethinkdb document reconfigure"
+         :generator (->> (independent/sequential-generator
+                           (range)
+                           (fn [k]
+                             (->> (gen/mix [w cas cas cas])
+                                  (gen/delay 1)
+                                  (gen/limit 200))))
+                         (gen/nemesis (->> (start-stop)
+                                           (interpose {:type  :info
+                                                       :f     :reconfigure})
+                                           (gen/seq)))
+                         (gen/time-limit 200))
+         :nemesis  (nemesis/compose
+                     {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
+                      #{:start :stop} (nemesis/partition-random-halves)})))

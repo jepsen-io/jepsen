@@ -128,6 +128,46 @@
   []
   (partitioner majorities-ring))
 
+(defn compose
+  "Takes a map of fs to nemeses and returns a single nemesis which, depending
+  on (:f op), routes to the appropriate child nemesis. `fs` should be a
+  function which takes (:f op) and returns either nil, if that nemesis should
+  not handle that :f, or a new :f, which replaces the op's :f, and the
+  resulting op is passed to the given nemesis. For instance:
+
+      (compose #{:start :stop} (partition-random-halves)
+               #{:kill}        (process-killer))
+
+  This routes `:kill` ops to process killer, and :start/:stop to the
+  partitioner. What if we had two partitioners which *both* take :start/:stop?
+
+      (compose {:split-start :start
+                :split-stop  :stop} (partition-random-halves)
+               {:ring-start  :start
+                :ring-stop2  :stop} (partition-majorities-ring))
+
+  We turn :split-start into :start, and pass that op to
+  partition-random-halves."
+  [nemeses]
+  (assert (map? nemeses))
+  (reify client/Client
+    (setup! [this test node]
+      (compose (util/map-vals #(client/setup! % test node) nemeses)))
+
+    (invoke! [this test op]
+      (let [f (:f op)]
+        (loop [nemeses nemeses]
+          (if-not (seq nemeses)
+            (throw (IllegalArgumentException.
+                     (str "no nemesis can handle " (:f op))))
+            (let [[fs nemesis] (first nemeses)]
+              (if-let [f' (fs f)]
+                (client/invoke! nemesis test (assoc op :f f'))
+                (recur (next nemeses))))))))
+
+    (teardown! [this test]
+      (util/map-vals #(client/teardown! % test) nemeses))))
+
 (defn set-time!
   "Set the local node time in POSIX seconds."
   [t]
