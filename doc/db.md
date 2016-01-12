@@ -6,7 +6,7 @@ the setup and teardown by hand, but letting Jepsen handle it lets us run tests
 in a CI system, parameterize database configuration, run multiple tests
 back-to-back with a clean slate, and so on.
 
-In `src/jepsen/zookeeper.clj`, we'll require the `jepsen.db`, `jepsen.control,
+In `src/jepsen/zookeeper.clj`, we'll require the `jepsen.db`, `jepsen.control`,
 and `jepsen.os.debian` namespaces, aliasing each to a short name. We'll also
 pull in every function from `clojure.tools.logging`, giving us log functions
 like `info`, `warn`, etc.
@@ -149,7 +149,7 @@ needs an *id* number, so we need a way to generate a number for each node name.
 ```
 
 The `->>` threading macro takes each form and inserts it into the next form as
-a final argument. So `(->> test :nodes)` becomes `(:node test)`, and `(->> test
+a final argument. So `(->> test :nodes)` becomes `(:nodes test)`, and `(->> test
 :nodes (map-indexed (fn ...)))` becomes `(map-indexed (fn ...) (:nodes test))`,
 and so on. Normal function calls often look "inside out", but the `->>` macro
 lets us write a chain of operations "in order"--like an object-oriented
