@@ -83,7 +83,7 @@
 
 (def html
   (reify checker/Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (->> (h/html [:html
                     [:head
                      [:style stylesheet]]

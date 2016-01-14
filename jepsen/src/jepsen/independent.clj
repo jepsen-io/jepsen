@@ -5,10 +5,17 @@
   namespace supports splitting a test into independent components--for example
   taking a test of a single register and lifting it to a *map* of keys to
   registers."
-  (:require [jepsen.util :refer [map-kv]]
+  (:require [jepsen.util :as util :refer [map-kv]]
+            [jepsen.store :as store]
             [jepsen.checker :refer [check Checker]]
             [jepsen.generator :as gen :refer [Generator]]
-            [clojure.core.reducers :as r]))
+            [clojure.core.reducers :as r]
+            [clojure.pprint :refer [pprint]]))
+
+(def dir
+  "What directory should we write independent results to?"
+  "independent")
+
 (defn tuple
   "Constructs a kv tuple"
   [k v]
@@ -87,19 +94,34 @@
   subset of that :results map which were not valid."
   [checker]
   (reify Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [ks       (history-keys history)
             results  (->> ks
                           (map (fn [k]
-                                 (let [h (subhistory k history)]
-                                   [k (check checker test model h)])))
+                                 (let [h (subhistory k history)
+                                       subdir (concat (:subdirectory opts)
+                                                      [dir k])
+                                       results (check checker test model h
+                                                      {:subdirectory subdir})]
+                                   ; Write analysis
+                                   (store/with-out-file test [subdir
+                                                              "results.edn"]
+                                     (pprint results))
+
+                                   ; Write history
+                                   (store/with-out-file test [subdir
+                                                              "history.txt"]
+                                     (util/print-history h))
+
+                                   ; Return results as a map
+                                   [k results])))
                           (into {}))
             failures (->> results
                           (reduce (fn [failures [k result]]
                                     (if (:valid? result)
                                       failures
-                                      (assoc! failures k result)))
-                                  (transient {}))
+                                      (conj! failures k)))
+                                  (transient []))
                           persistent!)]
         {:valid? (empty? failures)
          :results results

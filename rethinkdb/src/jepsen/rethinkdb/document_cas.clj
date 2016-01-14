@@ -164,7 +164,7 @@
                                            (interpose {:type  :info
                                                        :f     :reconfigure})
                                            (gen/seq)))
-                         (gen/time-limit 200))
+                         (gen/time-limit 300))
          :nemesis  (nemesis/compose
                      {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
                       #{:start :stop} (nemesis/partition-random-halves)})))

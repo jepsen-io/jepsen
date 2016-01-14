@@ -219,12 +219,13 @@
 
 (defn point-graph!
   "Writes a plot of raw latency data points."
-  [test history]
+  [test history opts]
   (let [history     (util/history->latencies history)
         datasets    (invokes-by-f-type history)
         fs          (sort (keys datasets))
         fs->points  (fs->points fs)
-        output-path (.getCanonicalPath (store/path! test "latency-raw.png"))]
+        output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
+                                                    "latency-raw.png"))]
     (g/raw-plot!
       (concat (latency-preamble test output-path)
               (nemesis-regions history)
@@ -244,7 +245,7 @@
 
 (defn quantiles-graph!
   "Writes a plot of latency quantiles, by f, over time."
-  [test history]
+  [test history opts]
   (let [history     (util/history->latencies history)
         dt          30
         qs          [0.5 0.95 0.99 1]
@@ -261,7 +262,8 @@
         fs->points  (fs->points fs)
         qs->colors  (qs->colors qs)
         output-path (.getCanonicalPath
-                      (store/path! test "latency-quantiles.png"))]
+                      (store/path! test (:subdirectory opts)
+                                   "latency-quantiles.png"))]
     (g/raw-plot!
       (concat (latency-preamble test output-path)
               (nemesis-regions history)
@@ -288,7 +290,7 @@
 
 (defn rate-graph!
   "Writes a plot of operation rate by their completion times."
-  [test history]
+  [test history opts]
   (let [dt          10
         td          (double (/ dt))
         t-max       (->> history (r/map :time) (reduce max 0) util/nanos->secs)
@@ -305,7 +307,8 @@
                                  {}))
         fs          (sort (keys datasets))
         fs->points  (fs->points fs)
-        output-path (.getCanonicalPath (store/path! test "rate.png"))]
+        output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
+                                                    "rate.png"))]
     (g/raw-plot!
       (concat (rate-preamble test output-path)
               (nemesis-regions history)
