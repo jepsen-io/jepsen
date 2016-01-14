@@ -90,6 +90,8 @@
 (defn ^File path
   "With one arg, a test, returns the directory for that test's results. Given
   additional arguments, returns a file with that name in the test directory.
+  Nested paths are flattened: (path t [:a [:b :c] :d) expands to .../a/b/c/d.
+  Nil path components are ignored: (path t :a nil :b) expands to .../a/b.
 
   Test must have only two keys: :name, and :start-time. :start-time may be a
   string, or a DateTime."
@@ -103,7 +105,12 @@
                 t
                 (time.local/format-local-time t :basic-date-time)))))
   ([test & args]
-   (apply io/file (path test) args)))
+   (info :file args)
+   (->> args
+        flatten
+        (remove nil?)
+        (map str)
+        (apply io/file (path test)))))
 
 (defn ^File path!
   "Like path, but ensures the path's containing directories exist."

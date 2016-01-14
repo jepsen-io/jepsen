@@ -209,35 +209,6 @@
 
     (teardown! [_ test])))
 
-(defn partition-gen
-  "Takes a client generator and wraps it in a typical schedule and nemesis
-  causing failover for partitions."
-  [gen]
-  (gen/phases
-    (->> gen
-         (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 5)
-                            {:type :info :f :start}
-                            (gen/sleep 5)
-                            {:type :info :f :stop}])))
-         (gen/time-limit 500))))
-
-(defn reconfigure-gen
-  "Takes a client generator and wraps it in a nemesis generator for
-  reconfiguration."
-  [gen]
-  (gen/phases
-    (->> gen
-         (gen/nemesis
-           (->> [(gen/sleep 5)
-                 {:type :info :f :start}
-                 (gen/sleep 5)
-                 {:type :info :f :stop}]
-                cycle
-                (interpose {:type :info :f :reconfigure})
-                gen/seq))
-         (gen/time-limit 500))))
-
 (defn test-
   "Constructs a test with the given name prefixed by 'rethinkdb ', merging any
   given options."
@@ -248,12 +219,5 @@
            :os        debian/os
            :db        (db (:version opts))
            :model     (model/cas-register)
-           :checker   (checker/compose {:linear checker/linearizable
-                                        :perf   (checker/perf)})
-;           :nemesis   (nemesis/hammer-time #(primaries % "jepsen" "cas")
-;                                           "rethinkdb"))
-;           :nemesis   (nemesis/partition-random-halves))
-           :nemesis  (nemesis/compose
-                       {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
-                        #{:start :stop} (nemesis/partition-random-halves)}))
+           :checker   (checker/perf))
     (dissoc opts :version)))

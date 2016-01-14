@@ -18,46 +18,53 @@
             [knossos.linear.report :as linear.report]))
 
 (defprotocol Checker
-  (check [checker test model history]
+  (check [checker test model history opts]
          "Verify the history is correct. Returns a map like
 
          {:valid? true}
 
          or
 
-         {:valid?    false
-          :failed-at [details of specific operations]}
+         {:valid?       false
+          :some-details ...
+          :failed-at    [details of specific operations]}
 
-         and maybe there can be some stats about what fraction of requests
-         were corrupt, etc."))
+         Opts is a map of options controlling checker execution. Keys include:
+
+         :subdirectory - A directory within this test's store directory where
+                         output files should be written. Defaults to nil."))
 
 (defn check-safe
   "Like check, but wraps exceptions up and returns them as a map like
 
   {:valid? nil :error \"...\"}"
-  [checker test model history]
-  (try (check checker test model history)
-       (catch Throwable t
-         {:valid? false
-          :error (with-out-str (trace/print-cause-trace t))})))
+  ([checker test model history]
+   (check-safe checker test model history {}))
+  ([checker test model history opts]
+   (try (check checker test model history opts)
+        (catch Throwable t
+          {:valid? false
+           :error (with-out-str (trace/print-cause-trace t))}))))
 
 (def unbridled-optimism
   "Everything is awesoooommmmme!"
   (reify Checker
-    (check [this test model history] {:valid? true})))
+    (check [this test model history opts] {:valid? true})))
 
 (def linearizable
   "Validates linearizability with Knossos."
   (reify Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [a (linear/analysis model history)]
+        (prn :lin-subdir opts)
         (when-not (:valid? a)
           (linear.report/render-analysis!
-            history a (.getCanonicalPath (store/path! test "linear.svg"))))
-        ; Writing these can take *hours*
+            history a (.getCanonicalPath (store/path! test (:subdirectory opts)
+                                                      "linear.svg"))))
+        ; Writing these can take *hours* so we truncate
         (assoc a
-               :final-paths (take 100 (:final-paths a))
-               :configs     (take 100 (:configs a)))))))
+               :final-paths (take 10 (:final-paths a))
+               :configs     (take 10 (:configs a)))))))
 
 (def queue
   "Every dequeue must come from somewhere. Validates queue operations by
@@ -66,7 +73,7 @@
   should obey this property. Should probably be used with an unordered queue
   model, because we don't look for alternate orderings. O(n)."
   (reify Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [final (->> history
                        (r/filter (fn select [op]
                                    (condp = (:f op)
@@ -85,7 +92,7 @@
   every successfully added element is present in the read, and that the read
   contains only elements for which an add was attempted."
   (reify Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [attempts (->> history
                           (r/filter op/invoke?)
                           (r/filter #(= :add (:f %)))
@@ -140,7 +147,7 @@
   successful dequeue. Queues only obey this property if the history includes
   draining them completely. O(n)."
   (reify Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [attempts (->> history
                           (r/filter op/invoke?)
                           (r/filter #(= :enqueue (:f %)))
@@ -208,7 +215,7 @@
    :max-relative-error  Same, but with error computed as a fraction of the mean}
   "
   (reify Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (loop [history            (seq (history/complete history))
              lower              0             ; Current lower bound on counter
              upper              0             ; Upper bound on counter value
@@ -250,10 +257,10 @@
   valid."
   [checker-map]
   (reify Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [results (->> checker-map
                          (pmap (fn [[k checker]]
-                                 [k (check checker test model history)]))
+                                 [k (check checker test model history opts)]))
                          (into {}))]
         (assoc results :valid? (every? :valid? (vals results)))))))
 
@@ -261,17 +268,17 @@
   "Spits out graphs of latencies."
   []
   (reify Checker
-    (check [_ test model history]
-      (perf/point-graph! test history)
-      (perf/quantiles-graph! test history)
+    (check [_ test model history opts]
+      (perf/point-graph! test history opts)
+      (perf/quantiles-graph! test history opts)
       {:valid? true})))
 
 (defn rate-graph
   "Spits out graphs of throughput over time."
   []
   (reify Checker
-    (check [_ test model history]
-      (perf/rate-graph! test history)
+    (check [_ test model history opts]
+      (perf/rate-graph! test history opts)
       {:valid? true})))
 
 (defn perf
