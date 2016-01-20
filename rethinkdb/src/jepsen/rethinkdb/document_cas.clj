@@ -157,14 +157,23 @@
          :generator (->> (independent/sequential-generator
                            (range)
                            (fn [k]
-                             (->> (gen/mix [w cas cas cas])
-                                  (gen/delay 1)
-                                  (gen/limit 200))))
-                         (gen/nemesis (->> (start-stop)
+                             (->> (gen/reserve 5 (gen/mix [w cas])
+                                               r)
+                                  (gen/delay 1/2)
+                                  (gen/limit 300))))
+;                         (gen/nemesis (gen/seq (cycle [(gen/sleep 0)
+;                                                       {:type :info
+;                                                        :f    :reconfigure}])))
+                         (gen/nemesis (->> (cycle [{:type :info
+                                                    :f    :start}
+                                                   (gen/sleep 5)
+                                                   {:type :info
+                                                    :f    :stop}])
                                            (interpose {:type  :info
                                                        :f     :reconfigure})
                                            (gen/seq)))
-                         (gen/time-limit 300))
+                         (gen/time-limit 800))
+;         :nemesis (aggressive-reconfigure-nemesis "jepsen" "cas")))
          :nemesis  (nemesis/compose
                      {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
                       #{:start :stop} (nemesis/partition-random-halves)})))
