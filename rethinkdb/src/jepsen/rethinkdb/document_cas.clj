@@ -105,7 +105,6 @@
                                    :fail)))))))
 
   (teardown! [this test]
-    (meh (r/run (r/db-drop db) (:conn this)))
     (close (:conn this))))
 
 (defn client
@@ -166,7 +165,6 @@
 ;                                                        :f    :reconfigure}])))
                          (gen/nemesis (->> (cycle [{:type :info
                                                     :f    :start}
-                                                   (gen/sleep 5)
                                                    {:type :info
                                                     :f    :stop}])
                                            (interpose {:type  :info
