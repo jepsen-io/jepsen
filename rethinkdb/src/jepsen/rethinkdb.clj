@@ -7,7 +7,7 @@
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen [core      :as jepsen]
                     [db        :as db]
-                    [util      :as util :refer [meh timeout retry]]
+                    [util      :as util :refer [meh timeout retry with-retry]]
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
@@ -186,35 +186,49 @@
 
     (invoke! [_ test op]
       (timeout 5000 (assoc op :value :timeout)
-         (assert (= :reconfigure (:f op)))
-         (let [size     (inc (rand-int (count (:nodes test))))
-               replicas (->> (:nodes test)
-                             shuffle
-                             (take size)
-                             (map name))
-               primary  (rand-nth replicas)
-               _        (info "nemesis opening conn to" primary)
-               conn     (conn primary)]
-           (try
-             (info "will reconfigure to" replicas "(" primary ")")
-             ; Reconfigure
-             (let [res (-> (r/db db)
-                           (r/table table)
-                           (r/reconfigure {:shards   1
-                                           :replicas (->> replicas
-                                                          (map #(vector % 1))
-                                                          (into {}))
-                                           :primary_replica_tag primary})
-                           (run! conn))]
-               (assert (= 1 (:reconfigured res))))
-             (info "reconfiguration complete")
-             ;            (info (with-out-str (pprint res))))
-             ; Wait for completion
-             ; (wait-table conn db table)
-             ; Return
-             (assoc op :value {:replicas replicas :primary primary})
+         (with-retry [i 10]
+           (assert (= :reconfigure (:f op)))
+           (let [size     (inc (rand-int (count (:nodes test))))
+                 replicas (->> (:nodes test)
+                               shuffle
+                               (take size)
+                               (map name))
+                 primary  (rand-nth replicas)
+                 _        (info "nemesis opening conn to" primary)
+                 conn     (conn primary)]
+             (try
+               (info "will reconfigure to" replicas "(" primary ")")
+               ; Reconfigure
+               (let [res (-> (r/db db)
+                             (r/table table)
+                             (r/reconfigure {:shards   1
+                                             :replicas (->> replicas
+                                                            (map #(vector % 1))
+                                                            (into {}))
+                                             :primary_replica_tag primary})
+                             (run! conn))]
+                 (assert (= 1 (:reconfigured res))))
+               (info "reconfiguration complete")
+               ;            (info (with-out-str (pprint res))))
+               ; Wait for completion
+               ; (wait-table conn db table)
+               ; Return
+               (assoc op :value {:replicas replicas :primary primary})
 
-             (finally (close conn))))))
+               (finally (close conn))))
+           (catch clojure.lang.ExceptionInfo e
+             (if (zero? i)
+               (throw e)
+               (condp re-find (.getMessage e)
+                 #"Could not find any servers with server tag"
+                 (do (warn "reconfigure caught; retrying:" (.getMessage e))
+                     (retry (dec i)))
+
+                 #"The server\(s\) hosting table .+? are currently unreachable."
+                 (do (warn "reconfigure failed: servers unreachable. retrying")
+                     (retry (dec i)))
+
+                 (throw e)))))))
 
     (teardown! [_ test])))
 
