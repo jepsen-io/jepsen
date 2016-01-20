@@ -10,7 +10,8 @@
   (let [test (jepsen/run! test)]
     (is (:valid? (:results test)))))
 
-(let [version "2.1.5+2~0jessie"]
+(let [; version "2.1.5+2~0jessie"
+      version "2.2.3+1~0jessie"]
   (deftest single-single-test
     (run! (dc/cas-test version "single" "single")))
   (deftest majority-single-test
