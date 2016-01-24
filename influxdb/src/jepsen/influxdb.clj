@@ -248,34 +248,46 @@
 
       (teardown! [_ test node]
         ;; nothing for now for examination of running nodes
-        ))
+        )
+
+      db/LogFiles
+      (log-files [_ test node] ["/var/log/influxdb/influxd.log"]))
 
     )
   )
 
-(defn basic-test
+(defn test-on-single-shard-data
   "A simple test of InfluxDB's safety."
-  [version]
+  [version name]
   (merge tests/noop-test
          {:ssh
                        {:username         "root"
                         :private-key-path "~/.ssh/id_rsa"
                         }
           :nodes       [:n1 :n2 :n3]
+          :name        name
           :concurrency 3
           :os          debian/os
           :client      (client nil)
           :db          (db version)
-          :nemesis     (nemesis/partition-random-halves)
+          :nemesis     (nemesis/partition-halves)
           :generator   (->> (gen/mix [r w])
                             (gen/stagger 1)
                             (gen/nemesis
-                              (gen/seq (cycle [(gen/sleep 1)
-                                               {:type :info :f :start}
-                                               (gen/sleep 2)
-                                               {:type :info :f :stop}
-                                               ])))
-                            (gen/time-limit 40))
+                              (gen/seq
+                                (cycle [(gen/sleep 1)
+                                        {:type :info :f :start}
+                                        (gen/sleep 2)
+                                        {:type :info :f :stop}
+                                        ])
+                                ;[(gen/sleep 4)
+                                ; {:type :info :f :start}
+                                ; (gen/sleep 1)
+                                ; {:type :info :f :stop}
+                                ; ]
+                                )
+                              )
+                            (gen/time-limit 60))
           :model       (model/register 42.0)
           :checker     (checker/compose
                          {:perf   (checker/perf)
