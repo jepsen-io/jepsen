@@ -201,15 +201,14 @@
     (setup! [this _ _] this)
 
     (invoke! [_ test op]
+      (assert (= :reconfigure (:f op)))
       (timeout 5000 (assoc op :value :timeout)
          (with-retry [i 10]
-           (assert (= :reconfigure (:f op)))
            (let [size     (inc (rand-int (count (:nodes test))))
                  replicas (->> (:nodes test)
                                shuffle
                                (take size))
                  primary  (rand-nth replicas)
-                 _        (info "nemesis opening conn to" primary)
                  conn     (conn primary)]
              (try
                (info "will reconfigure to" replicas "(" primary ")")
@@ -260,8 +259,8 @@
      (setup! [this _ _] this)
 
      (invoke! [_ test op]
+       (assert (= :reconfigure (:f op)))
        (locking state
-         (assert (= :reconfigure (:f op)))
          (timeout 10000 (assoc op :value :timeout)
            (with-retry [i 10]
              (let [{:keys [replicas primary grudge]
