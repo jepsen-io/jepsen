@@ -53,11 +53,17 @@
   ([pattern]
    (grepkill! 9 pattern))
   ([signal pattern]
-   (exec :ps :aux
-         | :grep pattern
-         | :grep :-v "grep"
-         | :awk "{print $2}"
-         | :xargs :kill (str "-" signal))))
+   (try
+     (exec :ps :aux
+           | :grep pattern
+           | :grep :-v "grep"
+           | :awk "{print $2}"
+           | :xargs :kill (str "-" signal))
+     ; Occasionally returns nonzero exit status and empty strings for reasons I
+     ; don't understand but think are fine?
+     (catch RuntimeException e
+       (when-not (re-find #"^\s*$" (.getMessage e))
+         (throw e))))))
 
 (defn start-daemon!
   "Starts a daemon process, logging stdout and stderr to the given file.

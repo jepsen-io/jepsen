@@ -179,14 +179,15 @@
 
 (defn reconfigure!
   "Reconfigures replicas for a table."
-  [db table primary replicas]
+  [conn db table primary replicas]
   (let [res (-> (r/db db)
                 (r/table table)
                 (r/reconfigure {:shards   1
                                 :replicas (->> replicas
+                                               (map name)
                                                (map #(vector % 1))
                                                (into {}))
-                                :primary_replica_tag primary})
+                                :primary_replica_tag (name primary)})
                 (run! conn))]
     (assert (= 1 (:reconfigured res)))
     (info "reconfigured" {:replicas replicas, :primary primary})
@@ -206,14 +207,13 @@
            (let [size     (inc (rand-int (count (:nodes test))))
                  replicas (->> (:nodes test)
                                shuffle
-                               (take size)
-                               (map name))
+                               (take size))
                  primary  (rand-nth replicas)
                  _        (info "nemesis opening conn to" primary)
                  conn     (conn primary)]
              (try
                (info "will reconfigure to" replicas "(" primary ")")
-               (reconfigure! db table primary replicas)
+               (reconfigure! conn db table primary replicas)
                (assoc op :value {:replicas replicas :primary primary})
                (finally (close conn))))
            (catch clojure.lang.ExceptionInfo e
@@ -243,7 +243,11 @@
                         (take (/ (count nodes) 2))
                         set)
         component2 (set/difference nodes component1)]
-    (nemesis/complete-grudge [component1 component2])))
+    (nemesis/complete-grudge [component1 component2])
+    ; Disregard that, pick randomly
+    (if (< (rand) 0.5)
+      {}
+      (nemesis/complete-grudge (nemesis/bisect (shuffle nodes))))))
 
 (defn aggressive-reconfigure-nemesis
   "A nemesis which reconfigures the cluster topology for the given db
@@ -258,25 +262,43 @@
      (invoke! [_ test op]
        (locking state
          (assert (= :reconfigure (:f op)))
-         (timeout 5000 (assoc op :value :timeout)
+         (timeout 10000 (assoc op :value :timeout)
            (with-retry [i 10]
              (let [{:keys [replicas primary grudge]
                     :or   {primary  (first (:nodes test))
                            replicas [(first (:nodes test))]
                            grudge   {}}}                    @state
-                   nodes     (set (:nodes test))
+                   nodes   (set (:nodes test))
+                   ; Pick a new primary and replicas at random.
+                   size' (inc (rand-int (count nodes)))
+                   replicas' (->> nodes
+                                 shuffle
+                                 (take size'))
+                   primary' (rand-nth replicas')
+
                    ; Pick a new primary visible to the current one.
-                   replicas' (take 1 (-> nodes
-                                         (disj primary)
-                                         (set/difference (set (grudge primary)))))
-                   primary'  (rand-nth replicas')
+                   ;primary' (-> nodes
+                   ;             (disj primary)
+                   ;             (set/difference (set (grudge primary)))
+                   ;             vec
+                   ;             rand-nth)
+                   ; Pick a new set of replicas including the primary, visible
+                   ; to the new primary.
+                   ;size'     (rand-int (count nodes))
+                   ;replicas' (->> (-> nodes
+                   ;                   (disj primary')
+                   ;                   (set/difference (set (grudge primary'))))
+                   ;              shuffle
+                   ;              (take size')
+                   ;              (cons primary'))
+
                    grudge'   (reconfigure-grudge nodes primary  replicas
                                                        primary' replicas')
-                   conn      (conn (rand-nth [primary primary']))]
+                   conn      (conn primary')]
                (try
                  ; Reconfigure
-                 (info "will reconfigure" primary replicas "->" primary' replicas' " with grudge" grudge)
-                 (reconfigure! db table primary' replicas')
+                 (info "will reconfigure" primary replicas "->" primary' replicas' " under grudge" grudge)
+                 (reconfigure! conn db table primary' replicas')
 
                  ; Set up new network topology
                  (net/heal! (:net test) test)
@@ -293,7 +315,6 @@
                  (assoc op :value @state)
                  (finally (close conn))))
            (catch clojure.lang.ExceptionInfo e
-             (warn e "hi")
              (if (zero? i)
                (throw e)
                (condp re-find (.getMessage e)
@@ -302,7 +323,8 @@
                      (retry (dec i)))
 
                  #"The server\(s\) hosting table .+? are currently unreachable."
-                 (do (warn "reconfigure failed: servers unreachable. retrying")
+                 (do (warn "reconfigure failed: servers unreachable. Healing net and retrying")
+                     (net/heal! (:net test) test)
                      (retry (dec i)))
 
                  (throw e))))))))
