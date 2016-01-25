@@ -161,25 +161,25 @@
                                (->> (gen/reserve 5 (gen/mix [w cas])
                                                  r)
                                     (gen/delay 1)
-                                    (gen/limit 200))))
-                         (gen/nemesis
-                           (gen/phases
-                             (gen/await #(deref (:table-created? (:client t))))
-                             (gen/seq (cycle [(gen/sleep 0)
-                                              {:type :info :f :reconfigure}]))))
-;                           (gen/nemesis
-;                             (gen/phases
-;                               (gen/await
-;                                 (fn []
-;                                   (info "Nemesis waiting")
-;                                   (deref (:table-created? (:client t)))
-;                                   (info "Nemesis ready to go")))
-;                               (->> (cycle [{:type :info, :f :start}
-;                                            {:type :info, :f :stop}])
-;                                    (interpose {:type :info, :f :reconfigure})
-;                                    (gen/seq))))
-                           (gen/time-limit 500))
-         :nemesis (aggressive-reconfigure-nemesis "jepsen" "cas"))))
-;           :nemesis  (nemesis/compose
-;                       {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
-;                        #{:start :stop} (nemesis/partition-random-halves)}))))
+                                    (gen/limit 100))))
+                         ;(gen/nemesis
+                         ;  (gen/phases
+                         ;    (gen/await #(deref (:table-created? (:client t))))
+                         ;    (gen/seq (cycle [(gen/sleep 0)
+                         ;                     {:type :info :f :reconfigure}]))))
+                           (gen/nemesis
+                             (gen/phases
+                               (gen/await
+                                 (fn []
+                                   (info "Nemesis waiting")
+                                   (deref (:table-created? (:client t)))
+                                   (info "Nemesis ready to go")))
+                               (->> (cycle [{:type :info, :f :start}
+                                            {:type :info, :f :stop}])
+                                    (interpose {:type :info, :f :reconfigure})
+                                    (gen/seq))))
+                           (gen/time-limit 1000))
+;         :nemesis (aggressive-reconfigure-nemesis "jepsen" "cas"))))
+           :nemesis  (nemesis/compose
+                       {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
+                        #{:start :stop} (nemesis/partition-random-halves)}))))
