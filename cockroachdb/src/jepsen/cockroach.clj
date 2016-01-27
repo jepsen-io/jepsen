@@ -1,6 +1,7 @@
 (ns jepsen.cockroach
     "Tests for CockroachDB"
     (:require [clojure.tools.logging :refer :all]
+            [clj-ssh.ssh :as ssh]
             [clojure.core.reducers :as r]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -11,25 +12,26 @@
              [db :as db]
              [tests :as tests]
              [control :as c :refer [|]]
+             [model :as model]
              [checker :as checker]
              [nemesis :as nemesis]
              [generator :as gen]
-             [util :refer [timeout meh]]]
+             [util :refer [timeout]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
-            [jepsen.os.ubuntu :as ubuntu]
-            [clojure.java.jdbc :as j]))
+            [jepsen.os.ubuntu :as ubuntu]))
 
 (defn eval!
-  "Evals a mysql string from the command line."
+  "Evals a sql string from the command line."
   [s]
   (c/exec "/home/ubuntu/sql.sh" s))
 
 (defn setup-db!
-  "Adds a jepsen database to the cluster."
+  "Set up the jepsen database in the cluster."
   [node]
-  (eval! "create database if not exists jepsen;")
-  (eval! "create table if not exists jepsen.test (name char(1), val int);")
+  (eval! "drop database if exists jepsen;")
+  (eval! "create database jepsen;")
+  (eval! "create table jepsen.test (name char(1), val int, primary key (name));")
   (eval! "insert into jepsen.test values ('a', 0);")
   )
 
@@ -41,98 +43,108 @@
 (def log-files
   ["/home/ubuntu/logs/cockroach.stderr"])
 
+(defn str->int [str]
+  (let [n (read-string str)]
+    (if (number? n) n nil)))
 
 (defn db
-  "Sets up and tears down Galera."
+  "Sets up and tears down CockroachDB."
   [version]
   (reify db/DB
     (setup! [_ test node]
 
       (c/exec "/home/ubuntu/restart.sh")
       (jepsen/synchronize test)
-      (setup-db! node)
+      (if (= node (jepsen/primary test)) (setup-db! node))
 
-      (info node "Install complete")
-      (Thread/sleep 5000))
+      (info node "Setup complete")
+      (Thread/sleep 1000))
 
     (teardown! [_ test node]
 
-        (stop! node)
-        (apply c/exec :truncate :-c :--size 0 log-files)
-	)
+      (if (= node (jepsen/primary test)) (stop! node))
+      (jepsen/synchronize test)
+      (apply c/exec :truncate :-c :--size 0 log-files)
+      )
     
     db/LogFiles
     (log-files [_ test node] log-files)))
-
-(defn conn-spec
-  "jdbc connection spec for a node."
-  [node]
-  {:classname   "org.postgresql.Driver"
-   :subprotocol "postgresql"
-   :subname     (str "//" (name node) ":15432/jepsen")
-   :user        "psql"
-   :password    "dummy"})
-
-(defmacro with-txn
-  "Executes body in a transaction, with a timeout"
-  [op [c conn-atom] & body]
-  `(timeout 5000 (assoc ~op :type :info, :value :timed-out)
-            (with-conn [c# ~conn-atom]
-              (j/with-db-transaction [~c c# :isolation :serializable]
-                 ~@body))))
-
-(defn simple-test
-  [version]
-  (assoc tests/noop-test
-         :name "cockroachdb"
-	 :os ubuntu/os
-	 :db (db version)
-	 ))
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defn client
-  "A client for a single compare-and-set register"
+(defn ssh-sql
+  "Evals a sql string from the command line."
+  [conn s]
+  (ssh/ssh conn {:cmd (str "/home/ubuntu/sql.sh " s)}))
+
+(defn client-ssh
+  "A client for a single compare-and-set register, using sql cli over ssh"
   [conn]
   (reify client/Client
     (setup! [_ test node]
-      (let [spec (conn-spec node)
-            conn (j/add-connection spec (j/get-connection spec))
-            ]
-      (client conn)))
+      (let [agent (ssh/ssh-agent {})
+            host (name node)
+            conn (ssh/session agent host {:username "ubuntu" :strict-host-key-checking :no})]
+           (ssh/connect conn)
+           (client-ssh conn)))
 
     (invoke! [this test op]
-      (timeout 5000 (assoc op :type :info, :error :timeout)
+      (timeout 2000 (assoc op :type :info, :error :timeout)
                (case (:f op)
-                 :read (j/with-db-transaction [c conn :isolation :serializable]
-                         (->>
-                          (j/query c "select val from test")
-                          (mapv :val)
-                          (assoc op :type :ok, :value)))
-                 :write (do
-                          (j/with-db-transaction [c conn :isolation :serializable]
-                            (j/update! c :test {:val (:value op)} ["name='a'"]))
-                          (assoc op :type :ok))
-                 :cas nil  
+                 :read (let [res (ssh-sql conn "begin \"set transaction isolation level serializable\" \"select val from jepsen.test\"  commit")
+                             out (str/split-lines (str/trim-newline (:out res)))]
+                          (if (zero? (:exit res))
+                            (assoc op :type :ok, :value (str->int (nth out 4)))
+                            (assoc op :type :info, :error (str "sql error: " (str/join " " out)))))
+                 :write (let [res (ssh-sql conn (str "begin \"set transaction isolation level serializable\" \"update jepsen.test set val=" (:value op) " where name='a'\" commit"))
+                             out (str/split-lines (str/trim-newline (:out res)))]
+                          (if (and (zero? (:exit res)) (= (last out) "OK"))
+                            (assoc op :type :ok)
+                            (assoc op :type :info, :error (str "sql error: " (str/join " " out)))))
+                 :cas (let [[value' value] (:value op)
+                            res (ssh-sql conn (str "begin "
+                                                   "\"set transaction isolation level serializable\" "
+                                                   "\"select val from jepsen.test\" "
+                                                   "\"update jepsen.test set val=" value " where name='a' and val=" value' "\" "
+                                                   "\"select val from jepsen.test\" "
+                                                   " commit"))
+                            out (str/split-lines (str/trim-newline (:out res)))]
+                        (if (zero? (:exit res))
+                          ;(assoc op :type :info, :error (str "sql: " (nth out 3) " / " value'))
+                          (assoc op :type (if (and (= (last out) "OK")
+                                                   (= (str->int (nth out 4)) value')
+                                                   (= (str->int (nth out 8)) value)) :ok :fail), :error (str "sql: " (str/join " " out)))
+                          (assoc op :type :info, :error (str "sql error: " (str/join " " out)))))
                  ))
       )
       
 
     (teardown! [_ test]
-               (.close conn))
+    	   (ssh/disconnect conn))
     ))
 
 (defn client-test
   [version]
   (assoc tests/noop-test
+         :nodes [:n1l :n2l :n3l :n4l :n5l]
          :name    "cockroachdb"
          :os      ubuntu/os
          :db      (db version)
-         :client  (client nil)
-         :generator (->> (gen/mix [r w])
-                         (gen/stagger 1)
+         :client  (client-ssh nil)
+         :nemesis (nemesis/partition-random-halves)
+         :generator (->> (gen/mix [r w cas])
+                         (gen/stagger 1/2)
                          (gen/clients)
-                         (gen/time-limit 15))
+                         (gen/nemesis
+                          (gen/seq (cycle [(gen/sleep 5)
+                                           {:type :info, :f :start}
+                                           (gen/sleep 5)
+                                           {:type :info, :f :stop}])))
+                         (gen/time-limit 30))
+         :model   (model/cas-register 0)
+         :checker (checker/compose
+                   {:perf   (checker/perf)
+                    :linear checker/linearizable})
 ))

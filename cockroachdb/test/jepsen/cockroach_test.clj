@@ -1,6 +1,7 @@
 (ns jepsen.cockroach-test
   (:require [clojure.test :refer :all]
             [jepsen.core :as jepsen]
+            [jepsen.control :as control]
             [jepsen.cockroach :as cl]))
 
 ;(deftest cl-test
