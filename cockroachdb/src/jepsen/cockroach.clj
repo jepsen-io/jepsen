@@ -112,7 +112,6 @@
                                                    " commit"))
                             out (str/split-lines (str/trim-newline (:out res)))]
                         (if (zero? (:exit res))
-                          ;(assoc op :type :info, :error (str "sql: " (nth out 3) " / " value'))
                           (assoc op :type (if (and (= (last out) "OK")
                                                    (= (str->int (nth out 4)) value')
                                                    (= (str->int (nth out 8)) value)) :ok :fail), :error (str "sql: " (str/join " " out)))
@@ -135,7 +134,7 @@
          :client  (client-ssh nil)
          :nemesis (nemesis/partition-random-halves)
          :generator (->> (gen/mix [r w cas])
-                         (gen/stagger 1/2)
+                         (gen/stagger 1)
                          (gen/clients)
                          (gen/nemesis
                           (gen/seq (cycle [(gen/sleep 5)
