@@ -55,29 +55,29 @@
     )
   )
 
-(defn batchPoints []
+(defn batchPoints [writeConsistencyLevel]
   (->
     (BatchPoints/database dbName)
-    (.consistency InfluxDB$ConsistencyLevel/ALL)
+    (.consistency writeConsistencyLevel)
     (.build)
     )
   )
-(defn writeToInflux [conn value]
+(defn writeToInflux [conn value writeConsistencyLevel]
 
   (.write
     conn
-    (.point (batchPoints)
+    (.point (batchPoints writeConsistencyLevel)
             (.build (.field (.time (Point/measurement "answers") 1 TimeUnit/NANOSECONDS) "answer" value))
             )
     )
   )
 (defn client
   "A client for a single compare-and-set register"
-  [conn]
+  [conn writeConsistencyLevel]
   (reify client/Client
     (setup! [_ test node]
       (info node "setting up client")
-      (let [cl (client (connect node))]
+      (let [cl (client (connect node) writeConsistencyLevel)]
         (info node "client setup!")
         cl)
       )
@@ -100,7 +100,7 @@
                                    )
                                  )
                  :write (try
-                          (do (writeToInflux conn (:value op))
+                          (do (writeToInflux conn (:value op) writeConsistencyLevel)
                               (assoc op :type :ok))
                           (catch Throwable e
                             (do
@@ -233,9 +233,14 @@
                       c (connect node)
                       initialPoint (.build (.field (.time (Point/measurement "answers") 1 TimeUnit/NANOSECONDS) "answer" 42))
                       ]
+                  (info node "creating jepsen DB...")
+                  (Thread/sleep 2000)
                   (.createDatabase c dbName)
+                  (info node "waiting for DB to be created and WAL to kick in for jepsen DB...")
+                  (Thread/sleep 2000)
                   (.write c dbName "default" initialPoint)
                   )
+
                 (info node "This node is OK, sees 3 members in the raft cluster")
                 )
           (catch RuntimeException e
@@ -256,9 +261,17 @@
     )
   )
 
-(defn test-on-single-shard-data
-  "A simple test of InfluxDB's safety."
-  [version name]
+
+;(defn test-multi-shard-data
+;  "Datapoints on multiple shards (from predefined weeks) are being inserted randomly and read back.
+;  This should show write unavailability even in ConsistencyLevel.ANY mode"
+;
+;
+;  )
+
+
+(defn test-
+  [version name writeConsistencyLevel healthy]
   (merge tests/noop-test
          {:ssh
                        {:username         "root"
@@ -268,9 +281,9 @@
           :name        name
           :concurrency 3
           :os          debian/os
-          :client      (client nil)
+          :client      (client nil writeConsistencyLevel)
           :db          (db version)
-          :nemesis     (nemesis/partition-halves)
+          :nemesis     (if healthy nemesis/noop (nemesis/partition-halves))
           :generator   (->> (gen/mix [r w])
                             (gen/stagger 1)
                             (gen/nemesis
@@ -280,18 +293,24 @@
                                         (gen/sleep 2)
                                         {:type :info :f :stop}
                                         ])
-                                ;[(gen/sleep 4)
-                                ; {:type :info :f :start}
-                                ; (gen/sleep 1)
-                                ; {:type :info :f :stop}
-                                ; ]
                                 )
                               )
-                            (gen/time-limit 60))
+                            (gen/time-limit 30))
           :model       (model/register 42.0)
           :checker     (checker/compose
                          {:perf   (checker/perf)
                           :linear checker/linearizable})
           }
          )
+
   )
+
+
+(defn test-on-single-shard-data
+  "Testing datapoints inserted to the very same time point, i.e. emulating a simple read-write register.
+  This should demonstrate InfluxDB's AP behaviour with ConsistencyLevel.ANY and
+  write unavailability with ConsistencyLevel.ALL in case of network partitions"
+  [version name writeConsistencyLevel healthy]
+  (test- version (str name " writeConsistency: " writeConsistencyLevel) writeConsistencyLevel healthy)
+  )
+

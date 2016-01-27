@@ -1,13 +1,25 @@
 (ns jepsen.influxdb-test
   (:require [clojure.test :refer :all]
-  	 		[jepsen.core :as jepsen]
-            [jepsen.influxdb :as influxdb]))
+            [jepsen.core :as jepsen]
+            [jepsen.influxdb :as influxdb])
+  (:import (org.influxdb InfluxDB$ConsistencyLevel)))
 
 (defn run!
   [test]
   (let [test (jepsen/run! test)]
     (is (:valid? (:results test)))))
 
-(deftest single-shard-data-rw-consistency-all
-  (is (:valid? (:results (jepsen/run! (influxdb/test-on-single-shard-data "0.9.6.1" "single-point-cons-ALL"))))))
 
+
+
+(deftest healthy-single-shard-data-rw-consistency-all
+  (run! (influxdb/test-on-single-shard-data "0.9.6.1" "healthy-sp" InfluxDB$ConsistencyLevel/ALL true)))
+
+(deftest healthy-single-shard-data-rw-consistency-any
+  (run! (influxdb/test-on-single-shard-data "0.9.6.1" "healthy-sp" InfluxDB$ConsistencyLevel/ANY true)))
+
+(deftest single-shard-data-rw-consistency-all
+  (run! (influxdb/test-on-single-shard-data "0.9.6.1" "nemesis-single-point" InfluxDB$ConsistencyLevel/ALL false)))
+
+(deftest single-shard-data-rw-consistency-any
+  (run! (influxdb/test-on-single-shard-data "0.9.6.1" "nemesis-single-point" InfluxDB$ConsistencyLevel/ANY false)))
