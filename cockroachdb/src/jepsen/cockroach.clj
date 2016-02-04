@@ -1,3 +1,4 @@
+
 (ns jepsen.cockroach
     "Tests for CockroachDB"
     (:require [clojure.tools.logging :refer :all]
@@ -31,8 +32,9 @@
   [node]
   (eval! "drop database if exists jepsen;")
   (eval! "create database jepsen;")
-  (eval! "create table jepsen.test (name char(1), val int, primary key (name));")
+  (eval! "create table jepsen.test (name string, val int, primary key (name));")
   (eval! "insert into jepsen.test values ('a', 0);")
+  (eval! "create table jepsen.set (val int);")
   )
 
 (defn stop!
@@ -79,7 +81,7 @@
   [conn s]
   (ssh/ssh conn {:cmd (str "/home/ubuntu/sql.sh " s)}))
 
-(defn client-ssh
+(defn ssh-cnt-client
   "A client for a single compare-and-set register, using sql cli over ssh"
   [conn]
   (reify client/Client
@@ -88,7 +90,7 @@
             host (name node)
             conn (ssh/session agent host {:username "ubuntu" :strict-host-key-checking :no})]
            (ssh/connect conn)
-           (client-ssh conn)))
+           (ssh-cnt-client conn)))
 
     (invoke! [this test op]
       (timeout 2000 (assoc op :type :info, :error :timeout)
@@ -124,14 +126,14 @@
     	   (ssh/disconnect conn))
     ))
 
-(defn client-test
+(defn atomic-test
   [version]
   (assoc tests/noop-test
          :nodes [:n1l :n2l :n3l :n4l :n5l]
-         :name    "cockroachdb"
+         :name    "atomic"
          :os      ubuntu/os
          :db      (db version)
-         :client  (client-ssh nil)
+         :client  (ssh-cnt-client nil)
          :nemesis (nemesis/partition-random-halves)
          :generator (->> (gen/mix [r w cas])
                          (gen/stagger 1)
@@ -146,3 +148,82 @@
                    {:perf   (checker/perf)
                     :linear checker/linearizable})
 ))
+
+(defn ssh-set-client
+  [conn]
+  (reify client/Client
+    (setup! [_ test node]
+      (let [agent (ssh/ssh-agent {})
+            host (name node)
+            conn (ssh/session agent host {:username "ubuntu" :strict-host-key-checking :no})]
+           (ssh/connect conn)
+           (ssh-set-client conn)))
+
+    (invoke! [this test op]
+      (case (:f op)
+        :add  (let [res (ssh-sql conn (str "begin "
+                                           "\"set transaction isolation level serializable\" "
+                                           "\"insert into jepsen.set values (" (:value op) ")\"  "
+                                           "commit"))
+                    out (str/split-lines (str/trim-newline (:out res)))]
+                (if (zero? (:exit res))
+                  (assoc op :type :ok)
+                  (assoc op :type :fail, , :error (str "sql error: " (str/join " " out)))))
+        :read (let [res (ssh-sql conn (str "begin "
+                                           "\"set transaction isolation level serializable\" "
+                                           "\"select val from jepsen.set\"  "
+                                           "commit"))
+                    out (str/split-lines (str/trim-newline (:out res)))]
+                (if (zero? (:exit res))
+                  (assoc op :type :ok, :value (into (sorted-set) (map str->int (drop-last 1 (drop 4 out)))))
+                  (assoc op :type :fail, :error (str "sql error: " (str/join " " out)))))
+        ))
+    
+    (teardown! [_ test]
+      (ssh/disconnect conn))
+    ))
+
+(defn with-nemesis
+  "Wraps a client generator in a nemesis that induces failures and eventually
+  stops."
+  [client]
+  (gen/phases
+    (gen/phases
+      (->> client
+           (gen/nemesis
+             (gen/seq (cycle [(gen/sleep 0)
+                              {:type :info, :f :start}
+                              (gen/sleep 10)
+                              {:type :info, :f :stop}
+                              ])))
+           (gen/time-limit 30))
+      (gen/nemesis (gen/once {:type :info, :f :stop}))
+      (gen/sleep 5))))
+
+
+(defn sets-test
+  [version]
+  (assoc tests/noop-test
+         :nodes [:n1l :n2l :n3l :n4l :n5l]
+     :name    "set"
+     :os      ubuntu/os
+     :db      (db version)
+     :version version
+     :client (ssh-set-client nil)
+     :nemesis (nemesis/partition-random-halves)
+     :generator (gen/phases
+                  (->> (range)
+                       (map (partial array-map
+                                     :type :invoke
+                                     :f :add
+                                     :value))
+                       gen/seq
+                       (gen/delay 1/10)
+                       with-nemesis)
+                  (->> {:type :invoke, :f :read, :value nil}
+                       gen/once
+                       gen/clients))
+     :checker (checker/compose
+                {:perf (checker/perf)
+                 :set  checker/set})
+     ))
