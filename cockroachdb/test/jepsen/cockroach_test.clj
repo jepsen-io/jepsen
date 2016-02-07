@@ -4,8 +4,10 @@
             [jepsen.control :as control]
             [jepsen.cockroach :as cl]))
 
-;(deftest cl-test
-;  (is (:valid? (:results (jepsen/run! (cl/simple-test "hello-version"))))))
-(deftest cl-test
-  (is (:valid? (:results (jepsen/run! (cl/client-test "hello-version"))))))
+(def nodes [:n1l :n2l :n3l :n4l :n5l])
 
+(deftest atomic-test  (is (:valid? (:results (jepsen/run! (cl/atomic-test nodes))))))
+
+(deftest sets-test  (is (:valid? (:results (jepsen/run! (cl/sets-test nodes))))))
+
+(deftest sets-test  (is (:valid? (:results (jepsen/run! (cl/bank-test nodes 4 10))))))
