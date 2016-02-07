@@ -10,7 +10,7 @@
   Every object may act as a generator, and constantly yields itself.
 
   Big ol box of monads, really."
-  (:refer-clojure :exclude [concat delay seq filter])
+  (:refer-clojure :exclude [concat delay seq filter await])
   (:require [jepsen.util :as util]
             [knossos.history :as history]
             [clojure.core :as c]
@@ -327,6 +327,21 @@
   "Executes generator only on clients."
   ([client-gen]
    (on (complement #{:nemesis}) client-gen)))
+
+(defn await
+  "Blocks until the given fn returns, then allows [gen] to proceed. If no gen
+  is given, yields nil. Only invokes fn once."
+  ([f] (await f nil))
+  ([f gen]
+   (let [state (atom :waiting)]
+     (reify Generator
+       (op [_ test process]
+         (when (= @state :waiting)
+           (locking state
+             (when (= @state :waiting)
+               (f)
+               (reset! state :ready))))
+         (op gen test process))))))
 
 (defn synchronize
   "Blocks until all nodes are blocked awaiting operations from this generator,
