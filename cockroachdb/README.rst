@@ -14,7 +14,8 @@ consistency made by database developers or their documentation`__.
 .. __: https://github.com/aphyr/jepsen
 .. __: https://aphyr.com/tags/jepsen
 
-This repository is a fork of Aphyr's main Jepsen repository, with additional tests for CockroachDB.
+This repository is a fork of Aphyr's main Jepsen repository, with
+additional tests for CockroachDB.
 
 What is being tested?
 ---------------------
@@ -25,10 +26,14 @@ atomically and that the visible histories from all nodes are
 linearizable. During the tests, random partitions are created in the
 network to exercise the consistency protocol.
 
-For now the shared data is implemented as a single field of a single
-row in a single table. The database is accessed using the command-line
-SQL client executed remotely via SSH on each node (``cockroach sql -e
-...``).
+For now three tests are implemented:
+
+- "atomic": concurrent atomic updates to a shared register;
+- "sets":  concurrent unique appends to a shared table;
+- "bank": concurrent transfers between rows of a shared table. 
+
+The database is accessed using the command-line SQL client executed
+remotely via SSH on each node (``cockroach sql -e ...``).
 
 Overview of results
 -------------------
@@ -36,6 +41,65 @@ Overview of results
 As of Jan 26 2016, following the test procedure outlined below and
 the test code in this repository, during multple tests run at
 Cockroach Labs there were no inconsistencies found by Jepsen.
+
+Test details: atomic updates
+-----------------------------
+
+One table contains a single row.
+
+Jepsen sends concurrently to different nodes either read, write or
+atomic compare-and-swap operations.
+
+Concurrently, a nemesis partitions the network between the nodes randomly.
+
+Each node may report ok, the operation is known to have succeeded;
+fail, the operation is known to have failed; and unknown otherwise
+(e.g. the connection dropped before the answer could be read).
+
+At the end, a linearizability checker validates that the trace of
+reads as observed from each client is compatible with a linearizable
+history of across all nodes.
+
+Test details: unique appends
+-----------------------------
+
+Jepsen sends appends of unique values via different
+nodes over time. 
+
+Concurrently, a nemesis partitions the network between the nodes randomly.
+
+Each node may report ok, the operation is known to have succeeded;
+fail, the operation is known to have failed; and unknown otherwise
+(e.g. the connection dropped before the answer could be read).
+
+At the end, a uniqueness checker validates that no value was
+added two or more times; that all known-ok additions are indeed
+present in the table; and that all known-fail additions are indeed
+not present in the table.
+
+Test details: bank transfers
+----------------------------
+
+One shared table contains multiple bank accounts, one per row.
+
+Jepsen sends concurrently read and transfer operations via
+different nodes to/between randomly selected accounts.
+
+Each node may report ok, the operation is known to have succeeded;
+fail, the operation is known to have failed; and unknown otherwise
+(e.g. the connection dropped before the answer could be read).
+
+At the end, the checker validates that the sum of the remaining
+balances of all accounts is the same as the initial sum.
+
+.. note:: This test is currently incomplete. The full test should
+   contain *conditional transactions*, where a transfer is only
+   effected if the remaining balance in the source account is
+   sufficient *within the same transaction*.  Then at the end the test
+   should check that no account has a negative balance.  However this
+   part of the test was not implemented because it is not possible to
+   place conditionals within a transaction executed via the
+   sql-over-ssh transport.
 
 How to run the Jepsen tests for CockroachDB
 -------------------------------------------
@@ -91,8 +155,9 @@ How to get there:
 6. run ``lein test`` from the ``cockroachdb`` test directory. This
    will run the Jepsen tests and exercise the database.
 
-7. Wait for the results of the tests. The output should end with a
-   detailed data structure containing the test results, including
+7. Wait for the results of the tests. there will
+   be multiple reports, one per test. Each report ends with
+   detailed data structure containing the test's results, including
    either ``:valid? true`` or ``:valid? false`` depending on whether
    inconsistencies were found.
 
