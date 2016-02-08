@@ -30,6 +30,7 @@ For now three tests are implemented:
 
 - "atomic": concurrent atomic updates to a shared register;
 - "sets":  concurrent unique appends to a shared table;
+- "monotonic": concurrent unique appends with carried dependency;
 - "bank": concurrent transfers between rows of a shared table. 
 
 The database is accessed using the command-line SQL client executed
@@ -76,6 +77,22 @@ At the end, a uniqueness checker validates that no value was
 added two or more times; that all known-ok additions are indeed
 present in the table; and that all known-fail additions are indeed
 not present in the table.
+
+Test details: monotonic
+-----------------------
+
+Jepsen sends atomic transactions that append the last known max
+value + 1, concurrently to different nodes over time.
+
+Concurrently, a nemesis partitions the network between the nodes randomly.
+
+Each node may report ok, the operation is known to have succeeded;
+fail, the operation is known to have failed; and unknown otherwise
+(e.g. the connection dropped before the answer could be read).
+
+At the end, a monotonic checker validates that no value was
+added two or more times; that all known-ok additions are indeed
+present in the table; that all values are in order.
 
 Test details: bank transfers
 ----------------------------

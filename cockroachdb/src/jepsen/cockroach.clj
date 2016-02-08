@@ -5,6 +5,8 @@
             [clj-ssh.ssh :as ssh]
             [clojure.core.reducers :as r]
             [clojure.java.io :as io]
+            [multiset.core :as multiset]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [knossos.op :as op]
@@ -17,7 +19,7 @@
              [checker :as checker]
              [nemesis :as nemesis]
              [generator :as gen]
-             [util :refer [timeout]]]
+             [util :as util]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
             [jepsen.os.ubuntu :as ubuntu]))
@@ -35,6 +37,8 @@
   (eval! "create table jepsen.test (name string, val int, primary key (name));")
   (eval! "insert into jepsen.test values ('a', 0);")
   (eval! "create table jepsen.set (val int);")
+  (eval! "create table jepsen.mono (val int);")
+  (eval! "insert into jepsen.mono values (0);")
   (eval! "create table if not exists jepsen.accounts (id int not null primary key, balance bigint not null);")
   )
 
@@ -124,7 +128,7 @@
       (ssh-cnt-client (ssh-open node)))
     
     (invoke! [this test op]
-      (timeout 2000 (assoc op :type :info, :error :timeout)
+      (util/timeout 5000 (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (let [[res out err]
                              (ssh-sql conn (str "begin "
@@ -187,6 +191,60 @@
 
 ;-------------------- Test for a distributed set ----------------------------
 
+(defn check-set-unique
+  "Given a set of :add operations followed by a final :read, verifies that
+  every successfully added element is present in the read, and that the read
+  contains only elements for which an add was attempted, and that all
+  elements are unique."
+  []
+  (reify checker/Checker
+    (check [this test model history]
+      (let [attempts (->> history
+                          (r/filter op/invoke?)
+                          (r/filter #(= :add (:f %)))
+                          (r/map :value)
+                          (into #{}))
+            adds (->> history
+                      (r/filter op/ok?)
+                      (r/filter #(= :add (:f %)))
+                      (r/map :value)
+                      (into #{}))
+            final-read-l (->> history
+                          (r/filter op/ok?)
+                          (r/filter #(= :read (:f %)))
+                          (r/map :value)
+                          (reduce (fn [_ x] x) nil))]
+        (if-not final-read-l
+          {:valid? false
+           :error  "Set was never read"})
+
+        (let [final-read  (into #{} final-read-l)
+                                        
+              dups        (remove final-read final-read-l)
+              
+              ;The OK set is every read value which we tried to add
+              ok          (set/intersection final-read attempts)
+
+              ; Unexpected records are those we *never* attempted.
+              unexpected  (set/difference final-read attempts)
+
+              ; Lost records are those we definitely added but weren't read
+              lost        (set/difference adds final-read)
+
+              ; Recovered records are those where we didn't know if the add
+              ; succeeded or not, but we found them in the final set.
+              recovered   (set/difference ok adds)]
+
+          {:valid?          (and (empty? lost) (empty? unexpected) (empty? dups))
+           :duplicates      dups
+           :ok              (util/integer-interval-set-str ok)
+           :lost            (util/integer-interval-set-str lost)
+           :unexpected      (util/integer-interval-set-str unexpected)
+           :recovered       (util/integer-interval-set-str recovered)
+           :ok-frac         (util/fraction (count ok) (count attempts))
+           :unexpected-frac (util/fraction (count unexpected) (count attempts))
+           :lost-frac       (util/fraction (count lost) (count attempts))
+           :recovered-frac  (util/fraction (count recovered) (count attempts))})))))
 
 (defn ssh-set-client
   [conn]
@@ -195,6 +253,7 @@
       (ssh-set-client (ssh-open node)))
       
     (invoke! [this test op]
+      (util/timeout 5000 (assoc op :type :info, :error :timeout)
       (case (:f op)
         :add  (let [[res out err] (ssh-sql conn (str "begin "
                                                      "\"set transaction isolation level serializable\" "
@@ -208,9 +267,9 @@
                                                      "\"select val from jepsen.set\"  "
                                                      "commit"))]
                 (if (zero? (:exit res))
-                  (assoc op :type :ok, :value (into (sorted-set) (map str->int (drop-last 1 (drop 4 out)))))
+                  (assoc op :type :ok, :value (into [] (map str->int (drop-last 1 (drop 4 out)))))
                   (assoc op :type :fail, :error err)))
-        ))
+        )))
     
     (teardown! [_ test]
       (ssh/disconnect conn))
@@ -226,10 +285,10 @@
            (gen/nemesis
              (gen/seq (cycle [(gen/sleep 0)
                               {:type :info, :f :start}
-                              (gen/sleep 10)
+                              (gen/sleep 5)
                               {:type :info, :f :stop}
                               ])))
-           (gen/time-limit 30))
+           (gen/time-limit 20))
       (gen/nemesis (gen/once {:type :info, :f :stop}))
       (gen/sleep 5))))
 
@@ -247,14 +306,117 @@
                                    :f :add
                                    :value))
                      gen/seq
-                     (gen/delay 1/10)
+                     (gen/stagger 1/10)
                      with-nemesis)
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
                      gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
-               :set  checker/set})
+               :set  (check-set-unique)})
+    }
+   ))
+
+
+; -------------------------- Test for an increasing sequence
+
+(defn check-monotonic
+  "Given a set of :add operations followed by a final :read, verifies that
+  every successfully added element is present in the read, and that the read
+  contains only elements for which an add was succesful, and that all
+  elements are unique and in order."
+  []
+  (reify checker/Checker
+    (check [this test model history]
+      (let [adds (->> history
+                      (r/filter op/ok?)
+                      (r/filter #(= :add (:f %)))
+                      (r/map :value)
+                      (into []))
+            final-read-l (->> history
+                          (r/filter op/ok?)
+                          (r/filter #(= :read (:f %)))
+                          (r/map :value)
+                          (reduce (fn [_ x] x) nil)
+                          )]
+        (if-not final-read-l
+          {:valid? false
+           :error  "Set was never read"})
+
+        (let [final-read  (into #{} final-read-l)
+              all-adds-l  (concat [0] adds)
+              all-adds    (into #{} all-adds-l)
+
+              in-order-adds     (= (sort all-adds-l) all-adds-l)
+              in-order-final    (= (sort final-read-l) final-read-l)
+              
+              dups        (remove final-read final-read-l)
+              
+              ; Lost records are those we definitely added but weren't read
+              lost        (set/difference all-adds final-read)]
+
+          {:valid?          (and (empty? lost) (empty? dups) in-order-adds in-order-final)
+           :duplicates      dups
+           :adds-ordered    in-order-adds
+           :final-ordered   in-order-final
+           :lost            (util/integer-interval-set-str lost)
+           :lost-frac       (util/fraction (count lost) (count adds))
+           })))))
+
+
+(defn ssh-set-inc-client
+  [conn]
+  (reify client/Client
+    (setup! [_ test node]
+      (ssh-set-inc-client (ssh-open node)))
+      
+    (invoke! [this test op]
+      (util/timeout 5000 (assoc op :type :info, :error :timeout)
+      (case (:f op)
+        :add  (let [[res out err] (ssh-sql conn (str "begin "
+                                                     "\"set transaction isolation level serializable\" "
+                                                     "\"select max(val) + 1 from jepsen.mono\" "
+                                                     "\"insert into jepsen.mono values (1 + (select max(val) from jepsen.mono))\" "
+                                                     "commit"))]
+                (assoc op :value nil)
+                (if (zero? (:exit res))
+                  (assoc op :type :ok, :value (str->int (first (drop 4 out))), :info err)
+                  (assoc op :type :fail, :error err)))
+        :read (let [[res out err] (ssh-sql conn (str "begin "
+                                                     "\"set transaction isolation level serializable\" "
+                                                     "\"select val from jepsen.mono\"  "
+                                                     "commit"))]
+                (if (zero? (:exit res))
+                  (assoc op :type :ok, :value (doall (map str->int (drop-last 1 (drop 4 out)))))
+                  (assoc op :type :fail, :error err)))
+        )))
+    
+    (teardown! [_ test]
+      (ssh/disconnect conn))
+    ))
+
+
+(defn monotonic-add-test
+  [nodes]
+  (basic-test nodes
+   {
+    :name    "set"
+    :client (ssh-set-inc-client nil)
+    :generator (gen/phases
+                (->> (range)
+                     (map (partial array-map
+                                   :type :invoke
+                                   :f :add
+                                   :value))
+                     gen/seq
+                     (gen/stagger 1/10)
+                     with-nemesis)
+                (->> {:type :invoke, :f :read, :value nil}
+                     gen/once
+                     gen/clients))
+    :checker (checker/compose
+              {:perf (checker/perf)
+               :set  (check-monotonic)})
     }
    ))
 
@@ -273,7 +435,7 @@
       )
 
     (invoke! [this test op]
-      (timeout 2000 (assoc op :type :info, :error :timeout)
+      (util/timeout 5000 (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (let [[res out err] (ssh-sql conn (str "begin "
                                                               "\"set transaction isolation level serializable\" "
