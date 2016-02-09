@@ -103,6 +103,23 @@
 
 ;-------------------- Common definitions ------------------------------------
 
+(defn clock-milli-scrambler
+  "Randomizes the system clock of all nodes within a dt-millisecond window."
+  [dt]
+  (reify client/Client
+    (setup! [this test _]
+      this)
+
+    (invoke! [this test op]
+      (assoc op :value
+                (c/on-many (:nodes test)
+                           (c/exec "/home/ubuntu/adjtime" (str (- (rand-int (* 2 dt)) dt))))))
+
+    (teardown! [this test]
+      (c/on-many (:nodes test)
+                 (c/su (c/exec "ntpdate" "ntp.ubuntu.com"))))
+    ))
+
 (defn basic-test
   [nodes opts]
   (merge tests/noop-test
@@ -400,7 +417,7 @@
   [nodes]
   (basic-test nodes
    {
-    :name    "set"
+    :name    "monotonic"
     :client (ssh-set-inc-client nil)
     :generator (gen/phases
                 (->> (range)
@@ -419,6 +436,31 @@
                :set  (check-monotonic)})
     }
    ))
+
+(defn monotonic-add-test-skews
+  [nodes]
+  (let [t (basic-test nodes
+   {
+    :name    "monotonic-skews"
+    :client (ssh-set-inc-client nil)
+    :generator (gen/phases
+                (->> (range)
+                     (map (partial array-map
+                                   :type :invoke
+                                   :f :add
+                                   :value))
+                     gen/seq
+                     (gen/stagger 1/10)
+                     with-nemesis)
+                (->> {:type :invoke, :f :read, :value nil}
+                     gen/once
+                     gen/clients))
+    :checker (checker/compose
+              {:perf (checker/perf)
+               :set  (check-monotonic)})
+    }
+   )]
+    (assoc t :nemesis (clock-milli-scrambler 100))))
 
 ; --------------------------- Test for transfers between bank accounts -------------------
 
