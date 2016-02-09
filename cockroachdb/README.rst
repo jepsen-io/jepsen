@@ -167,7 +167,9 @@ How to get there:
 
 5. copy the two scripts ``sql.sh`` and ``restart.sh`` from the
    ``cockroachdb/scripts`` subdirectory to the directory
-   ``/home/ubuntu`` on each node.
+   ``/home/ubuntu`` on each node. Compile
+   ``cockroachdb/scripts/adjtime.c`` and copy it to ``/home/ubuntu``
+   on each node.
 
 6. run ``lein test`` from the ``cockroachdb`` test directory. This
    will run the Jepsen tests and exercise the database.
