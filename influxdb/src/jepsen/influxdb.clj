@@ -21,7 +21,7 @@
             [jepsen.control.net :as cn]
             [jepsen.os.debian :as debian]
             )
-  (:import (org.influxdb InfluxDB$ConsistencyLevel InfluxDBFactory InfluxDB$LogLevel))
+  (:import (org.influxdb InfluxDBFactory InfluxDB$LogLevel))
   (:import (org.influxdb.dto Point Query BatchPoints))
   (:import (TimeUnit)
            (java.util.concurrent TimeUnit))
@@ -29,7 +29,6 @@
 
 (defn r [_ _] {:type :invoke, :f :read, :value nil})
 (defn w [_ _] {:type :invoke, :f :write, :value (double (rand-int 5))})
-(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
 (defn consToRef [element theRef]
   (dosync
@@ -40,9 +39,9 @@
     )
   )
 
-(defn nodesToJoin [nodes]
+(defn nodesToJoinParameterString [nodes]
   (if (>= 1 (count nodes)) ""
-                           (str "-join " (clojure.string/join "," (map (fn [n] (str (name n) ":8088")) (rest nodes)))))
+                           (str "-join " (name (last nodes)) ":8091"))
   )
 (def dbName "jepsen")
 (defn connect [node]
@@ -62,6 +61,7 @@
     (.build)
     )
   )
+
 (defn writeToInflux [conn value writeConsistencyLevel]
 
   (.write
@@ -69,6 +69,21 @@
     (.point (batchPoints writeConsistencyLevel)
             (.build (.field (.time (Point/measurement "answers") 1 TimeUnit/NANOSECONDS) "answer" value))
             )
+    )
+  )
+
+(defn queryInflux [conn queryString]
+  (let [q (Query. queryString dbName)]
+    (-> conn
+        (.query q)
+        (.getResults)
+        (.get 0)
+        (.getSeries)
+        (.get 0)
+        (.getValues)
+        (.get 0)
+        (.get 1)
+        )
     )
   )
 (defn client
@@ -86,18 +101,7 @@
       (timeout 5000 (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (assoc op :type :ok, :value
-                                 (let [q (Query. "SELECT answer from answers where time = 1" "jepsen")]
-                                   (-> conn
-                                       (.query q)
-                                       (.getResults)
-                                       (.get 0)
-                                       (.getSeries)
-                                       (.get 0)
-                                       (.getValues)
-                                       (.get 0)
-                                       (.get 1)
-                                       )
-                                   )
+                                 (queryInflux conn "SELECT answer from answers where time = 1")
                                  )
                  :write (try
                           (do (writeToInflux conn (:value op) writeConsistencyLevel)
@@ -109,7 +113,6 @@
                                 (assoc op :type :info, :error (.getMessage e))
                                 (assoc op :type :fail, :error (.getMessage e))
                                 )
-
                               )
                             )
                           )
@@ -158,7 +161,8 @@
                     (try (c/exec :dpkg-query :-l :influxdb)
                          (catch RuntimeException _
                            (info "Installing influxdb...")
-                           (c/exec :dpkg :-i file)))))
+                           (c/exec :dpkg :-i file))))
+                  )
                 (c/su
                   (c/exec :cp "/usr/lib/influxdb/scripts/init.sh" "/etc/init.d/influxdb")
 
@@ -191,11 +195,11 @@
                 (info node "I am waiting for the lock...")
                 (locking nodeOrderRef
                   (info node "I have the lock!")
-                  (let [norder (consToRef node nodeOrderRef)]
+                  (let [nodeOrder (consToRef node nodeOrderRef)]
 
-                    (info node "nodes to join: " (nodesToJoin norder) norder (deref nodeOrderRef))
+                    (info node "nodes to join: " (nodesToJoinParameterString nodeOrder) nodeOrder (deref nodeOrderRef))
                     (let [joinParams (-> (io/resource "influxdb") slurp
-                                         (str/replace #"%NODES_TO_JOIN%" (nodesToJoin norder)))]
+                                         (str/replace #"%NODES_TO_JOIN%" (nodesToJoinParameterString nodeOrder)))]
                       (info node "joinParams: " joinParams)
                       (c/su
                         (c/exec :echo
@@ -234,10 +238,7 @@
                       initialPoint (.build (.field (.time (Point/measurement "answers") 1 TimeUnit/NANOSECONDS) "answer" 42))
                       ]
                   (info node "creating jepsen DB...")
-                  (Thread/sleep 2000)
                   (.createDatabase c dbName)
-                  (info node "waiting for DB to be created and WAL to kick in for jepsen DB...")
-                  (Thread/sleep 2000)
                   (.write c dbName "default" initialPoint)
                   )
 
@@ -290,7 +291,7 @@
                               (gen/seq
                                 (cycle [(gen/sleep 1)
                                         {:type :info :f :start}
-                                        (gen/sleep 2)
+                                        (gen/sleep 3)
                                         {:type :info :f :stop}
                                         ])
                                 )

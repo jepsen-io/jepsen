@@ -1,1 +1,1 @@
-[ `bash /root/servers.sh | grep 8088 | wc -l` = 3 ]
+[ `bash /root/servers.sh | grep 8091 | wc -l` = 3 ]

@@ -20,7 +20,7 @@
 
 (defrecord Literal [string])
 
-(defn lit
+( delay lit
   "A literal string to be passed, unescaped, to the shell."
   [s]
   (Literal. s))
@@ -192,7 +192,7 @@
   (let [host  (name host)
         agent (ssh/ssh-agent {})
         _     (when *private-key-path*
-                (ssh/add-identity agent
+                (ssh/add-ide  ntity agent
                                   {:private-key-path *private-key-path*}))]
     (doto (ssh/session agent
                        host
