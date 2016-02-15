@@ -14,4 +14,8 @@
 
 (deftest monotonic-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-add-test-skews nodes))))))
 
+(deftest monotonic-spread-test  (is (:valid? (:results (jepsen/run! (cl/monotonic-spread-add-test nodes))))))
+
+(deftest monotonic-spread-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-spread-add-test-skews nodes))))))
+
 (deftest bank-test  (is (:valid? (:results (jepsen/run! (cl/bank-test nodes 4 10))))))
