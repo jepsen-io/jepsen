@@ -30,6 +30,7 @@ For now three tests are implemented:
 
 - "atomic": concurrent atomic updates to a shared register;
 - "sets":  concurrent unique appends to a shared table;
+- "monotonic-part", "monotonic-skews": concurrent unique appends with carried dependency;
 - "bank": concurrent transfers between rows of a shared table. 
 
 The database is accessed using the command-line SQL client executed
@@ -40,7 +41,13 @@ Overview of results
 
 As of Jan 26 2016, following the test procedure outlined below and
 the test code in this repository, during multple tests run at
-Cockroach Labs there were no inconsistencies found by Jepsen.
+Cockroach Labs there were no serious inconsistencies found by Jepsen.
+
+- for the atomic updates, unique appends, monotonic with network
+  partition, bank transfers: no anomaly founds;
+- for monotonic with clock skews: some anomalies found when server
+  runs *without* `--linearizable`; with this flag set, the anomalies
+  disappear.
 
 Test details: atomic updates
 -----------------------------
@@ -76,6 +83,30 @@ At the end, a uniqueness checker validates that no value was
 added two or more times; that all known-ok additions are indeed
 present in the table; and that all known-fail additions are indeed
 not present in the table.
+
+Test details: monotonic with network partition
+----------------------------------------------
+
+Jepsen sends atomic transactions that append the last known max
+value + 1 and the current db's now(), concurrently to different nodes
+over time.
+
+Concurrently, a nemesis partitions the network between the nodes randomly.
+
+Each node may report ok, the operation is known to have succeeded;
+fail, the operation is known to have failed; and unknown otherwise
+(e.g. the connection dropped before the answer could be read).
+
+At the end, a monotonic checker validates that no value was added two
+or more times; that all known-ok additions are indeed present in the
+table; that all max values are in the same order as the now()
+timestamps.
+
+Test details: monotonic with clock skews
+----------------------------------------
+
+Same test setup as above; however here the nemesis insert random clock
+skews of +/- 100ms on each node instead of partitions.
 
 Test details: bank transfers
 ----------------------------
@@ -150,7 +181,9 @@ How to get there:
 
 5. copy the two scripts ``sql.sh`` and ``restart.sh`` from the
    ``cockroachdb/scripts`` subdirectory to the directory
-   ``/home/ubuntu`` on each node.
+   ``/home/ubuntu`` on each node. Compile
+   ``cockroachdb/scripts/adjtime.c`` and copy it to ``/home/ubuntu``
+   on each node.
 
 6. run ``lein test`` from the ``cockroachdb`` test directory. This
    will run the Jepsen tests and exercise the database.
