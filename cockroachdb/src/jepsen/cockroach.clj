@@ -33,14 +33,15 @@
 (defn setup-db!
   "Set up the jepsen database in the cluster."
   [node]
-  (info "On node " (name node))
+  (info "Setting up db from node " (name node))
   (eval! "drop database if exists jepsen;")
   (eval! "create database jepsen;")
   (eval! "create table jepsen.test (name string, val int, primary key (name));")
   (eval! "insert into jepsen.test values ('a', 0);")
   (eval! "create table jepsen.set (val int);")
-  (eval! "create table jepsen.mono (val int, sts bigint, node int);")
-  (eval! "insert into jepsen.mono values (-1, extract(epoch_nanoseconds from now()), -1);")
+  (dorun (for [x (range 5)] (do
+                              (eval! (str "create table jepsen.mono" x " (val int, sts bigint, node int, tb int);"))
+                              (eval! (str "insert into jepsen.mono" x " values (-1, extract(epoch_nanoseconds from now()), -1, -1);")))))
   (eval! "create table if not exists jepsen.accounts (id int not null primary key, balance bigint not null);")
   )
 
@@ -63,8 +64,13 @@
   (reify db/DB
     (setup! [_ test node]
 
+      (info node "Stopping cockroachdb...")
+      (c/exec "/home/ubuntu/stop.sh")
+      (jepsen/synchronize test)
+      (info node "Resetting the clocks and starting cockroachdb...")
       (c/exec "/home/ubuntu/restart.sh")
       (jepsen/synchronize test)
+      
       (if (= node (jepsen/primary test)) (setup-db! node))
 
       (info node "Setup complete")
@@ -360,7 +366,7 @@
   "Given a set of :add operations followed by a final :read, verifies that
   every successfully added element is present in the read, and that the read
   contains only elements for which an add was succesful, and that all
-  elements are unique and in order."
+  elements are unique and in the same order as database timestamps."
   []
   (reify checker/Checker
     (check [this test model history]
@@ -395,7 +401,7 @@
                   dups        (remove final-read final-read-l)
               
                   ; Lost records are those we definitely added but weren't read
-                  lost        (into [] (set/difference all-adds final-read))]
+                  lost        (into [] (set/difference all-adds (map first final-read)))]
           {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts) (empty? off-order-val))
            ; :retries         retries
            :retry-frac      (util/fraction (count retries) (count history))
@@ -423,10 +429,10 @@
       (case (:f op)
         :add  (let [[res out err] (ssh-sql conn (str "begin "
                                                      "\"set transaction isolation level serializable\" "
-                                                     "\"select val,sts,node from jepsen.mono where val = (select max(val) from jepsen.mono)\" "
-                                                     "\"insert into jepsen.mono (val, sts, node) values ("
-                                                     "1 + (select max(val) from jepsen.mono),"
-                                                     "extract(epoch_nanoseconds from now()), " nodenum ")\" "
+                                                     "\"select val,sts,node,tb from jepsen.mono0 where val = (select max(val) from jepsen.mono0)\" "
+                                                     "\"insert into jepsen.mono0 (val, sts, node, tb) values ("
+                                                     "1 + (select max(val) from jepsen.mono0),"
+                                                     "extract(epoch_nanoseconds from now()), " nodenum ", 0)\" "
                                                      "commit"))]
                 (assoc op :value nil)
                 (if (zero? (:exit res))
@@ -434,7 +440,7 @@
                   (assoc op :type :fail, :error err)))
         :read (let [[res out err] (ssh-sql conn (str "begin "
                                                      "\"set transaction isolation level serializable\" "
-                                                     "\"select val,sts,node from jepsen.mono order by sts\"  "
+                                                     "\"select val,sts,node,tb from jepsen.mono0 order by sts\"  "
                                                      "commit"))
                     rows (drop-last 1 (drop 4 out))]
                 (if (zero? (:exit res))
@@ -495,6 +501,166 @@
     }
    )]
     (assoc t :nemesis (clock-milli-scrambler 100))))
+
+; --------------------------- Monotonic tests across multiple tables ---------------------
+
+(defn check-monotonic-split
+  "Same as check-monotonic, but check ordering only from each client's perspective."  
+  []
+  (reify checker/Checker
+    (check [this test model history]
+      (let [all-adds-l (->> history
+                            (r/filter op/ok?)
+                            (r/filter #(= :add (:f %)))
+                            (r/map :value)
+                            (into []))
+            final-read-l (->> history
+                              (r/filter op/ok?)
+                              (r/filter #(= :read (:f %)))
+                              (r/map :value)
+                              (reduce (fn [_ x] x) nil)
+                              )
+            all-fails (->> history
+                           (r/filter op/fail?))]
+            (if-not final-read-l
+              {:valid? false
+               :error  "Set was never read"})
+            
+            (let [final-read  (into #{} final-read-l)
+                  all-adds    (into #{} all-adds-l)
+                  
+                  retries    (->> all-fails
+                                  (r/filter #(= :retry (:error %)))
+                                  (into []))
+                  aborts    (->> all-fails
+                                 (r/filter #(= :abort-uncertain (:error %)))
+                                 (into []))
+                  sub-lists (->> (range 5)
+                                 (map (fn [x] (->> final-read-l
+                                                   (r/filter #(= x (nth % 2)))
+                                                   (into ())
+                                                   (reverse))))
+                                 (into []))
+                  off-order-pairs (map monotonic-order sub-lists)
+
+                  off-order-sts (map first off-order-pairs)
+                  off-order-val (map last off-order-pairs)
+
+                  dups        (remove final-read final-read-l)
+              
+                  ; Lost records are those we definitely added but weren't read
+                  lost        (into [] (set/difference all-adds (map first final-read)))]
+          {:valid?          (and (empty? lost) (empty? dups) (and (map empty? off-order-sts)) (and (map empty? off-order-val)))
+           ; :retries         retries
+           :retry-frac      (util/fraction (count retries) (count history))
+           ; :aborts          aborts
+           :abort-frac      (util/fraction (count aborts) (count history))
+           :lost            (into [] lost)
+           :lost-frac       (util/fraction (count lost) (count all-adds-l))
+           :duplicates      dups
+           :order-by-errors off-order-sts
+           :value-reorders  off-order-val
+           })))))
+
+(defn ssh-set-inc-spread-client
+  [conn nodenum]
+  (reify client/Client
+    (setup! [_ test node]
+      (info "Setting up client for" (name node))
+      (let [n (str->int (subs (name node) 1 2))]
+        (info "Setting up client " n " for " (name node))
+        (ssh-set-inc-spread-client (ssh-open node) n)))
+      
+    (invoke! [this test op]
+      (util/timeout 5000 (assoc op :type :info, :error :timeout)
+      (case (:f op)
+        :add  (let [rt (rand-int 5)
+                    [res out err] (ssh-sql conn (str "begin "
+                                                     "\"set transaction isolation level serializable\" "
+                                                     "\"insert into jepsen.mono" rt " (val, sts, node, tb) "
+                                                     "values (" (:value op) ","
+                                                     "extract(epoch_nanoseconds from now()), " nodenum ", " rt ")\" "
+                                                     "commit"))]
+                (assoc op :value nil)
+                (if (zero? (:exit res))
+                  (assoc op :type :ok)
+                  (assoc op :type :fail, :error err)))
+        :read (let [triplets (into [] (map
+                                       (fn [x]
+                                         (let [[res out err] (ssh-sql conn (str "begin "
+                                                                                "\"set transaction isolation level serializable\" "
+                                                                                "\"select val,sts,node,tb from jepsen.mono" x " where tb <> -1\"  "
+                                                                                "commit"))
+                                               rows (drop-last 1 (drop 4 out))]
+                                           [res rows err])) 
+                                       (range 5)))]
+                (if (zero? (->> triplets (map first) (map :exit) (reduce +)))
+                  (assoc op :type :ok, :value (->> triplets
+                                                   (map (fn [x] (nth x 1)))
+                                                   (reduce (fn [x y] (concat x y)))
+                                                   (map (fn [r] (map str->int (str/split r #"\s"))))
+                                                   (sort-by (fn [x] (nth x 1)))
+                                                   (into [])))
+                  (assoc op :type :fail, :error (->> triplets
+                                                     (map (fn [x] (nth x 2)))
+                                                     (into [])))
+                  ))
+        )))
+    
+    (teardown! [_ test]
+      (ssh/disconnect conn))
+    ))
+
+
+(defn monotonic-spread-add-test
+  [nodes]
+  (basic-test nodes
+   {
+    :name    "monotonic-spread-parts"
+    :client (ssh-set-inc-spread-client nil nil)
+    :generator (gen/phases
+                (->> (range)
+                     (map (partial array-map
+                                   :type :invoke
+                                   :f :add
+                                   :value))
+                     gen/seq
+                     (gen/stagger 1/10)
+                     with-nemesis)
+                (->> {:type :invoke, :f :read, :value nil}
+                     gen/once
+                     gen/clients))
+    :checker (checker/compose
+              {:perf (checker/perf)
+               :set  (check-monotonic-split)})
+    }
+   ))
+
+(defn monotonic-spread-add-test-skews
+  [nodes]
+  (let [t (basic-test nodes
+   {
+    :name    "monotonic-spread-skews"
+    :client (ssh-set-inc-spread-client nil nil)
+    :generator (gen/phases
+                (->> (range)
+                     (map (partial array-map
+                                   :type :invoke
+                                   :f :add
+                                   :value))
+                     gen/seq
+                     (gen/stagger 1/10)
+                     with-nemesis)
+                (->> {:type :invoke, :f :read, :value nil}
+                     gen/once
+                     gen/clients))
+    :checker (checker/compose
+              {:perf (checker/perf)
+               :set  (check-monotonic-split)})
+    }
+   )]
+    (assoc t :nemesis (clock-milli-scrambler 100))))
+
 
 ; --------------------------- Test for transfers between bank accounts -------------------
 
