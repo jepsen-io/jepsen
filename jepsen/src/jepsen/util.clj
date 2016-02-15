@@ -4,6 +4,7 @@
             [clojure.core.reducers :as r]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
+            [clojure.walk :as walk]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
@@ -187,6 +188,34 @@
          (do (Thread/sleep (* ~dt 1000))
              (recur))
          res#))))
+
+(defrecord Retry [bindings])
+
+(defmacro with-retry
+  "It's really fucking inconvenient not being able to recur from within (catch)
+  expressions. This macro wraps its body in a (loop [bindings] (try ...)).
+  Provides a (retry & new bindings) form which is usable within (catch) blocks:
+  when this form is returned by the body, the body will be retried with the new
+  bindings."
+  [initial-bindings & body]
+  (assert (vector? initial-bindings))
+  (assert (even? (count initial-bindings)))
+  (let [bindings-count (/ (count initial-bindings) 2)
+        body (walk/prewalk (fn [form]
+                             (if (and (list? form)
+                                      (= 'retry (first form)))
+                               (do (assert (= bindings-count
+                                              (count (rest form))))
+                                   `(Retry. [~@(rest form)]))
+                               form))
+                           body)
+        retval (gensym 'retval)]
+    `(loop [~@initial-bindings]
+       (let [~retval (try ~@body)]
+        (if (instance? Retry ~retval)
+          (recur ~@(->> (range bindings-count)
+                        (map (fn [i] `(nth (.bindings ~retval) ~i)))))
+          ~retval)))))
 
 (defn map-kv
   "Takes a function (f [k v]) which returns [k v], and builds a new map by

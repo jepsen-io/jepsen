@@ -49,21 +49,22 @@
 
 ; r.db('rethinkdb').table('cluster_config').get("heartbeat").update({heartbeat_timeout_secs: 2})
 
-(defrecord Client [tbl-created? db tbl write-acks read_mode]
+(defrecord Client [table-created? db tbl write-acks read_mode]
   client/Client
   (setup! [this test node]
     (let [conn (conn node)]
       (info node "Connected")
       ; Everyone's gotta block until we've made the table.
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
+      (locking table-created?
+        (when-not (realized? table-created?)
           (info node "Creating table...")
           (run! (r/db-create db) conn)
           (run! (r/table-create (r/db db) tbl {:replicas 5}) conn)
           (set-write-acks! conn test write-acks)
           (set-heartbeat! conn 2)
           (wait-table conn db tbl)
-          (info node "Table created")))
+          (info node "Table created")
+          (deliver table-created? true)))
 
       (assoc this :conn conn :node node)))
 
@@ -105,13 +106,12 @@
                                    :fail)))))))
 
   (teardown! [this test]
-    (meh (r/run (r/db-drop db) (:conn this)))
     (close (:conn this))))
 
 (defn client
   "A client which implements a register on top of an entire document."
   [write_acks read_mode]
-  (Client. (atom false) "jepsen" "cas" write_acks read_mode))
+  (Client. (promise) "jepsen" "cas" write_acks read_mode))
 
 ; Generators
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -152,19 +152,34 @@
   combination of topology changes and network partitions. Performs only writes
   and cas ops to prove that data loss isn't just due to stale reads."
   [version]
-  (assoc (cas-test version "majority" "majority")
-         :name      "rethinkdb document reconfigure"
-         :generator (->> (independent/sequential-generator
-                           (range)
-                           (fn [k]
-                             (->> (gen/mix [w cas cas cas])
-                                  (gen/delay 1)
-                                  (gen/limit 200))))
-                         (gen/nemesis (->> (start-stop)
-                                           (interpose {:type  :info
-                                                       :f     :reconfigure})
-                                           (gen/seq)))
-                         (gen/time-limit 300))
-         :nemesis  (nemesis/compose
-                     {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
-                      #{:start :stop} (nemesis/partition-random-halves)})))
+  (let [t (cas-test version "majority" "majority")]
+    (assoc t
+           :name      "rethinkdb document reconfigure"
+           :generator (->> (independent/sequential-generator
+                             (range)
+                             (fn [k]
+                               (->> (gen/reserve 5 (gen/mix [w cas])
+                                                 r)
+                                    (gen/delay 1)
+                                    (gen/limit 100))))
+                         ;(gen/nemesis
+                         ;  (gen/phases
+                         ;    (gen/await #(deref (:table-created? (:client t))))
+                         ;    (gen/seq (cycle [(gen/sleep 0)
+                         ;                     {:type :info :f :reconfigure}]))))
+                           (gen/nemesis
+                             (gen/phases
+                               (gen/await
+                                 (fn []
+                                   (info "Nemesis waiting")
+                                   (deref (:table-created? (:client t)))
+                                   (info "Nemesis ready to go")))
+                               (->> (cycle [{:type :info, :f :start}
+                                            {:type :info, :f :stop}])
+                                    (interpose {:type :info, :f :reconfigure})
+                                    (gen/seq))))
+                           (gen/time-limit 1000))
+;         :nemesis (aggressive-reconfigure-nemesis "jepsen" "cas"))))
+           :nemesis  (nemesis/compose
+                       {#{:reconfigure} (reconfigure-nemesis "jepsen" "cas")
+                        #{:start :stop} (nemesis/partition-random-halves)}))))
