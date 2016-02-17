@@ -158,7 +158,7 @@
       (ssh-cnt-client (ssh-open node)))
     
     (invoke! [this test op]
-      (util/timeout 5000 (assoc op :type :info, :error :timeout)
+      (util/timeout 1500 (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (let [[res out err]
                              (ssh-sql conn (str "begin "
@@ -283,7 +283,7 @@
       (ssh-set-client (ssh-open node)))
       
     (invoke! [this test op]
-      (util/timeout 5000 (assoc op :type :info, :error :timeout)
+      (util/timeout 1500 (assoc op :type :info, :error :timeout)
       (case (:f op)
         :add  (let [[res out err] (ssh-sql conn (str "begin "
                                                      "\"set transaction isolation level serializable\" "
@@ -425,7 +425,7 @@
         (ssh-set-inc-client (ssh-open node) n)))
       
     (invoke! [this test op]
-      (util/timeout 5000 (assoc op :type :info, :error :timeout)
+      (util/timeout 1500 (assoc op :type :info, :error :timeout)
       (case (:f op)
         :add  (let [[res out err] (ssh-sql conn (str "begin "
                                                      "\"set transaction isolation level serializable\" "
@@ -572,9 +572,9 @@
         (ssh-set-inc-spread-client (ssh-open node) n)))
       
     (invoke! [this test op]
-      (util/timeout 5000 (assoc op :type :info, :error :timeout)
+      (util/timeout 1500 (assoc op :type :info, :error :timeout)
       (case (:f op)
-        :add  (let [rt (rand-int 5)
+        :add  (let [rt (rand-int 2)
                     [res out err] (ssh-sql conn (str "begin "
                                                      "\"set transaction isolation level serializable\" "
                                                      "\"insert into jepsen.mono" rt " (val, sts, node, tb) "
@@ -677,7 +677,7 @@
       )
 
     (invoke! [this test op]
-      (util/timeout 5000 (assoc op :type :info, :error :timeout)
+      (util/timeout 1500 (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (let [[res out err] (ssh-sql conn (str "begin "
                                                               "\"set transaction isolation level serializable\" "
