@@ -121,7 +121,22 @@
                )
       )
     (teardown! [_ test])))
-
+(defn nuke [node]
+  (c/su
+    (info node "Stopping influxdb...")
+    (meh (c/exec :killall :-9 "influxd"))
+    (c/exec :service :influxdb :stop)
+    (info node "Removing influxdb...")
+    (c/exec :dpkg :--purge "influxdb")
+    (c/exec :rm :-rf "/var/lib/influxdb")
+    (info node "Removed influxdb")
+    (c/cd "/var/log/influxdb"
+          (try (c/exec :gzip :-S (str (java.lang.System/currentTimeMillis)) "influxd.log")
+               (catch Exception _)
+               )
+          )
+    )
+  )
 (defn db
   "Sets up and tears down InfluxDB"
   [version]
@@ -129,20 +144,7 @@
     (reify db/DB
       (setup! [_ test node]
         (try
-          (c/su
-            (info node "Stopping influxdb...")
-            (meh (c/exec :killall :-9 "influxd"))
-            (c/exec :service :influxdb :stop)
-            (info node "Removing influxdb...")
-            (c/exec :dpkg :--purge "influxdb")
-            (c/exec :rm :-rf "/var/lib/influxdb")
-            (info node "Removed influxdb")
-            (c/cd "/var/log/influxdb"
-                  (try (c/exec :gzip :-S (str (java.lang.System/currentTimeMillis)) "influxd.log")
-                       (catch Exception _)
-                       )
-                  )
-            )
+          (nuke node)
           (catch Throwable _)
           )
 
@@ -166,7 +168,6 @@
                 (c/su
                   (c/exec :cp "/usr/lib/influxdb/scripts/init.sh" "/etc/init.d/influxdb")
 
-                  ; preparing for the clustering, hostname should be the node's name
                   (info node "Copying influxdb configuration...")
                   (c/exec :echo (-> (io/resource "influxdb.conf")
                                     slurp
@@ -174,8 +175,6 @@
                           :> "/etc/influxdb/influxdb.conf")
 
 
-
-                  ; first stab at clustering -- doesn't really work yet
                   (c/exec :echo
                           (-> (io/resource "servers.sh") slurp) :> "/root/servers.sh")
                   (c/exec :echo
