@@ -20,7 +20,12 @@
   (let [test (jepsen/run! test)]
     (is (:valid? (:results test)))))
 
-(deftest document-cas-majority-test         (run! (dc/majority-test {})))
+(let [version "3.3.1"
+      tarball (str "https://fastdl.mongodb.org/linux/"
+                   "mongodb-linux-x86_64-debian71-" version ".tgz")
+      opts {:tarball tarball}]
+  (deftest document-cas-majority-test        (run! (dc/majority-test opts))))
+
 ;(deftest document-cas-no-read-majority-test (run! (dc/no-read-majority-test)))
 ;(deftest transfer-basic-read-test           (run! (t/basic-read-test)))
 ;(deftest transfer-partial-read-test         (run! (t/partial-read-test)))

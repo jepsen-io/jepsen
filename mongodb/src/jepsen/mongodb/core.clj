@@ -400,13 +400,15 @@
 
 (defn test-
   "Constructs a test with the given name prefixed by 'mongodb ', merging any
-  given options."
+  given options. Special options for Mongo:
+
+  :tarball - HTTPS URL of a tarball to install."
   [name opts]
   (merge
     (assoc tests/noop-test
            :name            (str "mongodb " name)
            :os              debian/os
-           :db              (db "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-debian71-3.2.0.tgz")
+           :db              (db (:tarball opts))
            :storage-engine  "wiredTiger"
            :model           (model/cas-register)
            :checker   (checker/compose {:linear checker/linearizable
