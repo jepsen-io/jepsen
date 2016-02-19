@@ -1,7 +1,7 @@
-
 (ns jepsen.cockroach
     "Tests for CockroachDB"
     (:require [clojure.tools.logging :refer :all]
+            [clojure.java.jdbc :as j]
             [clj-ssh.ssh :as ssh]
             [clojure.core.reducers :as r]
             [clojure.java.io :as io]
@@ -19,101 +19,272 @@
              [checker :as checker]
              [nemesis :as nemesis]
              [generator :as gen]
-             [util :as util]]
+             [util :as util :refer [meh]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
             [jepsen.os.ubuntu :as ubuntu]))
 
-(defn eval!
-  "Evals a sql string from the command line."
-  [s]
-   (info "Executing SQL: " s)
-  (c/exec "/home/ubuntu/sql.sh" (str (System/currentTimeMillis)) s))
+(import [java.net URLEncoder])
 
-(defn setup-db!
-  "Set up the jepsen database in the cluster."
+;; duration of 1 jepsen test
+(def test-duration 5) ; seconds
+
+;; timeout for DB operations during tests
+(def timeout-delay 1500) ; milliseconds
+
+;; number of tables involved in the monotonic-multitable tests
+(def multitable-spread 2) 
+
+;; which database to use during the tests.
+
+;; Possible values:
+;; :pg-local  Send the test SQL to a PostgreSQL database.
+;; :cdb-local  Send the test SQL to a preconfigured local CockroachDB instance.
+;; :cdb-cluster Send the test SQL to the CockroachDB cluster set up by the framework.
+(def jdbc-mode :cdb-cluster)
+
+;; Isolation level to use with test transactions.
+(def isolation-level :serializable)
+
+;; CockroachDB user and db name for jdbc-mode = :cdb-*
+(def db-user "root")
+(def db-passwd "dummy")
+(def dbname "jepsen") ; will get created automatically
+
+;; Postgres user and dbname for jdbc-mode = :pg-*
+(def pg-user "kena") ; must already exist
+(def pg-passwd "kena") ; must already exist
+(def pg-dbname "mydb") ; must already exist
+
+;;;;;;;;;;;;; Cluster settings ;;;;;;;;;;;;;;
+
+;; whether to start the CockroachDB cluster in insecure mode
+(def insecure true)  ; false not yet supported by Clojure JDBC
+
+;; FIXME: the Java SSL story really sucks. Postgres' JDBC driver
+;; doesn't support SSL parameters via the db URL (unlike the
+;; command-line client) and wants certificates to be handled via
+;; Java's SSLSocketFactory.
+;; This is hard to get right in Java, even more so in Clojure.
+
+;; whether to start the CockroachDB cluster with --linearizable
+(def linearizable false)
+
+;; Extra command-line arguments to give to `cockroach start`
+(def cockroach-start-arguments
+  (concat [:start
+           ;; ... other arguments here ...
+           ]
+          (if insecure [:--insecure] [])
+          (if linearizable [:--linearizable] [])))
+
+;; Unix username to log into via SSH
+(def username "ubuntu")
+
+;; Home directory for the CockroachDB setup
+(def working-path "/home/ubuntu")
+
+;; Location of various files
+(def cockroach (str working-path "/cockroach"))
+(def store-path (str working-path "/cockroach-data"))
+(def log-path (str working-path "/logs"))
+(def pidfile (str working-path "/pid"))
+(def errlog (str log-path "/cockroach.stderr"))
+(def verlog (str log-path "/version.txt")) 
+
+;; Location of the custom utility compiled from scripts/adjtime.c
+(def adjtime (str working-path "/adjtime"))
+;; NTP server to use with `ntpdate`
+(def ntpserver "ntp.ubuntu.com")
+
+(def log-files [errlog verlog])
+
+;;;;;;;;;;;;;;;;;;;; Database set-up and access functions  ;;;;;;;;;;;;;;;;;;;;;;;
+
+;; How to extract db time
+(def db-timestamp
+  (cond (= jdbc-mode :pg-local) "extract(microseconds from now())"
+        true "extract(epoch_nanoseconds from now())"))
+
+(defn db-conn-spec
+   "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
-  (info "Setting up db from node " (name node))
-  (eval! "drop database if exists jepsen;")
-  (eval! "create database jepsen;")
-  (eval! "create table jepsen.test (name string, val int, primary key (name));")
-  (eval! "insert into jepsen.test values ('a', 0);")
-  (eval! "create table jepsen.set (val int);")
-  (dorun (for [x (range 5)] (do
-                              (eval! (str "create table jepsen.mono" x " (val int, sts bigint, node int, tb int);"))
-                              (eval! (str "insert into jepsen.mono" x " values (-1, extract(epoch_nanoseconds from now()), -1, -1);")))))
-  (eval! "create table if not exists jepsen.accounts (id int not null primary key, balance bigint not null);")
-  )
+  (merge {:classname  "org.postgresql.Driver"  :subprotocol "postgresql"}
+         (cond (= jdbc-mode :cdb-cluster)
+               {:subname      (str "//" (name node) ":15432/" dbname)
+                :user        db-user
+                :password    db-passwd}
+               (= jdbc-mode :cdb-local)
+               {:subname      (str "//localhost:15432/" dbname)
+                :user        db-user
+                :password    db-passwd}
+               (= jdbc-mode :pg-local)
+               {:subname      (str "//localhost/" pg-dbname)
+                :user        pg-user
+                :password    pg-passwd
+                })))
 
-(defn stop!
-  "Remove the jepsen database from the cluster."
+(defn open-conn
+  "Given a Jepsen node, opens a new connection."
   [node]
-  (eval! "drop database if exists jepsen;"))
+  (let [spec (db-conn-spec node)]
+    (j/add-connection spec (j/get-connection spec))))
 
-(def log-files
-  ["/home/ubuntu/logs/cockroach.stderr"
-   "/home/ubuntu/logs/sql.log"])
+(defn close-conn
+  "Given a JDBC connection, closes it and returns the underlying spec."
+  [conn]
+  (when-let [c (:connection conn)]
+    (.close c))
+  (dissoc conn :connection))
 
-(defn str->int [str]
-  (let [n (read-string str)]
-    (if (number? n) n nil)))
+(defn cockroach-start-cmdline
+  "Construct the command line to start a CockroachDB node."
+  [extra-arg]
+  (concat 
+   [:start-stop-daemon
+    :--start :--background
+    :--make-pidfile :--pidfile pidfile
+    :--no-close
+    :--chuid username
+    :--chdir working-path
+    :--exec (c/expand-path cockroach)
+    :--]
+   cockroach-start-arguments
+   extra-arg
+   [:--logtostderr :true :>> errlog (c/lit "2>&1")]))
 
+(defmacro csql! [& body]
+  "Execute SQL statements using the cockroach sql CLI."
+  `(c/trace
+    (c/cd working-path
+          (apply c/exec
+                 (concat
+                  [cockroach :sql]
+                  (if insecure [:--insecure] nil)
+                  [:-e ~@body]
+                  [:>> errlog (c/lit "2>&1")]))
+          )))
+
+    
 (defn db
   "Sets up and tears down CockroachDB."
   []
   (reify db/DB
     (setup! [_ test node]
 
-      (info node "Stopping cockroachdb...")
-      (c/exec "/home/ubuntu/stop.sh")
-      (jepsen/synchronize test)
-      (info node "Resetting the clocks and starting cockroachdb...")
-      (c/exec "/home/ubuntu/restart.sh")
-      (jepsen/synchronize test)
+      (when (= jdbc-mode :cdb-cluster)
+        (when (= node (jepsen/primary test))
+          (info node "Starting CockroachDB once to initialize cluster...")
+          (c/trace (c/su (apply c/exec (cockroach-start-cmdline nil))))
+          (Thread/sleep 1000)
+          
+          (info node "Stopping 1st CockroachDB before starting cluster...")
+          (c/exec :killall -9 :cockroach))
+        
+        (jepsen/synchronize test)
+        
+        (info node "Starting CockroachDB...")
+        (c/exec cockroach :version :> verlog (c/lit "2>&1"))
+        (c/trace (c/su (apply c/exec
+                              (cockroach-start-cmdline 
+                               [(str "--join=" (name (jepsen/primary test)))]))))
+        
+        
+        (jepsen/synchronize test)
+        
+        (when (= node (jepsen/primary test))
+          (info node "Creating database...")
+          (csql! (str "create database " dbname)))
+        
+        (jepsen/synchronize test)
+      )
       
-      (if (= node (jepsen/primary test)) (setup-db! node))
-
+      (info node "Testing JDBC connection...")
+      (let [conn (open-conn node)]
+        (j/with-db-transaction [c conn :isolation isolation-level]
+          (into [] (j/query c ["select 1"])))
+        (close-conn conn))
+      
       (info node "Setup complete")
       (Thread/sleep 1000))
+      
 
     (teardown! [_ test node]
 
-      (if (= node (jepsen/primary test)) (stop! node))
-      (jepsen/synchronize test)
-      (apply c/exec :truncate :-c :--size 0 log-files)
-      )
+      (when (= jdbc-mode :cdb-cluster)
+        (info node "Stopping cockroachdb...")
+        (meh (c/exec :killall -9 :cockroach))
+        
+        (info node "Resetting the clocks...")
+        (c/su (c/exec :ntpdate ntpserver))
+        
+        (info node "Erasing the store...")
+        (c/exec :rm :-rf store-path)
+               
+        (info node "Clearing the logs...")
+        (apply c/exec :truncate :-c :--size 0 log-files)
+
+        (jepsen/synchronize test)
+        ))
+
     
     db/LogFiles
-    (log-files [_ test node] log-files)))
+    (log-files [_ test node] log-files)
+    )
+  )
 
-; -------------------- Accessing CockroachDB via SQL-over-SSH -----------------
+(defmacro with-error-handling
+  "Report SQL errors as Jepsen error strings."
+  [op & body]
+  `(try ~@body
+        (catch org.postgresql.util.PSQLException e#
+          (let [m# (.getMessage e#)]
+            (assoc ~op :type :fail, :error m#)))))
 
-(defn ssh-open
-  "Open a SSH session to the given node."
-  [node]
-  (let [agent (ssh/ssh-agent {})
-        host (name node)
-        conn (ssh/session agent host {:username "ubuntu" :strict-host-key-checking :no})]
-    conn))
+(defmacro capture-txn-abort
+  "Converts aborted transactions to an ::abort keyword"
+  [& body]
+  `(try ~@body
+        ; Galera
+        (catch java.sql.SQLTransactionRollbackException e#
+          (if (re-find #"abort" (.getMessage e#))
+            ::abort
+            (throw e#)))
+        (catch java.sql.BatchUpdateException e#
+          (if (re-find #"abort" (.getMessage e#))
+            ::abort
+            (throw e#)))))
 
-(defn ssh-sql-sh
-  "Evals a sql string from the command line over an existing SSH connection."
-  [conn s]
-  (ssh/ssh conn {:cmd (str "/home/ubuntu/sql.sh " (System/currentTimeMillis) " " s)}))
+(defmacro with-txn-aborts
+  "Aborts body on rollbacks."
+  [op & body]
+  `(let [res# (capture-txn-abort ~@body)]
+     (if (= ::abort res#)
+       (assoc ~op :type :fail, :error :aborted)
+       res#)))
 
-(defn ssh-sql
-    "Evals a SQL string and return the error status and messages if any"
-  [conn stmts]
-  (let [res (ssh-sql-sh conn stmts)
-        out (str/split-lines (str/trim-newline (:out res)))
-        err (let [rerr (str "sql error: " (str/join " " out))]
-              (cond (not (nil? (re-find #"retry txn" rerr))) :retry
-                    (not (nil? (re-find #"read.*encountered previous write" rerr))) :abort-uncertain
-                    :else rerr))]
-    [res out err]))
-  
+(defmacro with-txn
+  "Wrap a evaluation within a SQL transaction with timeout."
+  [op [c conn] & body]
+  `(util/timeout timeout-delay (assoc ~op :type :info, :value :timeout)
+                 (with-error-handling ~op
+                   (with-txn-aborts ~op
+                     (j/with-db-transaction [~c ~conn :isolation isolation-level]
+                       ~@body)))))
 
-;-------------------- Common definitions ------------------------------------
+(defn db-time
+  "Retrieve the current time (precise) from the database."
+  [c]
+  (->> (j/query c [(str "select " db-timestamp " as ts")])
+       (mapv :ts)
+       (first)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;; Common test definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn str->int [str]
+  (let [n (read-string str)]
+    (if (number? n) n nil)))
 
 (defn clock-milli-scrambler
   "Randomizes the system clock of all nodes within a dt-millisecond window."
@@ -124,78 +295,67 @@
 
     (invoke! [this test op]
       (assoc op :value
-                (c/on-many (:nodes test)
-                           (c/exec "/home/ubuntu/adjtime" (str (- (rand-int (* 2 dt)) dt))))))
+             (c/on-many (:nodes test)
+                        (c/su
+                         (c/exec adjtime (str (- (rand-int (* 2 dt)) dt)))))))
 
     (teardown! [this test]
       (c/on-many (:nodes test)
-                 (c/su (c/exec "ntpdate" "ntp.ubuntu.com"))))
+                 (c/su (c/exec :ntpdate ntpserver))))
     ))
 
 (defn basic-test
+  "Sets up the test parameters common to all tests."
   [nodes opts]
   (merge tests/noop-test
          {:nodes   nodes
-          :name    (str "cockroachdb " (:name opts))
+          :name    (str "cockroachdb-" (:name opts))
           :os      ubuntu/os
           :db      (db)
+          :ssh     {:username username}
           :nemesis (nemesis/partition-random-halves)
           }
          (dissoc opts :name)))
 
                                         ;
-;-------------------- Test for an atomic counter ----------------------------
+;;;;;;;;;;;;;;;;;; Atomic counter test ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defn ssh-cnt-client
-  "A client for a single compare-and-set register, using sql cli over ssh"
+(defn atomic-client
+  "A client for a single compare-and-set register."
   [conn]
   (reify client/Client
     (setup! [_ test node]
-      (ssh-cnt-client (ssh-open node)))
+      (let [conn (open-conn node)]
+        (when (= node (jepsen/primary test))
+          (j/execute! conn ["drop table if exists test"])
+          (j/execute! conn ["create table test (name varchar, val int)"])
+          (j/insert! conn :test {:name "a" :val 0}))
+        (atomic-client (open-conn node))))
     
     (invoke! [this test op]
-      (util/timeout 1500 (assoc op :type :info, :error :timeout)
-               (case (:f op)
-                 :read (let [[res out err]
-                             (ssh-sql conn (str "begin "
-                                                "\"set transaction isolation level serializable\" "
-                                                "\"select val from jepsen.test\"  "
-                                                "commit"))]
-                         (if (zero? (:exit res))
-                           (assoc op :type :ok, :value (str->int (nth out 4)))
-                           (assoc op :type :info, :error err)))
-                 :write (let [[res out err] (ssh-sql conn (str "begin "
-                                                               "\"set transaction isolation level serializable\" "
-                                                               "\"update jepsen.test set val=" (:value op) " where name='a'\" "
-                                                               "commit"))]
-                          (if (and (zero? (:exit res)) (= (last out) "OK"))
-                            (assoc op :type :ok)
-                            (assoc op :type :info, :error err)))
-                 :cas (let [[value' value] (:value op)
-                            [res out err] (ssh-sql conn (str "begin "
-                                                             "\"set transaction isolation level serializable\" "
-                                                             "\"select val from jepsen.test\" "
-                                                             "\"update jepsen.test set val=" value " where name='a' and val=" value' "\" "
-                                                             "\"select val from jepsen.test\" "
-                                                             " commit"))]
-                        (if (zero? (:exit res))
-                          (assoc op 
-                                 :type (if (and (= (last out) "OK")
-                                                (= (str->int (nth out 4)) value')
-                                                (= (str->int (nth out 8)) value))
-                                         :ok :fail),
-                                 :error err)
-                          (assoc op :type :info, :error err)))
-                 ))
-      )
-      
+      (with-txn op [c conn]
+        (case (:f op)
+          :read (->> (j/query c ["select val from test"])
+                     (mapv :val)
+                     (first)
+                     (assoc op :type :ok, :value))
+          
+          :write (do
+                   (j/update! c :test {:val (:value op)} ["name = 'a'"])
+                   (assoc op :type :ok))
+          
+          :cas (let [[value' value] (:value op)
+                     cnt (j/update! c :test {:val value} ["name='a' and val = ?" value'])]
+                 (assoc op :type (if (zero? (first cnt)) :fail :ok))))
+        ))
 
     (teardown! [_ test]
-    	   (ssh/disconnect conn))
+               (j/execute! conn ["drop table if exists test"])
+               (close-conn conn))
     ))
 
 (defn atomic-test
@@ -203,7 +363,7 @@
   (basic-test nodes
    {
     :name    "atomic"
-    :client  (ssh-cnt-client nil)
+    :client  (atomic-client nil)
     :generator (->> (gen/mix [r w cas])
                     (gen/stagger 1)
                     (gen/nemesis
@@ -211,17 +371,17 @@
                                       {:type :info, :f :start}
                                       (gen/sleep 5)
                                       {:type :info, :f :stop}])))
-                    (gen/time-limit 30))
+                    (gen/time-limit test-duration))
     :model   (model/cas-register 0)
     :checker (checker/compose
               {:perf   (checker/perf)
-               :linear checker/linearizable})
+               :details checker/linearizable})
     }
    ))
 
-;-------------------- Test for a distributed set ----------------------------
+;;;;;;;;;;;;;;;;;;;;;;;;;; Distributed set test ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn check-set-unique
+(defn check-sets
   "Given a set of :add operations followed by a final :read, verifies that
   every successfully added element is present in the read, and that the read
   contains only elements for which an add was attempted, and that all
@@ -250,19 +410,19 @@
 
         (let [final-read  (into #{} final-read-l)
                                         
-              dups        (remove final-read final-read-l)
+              dups        (into [] (for [[id freq] (frequencies final-read-l) :when (> freq 1)] id))
               
-              ;The OK set is every read value which we tried to add
+              ;;The OK set is every read value which we tried to add
               ok          (set/intersection final-read attempts)
 
-              ; Unexpected records are those we *never* attempted.
+              ;; Unexpected records are those we *never* attempted.
               unexpected  (set/difference final-read attempts)
 
-              ; Lost records are those we definitely added but weren't read
+              ;; Lost records are those we definitely added but weren't read
               lost        (set/difference adds final-read)
 
-              ; Recovered records are those where we didn't know if the add
-              ; succeeded or not, but we found them in the final set.
+              ;; Recovered records are those where we didn't know if the add
+              ;; succeeded or not, but we found them in the final set.
               recovered   (set/difference ok adds)]
 
           {:valid?          (and (empty? lost) (empty? unexpected) (empty? dups))
@@ -276,33 +436,31 @@
            :lost-frac       (util/fraction (count lost) (count attempts))
            :recovered-frac  (util/fraction (count recovered) (count attempts))})))))
 
-(defn ssh-set-client
+(defn sets-client
   [conn]
   (reify client/Client
     (setup! [_ test node]
-      (ssh-set-client (ssh-open node)))
+      (let [conn (open-conn node)]
+        (when (= node (jepsen/primary test))
+          (j/execute! conn ["drop table if exists set"])
+          (j/execute! conn ["create table set (val int)"]))
+
+        (sets-client (open-conn node))))
       
     (invoke! [this test op]
-      (util/timeout 1500 (assoc op :type :info, :error :timeout)
-      (case (:f op)
-        :add  (let [[res out err] (ssh-sql conn (str "begin "
-                                                     "\"set transaction isolation level serializable\" "
-                                                     "\"insert into jepsen.set values (" (:value op) ")\"  "
-                                                     "commit"))]
-                (if (zero? (:exit res))
-                  (assoc op :type :ok)
-                  (assoc op :type :fail, , :error err)))
-        :read (let [[res out err] (ssh-sql conn (str "begin "
-                                                     "\"set transaction isolation level serializable\" "
-                                                     "\"select val from jepsen.set\"  "
-                                                     "commit"))]
-                (if (zero? (:exit res))
-                  (assoc op :type :ok, :value (into [] (map str->int (drop-last 1 (drop 4 out)))))
-                  (assoc op :type :fail, :error err)))
-        )))
+      (with-txn op [c conn]
+        (case (:f op)
+          :add  (do
+                  (j/insert! c :set {:val (:value op)})
+                  (assoc op :type :ok))
+          :read (->> (j/query c ["select val from set"])
+                     (mapv :val)
+                     (assoc op :type :ok, :value))
+          )))
     
     (teardown! [_ test]
-      (ssh/disconnect conn))
+               (j/execute! conn ["drop table if exists set"])
+               (close-conn conn))
     ))
 
 (defn with-nemesis
@@ -318,7 +476,7 @@
                               (gen/sleep 5)
                               {:type :info, :f :stop}
                               ])))
-           (gen/time-limit 30))
+           (gen/time-limit test-duration))
       (gen/nemesis (gen/once {:type :info, :f :stop}))
       (gen/sleep 5))))
 
@@ -328,7 +486,7 @@
   (basic-test nodes
    {
     :name    "set"
-    :client (ssh-set-client nil)
+    :client (sets-client nil)
     :generator (gen/phases
                 (->> (range)
                      (map (partial array-map
@@ -343,14 +501,15 @@
                      gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
-               :set  (check-set-unique)})
+               :details  (check-sets)})
     }
    ))
 
 
-; -------------------------- Test for an increasing sequence
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Montonic inserts with dependency ;;;;;;;;;;;;;;;;;;;;
 
 (defn check-order
+  "Detect monotonicity errors over a result set (internal function)."
   [prev rows res1 res2 ]
   (if (empty? rows) [res1 res2]
       (let [row (first rows)
@@ -359,6 +518,7 @@
         (check-order row (rest rows) nres1 nres2))))
 
 (defn monotonic-order
+  "Detect monotonicity errors over a result set."
   [rows]
   (check-order (first rows) (rest rows) () ()))
 
@@ -383,82 +543,77 @@
                               )
             all-fails (->> history
                            (r/filter op/fail?))]
-            (if-not final-read-l
-              {:valid? false
-               :error  "Set was never read"})
-            
-            (let [final-read  (into #{} final-read-l)
-                  all-adds    (into #{} all-adds-l)
-                  
-                  retries    (->> all-fails
-                                  (r/filter #(= :retry (:error %)))
-                                  (into []))
-                  aborts    (->> all-fails
-                                 (r/filter #(= :abort-uncertain (:error %)))
-                                 (into []))
-                  [off-order-sts off-order-val] (monotonic-order final-read-l)
-
-                  dups        (remove final-read final-read-l)
+        (if-not final-read-l
+          {:valid? false
+           :error  "Set was never read"})
+        (let [
+              retries    (->> all-fails
+                              (r/filter #(= :retry (:error %)))
+                              (into []))
+              aborts    (->> all-fails
+                             (r/filter #(= :abort-uncertain (:error %)))
+                             (into []))
+              [off-order-sts off-order-val] (monotonic-order final-read-l)
               
-                  ; Lost records are those we definitely added but weren't read
-                  lost        (into [] (set/difference all-adds (map first final-read)))]
+              dups        (into [] (for [[id freq] (frequencies (map first final-read-l)) :when (> freq 1)] id))
+              
+              ;; Lost records are those we definitely added but weren't read
+              lost        (set/difference (into #{} (map first all-adds-l)) (into #{} (map first final-read-l)))]
           {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts) (empty? off-order-val))
-           ; :retries         retries
            :retry-frac      (util/fraction (count retries) (count history))
-           ; :aborts          aborts
            :abort-frac      (util/fraction (count aborts) (count history))
-           :lost            (into [] lost)
+           :lost            (util/integer-interval-set-str lost)
            :lost-frac       (util/fraction (count lost) (count all-adds-l))
            :duplicates      dups
            :order-by-errors off-order-sts
            :value-reorders  off-order-val
-           })))))
+           }
+          )))))
 
 
-(defn ssh-set-inc-client
+(defn monotonic-client
   [conn nodenum]
   (reify client/Client
     (setup! [_ test node]
-      (info "Setting up client for" (name node))
-      (let [n (str->int (subs (name node) 1 2))]
+      (let [n (str->int (subs (name node) 1 2))
+            conn (open-conn node)]
         (info "Setting up client " n " for " (name node))
-        (ssh-set-inc-client (ssh-open node) n)))
-      
-    (invoke! [this test op]
-      (util/timeout 1500 (assoc op :type :info, :error :timeout)
-      (case (:f op)
-        :add  (let [[res out err] (ssh-sql conn (str "begin "
-                                                     "\"set transaction isolation level serializable\" "
-                                                     "\"select val,sts,node,tb from jepsen.mono0 where val = (select max(val) from jepsen.mono0)\" "
-                                                     "\"insert into jepsen.mono0 (val, sts, node, tb) values ("
-                                                     "1 + (select max(val) from jepsen.mono0),"
-                                                     "extract(epoch_nanoseconds from now()), " nodenum ", 0)\" "
-                                                     "commit"))]
-                (assoc op :value nil)
-                (if (zero? (:exit res))
-                  (assoc op :type :ok, :value (map str->int (str/split (first (drop 4 out)) #"\s")), :info err)
-                  (assoc op :type :fail, :error err)))
-        :read (let [[res out err] (ssh-sql conn (str "begin "
-                                                     "\"set transaction isolation level serializable\" "
-                                                     "\"select val,sts,node,tb from jepsen.mono0 order by sts\"  "
-                                                     "commit"))
-                    rows (drop-last 1 (drop 4 out))]
-                (if (zero? (:exit res))
-                  (assoc op :type :ok, :value (doall (map (fn [r] (map str->int (str/split r #"\s"))) rows)))
-                  (assoc op :type :fail, :error err)))
-        )))
+        
+        (when (= node (jepsen/primary test))
+          (j/execute! conn ["drop table if exists mono"])
+          (j/execute! conn ["create table mono (val int, sts bigint, node int, tb int)"])
+          (j/insert! conn :mono {:val -1 :sts 0 :node -1 :tb -1}))
+
+        (monotonic-client (open-conn node) n)))
     
+    (invoke! [this test op]
+      (with-txn op [c conn]
+        (case (:f op)
+          :add  (let [currow (->> (j/query c ["select * from mono where val = (select max(val) from mono)"])
+                                  (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
+                                  (first))
+                      dbtime (db-time c)]
+                  
+                  (j/insert! c :mono {:val (+ 1 (first currow)) :sts dbtime :node nodenum :tb 0})
+                  (assoc op :type :ok, :value currow))
+          
+          :read (->> (j/query c ["select * from mono order by sts"])
+                     (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
+                     (into [])
+                     (assoc op :type :ok, :value))
+          )))
     (teardown! [_ test]
-      (ssh/disconnect conn))
+               (j/execute! conn ["drop table if exists test"])
+               (close-conn conn))
     ))
 
 
-(defn monotonic-add-test
+(defn monotonic-test
   [nodes]
   (basic-test nodes
    {
     :name    "monotonic-parts"
-    :client (ssh-set-inc-client nil nil)
+    :client (monotonic-client nil nil)
     :generator (gen/phases
                 (->> (range)
                      (map (partial array-map
@@ -473,16 +628,16 @@
                      gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
-               :set  (check-monotonic)})
+               :details (check-monotonic)})
     }
    ))
 
-(defn monotonic-add-test-skews
+(defn monotonic-test-skews
   [nodes]
   (let [t (basic-test nodes
    {
     :name    "monotonic-skews"
-    :client (ssh-set-inc-client nil nil)
+    :client (monotonic-client nil nil)
     :generator (gen/phases
                 (->> (range)
                      (map (partial array-map
@@ -497,12 +652,12 @@
                      gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
-               :set  (check-monotonic)})
+               :details  (check-monotonic)})
     }
    )]
     (assoc t :nemesis (clock-milli-scrambler 100))))
 
-; --------------------------- Monotonic tests across multiple tables ---------------------
+;;;;;;;;;;;;;;;;;;;;;; Monotonic inserts over multiple tables ;;;;;;;;;;;;;;;;
 
 (defn check-monotonic-split
   "Same as check-monotonic, but check ordering only from each client's perspective."  
@@ -546,78 +701,75 @@
                   off-order-sts (map first off-order-pairs)
                   off-order-val (map last off-order-pairs)
 
-                  dups        (remove final-read final-read-l)
+                  dups        (into [] (for [[id freq] (frequencies (map first final-read-l)) :when (> freq 1)] id))
               
                   ; Lost records are those we definitely added but weren't read
                   lost        (into [] (set/difference all-adds (map first final-read)))]
-          {:valid?          (and (empty? lost) (empty? dups) (and (map empty? off-order-sts)) (and (map empty? off-order-val)))
-           ; :retries         retries
-           :retry-frac      (util/fraction (count retries) (count history))
-           ; :aborts          aborts
-           :abort-frac      (util/fraction (count aborts) (count history))
-           :lost            (into [] lost)
-           :lost-frac       (util/fraction (count lost) (count all-adds-l))
-           :duplicates      dups
-           :order-by-errors off-order-sts
-           :value-reorders  off-order-val
-           })))))
+              {:valid?          (and (empty? lost)
+                                     (empty? dups)
+                                     (and (into [] (map empty? off-order-sts)))
+                                     (and (into [] (map empty? off-order-val))))
+               :retry-frac      (util/fraction (count retries) (count history))
+               :abort-frac      (util/fraction (count aborts) (count history))
+               :lost            (into [] lost)
+               :lost-frac       (util/fraction (count lost) (count all-adds-l))
+               :duplicates      dups
+               :order-by-errors off-order-sts
+               :value-reorders  off-order-val
+               })))))
 
-(defn ssh-set-inc-spread-client
+(defn monotonic-multitable-client
   [conn nodenum]
   (reify client/Client
     (setup! [_ test node]
-      (info "Setting up client for" (name node))
-      (let [n (str->int (subs (name node) 1 2))]
+      (let [n (str->int (subs (name node) 1 2))
+            conn (open-conn node)]
+        
         (info "Setting up client " n " for " (name node))
-        (ssh-set-inc-spread-client (ssh-open node) n)))
+
+        (when (= node (jepsen/primary test))
+          (dorun (for [x (range multitable-spread)]
+                   (do
+                     (j/execute! conn [(str "drop table if exists mono" x)])
+                     (j/execute! conn [(str "create table mono" x
+                                            " (val int, sts bigint, node int, tb int)")])
+                     (j/insert! conn (str "mono" x) {:val -1 :sts 0 :node -1 :tb x})
+                     ))))
+      
+        (monotonic-multitable-client (open-conn node) n)))
+  
       
     (invoke! [this test op]
-      (util/timeout 1500 (assoc op :type :info, :error :timeout)
-      (case (:f op)
-        :add  (let [rt (rand-int 2)
-                    [res out err] (ssh-sql conn (str "begin "
-                                                     "\"set transaction isolation level serializable\" "
-                                                     "\"insert into jepsen.mono" rt " (val, sts, node, tb) "
-                                                     "values (" (:value op) ","
-                                                     "extract(epoch_nanoseconds from now()), " nodenum ", " rt ")\" "
-                                                     "commit"))]
-                (assoc op :value nil)
-                (if (zero? (:exit res))
-                  (assoc op :type :ok)
-                  (assoc op :type :fail, :error err)))
-        :read (let [triplets (into [] (map
-                                       (fn [x]
-                                         (let [[res out err] (ssh-sql conn (str "begin "
-                                                                                "\"set transaction isolation level serializable\" "
-                                                                                "\"select val,sts,node,tb from jepsen.mono" x " where tb <> -1\"  "
-                                                                                "commit"))
-                                               rows (drop-last 1 (drop 4 out))]
-                                           [res rows err])) 
-                                       (range 5)))]
-                (if (zero? (->> triplets (map first) (map :exit) (reduce +)))
-                  (assoc op :type :ok, :value (->> triplets
-                                                   (map (fn [x] (nth x 1)))
-                                                   (reduce (fn [x y] (concat x y)))
-                                                   (map (fn [r] (map str->int (str/split r #"\s"))))
-                                                   (sort-by (fn [x] (nth x 1)))
-                                                   (into [])))
-                  (assoc op :type :fail, :error (->> triplets
-                                                     (map (fn [x] (nth x 2)))
-                                                     (into [])))
-                  ))
+      (with-txn op [c conn]
+        (case (:f op)
+          :add  (let [rt (rand-int multitable-spread)
+                      dbtime (db-time c)]
+                  (j/insert! c (str "mono" rt) {:val (:value op) :sts dbtime :node nodenum :tb rt})
+                  (assoc op :type :ok))
+          
+          :read (->> (range multitable-spread)
+                     (map (fn [x]
+                            (->> (j/query c [(str "select * from mono" x " where node <> -1")])
+                                 (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
+                                 )))
+                     (reduce concat)
+                     (sort-by (fn [x] (nth x 1)))
+                     (into [])
+                     (assoc op :type :ok, :value))
         )))
     
     (teardown! [_ test]
-      (ssh/disconnect conn))
-    ))
+      (dorun (for [x (range multitable-spread)]               
+               (j/execute! conn [(str "drop table if exists mono" x)])))
+      (close-conn conn))
+))
 
-
-(defn monotonic-spread-add-test
+(defn monotonic-multitable-test
   [nodes]
   (basic-test nodes
    {
     :name    "monotonic-spread-parts"
-    :client (ssh-set-inc-spread-client nil nil)
+    :client (monotonic-multitable-client nil nil)
     :generator (gen/phases
                 (->> (range)
                      (map (partial array-map
@@ -632,16 +784,16 @@
                      gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
-               :set  (check-monotonic-split)})
+               :details  (check-monotonic-split)})
     }
    ))
 
-(defn monotonic-spread-add-test-skews
+(defn monotonic-multitable-test-skews
   [nodes]
   (let [t (basic-test nodes
    {
     :name    "monotonic-spread-skews"
-    :client (ssh-set-inc-spread-client nil nil)
+    :client (monotonic-multitable-client nil nil)
     :generator (gen/phases
                 (->> (range)
                      (map (partial array-map
@@ -656,60 +808,69 @@
                      gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
-               :set  (check-monotonic-split)})
+               :details  (check-monotonic-split)})
     }
    )]
     (assoc t :nemesis (clock-milli-scrambler 100))))
 
 
-; --------------------------- Test for transfers between bank accounts -------------------
+;;;;;;;;;;;;;;;;;;;;;;;;;;; Test for transfers between bank accounts ;;;;;;;;;;;;;;;;;;;;;;;
 
-(defrecord SSHBankClient [conn n starting-balance]
+(defrecord BankClient [conn n starting-balance]
   client/Client
     (setup! [this test node]
-      (let [conn (ssh-open node)]
-        (if (= node (jepsen/primary test))
-                                        ; Create initial accts
+      (let [conn (open-conn node)]
+        
+        (when (= node (jepsen/primary test))
+          ;; Create initial accounts.
+          (j/execute! conn ["drop table if exists accounts"])
+          (j/execute! conn ["create table accounts (id int not null primary key, balance bigint not null)"])
           (dotimes [i n]
-            (let [[res out err] (ssh-sql conn (str "\"insert into jepsen.accounts values (" i "," starting-balance ")\""))]
-              (println "Created account " i " (" (:exit res) ", " err ")"))))
+            (j/insert! conn :accounts {:id i :balance starting-balance})))
+
         (assoc this :conn conn))
       )
 
     (invoke! [this test op]
-      (util/timeout 1500 (assoc op :type :info, :error :timeout)
-               (case (:f op)
-                 :read (let [[res out err] (ssh-sql conn (str "begin "
-                                                              "\"set transaction isolation level serializable\" "
-                                                              "\"select balance from jepsen.accounts\" "
-                                                              "commit"))]
-                         (if (zero? (:exit res))
-                           (assoc op :type :ok, :value (map str->int (drop-last 1 (drop 4 out))))
-                           (assoc op :type :fail, :error err)))
+      (with-txn op [c conn]
+        (case (:f op)
+          :read (->> (j/query c ["select balance from accounts"])
+                     (mapv :balance)
+                     (assoc op :type :ok, :value))
+          
+          :transfer (let [{:keys [from to amount]} (:value op)
+                          b1 (-> c
+                                 (j/query ["select balance from accounts where id = ?" from]
+                                          :row-fn :balance)
+                                 first
+                                 (- amount))
+                          b2 (-> c
+                                 (j/query ["select balance from accounts where id = ?" to]
+                                          :row-fn :balance)
+                                 first
+                                 (+ amount))]
+                      (cond (neg? b1)
+                            (assoc op :type :fail, :value [:negative from b1])
 
-                 :transfer
-                 (let [{:keys [from to amount]} (:value op)
-                       [res out err] (ssh-sql conn (str "begin "
-                                                        "\"set transaction isolation level serializable\" "
-                                                        "\"select balance-" amount " from jepsen.accounts where id = " from "\" "
-                                                        "\"select balance+" amount " from jepsen.accounts where id = " to "\" "
-                                                        "\"update jepsen.accounts set balance=balance-" amount " where id = " from "\"  "
-                                                        "\"update jepsen.accounts set balance=balance+" amount " where id = " to "\"  "
-                                                        "commit"))]
-                   (if (zero? (:exit res))
-                     (assoc op :type :ok)
-                     (assoc op :type :fail, :error err)))
+                            (neg? b2)
+                            (assoc op :type :fail, :value [:negative to b2])
+                            
+                            true
+                            (do (j/update! c :accounts {:balance b1} ["id = ?" from])
+                                (j/update! c :accounts {:balance b2} ["id = ?" to])
+                                (assoc op :type :ok))))
                  )))
 
     (teardown! [_ test]
-      (ssh/disconnect conn))
+      (j/execute! conn ["drop table if exists accounts"])
+      (close-conn conn))
     )
   
-(defn ssh-bank-client
+(defn bank-client
   "Simulates bank account transfers between n accounts, each starting with
   starting-balance."
   [n starting-balance]
-  (SSHBankClient. nil n starting-balance))
+  (BankClient. nil n starting-balance))
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
@@ -721,7 +882,7 @@
   [test process]
   (let [n (-> test :client :n)]
     {:type  :invoke
-    :f     :transfer
+     :f     :transfer
      :value {:from   (rand-int n)
              :to     (rand-int n)
              :amount (rand-int 5)}}))
@@ -765,7 +926,7 @@
     {:name "bank"
      ;:concurrency 20
      :model  {:n n :total (* n initial-balance)}
-     :client (ssh-bank-client n initial-balance)
+     :client (bank-client n initial-balance)
      :generator (gen/phases
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/clients)
@@ -775,10 +936,10 @@
                                          {:type :info, :f :start}
                                          (gen/sleep 5)
                                          {:type :info, :f :stop}])))
-                       (gen/time-limit 30))
+                       (gen/time-limit test-duration))
                   (gen/log "waiting for quiescence")
-                  (gen/sleep 30)
+                  (gen/sleep 3)
                   (gen/clients (gen/once bank-read)))
      :checker (checker/compose
                 {:perf (checker/perf)
-                 :bank (bank-checker)})}))
+                 :details (bank-checker)})}))
