@@ -26,12 +26,8 @@
             [jepsen.generator :as generator]
             [jepsen.checker :as checker]
             [jepsen.client :as client]
-            [jepsen.store :as store]
-            [com.climate.claypoole :as cp]
-            )
+            [jepsen.store :as store])
   (:import (java.util.concurrent CyclicBarrier)))
-
-(def pool (cp/threadpool 5))
 
 (defn synchronize
   "A synchronization primitive for tests. When invoked, blocks until all
@@ -66,13 +62,13 @@
   and ensures all resources are correctly closed in the event of an error."
   [[sym start stop resources] & body]
   ; Start resources in parallel
-  `(let [~sym (doall (cp/pmap pool (fcatch ~start) ~resources))]
+  `(let [~sym (doall (pmap (fcatch ~start) ~resources))]
      (when-let [ex# (some #(when (instance? Exception %) %) ~sym)]
        ; One of the resources threw instead of succeeding; shut down all which
        ; started OK and throw.
        (->> ~sym
             (remove (partial instance? Exception))
-            (cp/pmap pool (fcatch ~stop))
+            (pmap (fcatch ~stop))
             dorun)
        (throw ex#))
 
@@ -80,17 +76,15 @@
      (try ~@body
        (finally
          ; Clean up resources
-         (dorun (cp/pmap pool (fcatch ~stop) ~sym))))))
+         (dorun (pmap (fcatch ~stop) ~sym))))))
 
 (defn on-nodes
   "Given a test, evaluates (f test node) in parallel on each node, with that
   node's SSH connection bound."
   [test f]
-  (dorun (cp/pmap pool (fn [[node session]]                
+  (dorun (pmap (fn [[node session]]
                  (control/with-session node session
-                   (println node "with-session...")
-                   (f test node)
-                   ))
+                   (f test node)))
                (:sessions test))))
 
 (defmacro with-os
@@ -114,7 +108,6 @@
   "Wraps body in DB setup and teardown."
   [test & body]
   `(try
-      (println "with-db!!!")      
      (on-nodes ~test (partial db/cycle! (:db ~test)))
      (setup-primary! ~test)
 
@@ -395,15 +388,11 @@
                         ; Synchronization point for nodes
                         :barrier (let [c (count (:nodes test))]
                                    (if (pos? c)
-                                     (CyclicBarrier. c)
+                                     (CyclicBarrier. (count (:nodes test)))
                                      ::no-barrier))
                         ; Currently running histories
                         :active-histories (atom #{}))]
 
-        (info "== Concurrency level:" (:concurrency test))
-        (info "== Real concurrency level:" (+ 2 (cp/ncpus)))
-        (info "== barrier :" (:barrier test))
-        (info "== start-time :" (:start-time test))
         ; Open SSH conns
         (control/with-ssh (:ssh test)
           (with-resources [sessions
@@ -419,9 +408,7 @@
 
               ; Setup
               (with-os test
-                (info "OS setup for tests.")
                 (with-db test
-                   (info "DB setup for tests.")
                   (generator/with-threads (cons :nemesis
                                                 (range (:concurrency test)))
                     (util/with-relative-time

@@ -20,7 +20,6 @@
 (defn cycle!
   "Tries to tear down, then set up, the given DB."
   [db test node]
-  (println node "DB cycle started.")
   (try (teardown! db test node)
        (catch RuntimeException _))
   (setup! db test node))

@@ -8,7 +8,6 @@
                  [clj-ssh "0.5.11"]
                  [gnuplot "0.1.1"]
                  [hiccup "1.0.5"]
-                 [com.climate/claypoole "1.1.0"]
                  [org.clojars.achim/multiset "0.1.0"]
                  [byte-streams "0.1.4"]]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
