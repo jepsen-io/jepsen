@@ -29,7 +29,8 @@
 
 (defn r [_ _] {:type :invoke, :f :read, :value nil})
 (defn w [_ _] {:type :invoke, :f :write, :value (double (rand-int 5))})
-(defn wMulti [_ _ ] {:type :invoke, :f :write, :value (double (rand-int 5)), :time (long (rand-int ))})
+(defn wTimed [_ _ ] {:type       :invoke, :f :timedWrite, :value (double (rand-int 5)),
+                     :writeTime (*' (long 1000000000000000) (+ 100 (rand-int 1000)))})
 
 (defn consToRef [element theRef]
   (dosync
@@ -65,13 +66,14 @@
     )
   )
 
-(defn writeToInflux [conn value writeConsistencyLevel]
+(defn writeToInflux [conn value writeConsistencyLevel time]
+  (info (str "writing: " time))
   (-> conn
       (.write
         (-> (batchPoints writeConsistencyLevel)
             (.point
               (-> (Point/measurement "answers")
-                  (.time 1 TimeUnit/NANOSECONDS)
+                  (.time time TimeUnit/NANOSECONDS)
                   (.field "answer" value)
                   (.build)
                 )
@@ -108,13 +110,13 @@
       )
 
     (invoke! [this test op]
-      (timeout 5000 (assoc op :type :info, :error :timeout)
+      (timeout 15000 (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (assoc op :type :ok, :value
                                  (queryInflux conn "SELECT answer from answers where time = 1")
                                  )
                  :write (try
-                          (do (writeToInflux conn (:value op) writeConsistencyLevel)
+                          (do (writeToInflux conn (:value op) writeConsistencyLevel 1)
                               (assoc op :type :ok))
                           (catch Throwable e
                             (do
@@ -123,6 +125,20 @@
                                 (assoc op :type :info, :error (.getMessage e))
                                 (assoc op :type :fail, :error (.getMessage e))
                                 )
+                              )
+                            )
+                          )
+
+                 :timedWrite (try
+                          (do (writeToInflux conn (:value op) writeConsistencyLevel (:writeTime op))
+                              (assoc op :type :ok))
+                          (catch Throwable e
+                            (do
+                              (info "Write failed with " e)
+                              ;(if (.contains (.getMessage e) "timeout")
+                                (assoc op :type :info, :error (.getMessage e))
+                                ;(assoc op :type :fail, :error (.getMessage e))
+                                ;)
                               )
                             )
                           )
@@ -235,7 +251,11 @@
           (c/exec :bash "/root/test_cluster.sh")
           (let [
                 c (connect node)
-                initialPoint (.build (.field (.time (Point/measurement "answers") 1 TimeUnit/NANOSECONDS) "answer" 42))
+                initialPoint (-> (Point/measurement "answers")
+                                 (.time 1 TimeUnit/NANOSECONDS)
+                                 (.field "answer" 42)
+                                 (.build)
+                                 )
                 ]
             (info node "creating jepsen DB...")
             (.createDatabase c dbName)
@@ -271,12 +291,7 @@
   )
 
 
-;(defn test-multi-shard-data
-;  "Datapoints on multiple shards (from predefined weeks) are being inserted randomly and read back.
-;  This should show write unavailability even in ConsistencyLevel.ANY mode"
-;
-;
-;  )
+
 
 
 (defn test-
@@ -315,6 +330,7 @@
   )
 
 
+
 (defn test-on-single-shard-data
   "Testing datapoints inserted to the very same time point, i.e. emulating a simple read-write register.
   This should demonstrate InfluxDB's AP behaviour with ConsistencyLevel.ANY and
@@ -323,3 +339,27 @@
   (test- version (str name " writeConsistency: " writeConsistencyLevel) writeConsistencyLevel healthy)
   )
 
+
+(defn test-multi-shard-data
+  "Datapoints on multiple shards (from predefined weeks) are being inserted randomly and read back.
+  This should show write unavailability even in ConsistencyLevel.ANY mode - not really a test, it's more
+  of a reporting and analysis method"
+  [version name writeConsistencyLevel healthy]
+  (merge
+    (test- version (str name " writeConsistency: " writeConsistencyLevel) writeConsistencyLevel healthy)
+    {
+     :generator (->> (gen/mix [wTimed])
+                     (gen/nemesis
+                       (gen/seq
+                         (cycle [(gen/sleep 1)
+                                 {:type :info :f :start}
+                                 (gen/sleep 3)
+                                 {:type :info :f :stop}
+                                 ])
+                         )
+                       )
+                     (gen/time-limit 30))
+     :model model/noop
+     }
+    )
+  )
