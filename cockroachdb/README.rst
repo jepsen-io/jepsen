@@ -32,12 +32,9 @@ For now three tests are implemented:
 - "sets":  concurrent unique appends to a shared table;
 - "monotonic-part", "monotonic-skews": concurrent ordered appends with
   carried dependency;
-- "monotonic-spread-part", "monotonic-spread-skews": concurrent
+- "monotonic-multitable-part", "monotonic-multitable-skews": concurrent
   ordered appends to separate tables;
 - "bank": concurrent transfers between rows of a shared table. 
-
-The database is accessed using the command-line SQL client executed
-remotely via SSH on each node (``cockroach sql -e ...``).
 
 Overview of results
 -------------------
@@ -71,8 +68,8 @@ At the end, a linearizability checker validates that the trace of
 reads as observed from each client is compatible with a linearizable
 history of across all nodes.
 
-Test details: unique appends
------------------------------
+Test details: unique appends (sets)
+-----------------------------------
 
 One shared table of values.
 
@@ -160,15 +157,6 @@ fail, the operation is known to have failed; and unknown otherwise
 At the end, the checker validates that the sum of the remaining
 balances of all accounts is the same as the initial sum.
 
-.. note:: This test is currently incomplete. The full test should
-   contain *conditional transactions*, where a transfer is only
-   effected if the remaining balance in the source account is
-   sufficient *within the same transaction*.  Then at the end the test
-   should check that no account has a negative balance.  However this
-   part of the test was not implemented because it is not possible to
-   place conditionals within a transaction executed via the
-   sql-over-ssh transport.
-
 How to run the Jepsen tests for CockroachDB
 -------------------------------------------
 
@@ -201,26 +189,22 @@ How to get there:
 
    .. note:: If you cannot use AWS or this pre-packaged configuration,
       you can set up your cluster manually as well. The Jepsen test
-      code assumes Ubuntu 15 on all nodes, CockroachDB running in a
-      user account called ``ubuntu`` via ``supervisor``, and a SSH
-      server on each node reachable from the Jepsen
-      host. CockroachDB's error log is expected in
-      ``/home/ubuntu/logs/cockroach.stderr``.
+      code assumes Ubuntu 15 on all nodes, CockroachDB available to
+      run from a user account called ``ubuntu``,
+      and a SSH server on each node reachable from the Jepsen
+      host. 
       
 3. populate ``/etc/hosts`` on your Jepsen host machine so that the cluster nodes
    can be reached using names ``n1l`` .. ``n5l``.
 
 4. tweak your SSH configuration on both your cluster nodes and Jepsen
-   host so that you can log in password-less to the ``root`` and
-   ``ubuntu`` account on each node from the Jepsen host.  (suggestion:
-   create passwordless key pairs, populate ``authorized_keys`` where
-   needed, and run ``ssh-agent`` / ``ssh-add`` on the Jespen host)
+   host so that you can log in password-less to the ``ubuntu`` account
+   on each node from the Jepsen host.  (suggestion: create
+   passwordless key pairs, populate ``authorized_keys`` where needed,
+   and run ``ssh-agent`` / ``ssh-add`` on the Jespen host)
 
-5. copy the two scripts ``sql.sh`` and ``restart.sh`` from the
-   ``cockroachdb/scripts`` subdirectory to the directory
-   ``/home/ubuntu`` on each node. Compile
-   ``cockroachdb/scripts/adjtime.c`` and copy it to ``/home/ubuntu``
-   on each node.
+5. Compile ``cockroachdb/scripts/adjtime.c`` and copy it to
+   ``/home/ubuntu`` on each node.
 
 6. run ``lein test`` from the ``cockroachdb`` test directory. This
    will run the Jepsen tests and exercise the database.
