@@ -2,6 +2,7 @@
   (:require [clojure [pprint :refer :all]
                      [string :as str]]
             [clojure.java.io :as io]
+            [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen [core      :as jepsen]
                     [db        :as db]
@@ -167,10 +168,7 @@
 (defn replica-set-config
   "Returns the current replset config."
   [conn]
-  (-> conn
-      (mongo/get-db "local")
-      (mc/find-one "system.replset" {})
-      (from-db-object true)))
+  (admin-command! conn :replSetGetConfig 1))
 
 (defn replica-set-reconfigure!
   "Apply new configuration for a replica set."
