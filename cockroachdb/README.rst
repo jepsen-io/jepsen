@@ -30,11 +30,11 @@ For now three tests are implemented:
 
 - "atomic": concurrent atomic updates to a shared register;
 - "sets":  concurrent unique appends to a shared table;
-- "monotonic-part", "monotonic-skews": concurrent unique appends with carried dependency;
+- "monotonic-part", "monotonic-skews": concurrent ordered appends with
+  carried dependency;
+- "monotonic-multitable-part", "monotonic-multitable-skews": concurrent
+  ordered appends to separate tables;
 - "bank": concurrent transfers between rows of a shared table. 
-
-The database is accessed using the command-line SQL client executed
-remotely via SSH on each node (``cockroach sql -e ...``).
 
 Overview of results
 -------------------
@@ -43,11 +43,12 @@ As of Jan 26 2016, following the test procedure outlined below and
 the test code in this repository, during multple tests run at
 Cockroach Labs there were no serious inconsistencies found by Jepsen.
 
-- for the atomic updates, unique appends, monotonic with network
-  partition, bank transfers: no anomaly founds;
-- for monotonic with clock skews: some anomalies found when server
-  runs *without* `--linearizable`; with this flag set, the anomalies
-  disappear.
+- for the atomic updates, unique appends, monotonic on 1 table with
+  network partition, monotonic-spread with either partitions or clock
+  skews, and bank transfers: *no anomaly found*;
+- for monotonic on 1 table with clock skews: some
+  anomalies found when server runs *without* `--linearizable`; with
+  this flag set, the anomalies disappear.
 
 Test details: atomic updates
 -----------------------------
@@ -67,8 +68,10 @@ At the end, a linearizability checker validates that the trace of
 reads as observed from each client is compatible with a linearizable
 history of across all nodes.
 
-Test details: unique appends
------------------------------
+Test details: unique appends (sets)
+-----------------------------------
+
+One shared table of values.
 
 Jepsen sends appends of unique values via different
 nodes over time. 
@@ -86,6 +89,8 @@ not present in the table.
 
 Test details: monotonic with network partition
 ----------------------------------------------
+
+One shared table of triplets (value, timestamp).
 
 Jepsen sends atomic transactions that append the last known max
 value + 1 and the current db's now(), concurrently to different nodes
@@ -108,6 +113,35 @@ Test details: monotonic with clock skews
 Same test setup as above; however here the nemesis insert random clock
 skews of +/- 100ms on each node instead of partitions.
 
+Test details: monotonic over multiple tables, network partitions
+----------------------------------------------------------------
+
+Multiple (e.g. 5) tables, each containing triplets (value, timestamp, clientid).
+
+Each client repeatedly:
+- picks one of the random tables,
+- inserts the value of a local (per client) counter, the db timestamp
+  and its own client ID in the randomly chosen table,
+- records either success for the added value, or failure.
+
+Concurrently, a nemesis partitions the network between the nodes randomly.
+
+Each node may report ok, the operation is known to have succeeded;
+fail, the operation is known to have failed; and unknown otherwise
+(e.g. the connection dropped before the answer could be read).
+
+At the end, a monotonic checker validates that no value was added two
+or more times; that all known-ok additions are indeed present in some
+table; and that, per client id, the merged history for that client id
+across all tables presents the client's counter value in the same
+order as the db timestamp.
+
+Test details: monotonic over multiple tables, clock skews
+----------------------------------------------------------------
+
+Same test setup as above; however here the nemesis insert random clock
+skews of +/- 100ms on each node instead of partitions.
+
 Test details: bank transfers
 ----------------------------
 
@@ -122,15 +156,6 @@ fail, the operation is known to have failed; and unknown otherwise
 
 At the end, the checker validates that the sum of the remaining
 balances of all accounts is the same as the initial sum.
-
-.. note:: This test is currently incomplete. The full test should
-   contain *conditional transactions*, where a transfer is only
-   effected if the remaining balance in the source account is
-   sufficient *within the same transaction*.  Then at the end the test
-   should check that no account has a negative balance.  However this
-   part of the test was not implemented because it is not possible to
-   place conditionals within a transaction executed via the
-   sql-over-ssh transport.
 
 How to run the Jepsen tests for CockroachDB
 -------------------------------------------
@@ -164,26 +189,22 @@ How to get there:
 
    .. note:: If you cannot use AWS or this pre-packaged configuration,
       you can set up your cluster manually as well. The Jepsen test
-      code assumes Ubuntu 15 on all nodes, CockroachDB running in a
-      user account called ``ubuntu`` via ``supervisor``, and a SSH
-      server on each node reachable from the Jepsen
-      host. CockroachDB's error log is expected in
-      ``/home/ubuntu/logs/cockroach.stderr``.
+      code assumes Ubuntu 15 on all nodes, CockroachDB available to
+      run from a user account called ``ubuntu``,
+      and a SSH server on each node reachable from the Jepsen
+      host. 
       
 3. populate ``/etc/hosts`` on your Jepsen host machine so that the cluster nodes
    can be reached using names ``n1l`` .. ``n5l``.
 
 4. tweak your SSH configuration on both your cluster nodes and Jepsen
-   host so that you can log in password-less to the ``root`` and
-   ``ubuntu`` account on each node from the Jepsen host.  (suggestion:
-   create passwordless key pairs, populate ``authorized_keys`` where
-   needed, and run ``ssh-agent`` / ``ssh-add`` on the Jespen host)
+   host so that you can log in password-less to the ``ubuntu`` account
+   on each node from the Jepsen host.  (suggestion: create
+   passwordless key pairs, populate ``authorized_keys`` where needed,
+   and run ``ssh-agent`` / ``ssh-add`` on the Jespen host)
 
-5. copy the two scripts ``sql.sh`` and ``restart.sh`` from the
-   ``cockroachdb/scripts`` subdirectory to the directory
-   ``/home/ubuntu`` on each node. Compile
-   ``cockroachdb/scripts/adjtime.c`` and copy it to ``/home/ubuntu``
-   on each node.
+5. Compile ``cockroachdb/scripts/adjtime.c`` and copy it to
+   ``/home/ubuntu`` on each node.
 
 6. run ``lein test`` from the ``cockroachdb`` test directory. This
    will run the Jepsen tests and exercise the database.
