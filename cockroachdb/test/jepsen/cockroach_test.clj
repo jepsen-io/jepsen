@@ -10,8 +10,12 @@
 
 (deftest sets-test  (is (:valid? (:results (jepsen/run! (cl/sets-test nodes))))))
 
-(deftest monotonic-test  (is (:valid? (:results (jepsen/run! (cl/monotonic-add-test nodes))))))
+(deftest monotonic-test  (is (:valid? (:results (jepsen/run! (cl/monotonic-test nodes))))))
 
-(deftest monotonic-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-add-test-skews nodes))))))
+(deftest monotonic-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-test-skews nodes))))))
+
+(deftest monotonic-multitable-test  (is (:valid? (:results (jepsen/run! (cl/monotonic-multitable-test nodes))))))
+
+(deftest monotonic-multitable-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-multitable-test-skews nodes))))))
 
 (deftest bank-test  (is (:valid? (:results (jepsen/run! (cl/bank-test nodes 4 10))))))
