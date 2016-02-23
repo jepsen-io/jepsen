@@ -51,6 +51,11 @@
 (def db-passwd "dummy")
 (def dbname "jepsen") ; will get created automatically
 
+;; for secure mode
+(def client-cert "certs/node.client.crt")
+(def client-key "certs/node.client.pk8")
+(def ca-cert "certs/ca.crt")
+
 ;; Postgres user and dbname for jdbc-mode = :pg-*
 (def pg-user "kena") ; must already exist
 (def pg-passwd "kena") ; must already exist
@@ -58,14 +63,9 @@
 
 ;;;;;;;;;;;;; Cluster settings ;;;;;;;;;;;;;;
 
-;; whether to start the CockroachDB cluster in insecure mode
-(def insecure true)  ; false not yet supported by Clojure JDBC
-
-;; FIXME: the Java SSL story really sucks. Postgres' JDBC driver
-;; doesn't support SSL parameters via the db URL (unlike the
-;; command-line client) and wants certificates to be handled via
-;; Java's SSLSocketFactory.
-;; This is hard to get right in Java, even more so in Clojure.
+;; whether to start the CockroachDB cluster in insecure mode (SSL disabled)
+;; (may be useful to capture the network traffic between client and server)
+(def insecure false)
 
 ;; whether to start the CockroachDB cluster with --linearizable
 (def linearizable false)
@@ -106,16 +106,25 @@
   (cond (= jdbc-mode :pg-local) "extract(microseconds from now())"
         true "extract(epoch_nanoseconds from now())"))
 
+(def ssl-settings
+  (if insecure ""
+      (str "?ssl=true"
+           "&sslcert=" client-cert
+           "&sslkey=" client-key
+           "&sslrootcert=" ca-cert
+           "&sslfactory=org.postgresql.ssl.jdbc4.LibPQFactory"))
+  )
+
 (defn db-conn-spec
    "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
   (merge {:classname  "org.postgresql.Driver"  :subprotocol "postgresql"}
          (cond (= jdbc-mode :cdb-cluster)
-               {:subname      (str "//" (name node) ":15432/" dbname)
+               {:subname      (str "//" (name node) ":15432/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :cdb-local)
-               {:subname      (str "//localhost:15432/" dbname)
+               {:subname      (str "//localhost:15432/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :pg-local)
