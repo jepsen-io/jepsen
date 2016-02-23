@@ -33,7 +33,7 @@
 (def timeout-delay 1500) ; milliseconds
 
 ;; number of tables involved in the monotonic-multitable tests
-(def multitable-spread 2) 
+(def multitable-spread 2)
 
 ;; which database to use during the tests.
 
@@ -51,6 +51,11 @@
 (def db-passwd "dummy")
 (def dbname "jepsen") ; will get created automatically
 
+;; for secure mode
+(def client-cert "certs/node.client.crt")
+(def client-key "certs/node.client.pk8")
+(def ca-cert "certs/ca.crt")
+
 ;; Postgres user and dbname for jdbc-mode = :pg-*
 (def pg-user "kena") ; must already exist
 (def pg-passwd "kena") ; must already exist
@@ -58,14 +63,9 @@
 
 ;;;;;;;;;;;;; Cluster settings ;;;;;;;;;;;;;;
 
-;; whether to start the CockroachDB cluster in insecure mode
-(def insecure true)  ; false not yet supported by Clojure JDBC
-
-;; FIXME: the Java SSL story really sucks. Postgres' JDBC driver
-;; doesn't support SSL parameters via the db URL (unlike the
-;; command-line client) and wants certificates to be handled via
-;; Java's SSLSocketFactory.
-;; This is hard to get right in Java, even more so in Clojure.
+;; whether to start the CockroachDB cluster in insecure mode (SSL disabled)
+;; (may be useful to capture the network traffic between client and server)
+(def insecure false)
 
 ;; whether to start the CockroachDB cluster with --linearizable
 (def linearizable false)
@@ -90,7 +90,7 @@
 (def log-path (str working-path "/logs"))
 (def pidfile (str working-path "/pid"))
 (def errlog (str log-path "/cockroach.stderr"))
-(def verlog (str log-path "/version.txt")) 
+(def verlog (str log-path "/version.txt"))
 
 ;; Location of the custom utility compiled from scripts/adjtime.c
 (def adjtime (str working-path "/adjtime"))
@@ -106,16 +106,25 @@
   (cond (= jdbc-mode :pg-local) "extract(microseconds from now())"
         true "extract(epoch_nanoseconds from now())"))
 
+(def ssl-settings
+  (if insecure ""
+      (str "?ssl=true"
+           "&sslcert=" client-cert
+           "&sslkey=" client-key
+           "&sslrootcert=" ca-cert
+           "&sslfactory=org.postgresql.ssl.jdbc4.LibPQFactory"))
+  )
+
 (defn db-conn-spec
    "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
   (merge {:classname  "org.postgresql.Driver"  :subprotocol "postgresql"}
          (cond (= jdbc-mode :cdb-cluster)
-               {:subname      (str "//" (name node) ":15432/" dbname)
+               {:subname      (str "//" (name node) ":15432/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :cdb-local)
-               {:subname      (str "//localhost:15432/" dbname)
+               {:subname      (str "//localhost:15432/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :pg-local)
@@ -140,7 +149,7 @@
 (defn cockroach-start-cmdline
   "Construct the command line to start a CockroachDB node."
   [extra-arg]
-  (concat 
+  (concat
    [:start-stop-daemon
     :--start :--background
     :--make-pidfile :--pidfile pidfile
@@ -165,7 +174,7 @@
                   [:>> errlog (c/lit "2>&1")]))
           )))
 
-    
+
 (defn db
   "Sets up and tears down CockroachDB."
   []
@@ -177,57 +186,57 @@
           (info node "Starting CockroachDB once to initialize cluster...")
           (c/trace (c/su (apply c/exec (cockroach-start-cmdline nil))))
           (Thread/sleep 1000)
-          
+
           (info node "Stopping 1st CockroachDB before starting cluster...")
           (c/exec :killall -9 :cockroach))
-        
+
         (jepsen/synchronize test)
-        
+
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
         (c/trace (c/su (apply c/exec
-                              (cockroach-start-cmdline 
+                              (cockroach-start-cmdline
                                [(str "--join=" (name (jepsen/primary test)))]))))
-        
-        
+
+
         (jepsen/synchronize test)
-        
+
         (when (= node (jepsen/primary test))
           (info node "Creating database...")
           (csql! (str "create database " dbname)))
-        
+
         (jepsen/synchronize test)
       )
-      
+
       (info node "Testing JDBC connection...")
       (let [conn (open-conn node)]
         (j/with-db-transaction [c conn :isolation isolation-level]
           (into [] (j/query c ["select 1"])))
         (close-conn conn))
-      
+
       (info node "Setup complete")
       (Thread/sleep 1000))
-      
+
 
     (teardown! [_ test node]
 
       (when (= jdbc-mode :cdb-cluster)
         (info node "Stopping cockroachdb...")
         (meh (c/exec :killall -9 :cockroach))
-        
+
         (info node "Resetting the clocks...")
         (c/su (c/exec :ntpdate ntpserver))
-        
+
         (info node "Erasing the store...")
         (c/exec :rm :-rf store-path)
-               
+
         (info node "Clearing the logs...")
         (apply c/exec :truncate :-c :--size 0 log-files)
 
         (jepsen/synchronize test)
         ))
 
-    
+
     db/LogFiles
     (log-files [_ test node] log-files)
     )
@@ -335,7 +344,7 @@
           (j/execute! conn ["create table test (name varchar, val int)"])
           (j/insert! conn :test {:name "a" :val 0}))
         (atomic-client (open-conn node))))
-    
+
     (invoke! [this test op]
       (with-txn op [c conn]
         (case (:f op)
@@ -343,11 +352,11 @@
                      (mapv :val)
                      (first)
                      (assoc op :type :ok, :value))
-          
+
           :write (do
                    (j/update! c :test {:val (:value op)} ["name = 'a'"])
                    (assoc op :type :ok))
-          
+
           :cas (let [[value' value] (:value op)
                      cnt (j/update! c :test {:val value} ["name='a' and val = ?" value'])]
                  (assoc op :type (if (zero? (first cnt)) :fail :ok))))
@@ -409,9 +418,9 @@
            :error  "Set was never read"})
 
         (let [final-read  (into #{} final-read-l)
-                                        
+
               dups        (into [] (for [[id freq] (frequencies final-read-l) :when (> freq 1)] id))
-              
+
               ;;The OK set is every read value which we tried to add
               ok          (set/intersection final-read attempts)
 
@@ -446,7 +455,7 @@
           (j/execute! conn ["create table set (val int)"]))
 
         (sets-client (open-conn node))))
-      
+
     (invoke! [this test op]
       (with-txn op [c conn]
         (case (:f op)
@@ -457,7 +466,7 @@
                      (mapv :val)
                      (assoc op :type :ok, :value))
           )))
-    
+
     (teardown! [_ test]
                (j/execute! conn ["drop table if exists set"])
                (close-conn conn))
@@ -554,9 +563,9 @@
                              (r/filter #(= :abort-uncertain (:error %)))
                              (into []))
               [off-order-sts off-order-val] (monotonic-order final-read-l)
-              
+
               dups        (into [] (for [[id freq] (frequencies (map first final-read-l)) :when (> freq 1)] id))
-              
+
               ;; Lost records are those we definitely added but weren't read
               lost        (set/difference (into #{} (map first all-adds-l)) (into #{} (map first final-read-l)))]
           {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts) (empty? off-order-val))
@@ -578,14 +587,14 @@
       (let [n (str->int (subs (name node) 1 2))
             conn (open-conn node)]
         (info "Setting up client " n " for " (name node))
-        
+
         (when (= node (jepsen/primary test))
           (j/execute! conn ["drop table if exists mono"])
           (j/execute! conn ["create table mono (val int, sts bigint, node int, tb int)"])
           (j/insert! conn :mono {:val -1 :sts 0 :node -1 :tb -1}))
 
         (monotonic-client (open-conn node) n)))
-    
+
     (invoke! [this test op]
       (with-txn op [c conn]
         (case (:f op)
@@ -593,10 +602,10 @@
                                   (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
                                   (first))
                       dbtime (db-time c)]
-                  
+
                   (j/insert! c :mono {:val (+ 1 (first currow)) :sts dbtime :node nodenum :tb 0})
                   (assoc op :type :ok, :value currow))
-          
+
           :read (->> (j/query c ["select * from mono order by sts"])
                      (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
                      (into [])
@@ -660,7 +669,7 @@
 ;;;;;;;;;;;;;;;;;;;;;; Monotonic inserts over multiple tables ;;;;;;;;;;;;;;;;
 
 (defn check-monotonic-split
-  "Same as check-monotonic, but check ordering only from each client's perspective."  
+  "Same as check-monotonic, but check ordering only from each client's perspective."
   []
   (reify checker/Checker
     (check [this test model history]
@@ -680,10 +689,10 @@
             (if-not final-read-l
               {:valid? false
                :error  "Set was never read"})
-            
+
             (let [final-read  (into #{} final-read-l)
                   all-adds    (into #{} all-adds-l)
-                  
+
                   retries    (->> all-fails
                                   (r/filter #(= :retry (:error %)))
                                   (into []))
@@ -702,7 +711,7 @@
                   off-order-val (map last off-order-pairs)
 
                   dups        (into [] (for [[id freq] (frequencies (map first final-read-l)) :when (> freq 1)] id))
-              
+
                   ; Lost records are those we definitely added but weren't read
                   lost        (into [] (set/difference all-adds (map first final-read)))]
               {:valid?          (and (empty? lost)
@@ -724,7 +733,7 @@
     (setup! [_ test node]
       (let [n (str->int (subs (name node) 1 2))
             conn (open-conn node)]
-        
+
         (info "Setting up client " n " for " (name node))
 
         (when (= node (jepsen/primary test))
@@ -735,10 +744,10 @@
                                             " (val int, sts bigint, node int, tb int)")])
                      (j/insert! conn (str "mono" x) {:val -1 :sts 0 :node -1 :tb x})
                      ))))
-      
+
         (monotonic-multitable-client (open-conn node) n)))
-  
-      
+
+
     (invoke! [this test op]
       (with-txn op [c conn]
         (case (:f op)
@@ -746,7 +755,7 @@
                       dbtime (db-time c)]
                   (j/insert! c (str "mono" rt) {:val (:value op) :sts dbtime :node nodenum :tb rt})
                   (assoc op :type :ok))
-          
+
           :read (->> (range multitable-spread)
                      (map (fn [x]
                             (->> (j/query c [(str "select * from mono" x " where node <> -1")])
@@ -757,9 +766,9 @@
                      (into [])
                      (assoc op :type :ok, :value))
         )))
-    
+
     (teardown! [_ test]
-      (dorun (for [x (range multitable-spread)]               
+      (dorun (for [x (range multitable-spread)]
                (j/execute! conn [(str "drop table if exists mono" x)])))
       (close-conn conn))
 ))
@@ -820,7 +829,7 @@
   client/Client
     (setup! [this test node]
       (let [conn (open-conn node)]
-        
+
         (when (= node (jepsen/primary test))
           ;; Create initial accounts.
           (j/execute! conn ["drop table if exists accounts"])
@@ -837,7 +846,7 @@
           :read (->> (j/query c ["select balance from accounts"])
                      (mapv :balance)
                      (assoc op :type :ok, :value))
-          
+
           :transfer (let [{:keys [from to amount]} (:value op)
                           b1 (-> c
                                  (j/query ["select balance from accounts where id = ?" from]
@@ -854,7 +863,7 @@
 
                             (neg? b2)
                             (assoc op :type :fail, :value [:negative to b2])
-                            
+
                             true
                             (do (j/update! c :accounts {:balance b1} ["id = ?" from])
                                 (j/update! c :accounts {:balance b2} ["id = ?" to])
@@ -865,7 +874,7 @@
       (j/execute! conn ["drop table if exists accounts"])
       (close-conn conn))
     )
-  
+
 (defn bank-client
   "Simulates bank account transfers between n accounts, each starting with
   starting-balance."
