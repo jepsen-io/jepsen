@@ -239,5 +239,18 @@ How to get there:
    inconsistencies were found.
 
 9. Optionally, after the tests complete, collect additional outputs in
-   the subdirectory ``cockroachdb/stores/latest/``.
+   the subdirectory ``cockroachdb/store/latest/``.
 
+Browsing the test results
+-------------------------
+
+A small utility is provided to navigate the results using a web browser.
+
+To use this, point a HTTP server to ``cockroachdb/store`` and
+enable CGI handling for ``cockroachdb/stores/cgi-bin``; you can
+also achieve this simply by running the Python embedded web server with::
+
+  cd cockroachdb/store && python3 -m http.server --cgi 8080
+
+Then navigate to ``/cgi-bin/display.py`` in the web browser to start
+the interface.
