@@ -34,7 +34,7 @@ For now three tests are implemented:
   carried dependency;
 - "monotonic-multitable-part", "monotonic-multitable-skews": concurrent
   ordered appends to separate tables;
-- "bank": concurrent transfers between rows of a shared table. 
+- "bank": concurrent transfers between rows of a shared table.
 
 Overview of results
 -------------------
@@ -74,7 +74,7 @@ Test details: unique appends (sets)
 One shared table of values.
 
 Jepsen sends appends of unique values via different
-nodes over time. 
+nodes over time.
 
 Concurrently, a nemesis partitions the network between the nodes randomly.
 
@@ -174,7 +174,7 @@ How to get there:
 1. ensure Sun/Oracle's JDK 8 is installed on your Jepsen host, and install leiningen__.
 
    .. __: http://leiningen.org/
-   
+
 2. configure a 5-node CockroachDB cluster, for example using the
    configuration in CockroachDB's ``cloud/aws`` subdirectory. This
    should create 5 Ubuntu-based VMs on EC2 with a pre-initialized,
@@ -192,8 +192,8 @@ How to get there:
       code assumes Ubuntu 15 on all nodes, CockroachDB available to
       run from a user account called ``ubuntu``,
       and a SSH server on each node reachable from the Jepsen
-      host. 
-      
+      host.
+
 3. populate ``/etc/hosts`` on your Jepsen host machine so that the cluster nodes
    can be reached using names ``n1l`` .. ``n5l``.
 
@@ -222,13 +222,13 @@ How to get there:
    - generate a Java-ready encoding of the client key using the following command::
 
        openssl pkcs8 -topk8 -inform PEM -outform DER \
-            -in .../node.client.key -out .../node.client.pk8 -nocrypt
-     
+	    -in .../node.client.key -out .../node.client.pk8 -nocrypt
+
    - indicate the path to the client and CA certs and key in the configuration
      variables in ``src/jepsen/cockroach.clj``.
 
    To disable SSL instead, set ``insecure`` to false in ``src/jepsen/cockroach.clj``.
-   
+
 7. run ``lein test`` from the ``cockroachdb`` test directory. This
    will run the Jepsen tests and exercise the database.
 
