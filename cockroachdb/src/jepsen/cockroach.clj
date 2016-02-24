@@ -49,6 +49,7 @@
 ;; CockroachDB user and db name for jdbc-mode = :cdb-*
 (def db-user "root")
 (def db-passwd "dummy")
+(def db-port 26257)
 (def dbname "jepsen") ; will get created automatically
 
 ;; for secure mode
@@ -120,11 +121,11 @@
   [node]
   (merge {:classname  "org.postgresql.Driver"  :subprotocol "postgresql"}
          (cond (= jdbc-mode :cdb-cluster)
-               {:subname      (str "//" (name node) ":15432/" dbname ssl-settings)
+               {:subname      (str "//" (name node) ":" db-port "/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :cdb-local)
-               {:subname      (str "//localhost:15432/" dbname ssl-settings)
+               {:subname      (str "//localhost:" db-port "/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :pg-local)
