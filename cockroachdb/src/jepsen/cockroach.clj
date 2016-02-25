@@ -599,12 +599,13 @@
     (invoke! [this test op]
       (with-txn op [c conn]
         (case (:f op)
-          :add  (let [currow (->> (j/query c ["select * from mono where val = (select max(val) from mono)"])
+          :add  (let [curmax (->> (j/query c ["select max(val) as m from mono"] :row-fn :m)
+                                  (first))
+                      currow (->> (j/query c ["select * from mono where val = ?" curmax])
                                   (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
                                   (first))
                       dbtime (db-time c)]
-
-                  (j/insert! c :mono {:val (+ 1 (first currow)) :sts dbtime :node nodenum :tb 0})
+                  (j/insert! c :mono {:val (+ 1 curmax) :sts dbtime :node nodenum :tb 0})
                   (assoc op :type :ok, :value currow))
 
           :read (->> (j/query c ["select * from mono order by sts"])
