@@ -98,7 +98,7 @@
 ;; NTP server to use with `ntpdate`
 (def ntpserver "ntp.ubuntu.com")
 
-(def log-files [errlog verlog])
+(def log-files (if (= jdbc-mode :cdb-cluster) [errlog verlog] []))
 
 ;;;;;;;;;;;;;;;;;;;; Database set-up and access functions  ;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -318,13 +318,15 @@
   "Sets up the test parameters common to all tests."
   [nodes opts]
   (merge tests/noop-test
-         {:nodes   nodes
-          :name    (str "cockroachdb-" (:name opts))
-          :os      ubuntu/os
-          :db      (db)
-          :ssh     {:username username}
-          :nemesis (nemesis/partition-random-halves)
-          }
+         (let [t {:nodes   (if (= jdbc-mode :cdb-cluster) nodes [:localhost])
+                  :name    (str "cockroachdb-" (:name opts))
+                  :db      (db)
+                  :ssh     {:username username :strict-host-key-checking false}
+                  }]
+           (if (= jdbc-mode :cdb-cluster)
+             (assoc t :nemesis (nemesis/partition-random-halves)
+                    :os      ubuntu/os)
+             t))
          (dissoc opts :name)))
 
                                         ;
@@ -666,7 +668,9 @@
                :details  (check-monotonic)})
     }
    )]
-    (assoc t :nemesis (clock-milli-scrambler 100))))
+    (if (= jdbc-mode :cdb-cluster)
+      (assoc t :nemesis (clock-milli-scrambler 100))
+      t)))
 
 ;;;;;;;;;;;;;;;;;;;;;; Monotonic inserts over multiple tables ;;;;;;;;;;;;;;;;
 
@@ -822,7 +826,9 @@
                :details  (check-monotonic-split)})
     }
    )]
-    (assoc t :nemesis (clock-milli-scrambler 100))))
+    (if (= jdbc-mode :cdb-cluster)
+      (assoc t :nemesis (clock-milli-scrambler 100))
+      t)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Test for transfers between bank accounts ;;;;;;;;;;;;;;;;;;;;;;;
