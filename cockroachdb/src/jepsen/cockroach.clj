@@ -43,6 +43,10 @@
 ;; :cdb-cluster Send the test SQL to the CockroachDB cluster set up by the framework.
 (def jdbc-mode :cdb-cluster)
 
+;; Unix username to log into via SSH for :cdb-cluster,
+;; or to log into to localhost for :pg-local and :cdb-local
+(def username "ubuntu")
+
 ;; Isolation level to use with test transactions.
 (def isolation-level :serializable)
 
@@ -78,9 +82,6 @@
            ]
           (if insecure [:--insecure] [])
           (if linearizable [:--linearizable] [])))
-
-;; Unix username to log into via SSH
-(def username "ubuntu")
 
 ;; Home directory for the CockroachDB setup
 (def working-path "/home/ubuntu")
@@ -587,7 +588,7 @@
   [conn nodenum]
   (reify client/Client
     (setup! [_ test node]
-      (let [n (str->int (subs (name node) 1 2))
+      (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
             conn (open-conn node)]
         (info "Setting up client " n " for " (name node))
 
@@ -737,7 +738,7 @@
   [conn nodenum]
   (reify client/Client
     (setup! [_ test node]
-      (let [n (str->int (subs (name node) 1 2))
+      (let [n (if (= jdbc-mode :cdb-local) (str->int (subs (name node) 1 2)) 1)
             conn (open-conn node)]
 
         (info "Setting up client " n " for " (name node))
