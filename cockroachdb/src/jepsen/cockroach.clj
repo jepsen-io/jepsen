@@ -740,10 +740,12 @@
                   off-order-sts (map first off-order-pairs)
                   off-order-val (map last off-order-pairs)
 
-                  dups        (into [] (for [[id freq] (frequencies (map first final-read-l)) :when (> freq 1)] id))
+                  dups        (into [] (for [[id freq] (frequencies (into [] (map first final-read-l))) :when (> freq 1)] id))
 
                   ; Lost records are those we definitely added but weren't read
-                  lost        (into [] (set/difference all-adds (map first final-read)))]
+                  lost        (into [] (set/difference
+                                        (into #{} all-adds)
+                                        (into #{} (map first final-read))))]
               {:valid?          (and (empty? lost)
                                      (empty? dups)
                                      (and (into [] (map empty? off-order-sts)))
