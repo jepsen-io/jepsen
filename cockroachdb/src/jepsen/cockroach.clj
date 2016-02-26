@@ -990,3 +990,31 @@
      :checker (checker/compose
                 {:perf (checker/perf)
                  :details (bank-checker)})}))
+
+(defn bank-test-skews
+  [nodes n initial-balance]
+  (let [t (basic-test nodes
+                      {:name "bank-skews"
+                       :model  {:n n :total (* n initial-balance)}
+                       :client (bank-client n initial-balance)
+                       :generator (gen/phases
+                                   (->> (gen/mix [bank-read bank-diff-transfer])
+                                        (gen/clients)
+                                        (gen/stagger 1/10)
+                                        (gen/nemesis
+                                         (gen/seq (cycle [(gen/sleep nemesis-delay)
+                                                          {:type :info, :f :start}
+                                                          (gen/sleep nemesis-duration)
+                                                          {:type :info, :f :stop}])))
+                                        (gen/time-limit test-duration))
+                                   (gen/nemesis (gen/once {:type :info, :f :stop}))
+                                   (gen/log "waiting for quiescence")
+                                   (gen/sleep 5)
+                                   (gen/clients (gen/once bank-read)))
+                       :checker (checker/compose
+                                 {:perf (checker/perf)
+                                  :details (bank-checker)})})]
+    (if (= jdbc-mode :cdb-cluster)
+      (assoc t :nemesis (clock-milli-scrambler 100))
+      t)))
+

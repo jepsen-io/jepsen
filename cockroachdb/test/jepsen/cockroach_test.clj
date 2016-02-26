@@ -19,3 +19,5 @@
 (deftest monotonic-multitable-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-multitable-test-skews nodes))))))
 
 (deftest bank-test  (is (:valid? (:results (jepsen/run! (cl/bank-test nodes 4 10))))))
+
+(deftest bank-test-skews  (is (:valid? (:results (jepsen/run! (cl/bank-test-skews nodes 4 10))))))
