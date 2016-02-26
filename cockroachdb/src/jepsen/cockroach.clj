@@ -27,7 +27,13 @@
 (import [java.net URLEncoder])
 
 ;; duration of 1 jepsen test
-(def test-duration 5) ; seconds
+(def test-duration 30) ; seconds
+
+;; duration between interruptions
+(def nemesis-delay 5) ; seconds
+
+;; duration of an interruption
+(def nemesis-duration 5) ; seconds
 
 ;; timeout for DB operations during tests
 (def timeout-delay 1500) ; milliseconds
@@ -377,14 +383,18 @@
    {
     :name    "atomic"
     :client  (atomic-client nil)
-    :generator (->> (gen/mix [r w cas])
+    :generator (gen/phases
+                (->> (gen/mix [r w cas])
                     (gen/stagger 1)
                     (gen/nemesis
-                     (gen/seq (cycle [(gen/sleep 5)
+                     (gen/seq (cycle [(gen/sleep nemesis-delay)
                                       {:type :info, :f :start}
-                                      (gen/sleep 5)
+                                      (gen/sleep nemesis-duration)
                                       {:type :info, :f :stop}])))
                     (gen/time-limit test-duration))
+                (gen/nemesis (gen/once {:type :info, :f :stop}))
+                (gen/sleep 5))
+
     :model   (model/cas-register 0)
     :checker (checker/compose
               {:perf   (checker/perf)
@@ -472,26 +482,26 @@
           )))
 
     (teardown! [_ test]
-               (j/execute! conn ["drop table if exists set"])
-               (close-conn conn))
-    ))
+      (util/timeout timeout-delay nil
+                     (j/execute! conn ["drop table if exists set"]))
+       (close-conn conn))
+      ))
 
 (defn with-nemesis
   "Wraps a client generator in a nemesis that induces failures and eventually
   stops."
   [client]
   (gen/phases
-    (gen/phases
-      (->> client
-           (gen/nemesis
-             (gen/seq (cycle [(gen/sleep 0)
-                              {:type :info, :f :start}
-                              (gen/sleep 5)
-                              {:type :info, :f :stop}
-                              ])))
-           (gen/time-limit test-duration))
-      (gen/nemesis (gen/once {:type :info, :f :stop}))
-      (gen/sleep 5))))
+   (->> client
+        (gen/nemesis
+         (gen/seq (cycle [(gen/sleep nemesis-delay)
+                          {:type :info, :f :start}
+                          (gen/sleep nemesis-duration)
+                          {:type :info, :f :stop}
+                          ])))
+        (gen/time-limit test-duration))
+   (gen/nemesis (gen/once {:type :info, :f :stop}))
+   (gen/sleep 5)))
 
 
 (defn sets-test
@@ -776,7 +786,8 @@
 
     (teardown! [_ test]
       (dorun (for [x (range multitable-spread)]
-               (j/execute! conn [(str "drop table if exists mono" x)])))
+               (util/timeout timeout-delay nil
+                             (j/execute! conn [(str "drop table if exists mono" x)]))))
       (close-conn conn))
 ))
 
@@ -818,10 +829,19 @@
                                    :value))
                      gen/seq
                      (gen/stagger 1/10)
-                     with-nemesis)
+                     (gen/nemesis
+                      (gen/seq (cycle [(gen/sleep nemesis-delay)
+                                       {:type :info, :f :start}
+                                       (gen/sleep nemesis-duration)
+                                       {:type :info, :f :stop}
+                                       ])))
+                     (gen/time-limit test-duration))
+                (gen/nemesis (gen/once {:type :info, :f :stop}))
+                (gen/sleep 5)
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
-                     gen/clients))
+                     gen/clients)
+                (gen/sleep 3))
     :checker (checker/compose
               {:perf (checker/perf)
                :details  (check-monotonic-split)})
