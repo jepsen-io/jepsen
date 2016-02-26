@@ -254,9 +254,19 @@
   "Report SQL errors as Jepsen error strings."
   [op & body]
   `(try ~@body
+        (catch java.sql.SQLTransactionRollbackException e#
+          (let [m# (.getMessage e#)]
+            (assoc ~op :type :fail, :error m#)))
+        (catch java.sql.BatchUpdateException e#
+          (let [m# (.getMessage e#)
+                mm# (if (re-find #"getNextExc" m#)
+                      (str m# "\n" (.getMessage (.getNextException e#)))
+                      m#)]
+            (assoc ~op :type :fail, :error mm#)))
         (catch org.postgresql.util.PSQLException e#
           (let [m# (.getMessage e#)]
-            (assoc ~op :type :fail, :error m#)))))
+            (assoc ~op :type :fail, :error m#)))
+        ))
 
 (defmacro capture-txn-abort
   "Converts aborted transactions to an ::abort keyword"
@@ -285,9 +295,9 @@
   [op [c conn] & body]
   `(util/timeout timeout-delay (assoc ~op :type :info, :value :timeout)
                  (with-error-handling ~op
-                   (with-txn-aborts ~op
+                   ;(with-txn-aborts ~op
                      (j/with-db-transaction [~c ~conn :isolation isolation-level]
-                       ~@body)))))
+                       ~@body))))
 
 (defn db-time
   "Retrieve the current time (precise) from the database."
