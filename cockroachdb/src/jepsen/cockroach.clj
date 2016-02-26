@@ -188,7 +188,6 @@
   []
   (reify db/DB
     (setup! [_ test node]
-
       (when (= jdbc-mode :cdb-cluster)
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
@@ -272,7 +271,6 @@
   "Converts aborted transactions to an ::abort keyword"
   [& body]
   `(try ~@body
-        ; Galera
         (catch java.sql.SQLTransactionRollbackException e#
           (if (re-find #"abort" (.getMessage e#))
             ::abort
