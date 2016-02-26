@@ -978,13 +978,14 @@
                        (gen/clients)
                        (gen/stagger 1/10)
                        (gen/nemesis
-                        (gen/seq (cycle [(gen/sleep 5)
+                        (gen/seq (cycle [(gen/sleep nemesis-delay)
                                          {:type :info, :f :start}
-                                         (gen/sleep 5)
+                                         (gen/sleep nemesis-duration)
                                          {:type :info, :f :stop}])))
                        (gen/time-limit test-duration))
+                  (gen/nemesis (gen/once {:type :info, :f :stop}))
                   (gen/log "waiting for quiescence")
-                  (gen/sleep 3)
+                  (gen/sleep 5)
                   (gen/clients (gen/once bank-read)))
      :checker (checker/compose
                 {:perf (checker/perf)
