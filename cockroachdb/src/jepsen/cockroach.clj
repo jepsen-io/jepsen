@@ -968,6 +968,24 @@
                 {:perf (checker/perf)
                  :details (bank-checker)})}))
 
+(defn bank-test-clean
+  [nodes n initial-balance]
+  (basic-test nodes
+    (dissoc {:name "bank-no-nemesis"
+     ;:concurrency 20
+     :model  {:n n :total (* n initial-balance)}
+     :client (bank-client n initial-balance)
+     :generator (gen/phases
+                  (->> (gen/mix [bank-read bank-diff-transfer])
+                       (gen/clients)
+                       (gen/stagger 1/10)
+                       (gen/time-limit test-duration))
+                  (gen/clients (gen/once bank-read)))
+     :checker (checker/compose
+                {:perf (checker/perf)
+                 :details (bank-checker)})} :nemesis)
+    ))
+
 (defn bank-test-skews
   [nodes n initial-balance]
   (let [t (basic-test nodes

@@ -21,3 +21,5 @@
 (deftest bank-test  (is (:valid? (:results (jepsen/run! (cl/bank-test nodes 4 10))))))
 
 (deftest bank-test-skews  (is (:valid? (:results (jepsen/run! (cl/bank-test-skews nodes 4 10))))))
+
+(deftest bank-test-clean  (is (:valid? (:results (jepsen/run! (cl/bank-test-clean nodes 4 10))))))
