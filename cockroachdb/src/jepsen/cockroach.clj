@@ -823,7 +823,8 @@
                      with-nemesis)
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
-                     gen/clients))
+                     gen/clients)
+                (gen/sleep 3))
     :checker (checker/compose
               {:perf (checker/perf)
                :details  (check-monotonic-split)})
@@ -844,19 +845,10 @@
                                    :value))
                      gen/seq
                      (gen/stagger 1/10)
-                     (gen/nemesis
-                      (gen/seq (cycle [(gen/sleep nemesis-delay)
-                                       {:type :info, :f :start}
-                                       (gen/sleep nemesis-duration)
-                                       {:type :info, :f :stop}
-                                       ])))
-                     (gen/time-limit test-duration))
-                (gen/nemesis (gen/once {:type :info, :f :stop}))
-                (gen/sleep 5)
+                     with-nemesis)
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
-                     gen/clients)
-                (gen/sleep 3))
+                     gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
                :details  (check-monotonic-split)})
