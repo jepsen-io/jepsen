@@ -31,7 +31,7 @@ if path.split('.')[-1] in self_ext:
     print("Content-Type: text/plain;charset=utf-8\n")
 
     with open(path) as f:
-        print(f.read())
+        print(f.read().replace(r'\n','\n'))
 
     sys.exit(0)
 
@@ -57,7 +57,8 @@ if path == '.':
     <th>Type</th>
     <th>Status</th>
     <th>History</th>
-    <th>Perf</th>
+    <th>Latencies</th>
+    <th>Rates</th>
     <th>Version</th>
     <th>Details</th>
     </tr></thead><tbody>""")
@@ -86,12 +87,20 @@ if path == '.':
                         print(len(h.read().split('\n')), " events")
                     print("</a>")
                 print("</td>")
-                # Perf
+                # Latencies
                 print("<td>")
                 lfile = os.path.join(dpath, "latency-raw.png")
                 if os.path.exists(lfile):
                     print("<a href='/" + lfile + "'>" 
                           "<img height=60px src='/" + lfile + "' />"
+                          "</a>")
+                print("</td>")
+                # Rates
+                print("<td>")
+                rfile = os.path.join(dpath, "rate.png")
+                if os.path.exists(rfile):
+                    print("<a href='/" + rfile + "'>" 
+                          "<img height=60px src='/" + rfile + "' />"
                           "</a>")
                 print("</td>")
                 # Version
