@@ -87,8 +87,10 @@ elif path == '.':
     </p>
     <style type=text/css>
     .table > tbody > tr > td { vertical-align: middle !important; }
+    :target > * { background-color: yellow !important; }
     </style>
     <table class="table table-striped table-hover table-responsive"><thead><tr>
+    <th></th>
     <th>Timestamp</th>
     <th>Type</th>
     <th>Events</th>
@@ -118,15 +120,18 @@ elif path == '.':
                     n = v.split('/')[-2]
                     with open(v) as vf:
                         thisver = vf.read().split('\n')[1].split(':')[1].strip()
+                ts = d[1][:-5]
 
                 if not first and thisver != lastver:
-                    print("<tr class='info'><td colspan=9 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
+                    print("<tr class='info'><td colspan=10 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
                 first=False
                 lastver = thisver
-                    
-                print("<tr class='%s'>" % status)
+                print("<tr class='%s' id='%s'>" % (status, ts))
+                # Anchor
+                print("<td>")
+                print("<a href='#" + ts + "' class='btn btn-info'>#</a></td>")
                 # Timestamp
-                print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + d[1][:-5] +
+                print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + ts +
                       ' <span class="glyphicon glyphicon-info-sign"></span>'
                       "</a></td>")
                 # Type
