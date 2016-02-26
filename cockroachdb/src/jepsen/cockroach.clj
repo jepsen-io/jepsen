@@ -383,8 +383,9 @@
         ))
 
     (teardown! [_ test]
-               (j/execute! conn ["drop table if exists test"])
-               (close-conn conn))
+      (util/timeout timeout-delay nil
+                    (j/execute! conn ["drop table if exists test"]))
+      (close-conn conn))
     ))
 
 (defn atomic-test
@@ -636,9 +637,11 @@
                      (into [])
                      (assoc op :type :ok, :value))
           )))
+    
     (teardown! [_ test]
-               (j/execute! conn ["drop table if exists test"])
-               (close-conn conn))
+      (util/timeout timeout-delay nil
+                    (j/execute! conn ["drop table if exists mono"]))
+      (close-conn conn))
     ))
 
 
@@ -910,7 +913,8 @@
                  )))
 
     (teardown! [_ test]
-      (j/execute! conn ["drop table if exists accounts"])
+      (util/timeout timeout-delay nil
+                    (j/execute! conn ["drop table if exists accounts"]))
       (close-conn conn))
     )
 
