@@ -255,45 +255,24 @@
   `(try ~@body
         (catch java.sql.SQLTransactionRollbackException e#
           (let [m# (.getMessage e#)]
-            (assoc ~op :type :fail, :error m#)))
+            (assoc ~op :type :fail, :error (str "SQLTransactionRollbackException: " m#))))
         (catch java.sql.BatchUpdateException e#
           (let [m# (.getMessage e#)
                 mm# (if (re-find #"getNextExc" m#)
-                      (str m# "\n" (.getMessage (.getNextException e#)))
+                      (str "BatchUpdateException: " m# "\n"
+                           (.getMessage (.getNextException e#)))
                       m#)]
             (assoc ~op :type :fail, :error mm#)))
         (catch org.postgresql.util.PSQLException e#
           (let [m# (.getMessage e#)]
-            (assoc ~op :type :fail, :error m#)))
+            (assoc ~op :type :fail, :error (str "PSQLException: " m#)))
         ))
-
-(defmacro capture-txn-abort
-  "Converts aborted transactions to an ::abort keyword"
-  [& body]
-  `(try ~@body
-        (catch java.sql.SQLTransactionRollbackException e#
-          (if (re-find #"abort" (.getMessage e#))
-            ::abort
-            (throw e#)))
-        (catch java.sql.BatchUpdateException e#
-          (if (re-find #"abort" (.getMessage e#))
-            ::abort
-            (throw e#)))))
-
-(defmacro with-txn-aborts
-  "Aborts body on rollbacks."
-  [op & body]
-  `(let [res# (capture-txn-abort ~@body)]
-     (if (= ::abort res#)
-       (assoc ~op :type :fail, :error :aborted)
-       res#)))
 
 (defmacro with-txn
   "Wrap a evaluation within a SQL transaction with timeout."
   [op [c conn] & body]
   `(util/timeout timeout-delay (assoc ~op :type :info, :value :timeout)
                  (with-error-handling ~op
-                   ;(with-txn-aborts ~op
                      (j/with-db-transaction [~c ~conn :isolation isolation-level]
                        ~@body))))
 
