@@ -27,7 +27,13 @@
 (import [java.net URLEncoder])
 
 ;; duration of 1 jepsen test
-(def test-duration 5) ; seconds
+(def test-duration 30) ; seconds
+
+;; duration between interruptions
+(def nemesis-delay 5) ; seconds
+
+;; duration of an interruption
+(def nemesis-duration 5) ; seconds
 
 ;; timeout for DB operations during tests
 (def timeout-delay 1500) ; milliseconds
@@ -43,12 +49,17 @@
 ;; :cdb-cluster Send the test SQL to the CockroachDB cluster set up by the framework.
 (def jdbc-mode :cdb-cluster)
 
+;; Unix username to log into via SSH for :cdb-cluster,
+;; or to log into to localhost for :pg-local and :cdb-local
+(def username "ubuntu")
+
 ;; Isolation level to use with test transactions.
 (def isolation-level :serializable)
 
 ;; CockroachDB user and db name for jdbc-mode = :cdb-*
 (def db-user "root")
 (def db-passwd "dummy")
+(def db-port 26257)
 (def dbname "jepsen") ; will get created automatically
 
 ;; for secure mode
@@ -78,9 +89,6 @@
           (if insecure [:--insecure] [])
           (if linearizable [:--linearizable] [])))
 
-;; Unix username to log into via SSH
-(def username "ubuntu")
-
 ;; Home directory for the CockroachDB setup
 (def working-path "/home/ubuntu")
 
@@ -97,7 +105,7 @@
 ;; NTP server to use with `ntpdate`
 (def ntpserver "ntp.ubuntu.com")
 
-(def log-files [errlog verlog])
+(def log-files (if (= jdbc-mode :cdb-cluster) [errlog verlog] []))
 
 ;;;;;;;;;;;;;;;;;;;; Database set-up and access functions  ;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -120,11 +128,11 @@
   [node]
   (merge {:classname  "org.postgresql.Driver"  :subprotocol "postgresql"}
          (cond (= jdbc-mode :cdb-cluster)
-               {:subname      (str "//" (name node) ":15432/" dbname ssl-settings)
+               {:subname      (str "//" (name node) ":" db-port "/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :cdb-local)
-               {:subname      (str "//localhost:15432/" dbname ssl-settings)
+               {:subname      (str "//localhost:" db-port "/" dbname ssl-settings)
                 :user        db-user
                 :password    db-passwd}
                (= jdbc-mode :pg-local)
@@ -180,7 +188,6 @@
   []
   (reify db/DB
     (setup! [_ test node]
-
       (when (= jdbc-mode :cdb-cluster)
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
@@ -246,40 +253,28 @@
   "Report SQL errors as Jepsen error strings."
   [op & body]
   `(try ~@body
+        (catch java.sql.SQLTransactionRollbackException e#
+          (let [m# (.getMessage e#)]
+            (assoc ~op :type :fail, :error (str "SQLTransactionRollbackException: " m#))))
+        (catch java.sql.BatchUpdateException e#
+          (let [m# (.getMessage e#)
+                mm# (if (re-find #"getNextExc" m#)
+                      (str "BatchUpdateException: " m# "\n"
+                           (.getMessage (.getNextException e#)))
+                      m#)]
+            (assoc ~op :type :fail, :error mm#)))
         (catch org.postgresql.util.PSQLException e#
           (let [m# (.getMessage e#)]
-            (assoc ~op :type :fail, :error m#)))))
-
-(defmacro capture-txn-abort
-  "Converts aborted transactions to an ::abort keyword"
-  [& body]
-  `(try ~@body
-        ; Galera
-        (catch java.sql.SQLTransactionRollbackException e#
-          (if (re-find #"abort" (.getMessage e#))
-            ::abort
-            (throw e#)))
-        (catch java.sql.BatchUpdateException e#
-          (if (re-find #"abort" (.getMessage e#))
-            ::abort
-            (throw e#)))))
-
-(defmacro with-txn-aborts
-  "Aborts body on rollbacks."
-  [op & body]
-  `(let [res# (capture-txn-abort ~@body)]
-     (if (= ::abort res#)
-       (assoc ~op :type :fail, :error :aborted)
-       res#)))
+            (assoc ~op :type :fail, :error (str "PSQLException: " m#)))
+        ))
 
 (defmacro with-txn
   "Wrap a evaluation within a SQL transaction with timeout."
   [op [c conn] & body]
   `(util/timeout timeout-delay (assoc ~op :type :info, :value :timeout)
                  (with-error-handling ~op
-                   (with-txn-aborts ~op
                      (j/with-db-transaction [~c ~conn :isolation isolation-level]
-                       ~@body)))))
+                       ~@body))))
 
 (defn db-time
   "Retrieve the current time (precise) from the database."
@@ -317,13 +312,15 @@
   "Sets up the test parameters common to all tests."
   [nodes opts]
   (merge tests/noop-test
-         {:nodes   nodes
-          :name    (str "cockroachdb-" (:name opts))
-          :os      ubuntu/os
-          :db      (db)
-          :ssh     {:username username}
-          :nemesis (nemesis/partition-random-halves)
-          }
+         (let [t {:nodes   (if (= jdbc-mode :cdb-cluster) nodes [:localhost])
+                  :name    (str "cockroachdb-" (:name opts))
+                  :db      (db)
+                  :ssh     {:username username :strict-host-key-checking false}
+                  }]
+           (if (= jdbc-mode :cdb-cluster)
+             (assoc t :nemesis (nemesis/partition-random-halves)
+                    :os      ubuntu/os)
+             t))
          (dissoc opts :name)))
 
                                         ;
@@ -363,8 +360,9 @@
         ))
 
     (teardown! [_ test]
-               (j/execute! conn ["drop table if exists test"])
-               (close-conn conn))
+      (util/timeout timeout-delay nil
+                    (j/execute! conn ["drop table if exists test"]))
+      (close-conn conn))
     ))
 
 (defn atomic-test
@@ -373,14 +371,18 @@
    {
     :name    "atomic"
     :client  (atomic-client nil)
-    :generator (->> (gen/mix [r w cas])
+    :generator (gen/phases
+                (->> (gen/mix [r w cas])
                     (gen/stagger 1)
                     (gen/nemesis
-                     (gen/seq (cycle [(gen/sleep 5)
+                     (gen/seq (cycle [(gen/sleep nemesis-delay)
                                       {:type :info, :f :start}
-                                      (gen/sleep 5)
+                                      (gen/sleep nemesis-duration)
                                       {:type :info, :f :stop}])))
                     (gen/time-limit test-duration))
+                (gen/nemesis (gen/once {:type :info, :f :stop}))
+                (gen/sleep 5))
+
     :model   (model/cas-register 0)
     :checker (checker/compose
               {:perf   (checker/perf)
@@ -468,26 +470,26 @@
           )))
 
     (teardown! [_ test]
-               (j/execute! conn ["drop table if exists set"])
-               (close-conn conn))
-    ))
+      (util/timeout timeout-delay nil
+                     (j/execute! conn ["drop table if exists set"]))
+       (close-conn conn))
+      ))
 
 (defn with-nemesis
   "Wraps a client generator in a nemesis that induces failures and eventually
   stops."
   [client]
   (gen/phases
-    (gen/phases
-      (->> client
-           (gen/nemesis
-             (gen/seq (cycle [(gen/sleep 0)
-                              {:type :info, :f :start}
-                              (gen/sleep 5)
-                              {:type :info, :f :stop}
-                              ])))
-           (gen/time-limit test-duration))
-      (gen/nemesis (gen/once {:type :info, :f :stop}))
-      (gen/sleep 5))))
+   (->> client
+        (gen/nemesis
+         (gen/seq (cycle [(gen/sleep nemesis-delay)
+                          {:type :info, :f :start}
+                          (gen/sleep nemesis-duration)
+                          {:type :info, :f :stop}
+                          ])))
+        (gen/time-limit test-duration))
+   (gen/nemesis (gen/once {:type :info, :f :stop}))
+   (gen/sleep 5)))
 
 
 (defn sets-test
@@ -584,7 +586,7 @@
   [conn nodenum]
   (reify client/Client
     (setup! [_ test node]
-      (let [n (str->int (subs (name node) 1 2))
+      (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
             conn (open-conn node)]
         (info "Setting up client " n " for " (name node))
 
@@ -598,12 +600,13 @@
     (invoke! [this test op]
       (with-txn op [c conn]
         (case (:f op)
-          :add  (let [currow (->> (j/query c ["select * from mono where val = (select max(val) from mono)"])
+          :add  (let [curmax (->> (j/query c ["select max(val) as m from mono"] :row-fn :m)
+                                  (first))
+                      currow (->> (j/query c ["select * from mono where val = ?" curmax])
                                   (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
                                   (first))
                       dbtime (db-time c)]
-
-                  (j/insert! c :mono {:val (+ 1 (first currow)) :sts dbtime :node nodenum :tb 0})
+                  (j/insert! c :mono {:val (+ 1 curmax) :sts dbtime :node nodenum :tb 0})
                   (assoc op :type :ok, :value currow))
 
           :read (->> (j/query c ["select * from mono order by sts"])
@@ -611,9 +614,11 @@
                      (into [])
                      (assoc op :type :ok, :value))
           )))
+    
     (teardown! [_ test]
-               (j/execute! conn ["drop table if exists test"])
-               (close-conn conn))
+      (util/timeout timeout-delay nil
+                    (j/execute! conn ["drop table if exists mono"]))
+      (close-conn conn))
     ))
 
 
@@ -664,7 +669,9 @@
                :details  (check-monotonic)})
     }
    )]
-    (assoc t :nemesis (clock-milli-scrambler 100))))
+    (if (= jdbc-mode :cdb-cluster)
+      (assoc t :nemesis (clock-milli-scrambler 100))
+      t)))
 
 ;;;;;;;;;;;;;;;;;;;;;; Monotonic inserts over multiple tables ;;;;;;;;;;;;;;;;
 
@@ -710,10 +717,12 @@
                   off-order-sts (map first off-order-pairs)
                   off-order-val (map last off-order-pairs)
 
-                  dups        (into [] (for [[id freq] (frequencies (map first final-read-l)) :when (> freq 1)] id))
+                  dups        (into [] (for [[id freq] (frequencies (into [] (map first final-read-l))) :when (> freq 1)] id))
 
                   ; Lost records are those we definitely added but weren't read
-                  lost        (into [] (set/difference all-adds (map first final-read)))]
+                  lost        (into [] (set/difference
+                                        (into #{} all-adds)
+                                        (into #{} (map first final-read))))]
               {:valid?          (and (empty? lost)
                                      (empty? dups)
                                      (and (into [] (map empty? off-order-sts)))
@@ -731,7 +740,7 @@
   [conn nodenum]
   (reify client/Client
     (setup! [_ test node]
-      (let [n (str->int (subs (name node) 1 2))
+      (let [n (if (= jdbc-mode :cdb-local) (str->int (subs (name node) 1 2)) 1)
             conn (open-conn node)]
 
         (info "Setting up client " n " for " (name node))
@@ -769,7 +778,8 @@
 
     (teardown! [_ test]
       (dorun (for [x (range multitable-spread)]
-               (j/execute! conn [(str "drop table if exists mono" x)])))
+               (util/timeout timeout-delay nil
+                             (j/execute! conn [(str "drop table if exists mono" x)]))))
       (close-conn conn))
 ))
 
@@ -790,7 +800,8 @@
                      with-nemesis)
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
-                     gen/clients))
+                     gen/clients)
+                (gen/sleep 3))
     :checker (checker/compose
               {:perf (checker/perf)
                :details  (check-monotonic-split)})
@@ -820,7 +831,9 @@
                :details  (check-monotonic-split)})
     }
    )]
-    (assoc t :nemesis (clock-milli-scrambler 100))))
+    (if (= jdbc-mode :cdb-cluster)
+      (assoc t :nemesis (clock-milli-scrambler 100))
+      t)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Test for transfers between bank accounts ;;;;;;;;;;;;;;;;;;;;;;;
@@ -871,7 +884,8 @@
                  )))
 
     (teardown! [_ test]
-      (j/execute! conn ["drop table if exists accounts"])
+      (util/timeout timeout-delay nil
+                    (j/execute! conn ["drop table if exists accounts"]))
       (close-conn conn))
     )
 
@@ -941,14 +955,43 @@
                        (gen/clients)
                        (gen/stagger 1/10)
                        (gen/nemesis
-                        (gen/seq (cycle [(gen/sleep 5)
+                        (gen/seq (cycle [(gen/sleep nemesis-delay)
                                          {:type :info, :f :start}
-                                         (gen/sleep 5)
+                                         (gen/sleep nemesis-duration)
                                          {:type :info, :f :stop}])))
                        (gen/time-limit test-duration))
+                  (gen/nemesis (gen/once {:type :info, :f :stop}))
                   (gen/log "waiting for quiescence")
-                  (gen/sleep 3)
+                  (gen/sleep 5)
                   (gen/clients (gen/once bank-read)))
      :checker (checker/compose
                 {:perf (checker/perf)
                  :details (bank-checker)})}))
+
+(defn bank-test-skews
+  [nodes n initial-balance]
+  (let [t (basic-test nodes
+                      {:name "bank-skews"
+                       :model  {:n n :total (* n initial-balance)}
+                       :client (bank-client n initial-balance)
+                       :generator (gen/phases
+                                   (->> (gen/mix [bank-read bank-diff-transfer])
+                                        (gen/clients)
+                                        (gen/stagger 1/10)
+                                        (gen/nemesis
+                                         (gen/seq (cycle [(gen/sleep nemesis-delay)
+                                                          {:type :info, :f :start}
+                                                          (gen/sleep nemesis-duration)
+                                                          {:type :info, :f :stop}])))
+                                        (gen/time-limit test-duration))
+                                   (gen/nemesis (gen/once {:type :info, :f :stop}))
+                                   (gen/log "waiting for quiescence")
+                                   (gen/sleep 5)
+                                   (gen/clients (gen/once bank-read)))
+                       :checker (checker/compose
+                                 {:perf (checker/perf)
+                                  :details (bank-checker)})})]
+    (if (= jdbc-mode :cdb-cluster)
+      (assoc t :nemesis (clock-milli-scrambler 100))
+      t)))
+
