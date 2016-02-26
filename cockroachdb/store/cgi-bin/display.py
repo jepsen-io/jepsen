@@ -35,7 +35,6 @@ if path.split('.')[-1] in self_ext:
         contents = f.read().replace(r'\n','\n')
         print(contents)
 
-    sys.exit(0)
 
 elif 'grep-err' in form:
     print("Content-Type: text/plain;charset=utf-8\n")
@@ -45,7 +44,6 @@ elif 'grep-err' in form:
             if 'ERROR' in l:
                 print(l)
 
-    sys.exit(0)
 
 elif 'version-details' in form:
     import re
@@ -63,36 +61,34 @@ elif 'version-details' in form:
                 if 'cockroachdb/cockroach' in l: print("<strong>&lt;--- here</strong>", end='')
                 print()
     print("""</pre></body></html>""")
-    sys.exit(0)
 
-print("Content-Type: text/html;charset=utf-8\n")
-print("""<!DOCTYPE html>
-<html lang=en>
-<head>
-<title>CockroachDB Jepsen test results</title>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Latest compiled and minified CSS -->
-<link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css">
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.0/jquery.min.js"></script>
-<script src="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script></head>
-<body><div class="container-fluid">
-<h1>CockroachDB Jepsen test results</h1>
-<p class=lead>Welcome</p>
-<p class='alert alert-info'>For test descriptions, refer to <a href="https://github.com/cockroachdb/jepsen/blob/master/cockroachdb/README.rst">the README file</a>.
-</br>
-<strong>Note</strong><br/>These tests are run irregularly.<br/>
-They may not use the latest code from the main CockroachDB repository.</br>
-Some tests are run using unmerged change sets.<br/>
-<strong>Always refer to the Version column to place test results in context.</strong>
-</p>""")
-
-if path == '.':
-    print("""<style type=text/css>
+elif path == '.':
+    
+    print("Content-Type: text/html;charset=utf-8\n")
+    print("""<!DOCTYPE html>
+    <html lang=en>
+    <head>
+    <title>CockroachDB Jepsen test results</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.0/jquery.min.js"></script>
+    <script src="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script></head>
+    <body><div class="container-fluid">
+    <h1>CockroachDB Jepsen test results</h1>
+    <p class=lead>Welcome</p>
+    <p class='alert alert-info'>For test descriptions, refer to <a href="https://github.com/cockroachdb/jepsen/blob/master/cockroachdb/README.rst">the README file</a>.
+    </br>
+    <strong>Note</strong><br/>These tests are run irregularly.<br/>
+    They may not use the latest code from the main CockroachDB repository.</br>
+    Some tests are run using unmerged change sets.<br/>
+    <strong>Always refer to the Version column to place test results in context.</strong>
+    </p>
+    <style type=text/css>
     .table > tbody > tr > td { vertical-align: middle !important; }
     </style>
-    """)
-    print("""<table class="table table-striped table-hover table-responsive"><thead><tr>
+    <table class="table table-striped table-hover table-responsive"><thead><tr>
     <th>Timestamp</th>
     <th>Type</th>
     <th>Events</th>
@@ -101,6 +97,7 @@ if path == '.':
     <th>Rates</th>
     <th>Version</th>
     <th>Details</th>
+    <th>Node logs</th>
     </tr></thead><tbody>""")
     rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn')), key=lambda r:r[1],reverse=True)
     lastver = None
@@ -123,7 +120,7 @@ if path == '.':
                         thisver = vf.read().split('\n')[1].split(':')[1].strip()
 
                 if not first and thisver != lastver:
-                    print("<tr class='info'><td colspan=8 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
+                    print("<tr class='info'><td colspan=9 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
                 first=False
                 lastver = thisver
                     
@@ -190,10 +187,24 @@ if path == '.':
                         dstr = dstr[:60] + "... <a href='" + cpath + "?path=" + urllib.parse.quote_plus(ednpath) + "'>(more)</a>"
                     print("<tt class='small'>" + dstr + "</tt>")
                 print("</td>")
+
+                # Node logs
+                print("<td>")
+                logs = sorted(glob.glob(os.path.join(dpath, "*/cockroach.stderr")))
+                if len(logs) > 0:
+                    for log in logs:
+                        print("<a href='" + cpath + "?path=" + urllib.parse.quote_plus(log) + "' class='btn btn-%s btn-xs'>" % status +
+                              "<span class='glyphicon glyphicon-info-sign'></span></a>")
+                print("</td>")
+                
                 print("</tr>")
     print("</tbody></table>")
     
+    print("</div></body></html>")
+
 elif os.path.isdir(path):
+    print("Content-Type: text/html;charset=utf-8\n")
+    print("""<!DOCTYPE html><html lang=en><body><ul>""")
     print("<ul>")
     print("<li><a href='" + cpath + "?path=" + urllib.parse.quote_plus('/'.join(path.split('/')[:-1])) + "'>Up one level</a>")
     for d in sorted_ls(path):
@@ -206,6 +217,8 @@ elif os.path.isdir(path):
         else:
             dst = "/" + ditem
         print("<li><a href='" + dst + "'>" + d + "</a></li>")
-    print("</ul>")
-    
-print("</div></body></html>")
+    print("</ul></body></html>")
+
+else:
+    print("Content-Type: text/plain;charset=utf-8\n")
+    print("You shouldn't be here.")
