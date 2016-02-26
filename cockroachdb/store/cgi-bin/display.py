@@ -22,6 +22,18 @@ if 'path' in form:
 if len(path) == 0 or path[0] == '/':
     path = '.'
 
+offset = 0
+if 'offset' in form:
+    offset = int(form.getvalue('offset'))
+
+pgsize = 10
+if 'pgsize' in form:
+    pgsize = int(form.getvalue('pgsize'))
+
+entry = None
+if 'entry' in form:
+    entry = form.getvalue('entry')
+    
 def sorted_ls(path):
     mtime = lambda f: os.stat(os.path.join(path, f)).st_mtime
     return list(sorted(os.listdir(path), key=mtime))  
@@ -88,10 +100,42 @@ elif path == '.':
     <style type=text/css>
     .table > tbody > tr > td { vertical-align: middle !important; }
     :target > * { background-color: yellow !important; }
-    </style>
-    <table class="table table-striped table-hover table-responsive"><thead><tr>
+    </style>""")
+
+    rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn')), key=lambda r:r[1],reverse=True)
+
+    rpgsize = pgsize
+    if pgsize == -1:
+       rpgsize = len(rl)
+    if entry is not None:
+        for i,v in enumerate(rl):
+            if entry in v[1]:
+                offset=i
+                break
+    if offset < 0:
+        offset = 0
+    elif offset >= len(rl):
+        offset = len(rl)-1
+    upper = min(offset + rpgsize, len(rl))
+        
+    if offset > 0:
+        print("<a href='" + cpath + "?offset=0&pgsize=%d' class='btn btn-info'>First</a>" % pgsize)
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Previous %d</a>" % (max(offset-rpgsize, 0), pgsize, rpgsize))
+    print("<strong>Viewing entries", offset, "to", upper-1,"</strong>")
+    if offset < (len(rl) - pgsize):
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Next %d</a>" % (max(min(offset+rpgsize, len(rl)-1), 0), pgsize, rpgsize))
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Last</a>" % (max(len(rl)-rpgsize,0),pgsize))
+    print("Number of entries per page: ")
+    print("<a href='" + cpath + "?offset=%d&pgsize=10' class='btn btn-info'>10</a>" % offset)
+    print("<a href='" + cpath + "?offset=%d&pgsize=50' class='btn btn-info'>50</a>" % offset)
+    print("<a href='" + cpath + "?offset=%d&pgsize=100' class='btn btn-info'>100</a>" % offset)
+    print("<a href='" + cpath + "?offset=%d&pgsize=-1' class='btn btn-info'>All</a>" % offset)
+        
+    print("""
+    <table class="sortable table table-striped table-hover table-responsive"><thead><tr>
     <th></th>
     <th>Timestamp</th>
+    <th>Status</th>
     <th>Type</th>
     <th>Events</th>
     <th>Errors</th>
@@ -101,10 +145,9 @@ elif path == '.':
     <th>Details</th>
     <th>Node logs</th>
     </tr></thead><tbody>""")
-    rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn')), key=lambda r:r[1],reverse=True)
     lastver = None
     first = True
-    for d in rl:
+    for d in rl[offset:upper]:
         dpath = os.path.join(d[0],d[1])
         ednpath = os.path.join(dpath, 'results.edn')
         with open(ednpath) as f:
@@ -112,6 +155,7 @@ elif path == '.':
             if r is not None:
                 ok = r[edn_format.Keyword('valid?')]
                 status = {True:'success',False:'danger'}[ok]
+                tstatus = {True:'OK',False:'WOOPS'}[ok]
 
                 thisver = None
                 dv = sorted(glob.glob(os.path.join(dpath, '*/version.txt')))
@@ -123,17 +167,19 @@ elif path == '.':
                 ts = d[1][:-5]
 
                 if not first and thisver != lastver:
-                    print("<tr class='info'><td colspan=10 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
+                    print("<tr class='info'><td colspan=11 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
                 first=False
                 lastver = thisver
                 print("<tr class='%s' id='%s'>" % (status, ts))
                 # Anchor
                 print("<td>")
-                print("<a href='#" + ts + "' class='btn btn-info'>#</a></td>")
+                print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-info'>#</a></td>")
                 # Timestamp
                 print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + ts +
                       ' <span class="glyphicon glyphicon-info-sign"></span>'
                       "</a></td>")
+                # Status
+                print("<td>" + tstatus + "</td>")
                 # Type
                 print("<td>" + d[0].split('-', 1)[1] + "</td>")
                 # History
@@ -204,7 +250,7 @@ elif path == '.':
                 
                 print("</tr>")
     print("</tbody></table>")
-    
+    print('<script src="/sorttable.js"></script>')
     print("</div></body></html>")
 
 elif os.path.isdir(path):
