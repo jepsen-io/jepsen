@@ -57,7 +57,7 @@ elif 'version-details' in form:
             if m is None or "/" not in l:
                 print(l)
             else:
-                print("<a href='http://" + m.group(1) + "/tree/" + m.group(2) + "'>" + l + "</a>", end='')
+                print("<a target='_blank' href='http://" + m.group(1) + "/tree/" + m.group(2) + "'>" + l + "</a>", end='')
                 if 'cockroachdb/cockroach' in l: print("<strong>&lt;--- here</strong>", end='')
                 print()
     print("""</pre></body></html>""")
