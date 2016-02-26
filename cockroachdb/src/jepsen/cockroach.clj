@@ -266,7 +266,7 @@
         (catch org.postgresql.util.PSQLException e#
           (let [m# (.getMessage e#)]
             (assoc ~op :type :fail, :error (str "PSQLException: " m#)))
-        ))
+        )))
 
 (defmacro with-txn
   "Wrap a evaluation within a SQL transaction with timeout."
