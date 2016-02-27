@@ -41,6 +41,13 @@
 ;; number of tables involved in the monotonic-multitable tests
 (def multitable-spread 2)
 
+;; address of the Jepsen controlling node as seen by
+;; the database nodes. Used to filter packet captures.
+;; replace by a string constant e.g. (def control-addr "x.y.z.w")
+;; if the following doesnt work.
+(def control-addr (.getHostAddress (java.net.InetAddress/getLocalHost)))
+(def tcpdump "/usr/sbin/tcpdump")
+
 ;; which database to use during the tests.
 
 ;; Possible values:
@@ -99,13 +106,14 @@
 (def pidfile (str working-path "/pid"))
 (def errlog (str log-path "/cockroach.stderr"))
 (def verlog (str log-path "/version.txt"))
-
+(def pcaplog (str log-path "/trace.pcap"))
+  
 ;; Location of the custom utility compiled from scripts/adjtime.c
 (def adjtime (str working-path "/adjtime"))
 ;; NTP server to use with `ntpdate`
 (def ntpserver "ntp.ubuntu.com")
 
-(def log-files (if (= jdbc-mode :cdb-cluster) [errlog verlog] []))
+(def log-files (if (= jdbc-mode :cdb-cluster) [errlog verlog pcaplog] []))
 
 ;;;;;;;;;;;;;;;;;;;; Database set-up and access functions  ;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -199,6 +207,14 @@
 
         (jepsen/synchronize test)
 
+        (info node "Starting packet capture (filtering on " control-addr ")...")
+        (c/su (c/exec :start-stop-daemon
+                      :--start :--background
+                      :--exec tcpdump
+                      :--
+                      :-w pcaplog :host control-addr :and :port db-port                      
+                      ))
+        
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
         (c/trace (c/su (apply c/exec
@@ -238,7 +254,11 @@
         (c/exec :rm :-rf store-path)
 
         (info node "Clearing the logs...")
+        (meh (c/su (c/exec :chown username log-files)))
         (apply c/exec :truncate :-c :--size 0 log-files)
+
+        (info node "Stopping tcpdump...")
+        (meh (c/su (c/exec :killall -9 :tcpdump)))
 
         (jepsen/synchronize test)
         ))
@@ -967,6 +987,24 @@
      :checker (checker/compose
                 {:perf (checker/perf)
                  :details (bank-checker)})}))
+
+(defn bank-test-clean
+  [nodes n initial-balance]
+  (basic-test nodes
+    (dissoc {:name "bank-no-nemesis"
+     ;:concurrency 20
+     :model  {:n n :total (* n initial-balance)}
+     :client (bank-client n initial-balance)
+     :generator (gen/phases
+                  (->> (gen/mix [bank-read bank-diff-transfer])
+                       (gen/clients)
+                       (gen/stagger 1/10)
+                       (gen/time-limit test-duration))
+                  (gen/clients (gen/once bank-read)))
+     :checker (checker/compose
+                {:perf (checker/perf)
+                 :details (bank-checker)})} :nemesis)
+    ))
 
 (defn bank-test-skews
   [nodes n initial-balance]
