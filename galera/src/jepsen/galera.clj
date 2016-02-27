@@ -76,7 +76,7 @@
   "Stops sql daemon."
   [node]
   (info node "stopping mysqld")
-  (meh (cu/grepkill "mysqld")))
+  (meh (cu/grepkill! "mysqld")))
 
 (defn eval!
   "Evals a mysql string from the command line."
