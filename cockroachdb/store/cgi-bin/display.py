@@ -13,7 +13,7 @@ cgitb.enable()
 
 form = cgi.FieldStorage()
 
-base = '/home/kena/jepsen/cockroachdb/store'
+base = os.getenv("DOCUMENT_ROOT")
 os.chdir(base)
 path = ''
 if 'path' in form:
