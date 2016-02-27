@@ -99,7 +99,7 @@ elif path == '.':
     </p>
     <style type=text/css>
     .table > tbody > tr > td { vertical-align: middle !important; }
-    :target > * { background-color: yellow !important; }
+    .selected > * { background-color: yellow !important; }
     </style>""")
 
     rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn')), key=lambda r:r[1],reverse=True)
@@ -170,10 +170,13 @@ elif path == '.':
                     print("<tr class='info'><td colspan=11 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
                 first=False
                 lastver = thisver
-                print("<tr class='%s' id='%s'>" % (status, ts))
+                selected = ''
+                if entry is not None and ts == entry:
+                    selected = 'selected'
+                print("<tr class='%s %s' id='%s'>" % (status, selected, ts))
                 # Anchor
                 print("<td>")
-                print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-info'>#</a></td>")
+                print("<a href='" + cpath + "?entry=" + ts + "' class='btn btn-info'>#</a></td>")
                 # Timestamp
                 print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + ts +
                       ' <span class="glyphicon glyphicon-info-sign"></span>'
