@@ -144,6 +144,7 @@ elif path == '.':
     <th>Version</th>
     <th>Details</th>
     <th>Node logs</th>
+    <th>Network traces</th>
     </tr></thead><tbody>""")
     lastver = None
     first = True
@@ -167,7 +168,7 @@ elif path == '.':
                 ts = d[1][:-5]
 
                 if not first and thisver != lastver:
-                    print("<tr class='info'><td colspan=11 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
+                    print("<tr class='info'><td colspan=12 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
                 first=False
                 lastver = thisver
                 selected = ''
@@ -248,6 +249,14 @@ elif path == '.':
                 if len(logs) > 0:
                     for log in logs:
                         print("<a href='" + cpath + "?path=" + urllib.parse.quote_plus(log) + "' class='btn btn-%s btn-xs'>" % status +
+                              "<span class='glyphicon glyphicon-info-sign'></span></a>")
+                print("</td>")
+                # Network traces
+                print("<td>")
+                logs = sorted(glob.glob(os.path.join(dpath, "*/trace.pcap")))
+                if len(logs) > 0:
+                    for log in logs:
+                        print("<a href='/" + log + "' class='btn btn-%s btn-xs'>" % status +
                               "<span class='glyphicon glyphicon-info-sign'></span></a>")
                 print("</td>")
                 
