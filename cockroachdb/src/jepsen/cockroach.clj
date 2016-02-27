@@ -928,7 +928,7 @@
      :f     :transfer
      :value {:from   (rand-int n)
              :to     (rand-int n)
-             :amount (rand-int 5)}}))
+             :amount (+ 1 (rand-int 5))}}))
 
 (def bank-diff-transfer
   "Like transfer, but only transfers between *different* accounts."
