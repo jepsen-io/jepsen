@@ -146,7 +146,8 @@ elif path == '.':
     <th>Node logs</th>
     <th>Network traces</th>
     </tr></thead><tbody>""")
-    lastver = None
+    db_lastver = None
+    jt_lastver = None
     first = True
     for d in rl[offset:upper]:
         dpath = os.path.join(d[0],d[1])
@@ -157,20 +158,29 @@ elif path == '.':
                 ok = r[edn_format.Keyword('valid?')]
                 status = {True:'success',False:'danger'}[ok]
                 tstatus = {True:'OK',False:'WOOPS'}[ok]
-
-                thisver = None
-                dv = sorted(glob.glob(os.path.join(dpath, '*/version.txt')))
-                if len(dv) > 0:
-                    v = dv[0]
-                    n = v.split('/')[-2]
-                    with open(v) as vf:
-                        thisver = vf.read().split('\n')[1].split(':')[1].strip()
                 ts = d[1][:-5]
 
-                if not first and thisver != lastver:
+                jt_thisver = None
+                jt_verfile =  os.path.join(dpath, 'jepsen-version.txt')
+                if os.path.exists(jt_verfile):
+                    with open(jt_verfile) as f:
+                        jt_thisver = f.read().strip()
+                if not first and jt_thisver != jt_lastver:
+                    print("<tr class='info'><td colspan=12 class='text-center small'><strong>New Jepsen / test framework version</strong></td></tr>")
+                jt_lastver = jt_thisver
+                
+                db_thisver = None
+                dv = sorted(glob.glob(os.path.join(dpath, '*/version.txt')))
+                if len(dv) > 0:
+                    db_version_file = dv[0]
+                    # n = db_version_split.split('/')[-2]
+                    with open(db_version_file) as vf:
+                        db_thisver = vf.read().split('\n')[1].split(':')[1].strip()
+
+                if not first and db_thisver != db_lastver:
                     print("<tr class='info'><td colspan=12 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
                 first=False
-                lastver = thisver
+                db_lastver = db_thisver
                 selected = ''
                 if entry is not None and ts == entry:
                     selected = 'selected'
@@ -222,14 +232,9 @@ elif path == '.':
                 print("</td>")
                 # Version
                 print("<td>")
-                dv = sorted(glob.glob(os.path.join(dpath, '*/version.txt')))
-                if len(dv) > 0:
-                    v = dv[0]
-                    n = v.split('/')[-2]
-                    with open(v) as vf:
-                        vn = vf.read().split('\n')[1].split(':')[1].strip()
-                        print("<a href='" + cpath + "?version-details=1&path=" + urllib.parse.quote_plus(v) + "' class='btn btn-%s btn-xs'>" % status + vn + 
-                              " <span class='glyphicon glyphicon-info-sign'></span></a>")
+                print("<a href='" + cpath + "?version-details=1&path=" + urllib.parse.quote_plus(db_version_file) +
+                      "' class='btn btn-%s btn-xs'>" % status + db_thisver + 
+                      " <span class='glyphicon glyphicon-info-sign'></span></a>")
                 print("</td>")
                 # Details
                 print("<td>")
