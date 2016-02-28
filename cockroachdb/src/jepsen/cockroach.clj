@@ -5,6 +5,7 @@
             [clj-ssh.ssh :as ssh]
             [clojure.core.reducers :as r]
             [clojure.java.io :as io]
+            [clojure.java.shell :refer [sh]]
             [multiset.core :as multiset]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -16,6 +17,7 @@
              [tests :as tests]
              [control :as c :refer [|]]
              [model :as model]
+             [store :as store]
              [checker :as checker]
              [nemesis :as nemesis]
              [generator :as gen]
@@ -196,6 +198,12 @@
   []
   (reify db/DB
     (setup! [_ test node]
+      (when (= node (jepsen/primary test))
+        (store/with-out-file test "jepsen-version.txt"
+          (meh (->> (sh "git" "describe" "--tags")
+                    (:out)
+                    (print)))))
+        
       (when (= jdbc-mode :cdb-cluster)
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
