@@ -153,9 +153,8 @@
 
 (defn open-conn
   "Given a Jepsen node, opens a new connection."
-  [node]
-  (let [spec (db-conn-spec node)]
-    (j/add-connection spec (j/get-connection spec))))
+  [spec]
+  (j/add-connection spec (j/get-connection spec)))
 
 (defn close-conn
   "Given a JDBC connection, closes it and returns the underlying spec."
@@ -163,6 +162,11 @@
   (when-let [c (:connection conn)]
     (.close c))
   (dissoc conn :connection))
+
+(defn init-conn
+  "Given a Jepsen node, create an atom with a connection object therein."
+  [node]
+  (->> node db-conn-spec open-conn atom))
 
 (defn cockroach-start-cmdline
   "Construct the command line to start a CockroachDB node."
@@ -240,10 +244,10 @@
       )
 
       (info node "Testing JDBC connection...")
-      (let [conn (open-conn node)]
-        (j/with-db-transaction [c conn :isolation isolation-level]
+      (let [conn (init-conn node)]
+        (j/with-db-transaction [c @conn :isolation isolation-level]
           (into [] (j/query c ["select 1"])))
-        (close-conn conn))
+        (close-conn @conn))
 
       (info node "Setup complete")
       (Thread/sleep 1000))
@@ -296,14 +300,28 @@
             (assoc ~op :type :fail, :error (str "PSQLException: " m#)))
         )))
 
+(defmacro with-timeout
+  "Write an evaluation within a timeout check. Re-open the connection
+  if the operation time outs."
+  [conn alt & body]
+  `(util/timeout timeout-delay
+                 (do
+                   (let [spec# (close-conn (deref ~conn))
+                         new-conn# (open-conn spec#)]
+                     (info "Re-opening connection...")
+                     (reset! ~conn new-conn#))
+                   ~alt)
+                 ~@body))
+  
 (defmacro with-txn
   "Wrap a evaluation within a SQL transaction with timeout."
   [op [c conn] & body]
-  `(util/timeout timeout-delay (assoc ~op :type :info, :value :timeout)
-                 (with-error-handling ~op
-                     (j/with-db-transaction [~c ~conn :isolation isolation-level]
-                       ~@body))))
-
+  `(with-timeout ~conn
+     (assoc ~op :type :info, :value :timeout)
+     (with-error-handling ~op
+       (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
+         ~@body))))
+  
 (defn db-time
   "Retrieve the current time (precise) from the database."
   [c]
@@ -363,12 +381,12 @@
   [conn]
   (reify client/Client
     (setup! [_ test node]
-      (let [conn (open-conn node)]
+      (let [conn (init-conn node)]
         (when (= node (jepsen/primary test))
-          (j/execute! conn ["drop table if exists test"])
-          (j/execute! conn ["create table test (name varchar, val int)"])
-          (j/insert! conn :test {:name "a" :val 0}))
-        (atomic-client (open-conn node))))
+          (j/execute! @conn ["drop table if exists test"])
+          (j/execute! @conn ["create table test (name varchar, val int)"])
+          (j/insert! @conn :test {:name "a" :val 0}))
+        (atomic-client conn)))
 
     (invoke! [this test op]
       (with-txn op [c conn]
@@ -388,9 +406,9 @@
         ))
 
     (teardown! [_ test]
-      (util/timeout timeout-delay nil
-                    (j/execute! conn ["drop table if exists test"]))
-      (close-conn conn))
+      (with-timeout conn nil
+        (j/execute! @conn ["drop table if exists test"]))
+      (close-conn @conn))
     ))
 
 (defn atomic-test
@@ -479,12 +497,12 @@
   [conn]
   (reify client/Client
     (setup! [_ test node]
-      (let [conn (open-conn node)]
+      (let [conn (init-conn node)]
         (when (= node (jepsen/primary test))
-          (j/execute! conn ["drop table if exists set"])
-          (j/execute! conn ["create table set (val int)"]))
+          (j/execute! @conn ["drop table if exists set"])
+          (j/execute! @conn ["create table set (val int)"]))
 
-        (sets-client (open-conn node))))
+        (sets-client conn)))
 
     (invoke! [this test op]
       (with-txn op [c conn]
@@ -498,10 +516,10 @@
           )))
 
     (teardown! [_ test]
-      (util/timeout timeout-delay nil
-                     (j/execute! conn ["drop table if exists set"]))
-       (close-conn conn))
-      ))
+      (with-timeout conn nil
+        (j/execute! @conn ["drop table if exists set"]))
+      (close-conn @conn))
+    ))
 
 (defn with-nemesis
   "Wraps a client generator in a nemesis that induces failures and eventually
@@ -615,15 +633,15 @@
   (reify client/Client
     (setup! [_ test node]
       (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
-            conn (open-conn node)]
+            conn (init-conn node)]
         (info "Setting up client " n " for " (name node))
 
         (when (= node (jepsen/primary test))
-          (j/execute! conn ["drop table if exists mono"])
-          (j/execute! conn ["create table mono (val int, sts bigint, node int, tb int)"])
-          (j/insert! conn :mono {:val -1 :sts 0 :node -1 :tb -1}))
+          (j/execute! @conn ["drop table if exists mono"])
+          (j/execute! @conn ["create table mono (val int, sts bigint, node int, tb int)"])
+          (j/insert! @conn :mono {:val -1 :sts 0 :node -1 :tb -1}))
 
-        (monotonic-client (open-conn node) n)))
+        (monotonic-client conn n)))
 
     (invoke! [this test op]
       (with-txn op [c conn]
@@ -644,9 +662,9 @@
           )))
     
     (teardown! [_ test]
-      (util/timeout timeout-delay nil
-                    (j/execute! conn ["drop table if exists mono"]))
-      (close-conn conn))
+      (with-timeout conn nil
+        (j/execute! @conn ["drop table if exists mono"]))
+      (close-conn @conn))
     ))
 
 
@@ -769,20 +787,20 @@
   (reify client/Client
     (setup! [_ test node]
       (let [n (if (= jdbc-mode :cdb-local) (str->int (subs (name node) 1 2)) 1)
-            conn (open-conn node)]
+            conn (init-conn node)]
 
         (info "Setting up client " n " for " (name node))
 
         (when (= node (jepsen/primary test))
           (dorun (for [x (range multitable-spread)]
                    (do
-                     (j/execute! conn [(str "drop table if exists mono" x)])
-                     (j/execute! conn [(str "create table mono" x
+                     (j/execute! @conn [(str "drop table if exists mono" x)])
+                     (j/execute! @conn [(str "create table mono" x
                                             " (val int, sts bigint, node int, tb int)")])
-                     (j/insert! conn (str "mono" x) {:val -1 :sts 0 :node -1 :tb x})
+                     (j/insert! @conn (str "mono" x) {:val -1 :sts 0 :node -1 :tb x})
                      ))))
 
-        (monotonic-multitable-client (open-conn node) n)))
+        (monotonic-multitable-client conn n)))
 
 
     (invoke! [this test op]
@@ -806,9 +824,9 @@
 
     (teardown! [_ test]
       (dorun (for [x (range multitable-spread)]
-               (util/timeout timeout-delay nil
-                             (j/execute! conn [(str "drop table if exists mono" x)]))))
-      (close-conn conn))
+               (with-timeout conn nil
+                 (j/execute! @conn [(str "drop table if exists mono" x)]))))
+      (close-conn @conn))
 ))
 
 (defn monotonic-multitable-test
@@ -869,14 +887,14 @@
 (defrecord BankClient [conn n starting-balance]
   client/Client
     (setup! [this test node]
-      (let [conn (open-conn node)]
+      (let [conn (init-conn node)]
 
         (when (= node (jepsen/primary test))
           ;; Create initial accounts.
-          (j/execute! conn ["drop table if exists accounts"])
-          (j/execute! conn ["create table accounts (id int not null primary key, balance bigint not null)"])
+          (j/execute! @conn ["drop table if exists accounts"])
+          (j/execute! @conn ["create table accounts (id int not null primary key, balance bigint not null)"])
           (dotimes [i n]
-            (j/insert! conn :accounts {:id i :balance starting-balance})))
+            (j/insert! @conn :accounts {:id i :balance starting-balance})))
 
         (assoc this :conn conn))
       )
@@ -912,9 +930,9 @@
                  )))
 
     (teardown! [_ test]
-      (util/timeout timeout-delay nil
-                    (j/execute! conn ["drop table if exists accounts"]))
-      (close-conn conn))
+      (with-timeout conn nil
+        (j/execute! @conn ["drop table if exists accounts"]))
+      (close-conn @conn))
     )
 
 (defn bank-client
