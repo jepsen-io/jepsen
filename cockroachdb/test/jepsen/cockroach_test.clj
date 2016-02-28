@@ -23,6 +23,7 @@
      (deftest ~(symbol (str name# "-startstop"))     (check ~base cln/startstop))
      (deftest ~(symbol (str name# "-parts-skews"))   (check ~base (cln/compose cln/parts   cln/skews)))
      (deftest ~(symbol (str name# "-majring-skews")) (check ~base (cln/compose cln/majring cln/skews)))
+     (deftest ~(symbol (str name# "-startstop-skews")) (check ~base (cln/compose cln/startstop cln/skews)))
      )))
 
 (def-tests cl/atomic-test)
