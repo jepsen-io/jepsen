@@ -186,15 +186,14 @@
 
 (defmacro csql! [& body]
   "Execute SQL statements using the cockroach sql CLI."
-  `(c/trace
-    (c/cd working-path
-          (apply c/exec
-                 (concat
-                  [cockroach :sql]
-                  (if insecure [:--insecure] nil)
-                  [:-e ~@body]
-                  [:>> errlog (c/lit "2>&1")]))
-          )))
+  `(c/cd working-path
+         (c/exec
+          (concat
+           [cockroach :sql]
+           (if insecure [:--insecure] nil)
+           [:-e ~@body]
+           [:>> errlog (c/lit "2>&1")]))
+         ))
 
 
 (defn db
@@ -211,7 +210,7 @@
       (when (= jdbc-mode :cdb-cluster)
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
-          (c/trace (c/su (apply c/exec (cockroach-start-cmdline nil))))
+          (c/su (apply c/exec (cockroach-start-cmdline nil)))
           (Thread/sleep 1000)
 
           (info node "Stopping 1st CockroachDB before starting cluster...")
@@ -229,10 +228,9 @@
         
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
-        (c/trace (c/su (apply c/exec
-                              (cockroach-start-cmdline
-                               [(str "--join=" (name (jepsen/primary test)))]))))
-
+        (c/su (c/exec
+               (cockroach-start-cmdline
+                [(str "--join=" (name (jepsen/primary test)))])))
 
         (jepsen/synchronize test)
 
@@ -267,7 +265,7 @@
 
         (info node "Clearing the logs...")
         (meh (c/su (c/exec :chown username log-files)))
-        (apply c/exec :truncate :-c :--size 0 log-files)
+        (c/exec :truncate :-c :--size 0 log-files)
 
         (info node "Stopping tcpdump...")
         (meh (c/su (c/exec :killall -9 :tcpdump)))
