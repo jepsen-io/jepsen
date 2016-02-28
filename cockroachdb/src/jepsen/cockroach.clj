@@ -621,7 +621,7 @@
   [nodes nemesis]
   (basic-test nodes nemesis
    {
-    :name    "monotonic-parts"
+    :name    "monotonic"
     :client (monotonic-client nil nil)
     :generator (gen/phases
                 (->> (range)
