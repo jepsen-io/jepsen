@@ -883,12 +883,12 @@
          :bad-reads bad-reads}))))
 
 (defn bank-test
-  [nodes nemesis n initial-balance]
+  [nodes nemesis]
   (basic-test nodes nemesis
     {:name "bank"
      ;:concurrency 20
-     :model  {:n n :total (* n initial-balance)}
-     :client (bank-client n initial-balance)
+     :model  {:n 4 :total 40}
+     :client (bank-client 4 10)
      :generator (gen/phases
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/clients)
