@@ -14,6 +14,7 @@
             [jepsen [client :as client]
              [core :as jepsen]
              [db :as db]
+             [os :as os]
              [tests :as tests]
              [control :as c :refer [|]]
              [model :as model]
@@ -24,18 +25,10 @@
              [util :as util :refer [meh]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
-            [jepsen.os.ubuntu :as ubuntu]))
+            [jepsen.os.ubuntu :as ubuntu]
+            [jepsen.cockroach-nemesis :as cln]))
 
 (import [java.net URLEncoder])
-
-;; duration of 1 jepsen test
-(def test-duration 30) ; seconds
-
-;; duration between interruptions
-(def nemesis-delay 5) ; seconds
-
-;; duration of an interruption
-(def nemesis-duration 5) ; seconds
 
 ;; timeout for DB operations during tests
 (def timeout-delay 1500) ; milliseconds
@@ -110,10 +103,6 @@
 (def verlog (str log-path "/version.txt"))
 (def pcaplog (str log-path "/trace.pcap"))
   
-;; Location of the custom utility compiled from scripts/adjtime.c
-(def adjtime (str working-path "/adjtime"))
-;; NTP server to use with `ntpdate`
-(def ntpserver "ntp.ubuntu.com")
 
 (def log-files (if (= jdbc-mode :cdb-cluster) [errlog verlog pcaplog] []))
 
@@ -258,7 +247,7 @@
         (meh (c/exec :killall -9 :cockroach))
 
         (info node "Resetting the clocks...")
-        (c/su (c/exec :ntpdate ntpserver))
+        (c/su (c/exec :ntpdate cln/ntpserver))
 
         (info node "Erasing the store...")
         (c/exec :rm :-rf store-path)
@@ -334,40 +323,25 @@
   (let [n (read-string str)]
     (if (number? n) n nil)))
 
-(defn clock-milli-scrambler
-  "Randomizes the system clock of all nodes within a dt-millisecond window."
-  [dt]
-  (reify client/Client
-    (setup! [this test _]
-      this)
-
-    (invoke! [this test op]
-      (assoc op :value
-             (c/on-many (:nodes test)
-                        (c/su
-                         (c/exec adjtime (str (- (rand-int (* 2 dt)) dt)))))))
-
-    (teardown! [this test]
-      (c/on-many (:nodes test)
-                 (c/su (c/exec :ntpdate ntpserver))))
-    ))
-
 (defn basic-test
   "Sets up the test parameters common to all tests."
-  [nodes opts]
+  [nodes nemesis opts]
   (merge tests/noop-test
-         (let [t {:nodes   (if (= jdbc-mode :cdb-cluster) nodes [:localhost])
-                  :name    (str "cockroachdb-" (:name opts))
-                  :db      (db)
-                  :ssh     {:username username :strict-host-key-checking false}
-                  }]
-           (if (= jdbc-mode :cdb-cluster)
-             (assoc t :nemesis (nemesis/partition-random-halves)
-                    :os      ubuntu/os)
-             t))
-         (dissoc opts :name)))
+         {:nodes   (if (= jdbc-mode :cdb-cluster) nodes [:localhost])
+          :name    (str "cockroachdb-" (:name opts) 
+                        (if (= jdbc-mode :cdb-cluster)
+                          (str ":" (:name nemesis))
+                          "-fake"))
+          :db      (db)
+          :ssh     {:username username :strict-host-key-checking false}
+          :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
+          :nemesis (if (= jdbc-mode :cdb-cluster) (:client nemesis) nemesis/noop)
+          }
+         (dissoc opts :name)
+         ))
 
-                                        ;
+
+
 ;;;;;;;;;;;;;;;;;; Atomic counter test ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
@@ -410,27 +384,20 @@
     ))
 
 (defn atomic-test
-  [nodes]
-  (basic-test nodes
+  [nodes nemesis]
+  (basic-test nodes nemesis
    {
     :name    "atomic"
     :client  (atomic-client nil)
     :generator (gen/phases
-                (->> (gen/mix [r w cas])
-                    (gen/stagger 1)
-                    (gen/nemesis
-                     (gen/seq (cycle [(gen/sleep nemesis-delay)
-                                      {:type :info, :f :start}
-                                      (gen/sleep nemesis-duration)
-                                      {:type :info, :f :stop}])))
-                    (gen/time-limit test-duration))
-                (gen/nemesis (gen/once {:type :info, :f :stop}))
-                (gen/sleep 5))
+                (->> (gen/reserve 1 r (gen/mix [w cas r]))
+                     (gen/stagger 1)
+                     (cln/with-nemesis (:generator nemesis))))
 
     :model   (model/cas-register 0)
     :checker (checker/compose
               {:perf   (checker/perf)
-               :details checker/linearizable})
+               :details checker/linearizable })
     }
    ))
 
@@ -519,29 +486,13 @@
       (close-conn @conn))
     ))
 
-(defn with-nemesis
-  "Wraps a client generator in a nemesis that induces failures and eventually
-  stops."
-  [client]
-  (gen/phases
-   (->> client
-        (gen/nemesis
-         (gen/seq (cycle [(gen/sleep nemesis-delay)
-                          {:type :info, :f :start}
-                          (gen/sleep nemesis-duration)
-                          {:type :info, :f :stop}
-                          ])))
-        (gen/time-limit test-duration))
-   (gen/nemesis (gen/once {:type :info, :f :stop}))
-   (gen/sleep 5)))
-
 
 (defn sets-test
-  [nodes]
-  (basic-test nodes
+  [nodes nemesis]
+  (basic-test nodes nemesis
    {
     :name    "set"
-    :client (sets-client nil)
+    :client  (sets-client nil)
     :generator (gen/phases
                 (->> (range)
                      (map (partial array-map
@@ -550,13 +501,12 @@
                                    :value))
                      gen/seq
                      (gen/stagger 1/10)
-                     with-nemesis)
-                (gen/sleep 3)
+                     (cln/with-nemesis (:generator nemesis)))
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
                      gen/clients))
     :checker (checker/compose
-              {:perf (checker/perf)
+              {:perf     (checker/perf)
                :details  (check-sets)})
     }
    ))
@@ -668,8 +618,8 @@
 
 
 (defn monotonic-test
-  [nodes]
-  (basic-test nodes
+  [nodes nemesis]
+  (basic-test nodes nemesis
    {
     :name    "monotonic-parts"
     :client (monotonic-client nil nil)
@@ -681,42 +631,15 @@
                                    :value))
                      gen/seq
                      (gen/stagger 1/10)
-                     with-nemesis)
+                     (cln/with-nemesis (:generator nemesis)))
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
                      gen/clients))
     :checker (checker/compose
-              {:perf (checker/perf)
+              {:perf    (checker/perf)
                :details (check-monotonic)})
     }
    ))
-
-(defn monotonic-test-skews
-  [nodes]
-  (let [t (basic-test nodes
-   {
-    :name    "monotonic-skews"
-    :client (monotonic-client nil nil)
-    :generator (gen/phases
-                (->> (range)
-                     (map (partial array-map
-                                   :type :invoke
-                                   :f :add
-                                   :value))
-                     gen/seq
-                     (gen/stagger 1/10)
-                     with-nemesis)
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
-    :checker (checker/compose
-              {:perf (checker/perf)
-               :details  (check-monotonic)})
-    }
-   )]
-    (if (= jdbc-mode :cdb-cluster)
-      (assoc t :nemesis (clock-milli-scrambler 100))
-      t)))
 
 ;;;;;;;;;;;;;;;;;;;;;; Monotonic inserts over multiple tables ;;;;;;;;;;;;;;;;
 
@@ -829,10 +752,10 @@
 ))
 
 (defn monotonic-multitable-test
-  [nodes]
-  (basic-test nodes
+  [nodes nemesis]
+  (basic-test nodes nemesis
    {
-    :name    "monotonic-spread-parts"
+    :name    "monotonic-multitable"
     :client (monotonic-multitable-client nil nil)
     :generator (gen/phases
                 (->> (range)
@@ -842,44 +765,15 @@
                                    :value))
                      gen/seq
                      (gen/stagger 1/10)
-                     with-nemesis)
-                (gen/sleep 3)
+                     (cln/with-nemesis (:generator nemesis)))
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
                      gen/clients))
     :checker (checker/compose
-              {:perf (checker/perf)
+              {:perf     (checker/perf)
                :details  (check-monotonic-split)})
     }
    ))
-
-(defn monotonic-multitable-test-skews
-  [nodes]
-  (let [t (basic-test nodes
-   {
-    :name    "monotonic-spread-skews"
-    :client (monotonic-multitable-client nil nil)
-    :generator (gen/phases
-                (->> (range)
-                     (map (partial array-map
-                                   :type :invoke
-                                   :f :add
-                                   :value))
-                     gen/seq
-                     (gen/stagger 1/10)
-                     with-nemesis)
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
-    :checker (checker/compose
-              {:perf (checker/perf)
-               :details  (check-monotonic-split)})
-    }
-   )]
-    (if (= jdbc-mode :cdb-cluster)
-      (assoc t :nemesis (clock-milli-scrambler 100))
-      t)))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Test for transfers between bank accounts ;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -989,8 +883,8 @@
          :bad-reads bad-reads}))))
 
 (defn bank-test
-  [nodes n initial-balance]
-  (basic-test nodes
+  [nodes nemesis n initial-balance]
+  (basic-test nodes nemesis
     {:name "bank"
      ;:concurrency 20
      :model  {:n n :total (* n initial-balance)}
@@ -999,62 +893,9 @@
                   (->> (gen/mix [bank-read bank-diff-transfer])
                        (gen/clients)
                        (gen/stagger 1/10)
-                       (gen/nemesis
-                        (gen/seq (cycle [(gen/sleep nemesis-delay)
-                                         {:type :info, :f :start}
-                                         (gen/sleep nemesis-duration)
-                                         {:type :info, :f :stop}])))
-                       (gen/time-limit test-duration))
-                  (gen/nemesis (gen/once {:type :info, :f :stop}))
-                  (gen/log "waiting for quiescence")
-                  (gen/sleep 5)
+                       (cln/with-nemesis (:generator nemesis)))
                   (gen/clients (gen/once bank-read)))
      :checker (checker/compose
                 {:perf (checker/perf)
                  :details (bank-checker)})}))
-
-(defn bank-test-clean
-  [nodes n initial-balance]
-  (basic-test nodes
-    (dissoc {:name "bank-no-nemesis"
-     ;:concurrency 20
-     :model  {:n n :total (* n initial-balance)}
-     :client (bank-client n initial-balance)
-     :generator (gen/phases
-                  (->> (gen/mix [bank-read bank-diff-transfer])
-                       (gen/clients)
-                       (gen/stagger 1/10)
-                       (gen/time-limit test-duration))
-                  (gen/clients (gen/once bank-read)))
-     :checker (checker/compose
-                {:perf (checker/perf)
-                 :details (bank-checker)})} :nemesis)
-    ))
-
-(defn bank-test-skews
-  [nodes n initial-balance]
-  (let [t (basic-test nodes
-                      {:name "bank-skews"
-                       :model  {:n n :total (* n initial-balance)}
-                       :client (bank-client n initial-balance)
-                       :generator (gen/phases
-                                   (->> (gen/mix [bank-read bank-diff-transfer])
-                                        (gen/clients)
-                                        (gen/stagger 1/10)
-                                        (gen/nemesis
-                                         (gen/seq (cycle [(gen/sleep nemesis-delay)
-                                                          {:type :info, :f :start}
-                                                          (gen/sleep nemesis-duration)
-                                                          {:type :info, :f :stop}])))
-                                        (gen/time-limit test-duration))
-                                   (gen/nemesis (gen/once {:type :info, :f :stop}))
-                                   (gen/log "waiting for quiescence")
-                                   (gen/sleep 5)
-                                   (gen/clients (gen/once bank-read)))
-                       :checker (checker/compose
-                                 {:perf (checker/perf)
-                                  :details (bank-checker)})})]
-    (if (= jdbc-mode :cdb-cluster)
-      (assoc t :nemesis (clock-milli-scrambler 100))
-      t)))
 
