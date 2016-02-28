@@ -443,7 +443,7 @@
   elements are unique."
   []
   (reify checker/Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [attempts (->> history
                           (r/filter op/invoke?)
                           (r/filter #(= :add (:f %)))
@@ -585,7 +585,7 @@
   elements are unique and in the same order as database timestamps."
   []
   (reify checker/Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [all-adds-l (->> history
                             (r/filter op/ok?)
                             (r/filter #(= :add (:f %)))
@@ -724,7 +724,7 @@
   "Same as check-monotonic, but check ordering only from each client's perspective."
   []
   (reify checker/Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [all-adds-l (->> history
                             (r/filter op/ok?)
                             (r/filter #(= :add (:f %)))
@@ -965,7 +965,7 @@
   "Balances must all be non-negative and sum to the model's total."
   []
   (reify checker/Checker
-    (check [this test model history]
+    (check [this test model history opts]
       (let [bad-reads (->> history
                            (r/filter op/ok?)
                            (r/filter #(= :read (:f %)))
