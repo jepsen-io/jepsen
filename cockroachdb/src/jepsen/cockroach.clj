@@ -553,6 +553,7 @@
                      gen/seq
                      (gen/stagger 1/10)
                      with-nemesis)
+                (gen/sleep 3)
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
                      gen/clients))
@@ -844,10 +845,10 @@
                      gen/seq
                      (gen/stagger 1/10)
                      with-nemesis)
+                (gen/sleep 3)
                 (->> {:type :invoke, :f :read, :value nil}
                      gen/once
-                     gen/clients)
-                (gen/sleep 3))
+                     gen/clients))
     :checker (checker/compose
               {:perf (checker/perf)
                :details  (check-monotonic-split)})
