@@ -1,25 +1,33 @@
 (ns jepsen.cockroach-test
   (:require [clojure.test :refer :all]
+            [clojure.string :as string]
             [jepsen.core :as jepsen]
             [jepsen.control :as control]
-            [jepsen.cockroach :as cl]))
+            [jepsen.cockroach :as cl]
+            [jepsen.cockroach-nemesis :as cln]))
 
 (def nodes [:n1l :n2l :n3l :n4l :n5l])
 
-(deftest atomic-test  (is (:valid? (:results (jepsen/run! (cl/atomic-test nodes))))))
+(defn check
+  [test nemesis]
+  (is (:valid? (:results (jepsen/run! (test nodes nemesis))))))
 
-(deftest sets-test  (is (:valid? (:results (jepsen/run! (cl/sets-test nodes))))))
+(defmacro def-tests
+  [base]
+  (let [name# (string/replace (name base) "cl/" "")]
+  `(do
+     (deftest ~(symbol name#)                        (check ~base cln/none))
+     (deftest ~(symbol (str name# "-parts"))         (check ~base cln/parts))
+     (deftest ~(symbol (str name# "-majring"))       (check ~base cln/majring))
+     (deftest ~(symbol (str name# "-skews"))         (check ~base cln/skews))
+     (deftest ~(symbol (str name# "-startstop"))     (check ~base cln/startstop))
+     (deftest ~(symbol (str name# "-parts-skews"))   (check ~base (cln/compose cln/parts   cln/skews)))
+     (deftest ~(symbol (str name# "-majring-skews")) (check ~base (cln/compose cln/majring cln/skews)))
+     (deftest ~(symbol (str name# "-startstop-skews")) (check ~base (cln/compose cln/startstop cln/skews)))
+     )))
 
-(deftest monotonic-test  (is (:valid? (:results (jepsen/run! (cl/monotonic-test nodes))))))
-
-(deftest monotonic-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-test-skews nodes))))))
-
-(deftest monotonic-multitable-test  (is (:valid? (:results (jepsen/run! (cl/monotonic-multitable-test nodes))))))
-
-(deftest monotonic-multitable-test-skews  (is (:valid? (:results (jepsen/run! (cl/monotonic-multitable-test-skews nodes))))))
-
-(deftest bank-test  (is (:valid? (:results (jepsen/run! (cl/bank-test nodes 4 10))))))
-
-(deftest bank-test-skews  (is (:valid? (:results (jepsen/run! (cl/bank-test-skews nodes 4 10))))))
-
-(deftest bank-test-clean  (is (:valid? (:results (jepsen/run! (cl/bank-test-clean nodes 4 10))))))
+(def-tests cl/atomic-test)
+(def-tests cl/sets-test)
+(def-tests cl/monotonic-test)
+(def-tests cl/monotonic-multitable-test)
+(def-tests cl/bank-test)
