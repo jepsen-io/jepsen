@@ -269,6 +269,28 @@
     )
   )
 
+(defmacro with-annotate-errors
+  "Replace complex CockroachDB errors by a simple error message."
+  [& body]
+  `(let [res# (do ~@body)]
+     (if (= (:type res#) :fail)
+       (let [e# (:error res#)]
+         (cond (re-find #"read.*encountered previous write.*uncertainty interval" e#)
+               (assoc res# :error :retry-uncertainty)
+               
+               (re-find #"retry txn" e#)
+               (assoc res# :error :retry-read-write-conflict)
+               
+               (re-find #"txn.*failed to push" e#)
+               (assoc res# :error :retry-read-write-conflict)
+               
+               (re-find #"txn aborted" e#)
+               (assoc res# :error :retry-write-write-conflict)
+               
+               true
+               res#))
+       res#)))
+
 (defmacro with-error-handling
   "Report SQL errors as Jepsen error strings."
   [op & body]
@@ -305,10 +327,11 @@
   "Wrap a evaluation within a SQL transaction with timeout."
   [op [c conn] & body]
   `(with-timeout ~conn
-     (assoc ~op :type :info, :value :timeout)
-     (with-error-handling ~op
-       (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
-         ~@body))))
+     (assoc ~op :type :info, :value [:timeout :url (:subname (deref ~conn))])
+     (with-annotate-errors
+       (with-error-handling ~op
+         (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
+           ~@body)))))
   
 (defn db-time
   "Retrieve the current time (precise) from the database."
