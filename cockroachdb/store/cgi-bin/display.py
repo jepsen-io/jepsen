@@ -8,7 +8,7 @@ import urllib
 import edn_format
 import datetime
 import humanize
-
+import fnmatch
 cpath = os.getenv("SCRIPT_NAME")
 
 cgitb.enable()
@@ -32,6 +32,10 @@ pgsize = 10
 if 'pgsize' in form:
     pgsize = int(form.getvalue('pgsize'))
 
+filter = '*'
+if 'filter' in form:
+    filter = form.getvalue('filter')
+    
 entry = None
 if 'entry' in form:
     entry = form.getvalue('entry')
@@ -114,17 +118,20 @@ elif path == '.':
     .selected > * { background-color: yellow !important; }
     </style>""")
 
-    rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn')), key=lambda r:r[1],reverse=True)
+    if filter != '*':
+        print("<strong>Currently filtering on " + filter + ". <a href='" + cpath + "' class='btn btn-info'>Reset filter</a></p>")
+
+    rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn') if fnmatch.fnmatch(x, filter+'/*')), key=lambda r:r[1],reverse=True)
 
     nemeses = sorted(set((x[0].split(':',1)[1] for x in rl if ':' in x[0])))
     tests = sorted(set((x[0].split(':',1)[0] for x in rl if ':' in x[0])))
     print("<h2>Overview of latest test results per test/nemesis combination</h2>")
     print("<table class='table table-striped table-hover table-responsive'><thead><tr><th>Test</th>")
     for n in nemeses:
-        print("<th>", n, "</th>")
+        print("<th><a href='" + cpath + "?filter=*:" + n + "'>" +  n + "</a></th>")
     print("</tr></thead><tbody>")
     for t in tests:
-        print("<tr><td>", t, "</td>")
+        print("<tr><td><a href='" + cpath + "?filter=" + t + ":*'>" + t + "</a></td>")
         for n in nemeses:
             print("<td>")
             tn = t + ':' + n
@@ -167,17 +174,17 @@ elif path == '.':
     upper = min(offset + rpgsize, len(rl))
         
     if offset > 0:
-        print("<a href='" + cpath + "?offset=0&pgsize=%d' class='btn btn-info'>First</a>" % pgsize)
-        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Previous %d</a>" % (max(offset-rpgsize, 0), pgsize, rpgsize))
+        print("<a href='" + cpath + "?offset=0&pgsize=%d&filter=%s' class='btn btn-info'>First</a>" % (pgsize,filter))
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d&filter=%s' class='btn btn-info'>Previous %d</a>" % (max(offset-rpgsize, 0), pgsize, filter, rpgsize))
     print("<strong>Viewing entries", offset, "to", upper-1,"</strong>")
     if offset < (len(rl) - pgsize):
-        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Next %d</a>" % (max(min(offset+rpgsize, len(rl)-1), 0), pgsize, rpgsize))
-        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Last</a>" % (max(len(rl)-rpgsize,0),pgsize))
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d&filter=%s' class='btn btn-info'>Next %d</a>" % (max(min(offset+rpgsize, len(rl)-1), 0), pgsize, filter, rpgsize))
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d&filter=%s' class='btn btn-info'>Last</a>" % (max(len(rl)-rpgsize,0),pgsize, filter))
     print("Number of entries per page: ")
-    print("<a href='" + cpath + "?offset=%d&pgsize=10' class='btn btn-info'>10</a>" % offset)
-    print("<a href='" + cpath + "?offset=%d&pgsize=50' class='btn btn-info'>50</a>" % offset)
-    print("<a href='" + cpath + "?offset=%d&pgsize=100' class='btn btn-info'>100</a>" % offset)
-    print("<a href='" + cpath + "?offset=%d&pgsize=-1' class='btn btn-info'>All</a>" % offset)
+    print("<a href='" + cpath + "?offset=%d&pgsize=10&filter=%s' class='btn btn-info'>10</a>" % (offset, filter))
+    print("<a href='" + cpath + "?offset=%d&pgsize=50&filter=%s' class='btn btn-info'>50</a>" % (offset, filter))
+    print("<a href='" + cpath + "?offset=%d&pgsize=100&filter=%s' class='btn btn-info'>100</a>" % (offset, filter))
+    print("<a href='" + cpath + "?offset=%d&pgsize=-1&filter=%s' class='btn btn-info'>All</a>" % (offset, filter))
         
     print("""
     <table class="sortable table table-striped table-hover table-responsive"><thead><tr>
@@ -244,7 +251,8 @@ elif path == '.':
                 # Status
                 print("<td>" + tstatus + "</td>")
                 # Type
-                print("<td>" + d[0].split('-', 1)[1] + "</td>")
+                tn = d[0]
+                print("<td><a href='" + cpath + "?filter=" + tn + "'>" + tn.split('-', 1)[1] + "</a></td>")
                 # History
                 print("<td>")
                 hfile = os.path.join(dpath, 'history.txt')
