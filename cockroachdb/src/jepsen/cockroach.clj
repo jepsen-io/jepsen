@@ -542,9 +542,10 @@
                      gen/seq
                      (gen/stagger 1/10)
                      (cln/with-nemesis (:generator nemesis)))
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
+                (gen/each
+                 (->> {:type :invoke, :f :read, :value nil}
+                      (gen/limit 2)
+                      gen/clients)))
     :checker (checker/compose
               {:perf     (checker/perf)
                :details  (check-sets)})
@@ -673,9 +674,10 @@
                      gen/seq
                      (gen/stagger 1/10)
                      (cln/with-nemesis (:generator nemesis)))
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
+                (gen/each
+                 (->> {:type :invoke, :f :read, :value nil}
+                      (gen/limit 2)
+                      gen/clients)))
     :checker (checker/compose
               {:perf    (checker/perf)
                :details (check-monotonic)})
@@ -808,9 +810,10 @@
                      gen/seq
                      (gen/stagger 1/10)
                      (cln/with-nemesis (:generator nemesis)))
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
+                (gen/each
+                 (->> {:type :invoke, :f :read, :value nil}
+                      (gen/limit 2)
+                      gen/clients)))
     :checker (checker/compose
               {:perf     (checker/perf)
                :details  (check-monotonic-split)})
