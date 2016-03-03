@@ -602,7 +602,8 @@
 
               ;; Lost records are those we definitely added but weren't read
               lost        (set/difference (into #{} (map first all-adds-l)) (into #{} (map first final-read-l)))]
-          {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts) (empty? off-order-val))
+          {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts)
+                                 (or (not linearizable) (empty? off-order-val)))
            :retry-frac      (util/fraction (count retries) (count history))
            :abort-frac      (util/fraction (count aborts) (count history))
            :lost            (util/integer-interval-set-str lost)
@@ -731,7 +732,8 @@
               {:valid?          (and (empty? lost)
                                      (empty? dups)
                                      (and (into [] (map empty? off-order-sts)))
-                                     (and (into [] (map empty? off-order-val))))
+                                     (or (not linearizable)
+                                         (and (into [] (map empty? off-order-val)))))
                :retry-frac      (util/fraction (count retries) (count history))
                :abort-frac      (util/fraction (count aborts) (count history))
                :lost            (into [] lost)
