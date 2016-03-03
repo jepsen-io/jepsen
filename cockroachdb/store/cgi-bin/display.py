@@ -128,7 +128,7 @@ elif path == '.':
         for n in nemeses:
             print("<td>")
             tn = t + ':' + n
-            dr = [x for x in rl if x[0] == tn]
+            dr = sorted([x for x in rl if x[0] == tn])
             if len(dr) > 0:
                 d = dr[-1]
                 dpath = os.path.join(d[0],d[1])
