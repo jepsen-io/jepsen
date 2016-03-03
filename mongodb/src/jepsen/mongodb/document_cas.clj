@@ -22,73 +22,60 @@
             [knossos.core :as knossos]
             [cheshire.core :as json]
             [jepsen.mongodb.core :refer :all]
-            [monger.core :as mongo]
-            [monger.collection :as mc]
-            [monger.result :as mr]
-            [monger.query :as mq]
-            [monger.command]
-            [monger.operators :refer :all]
-            [monger.conversion :refer [from-db-object]])
-  (:import (clojure.lang ExceptionInfo)
-           (org.bson BasicBSONObject
-                     BasicBSONDecoder)
-           (org.bson.types ObjectId)
-           (com.mongodb DB
-                        WriteConcern
-                        ReadPreference)))
+            [jepsen.mongodb.mongo :as m])
+  (:import (clojure.lang ExceptionInfo)))
 
-(defrecord Client [db-name coll id write-concern conn db]
+(defrecord Client [db-name coll-name id write-concern client coll]
   client/Client
   (setup! [this test node]
-    (let [conn (cluster-client test)
-          db   (mongo/get-db conn db-name)]
+    (let [client (m/cluster-client test)
+          coll   (-> client
+                     (m/db db-name)
+                     (m/collection coll-name)
+                     (m/with-write-concern write-concern))]
       ; Create document
-      (upsert db coll {:_id id, :value nil} write-concern)
+      (m/upsert! coll {:_id id, :value nil})
 
-      (assoc this :conn conn, :db db)))
+      (assoc this :client client, :coll coll)))
 
   (invoke! [this test op]
     ; Reads are idempotent; we can treat their failure as an info.
     (with-errors op #{:read}
       (case (:f op)
         ; :read (let [res (mc/find-map-by-id db coll id)]
-        :read (let [res (->> (mq/with-collection db coll
-                               (mq/find {:_id id})
-                               (mq/fields [:_id :value])
-                               (mq/read-preference (ReadPreference/primary)))
-                             first)]
+        :read (let [res (m/find-one coll id)]
                 (assoc op :type :ok, :value (:value res)))
 
-        :write (let [res (parse-result
-                           (mc/update-by-id db coll id
-                                            {:_id id, :value (:value op)}
-                                            {:write-concern write-concern}))]
-                 (assert (= 1 (.getN res)))
+        :write (let [res (m/replace! coll {:_id id, :value (:value op)})]
+                 (info :write-result (pr-str res))
+                 (assert (:acknowledged? res))
+                 ; Note that modified-count will be zero, depending on the
+                 ; storage engine, if you perform a write the same as the
+                 ; current value.
+                 (assert (= 1 (:matched-count res)))
                  (assoc op :type :ok))
 
         :cas   (let [[value value'] (:value op)
-                     res (parse-result
-                           (mc/update db coll
-                                      {:_id id, :value value}
-                                      {:_id id, :value value'}
-                                      {:write-concern write-concern}))]
-                 ; Check how many documents we actually modified...
-                 (condp = (.getN res)
-                   0 (assoc op :type :fail)
-                   1 (assoc op :type :ok)
-                   2 (throw (ex-info "CAS unexpected number of modified docs"
-                                     {:n (.getN res)
-                                      :res res})))))))
-
+                     res (m/cas! coll
+                                 {:_id id, :value value}
+                                 {:_id id, :value value'})]
+                  ; Check how many documents we actually modified.
+                 (cond
+                   (not (:acknowledged? res)) (assoc op :type :info, :error res)
+                   (= 0 (:matched-count res)) (assoc op :type :fail)
+                   (= 1 (:matched-count res)) (assoc op :type :ok)
+                   true (assoc op :type :info
+                               :error (str "CAS: matched too many docs! "
+                                           res)))))))
   (teardown! [_ test]
-    (mongo/disconnect conn)))
+    (.close ^java.io.Closeable client)))
 
 (defn client
   "A client which implements a register on top of an entire document."
   [write-concern]
   (Client. "jepsen"
-           "jepsen"
-           (ObjectId.)
+           "cas"
+           0
            write-concern
            nil
            nil))
@@ -103,7 +90,7 @@
   [opts]
   (test- "document cas majority"
          (merge
-           {:client (client WriteConcern/MAJORITY)
+           {:client (client :majority)
             :concurrency 10
             :generator (std-gen (gen/reserve 5 (gen/mix [w cas cas]) r))}
            opts)))
@@ -113,6 +100,6 @@
   doesn't have linearizable reads."
   [opts]
   (test- "document cas no-read majority"
-         (merge {:client (client WriteConcern/MAJORITY)
+         (merge {:client (client :majority)
                  :generator (std-gen (gen/mix [w cas cas]))}
                 opts)))

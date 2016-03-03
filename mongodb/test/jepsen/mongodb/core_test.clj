@@ -3,8 +3,7 @@
             [clojure.pprint :refer :all]
             [clojure.java.io :as io]
             [jepsen.mongodb [core :as m]
-                            [document-cas :as dc]
-                            [transfer :as t]]
+                            [document-cas :as dc]]
             [jepsen [core      :as jepsen]
                     [util      :as util]
                     [checker   :as checker]
@@ -27,6 +26,3 @@
   (deftest document-cas-majority-test        (run! (dc/majority-test opts))))
 
 ;(deftest document-cas-no-read-majority-test (run! (dc/no-read-majority-test)))
-;(deftest transfer-basic-read-test           (run! (t/basic-read-test)))
-;(deftest transfer-partial-read-test         (run! (t/partial-read-test)))
-;(deftest transfer-diff-account-test         (run! (t/diff-account-test)))
