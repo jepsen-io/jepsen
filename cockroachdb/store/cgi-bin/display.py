@@ -236,9 +236,9 @@ elif path == '.':
                 print("<tr class='%s %s' id='%s'>" % (status, selected, ts))
                 # Anchor
                 print("<td>")
-                print("<a href='" + cpath + "?entry=" + ts + "' class='btn btn-info'>#</a></td>")
+                print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-info'>#</a></td>")
                 # Timestamp
-                print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + ts +
+                print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + reltime(ts) +
                       ' <span class="glyphicon glyphicon-info-sign"></span>'
                       "</a></td>")
                 # Status
