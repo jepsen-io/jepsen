@@ -277,7 +277,10 @@
   `(let [res# (do ~@body)]
      (if (= (:type res#) :fail)
        (let [e# (:error res#)]
-         (cond (re-find #"read.*encountered previous write.*uncertainty interval" e#)
+         (cond (nil? e#)
+               res#
+
+               (re-find #"read.*encountered previous write.*uncertainty interval" e#)
                (assoc res# :error :retry-uncertainty)
                
                (re-find #"retry txn" e#)
