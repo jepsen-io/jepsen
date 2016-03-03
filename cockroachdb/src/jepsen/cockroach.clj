@@ -200,11 +200,12 @@
       (when (= jdbc-mode :cdb-cluster)
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
-          (c/su (apply c/exec (cockroach-start-cmdline nil)))
-          (Thread/sleep 1000)
+          (c/su (c/exec (cockroach-start-cmdline nil)))
 
+          (Thread/sleep 1000)
+          
           (info node "Stopping 1st CockroachDB before starting cluster...")
-          (c/exec :killall -9 :cockroach))
+          (c/exec cockroach :quit (if insecure [:--insecure] [])))
 
         (jepsen/synchronize test)
 
@@ -238,27 +239,28 @@
         (close-conn @conn))
 
       (info node "Setup complete")
-      (Thread/sleep 1000))
+      )
 
 
     (teardown! [_ test node]
 
       (when (= jdbc-mode :cdb-cluster)
-        (info node "Stopping cockroachdb...")
-        (meh (c/exec :killall -9 :cockroach))
-
         (info node "Resetting the clocks...")
         (c/su (c/exec :ntpdate cln/ntpserver))
+
+        (info node "Stopping cockroachdb...")
+        (meh (c/exec cockroach :quit (if insecure [:--insecure] [])))
+        (meh (c/exec :killall -9 :cockroach))
 
         (info node "Erasing the store...")
         (c/exec :rm :-rf store-path)
 
+        (info node "Stopping tcpdump...")
+        (meh (c/su (c/exec :killall -9 :tcpdump)))
+
         (info node "Clearing the logs...")
         (meh (c/su (c/exec :chown username log-files)))
         (c/exec :truncate :-c :--size 0 log-files)
-
-        (info node "Stopping tcpdump...")
-        (meh (c/su (c/exec :killall -9 :tcpdump)))
 
         (jepsen/synchronize test)
         ))
