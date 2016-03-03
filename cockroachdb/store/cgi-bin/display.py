@@ -6,6 +6,8 @@ import sys
 import glob
 import urllib
 import edn_format
+import datetime
+import humanize
 
 cpath = os.getenv("SCRIPT_NAME")
 
@@ -39,6 +41,16 @@ def sorted_ls(path):
     return list(sorted(os.listdir(path), key=mtime))  
 
 self_ext = ['edn', 'stderr']
+
+def reltime(ts):
+    # format is YYMMDDTHHMMSS
+    y = int(ts[:4]   ) 
+    m = int(ts[4:6]  )
+    d = int(ts[6:8]  )
+    H = int(ts[9:11] )
+    M = int(ts[11:13])
+    S = int(ts[13:15])
+    return humanize.naturaltime(datetime.datetime(y,m,d,H,M,S))
 
 if path.split('.')[-1] in self_ext:
     print("Content-Type: text/plain;charset=utf-8\n")
@@ -104,6 +116,42 @@ elif path == '.':
 
     rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn')), key=lambda r:r[1],reverse=True)
 
+    nemeses = sorted(set((x[0].split(':',1)[1] for x in rl if ':' in x[0])))
+    tests = sorted(set((x[0].split(':',1)[0] for x in rl if ':' in x[0])))
+    print("<h2>Overview of latest test results per test/nemesis combination</h2>")
+    print("<table class='table table-striped table-hover table-responsive'><thead><tr><th>Test</th>")
+    for n in nemeses:
+        print("<th>", n, "</th>")
+    print("</tr></thead><tbody>")
+    for t in tests:
+        print("<tr><td>", t, "</td>")
+        for n in nemeses:
+            print("<td>")
+            tn = t + ':' + n
+            dr = [x for x in rl if x[0] == tn]
+            if len(dr) > 0:
+                d = dr[-1]
+                dpath = os.path.join(d[0],d[1])
+                ednpath = os.path.join(dpath, 'results.edn')
+                with open(ednpath) as f:
+                    r = edn_format.loads(f.read())
+                    if r is not None:
+                        ok = r[edn_format.Keyword('valid?')]
+                        status = {True:'success',False:'danger'}[ok]
+                        ts = d[1][:-5]
+                        lfile = os.path.join(dpath, "latency-raw.png")
+                        if os.path.exists(lfile):
+                            print("<a href='/" + lfile + "'>" 
+                                  "<img height=60px src='/" + lfile + "' />"
+                                  "</a>")
+                        print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-%s btn-xs'>" % status + reltime(ts) +
+                              ' <span class="glyphicon glyphicon-info-sign"></span>'
+                              "</a>")
+            print("</td>")
+        print("</tr>")
+    print("</tbody></table>")
+
+    print("<h2>Latest test results in chronological order</h2>")
     rpgsize = pgsize
     if pgsize == -1:
        rpgsize = len(rl)
