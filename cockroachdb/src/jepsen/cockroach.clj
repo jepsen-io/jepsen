@@ -22,6 +22,7 @@
              [checker :as checker]
              [nemesis :as nemesis]
              [generator :as gen]
+             [independent :as independent]
              [util :as util :refer [meh]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
@@ -348,58 +349,69 @@
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defn atomic-client
-  "A client for a single compare-and-set register."
-  [conn]
-  (reify client/Client
-    (setup! [_ test node]
-      (let [conn (init-conn node)]
-        (when (= node (jepsen/primary test))
-          (j/execute! @conn ["drop table if exists test"])
-          (j/execute! @conn ["create table test (name varchar, val int)"])
-          (j/insert! @conn :test {:name "a" :val 0}))
-        (atomic-client conn)))
+(defrecord AtomicClient [tbl-created?]
+  client/Client
 
-    (invoke! [this test op]
+  (setup! [this test node]
+    (let [conn (init-conn node)]
+      (info node "Connected")
+      ;; Everyone's gotta block until we've made the table.
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (info node "Creating table")
+          (j/execute! @conn ["create table test (id int, val int)"])))
+      
+      (assoc this :conn conn)))
+  
+  (invoke! [this test op]
+    (let [conn (:conn this)]
       (with-txn op [c conn]
-        (case (:f op)
-          :read (->> (j/query c ["select val from test"])
-                     (mapv :val)
-                     (first)
-                     (assoc op :type :ok, :value))
-
-          :write (do
-                   (j/update! c :test {:val (:value op)} ["name = 'a'"])
-                   (assoc op :type :ok))
-
-          :cas (let [[value' value] (:value op)
-                     cnt (j/update! c :test {:val value} ["name='a' and val = ?" value'])]
-                 (assoc op :type (if (zero? (first cnt)) :fail :ok))))
-        ))
-
-    (teardown! [_ test]
-      (with-timeout conn nil
-        (j/execute! @conn ["drop table if exists test"]))
+        (let [id     (key (:value op))
+              value  (val (:value op))
+              val'    (->> (j/query c ["select val from test where id = ?" id] :row-fn :val)
+                           (first))]
+          (case (:f op)
+            :read (assoc op :type :ok, :value (independent/tuple id val'))
+            
+            :write (do
+                     (if (nil? val')
+                       (j/insert! c :test {:id id :val value})
+                       (j/update! c :test {:val value} ["id = ?" id]))
+                     (assoc op :type :ok))
+            
+            :cas (let [[value' value] value
+                       cnt (j/update! c :test {:val value} ["id = ? and val = ?" id value'])]
+                   (assoc op :type (if (zero? (first cnt)) :fail :ok))))
+          ))))
+  
+  (teardown! [this test]
+    (let [conn (:conn this)]
+      (meh (with-timeout conn nil
+             (j/execute! @conn ["drop table test"])))
       (close-conn @conn))
     ))
 
 (defn atomic-test
   [nodes nemesis]
   (basic-test nodes nemesis
-   {
-    :name    "atomic"
-    :client  (atomic-client nil)
-    :generator (gen/phases
-                (->> (gen/reserve 1 r (gen/mix [w cas r]))
-                     (gen/stagger 1)
-                     (cln/with-nemesis (:generator nemesis))))
+              {:name    "atomic"
+               :concurrency 10
+               :client  (AtomicClient. (atom false))
+               :generator (->> (independent/sequential-generator
+                                (range)
+                                (fn [k]
+                                  (->> (gen/reserve 5 (gen/mix [w cas]) r)
+                                       (gen/delay 1)
+                                       (gen/limit 60))))
+                               ;;(gen/stagger 1)
+                               (cln/with-nemesis (:generator nemesis)))
 
-    :model   (model/cas-register 0)
-    :checker (checker/compose
-              {:perf   (checker/perf)
-               :details checker/linearizable })
-    }
-   ))
+               :model   (model/cas-register 0)
+               :checker (checker/compose
+                         {:perf   (checker/perf)
+                          :details (independent/checker checker/linearizable) })
+               }
+              ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;; Distributed set test ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
