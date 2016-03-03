@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [debug info warn]]
+            [clojure.walk :as walk]
             [jepsen [core      :as jepsen]
                     [db        :as db]
                     [util      :as util :refer [meh timeout]]
@@ -18,24 +19,11 @@
             [jepsen.control [net :as net]
                             [util :as cu]]
             [jepsen.os.debian :as debian]
-            [jepsen.checker.timeline :as timeline]
+            [jepsen.mongodb.mongo :as m]
             [knossos [core :as knossos]
                      [model :as model]]
-            [cheshire.core :as json]
-            [monger.core :as mongo]
-            [monger.collection :as mc]
-            [monger.result :as mr]
-            [monger.query :as mq]
-            [monger.command :as command]
-            [monger.operators :refer :all]
-            [monger.conversion :refer [from-db-object]])
-  (:import (clojure.lang ExceptionInfo)
-           (org.bson BasicBSONObject
-                     BasicBSONDecoder)
-           (org.bson.types ObjectId)
-           (com.mongodb DB
-                        WriteConcern
-                        ReadPreference)))
+            [cheshire.core :as json])
+  (:import (clojure.lang ExceptionInfo)))
 
 (def username "mongodb")
 
@@ -93,55 +81,26 @@
   (stop! node)
   (info node "deleting data files")
   (c/su
-    (c/exec :rm :-rf (c/lit "/opt/mongodb/*.log"))
-    (c/exec :rm :-rf (c/lit "/opt/mongodb/data/*"))))
+    (c/exec :rm :-rf (c/lit "/opt/mongodb/*.log"))))
 
 (defn mongo!
   "Run a Mongo shell command. Spits back an unparsable kinda-json string,
-  because go fuck yourself, that's why."
+  because what else would 'printjson' do?"
   [cmd]
   (-> (c/exec :mongo :--quiet :--eval (str "printjson(" cmd ")"))))
 
-(defn parse-result
-  "Takes a Mongo result and returns it as a Clojure data structure (using
-  mongo.result/from-db-object), unless it contains an error, in which case an
-  ex-info exception of :type :mongo is raised."
-  [res]
-;  (if (mr/acknowledged? res)
-    (from-db-object res true))
-;    (throw (ex-info (str "Mongo error: "
-;                         (get res "errmsg")
-;                         " - "
-;                         (get res "info"))
-;                    {:type   :mongo
-;                     :result res}))))
-
-(defn command!
-  "Wrapper for monger's admin command API where the command
-  is the first key in the (ordered!?) map."
-  [conn db-name & cmd]
-;  (info "command" (seq (.getServerAddressList conn)) db-name cmd)
-  (timeout 10000 (throw (ex-info "timeout" {:db-name db-name :cmd cmd}))
-           (-> conn
-               (mongo/get-db db-name)
-               (mongo/command (apply array-map cmd))
-               parse-result)))
-
-(defn admin-command!
-  "Runs a command on the admin database."
-  [conn & args]
-  (apply command! conn "admin" args))
+;; Cluster setup
 
 (defn replica-set-status
   "Returns the current replica set status."
   [conn]
-  (admin-command! conn :replSetGetStatus 1))
+  (m/admin-command! conn :replSetGetStatus 1))
 
 (defn replica-set-initiate!
   "Initialize a replica set on a node."
   [conn config]
   (try
-    (admin-command! conn :replSetInitiate config)
+    (m/admin-command! conn :replSetInitiate config)
     (catch ExceptionInfo e
       (condp re-find (get-in (ex-data e) [:result "errmsg"])
         ; Some of the time (but not all the time; why?) Mongo returns this error
@@ -163,17 +122,17 @@
 (defn replica-set-master?
   "What's this node's replset role?"
   [conn]
-  (admin-command! conn :isMaster 1))
+  (m/admin-command! conn :isMaster 1))
 
 (defn replica-set-config
   "Returns the current replset config."
   [conn]
-  (admin-command! conn :replSetGetConfig 1))
+  (m/admin-command! conn :replSetGetConfig 1))
 
 (defn replica-set-reconfigure!
   "Apply new configuration for a replica set."
   [conn conf]
-  (admin-command! conn :replSetReconfig conf))
+  (m/admin-command! conn :replSetReconfig conf))
 
 (defn node+port->node
   "Take a mongo \"n1:27107\" string and return just the node as a keyword:
@@ -204,13 +163,6 @@
 
     (first ps)))
 
-(def mongo-conn-opts
-  "Connection options for Mongo."
-  (mongo/mongo-options
-    {:max-wait-time   20000
-     :connect-timeout 5000
-     :socket-timeout  10000})) ; a buncha simple ops in mongo take 1000+ ms (!?)
-
 (defn await-conn
   "Block until we can connect to the given node. Returns a connection to the
   node."
@@ -220,16 +172,21 @@
                            {:node node}))
            (loop []
              (or (try
-                   (let [conn (mongo/connect (mongo/server-address (name node))
-                                             mongo-conn-opts)]
+                   (let [conn (m/client node)]
                      (try
-                       (command/top conn)
+                       (info "DBS ARE" (m/iterable-seq
+                                         (.listDatabaseNames conn)))
                        conn
+                       ; Don't leak clients when they fail
                        (catch Throwable t
-                         (mongo/disconnect conn)
-                         (throw t)))))
+                         (.close conn)
+                         (throw t))))
 ;                   (catch com.mongodb.MongoServerSelectionException e
 ;                     nil))
+                    ; Todo: figure out what Mongo 3.x throws when servers
+                    ; aren't ready yet
+                    )
+                 ; If we aren't ready, sleep and retry
                  (do
                    (Thread/sleep 1000)
                    (recur))))))
@@ -327,32 +284,6 @@
 
     (teardown! [_ test node]
       (wipe! node))))
-
-(defn cluster-client
-  "Returns a mongoDB connection for all nodes in a test."
-  [test]
-  (mongo/connect (->> test :nodes (map name) (mapv mongo/server-address))
-                 mongo-conn-opts))
-
-(defn upsert
-  "Ensures the existence of the given document."
-  [db coll doc write-concern]
-  (assert (:_id doc))
-  (let [res (try
-              (mc/upsert db coll
-                         {:_id (:_id doc)}
-                         doc
-                         {:write-concern write-concern})
-              (catch com.mongodb.DuplicateKeyException e
-                ; This is probably
-                ; https://jira.mongodb.org/browse/SERVER-14322; we back off
-                ; randomly and retry.
-                (info "Retrying duplicate key collision")
-                (Thread/sleep (rand-int 100))
-                ::retry))]
-    (if (= ::retry res)
-      (recur db coll doc write-concern)
-      res)))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operation functions which
