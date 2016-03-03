@@ -219,6 +219,7 @@ elif path == '.':
                 
                 db_thisver = None
                 dv = sorted(glob.glob(os.path.join(dpath, '*/version.txt')))
+                db_version_file = None
                 if len(dv) > 0:
                     db_version_file = dv[0]
                     # n = db_version_split.split('/')[-2]
@@ -280,9 +281,10 @@ elif path == '.':
                 print("</td>")
                 # Version
                 print("<td>")
-                print("<a href='" + cpath + "?version-details=1&path=" + urllib.parse.quote_plus(db_version_file) +
-                      "' class='btn btn-%s btn-xs'>" % status + db_thisver + 
-                      " <span class='glyphicon glyphicon-info-sign'></span></a>")
+                if db_version_file is not None:
+                    print("<a href='" + cpath + "?version-details=1&path=" + urllib.parse.quote_plus(db_version_file) +
+                          "' class='btn btn-%s btn-xs'>" % status + db_thisver + 
+                          " <span class='glyphicon glyphicon-info-sign'></span></a>")
                 print("</td>")
                 # Details
                 print("<td>")
