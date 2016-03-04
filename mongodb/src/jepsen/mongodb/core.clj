@@ -174,8 +174,7 @@
              (or (try
                    (let [conn (m/client node)]
                      (try
-                       (info "DBS ARE" (m/iterable-seq
-                                         (.listDatabaseNames conn)))
+                       (.first (.listDatabaseNames conn))
                        conn
                        ; Don't leak clients when they fail
                        (catch Throwable t
@@ -312,12 +311,12 @@
   [gen]
   (gen/phases
     (->> gen
-         (gen/delay 1)
+         (gen/stagger 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 60)
+           (gen/seq (cycle [(gen/sleep 30)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-        (gen/time-limit 120))
+        (gen/time-limit 300))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -339,8 +338,6 @@
            :os              debian/os
            :db              (db (:tarball opts))
            :storage-engine  "wiredTiger"
-           :model           (model/cas-register)
-           :checker   (checker/compose {:linear checker/linearizable
-                                        :latency (checker/latency-graph)})
+           :checker         (checker/perf)
            :nemesis         (nemesis/partition-random-halves))
     opts))
