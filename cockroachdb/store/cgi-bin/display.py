@@ -6,7 +6,9 @@ import sys
 import glob
 import urllib
 import edn_format
-
+import datetime
+import humanize
+import fnmatch
 cpath = os.getenv("SCRIPT_NAME")
 
 cgitb.enable()
@@ -30,6 +32,10 @@ pgsize = 10
 if 'pgsize' in form:
     pgsize = int(form.getvalue('pgsize'))
 
+filter = '*'
+if 'filter' in form:
+    filter = form.getvalue('filter')
+    
 entry = None
 if 'entry' in form:
     entry = form.getvalue('entry')
@@ -39,6 +45,16 @@ def sorted_ls(path):
     return list(sorted(os.listdir(path), key=mtime))  
 
 self_ext = ['edn', 'stderr']
+
+def reltime(ts):
+    # format is YYMMDDTHHMMSS
+    y = int(ts[:4]   ) 
+    m = int(ts[4:6]  )
+    d = int(ts[6:8]  )
+    H = int(ts[9:11] )
+    M = int(ts[11:13])
+    S = int(ts[13:15])
+    return humanize.naturaltime(datetime.datetime(y,m,d,H,M,S))
 
 if path.split('.')[-1] in self_ext:
     print("Content-Type: text/plain;charset=utf-8\n")
@@ -102,8 +118,47 @@ elif path == '.':
     .selected > * { background-color: yellow !important; }
     </style>""")
 
-    rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn')), key=lambda r:r[1],reverse=True)
+    if filter != '*':
+        print("<strong>Currently filtering on " + filter + ". <a href='" + cpath + "' class='btn btn-info'>Reset filter</a></p>")
 
+    rl = sorted((x.split('/') for x in glob.glob('*/20*/results.edn') if fnmatch.fnmatch(x, filter+'/*')), key=lambda r:r[1],reverse=True)
+
+    nemeses = sorted(set((x[0].split(':',1)[1] for x in rl if ':' in x[0])))
+    tests = sorted(set((x[0].split(':',1)[0] for x in rl if ':' in x[0])))
+    print("<h2>Overview of latest test results per test/nemesis combination</h2>")
+    print("<table class='table table-striped table-hover table-responsive'><thead><tr><th>Test</th>")
+    for n in nemeses:
+        print("<th><a href='" + cpath + "?filter=*:" + n + "'>" +  n + "</a></th>")
+    print("</tr></thead><tbody>")
+    for t in tests:
+        print("<tr><td><a href='" + cpath + "?filter=" + t + ":*'>" + t + "</a></td>")
+        for n in nemeses:
+            print("<td>")
+            tn = t + ':' + n
+            dr = sorted([x for x in rl if x[0] == tn])
+            if len(dr) > 0:
+                d = dr[-1]
+                dpath = os.path.join(d[0],d[1])
+                ednpath = os.path.join(dpath, 'results.edn')
+                with open(ednpath) as f:
+                    r = edn_format.loads(f.read())
+                    if r is not None:
+                        ok = r[edn_format.Keyword('valid?')]
+                        status = {True:'success',False:'danger'}[ok]
+                        ts = d[1][:-5]
+                        lfile = os.path.join(dpath, "latency-raw.png")
+                        if os.path.exists(lfile):
+                            print("<a href='/" + lfile + "'>" 
+                                  "<img height=60px src='/" + lfile + "' />"
+                                  "</a>")
+                        print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-%s btn-xs'>" % status + reltime(ts) +
+                              ' <span class="glyphicon glyphicon-info-sign"></span>'
+                              "</a>")
+            print("</td>")
+        print("</tr>")
+    print("</tbody></table>")
+
+    print("<h2>Latest test results in chronological order</h2>")
     rpgsize = pgsize
     if pgsize == -1:
        rpgsize = len(rl)
@@ -119,17 +174,17 @@ elif path == '.':
     upper = min(offset + rpgsize, len(rl))
         
     if offset > 0:
-        print("<a href='" + cpath + "?offset=0&pgsize=%d' class='btn btn-info'>First</a>" % pgsize)
-        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Previous %d</a>" % (max(offset-rpgsize, 0), pgsize, rpgsize))
+        print("<a href='" + cpath + "?offset=0&pgsize=%d&filter=%s' class='btn btn-info'>First</a>" % (pgsize,filter))
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d&filter=%s' class='btn btn-info'>Previous %d</a>" % (max(offset-rpgsize, 0), pgsize, filter, rpgsize))
     print("<strong>Viewing entries", offset, "to", upper-1,"</strong>")
     if offset < (len(rl) - pgsize):
-        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Next %d</a>" % (max(min(offset+rpgsize, len(rl)-1), 0), pgsize, rpgsize))
-        print("<a href='" + cpath + "?offset=%d&pgsize=%d' class='btn btn-info'>Last</a>" % (max(len(rl)-rpgsize,0),pgsize))
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d&filter=%s' class='btn btn-info'>Next %d</a>" % (max(min(offset+rpgsize, len(rl)-1), 0), pgsize, filter, rpgsize))
+        print("<a href='" + cpath + "?offset=%d&pgsize=%d&filter=%s' class='btn btn-info'>Last</a>" % (max(len(rl)-rpgsize,0),pgsize, filter))
     print("Number of entries per page: ")
-    print("<a href='" + cpath + "?offset=%d&pgsize=10' class='btn btn-info'>10</a>" % offset)
-    print("<a href='" + cpath + "?offset=%d&pgsize=50' class='btn btn-info'>50</a>" % offset)
-    print("<a href='" + cpath + "?offset=%d&pgsize=100' class='btn btn-info'>100</a>" % offset)
-    print("<a href='" + cpath + "?offset=%d&pgsize=-1' class='btn btn-info'>All</a>" % offset)
+    print("<a href='" + cpath + "?offset=%d&pgsize=10&filter=%s' class='btn btn-info'>10</a>" % (offset, filter))
+    print("<a href='" + cpath + "?offset=%d&pgsize=50&filter=%s' class='btn btn-info'>50</a>" % (offset, filter))
+    print("<a href='" + cpath + "?offset=%d&pgsize=100&filter=%s' class='btn btn-info'>100</a>" % (offset, filter))
+    print("<a href='" + cpath + "?offset=%d&pgsize=-1&filter=%s' class='btn btn-info'>All</a>" % (offset, filter))
         
     print("""
     <table class="sortable table table-striped table-hover table-responsive"><thead><tr>
@@ -171,6 +226,7 @@ elif path == '.':
                 
                 db_thisver = None
                 dv = sorted(glob.glob(os.path.join(dpath, '*/version.txt')))
+                db_version_file = None
                 if len(dv) > 0:
                     db_version_file = dv[0]
                     # n = db_version_split.split('/')[-2]
@@ -187,15 +243,16 @@ elif path == '.':
                 print("<tr class='%s %s' id='%s'>" % (status, selected, ts))
                 # Anchor
                 print("<td>")
-                print("<a href='" + cpath + "?entry=" + ts + "' class='btn btn-info'>#</a></td>")
+                print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-info'>#</a></td>")
                 # Timestamp
-                print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + ts +
+                print("<td><a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "' class='btn btn-%s'>" % status + reltime(ts) +
                       ' <span class="glyphicon glyphicon-info-sign"></span>'
                       "</a></td>")
                 # Status
                 print("<td>" + tstatus + "</td>")
                 # Type
-                print("<td>" + d[0].split('-', 1)[1] + "</td>")
+                tn = d[0]
+                print("<td><a href='" + cpath + "?filter=" + tn + "'>" + tn.split('-', 1)[1] + "</a></td>")
                 # History
                 print("<td>")
                 hfile = os.path.join(dpath, 'history.txt')
@@ -232,9 +289,10 @@ elif path == '.':
                 print("</td>")
                 # Version
                 print("<td>")
-                print("<a href='" + cpath + "?version-details=1&path=" + urllib.parse.quote_plus(db_version_file) +
-                      "' class='btn btn-%s btn-xs'>" % status + db_thisver + 
-                      " <span class='glyphicon glyphicon-info-sign'></span></a>")
+                if db_version_file is not None:
+                    print("<a href='" + cpath + "?version-details=1&path=" + urllib.parse.quote_plus(db_version_file) +
+                          "' class='btn btn-%s btn-xs'>" % status + db_thisver + 
+                          " <span class='glyphicon glyphicon-info-sign'></span></a>")
                 print("</td>")
                 # Details
                 print("<td>")

@@ -200,11 +200,12 @@
       (when (= jdbc-mode :cdb-cluster)
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
-          (c/su (apply c/exec (cockroach-start-cmdline nil)))
-          (Thread/sleep 1000)
+          (c/su (c/exec (cockroach-start-cmdline nil)))
 
+          (Thread/sleep 1000)
+          
           (info node "Stopping 1st CockroachDB before starting cluster...")
-          (c/exec :killall -9 :cockroach))
+          (c/exec cockroach :quit (if insecure [:--insecure] [])))
 
         (jepsen/synchronize test)
 
@@ -238,27 +239,28 @@
         (close-conn @conn))
 
       (info node "Setup complete")
-      (Thread/sleep 1000))
+      )
 
 
     (teardown! [_ test node]
 
       (when (= jdbc-mode :cdb-cluster)
-        (info node "Stopping cockroachdb...")
-        (meh (c/exec :killall -9 :cockroach))
-
         (info node "Resetting the clocks...")
         (c/su (c/exec :ntpdate cln/ntpserver))
+
+        (info node "Stopping cockroachdb...")
+        (meh (c/exec cockroach :quit (if insecure [:--insecure] [])))
+        (meh (c/exec :killall -9 :cockroach))
 
         (info node "Erasing the store...")
         (c/exec :rm :-rf store-path)
 
+        (info node "Stopping tcpdump...")
+        (meh (c/su (c/exec :killall -9 :tcpdump)))
+
         (info node "Clearing the logs...")
         (meh (c/su (c/exec :chown username log-files)))
         (c/exec :truncate :-c :--size 0 log-files)
-
-        (info node "Stopping tcpdump...")
-        (meh (c/su (c/exec :killall -9 :tcpdump)))
 
         (jepsen/synchronize test)
         ))
@@ -268,6 +270,31 @@
     (log-files [_ test node] log-files)
     )
   )
+
+(defmacro with-annotate-errors
+  "Replace complex CockroachDB errors by a simple error message."
+  [& body]
+  `(let [res# (do ~@body)]
+     (if (= (:type res#) :fail)
+       (let [e# (:error res#)]
+         (cond (nil? e#)
+               res#
+
+               (re-find #"read.*encountered previous write.*uncertainty interval" e#)
+               (assoc res# :error :retry-uncertainty)
+               
+               (re-find #"retry txn" e#)
+               (assoc res# :error :retry-read-write-conflict)
+               
+               (re-find #"txn.*failed to push" e#)
+               (assoc res# :error :retry-read-write-conflict)
+               
+               (re-find #"txn aborted" e#)
+               (assoc res# :error :retry-write-write-conflict)
+               
+               true
+               res#))
+       res#)))
 
 (defmacro with-error-handling
   "Report SQL errors as Jepsen error strings."
@@ -305,10 +332,11 @@
   "Wrap a evaluation within a SQL transaction with timeout."
   [op [c conn] & body]
   `(with-timeout ~conn
-     (assoc ~op :type :info, :value :timeout)
-     (with-error-handling ~op
-       (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
-         ~@body))))
+     (assoc ~op :type :info, :value [:timeout :url (:subname (deref ~conn))])
+     (with-annotate-errors
+       (with-error-handling ~op
+         (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
+           ~@body)))))
   
 (defn db-time
   "Retrieve the current time (precise) from the database."
@@ -514,9 +542,10 @@
                      gen/seq
                      (gen/stagger 1/10)
                      (cln/with-nemesis (:generator nemesis)))
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
+                (gen/each
+                 (->> {:type :invoke, :f :read, :value nil}
+                      (gen/limit 2)
+                      gen/clients)))
     :checker (checker/compose
               {:perf     (checker/perf)
                :details  (check-sets)})
@@ -577,7 +606,8 @@
 
               ;; Lost records are those we definitely added but weren't read
               lost        (set/difference (into #{} (map first all-adds-l)) (into #{} (map first final-read-l)))]
-          {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts) (empty? off-order-val))
+          {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts)
+                                 (or (not linearizable) (empty? off-order-val)))
            :retry-frac      (util/fraction (count retries) (count history))
            :abort-frac      (util/fraction (count aborts) (count history))
            :lost            (util/integer-interval-set-str lost)
@@ -644,9 +674,10 @@
                      gen/seq
                      (gen/stagger 1/10)
                      (cln/with-nemesis (:generator nemesis)))
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
+                (gen/each
+                 (->> {:type :invoke, :f :read, :value nil}
+                      (gen/limit 2)
+                      gen/clients)))
     :checker (checker/compose
               {:perf    (checker/perf)
                :details (check-monotonic)})
@@ -706,7 +737,8 @@
               {:valid?          (and (empty? lost)
                                      (empty? dups)
                                      (and (into [] (map empty? off-order-sts)))
-                                     (and (into [] (map empty? off-order-val))))
+                                     (or (not linearizable)
+                                         (and (into [] (map empty? off-order-val)))))
                :retry-frac      (util/fraction (count retries) (count history))
                :abort-frac      (util/fraction (count aborts) (count history))
                :lost            (into [] lost)
@@ -778,9 +810,10 @@
                      gen/seq
                      (gen/stagger 1/10)
                      (cln/with-nemesis (:generator nemesis)))
-                (->> {:type :invoke, :f :read, :value nil}
-                     gen/once
-                     gen/clients))
+                (gen/each
+                 (->> {:type :invoke, :f :read, :value nil}
+                      (gen/limit 2)
+                      gen/clients)))
     :checker (checker/compose
               {:perf     (checker/perf)
                :details  (check-monotonic-split)})
