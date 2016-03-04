@@ -156,3 +156,8 @@
    :generator nemesis-single-gen
    :client (clock-milli-scrambler 100)})
 
+(def bigskews
+  {:name "bigskews"
+   :generator nemesis-single-gen
+   :client (nemesis/clock-scrambler 20)})
+
