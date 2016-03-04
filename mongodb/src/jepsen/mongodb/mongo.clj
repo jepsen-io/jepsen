@@ -82,15 +82,16 @@
 (defn document->map
   "Converts a document back into a map."
   [^Document doc]
-  (->> doc
-       .entrySet
-       (reduce (fn [m [k v]]
-                 (assoc m
-                        (keyword k)
-                        (cond (instance? Document v) (document->map v)
-                              (instance? List v)     (map document->map v)
-                              true                   v)))
-               {})))
+  (when-not (nil? doc)
+    (->> doc
+         .entrySet
+         (reduce (fn [m [k v]]
+                   (assoc m
+                          (keyword k)
+                          (cond (instance? Document v) (document->map v)
+                                (instance? List v)     (map document->map v)
+                                true                   v)))
+                 {}))))
 
 (defn create-collection!
   "Create a collection in a database."

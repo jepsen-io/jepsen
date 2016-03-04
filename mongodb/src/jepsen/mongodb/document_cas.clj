@@ -63,7 +63,7 @@
                    (condp = (:matched-count res)
                      0 (assoc op :type :fail)
                      1 (assoc op :type :ok)
-                       (assoc op :type :info
+                     true (assoc op :type :info
                                  :error (str "CAS: matched too many docs! "
                                              res))))))))
   (teardown! [_ test]
@@ -97,7 +97,7 @@
                                 (->> (gen/mix [w cas cas])
                                      (gen/reserve 5 r)
                                      (gen/stagger 1)
-                                     (gen/time-limit 60)))))
+                                     (gen/time-limit 45)))))
             :model        (model/cas-register)
             :checker      (checker/compose
                             {:linear (independent/checker checker/linearizable)
