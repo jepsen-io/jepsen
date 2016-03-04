@@ -921,7 +921,13 @@
                                          {:type :wrong-total
                                           :expected (:total model)
                                           :found    (reduce + balances)
-                                          :op       op}))))
+                                          :op       op}
+
+                                         (some neg? balances)
+                                         {:type     :negative-value
+                                          :found    balances
+                                          :op       op}
+                                         ))))
                            (r/filter identity)
                            (into []))]
         {:valid? (empty? bad-reads)
