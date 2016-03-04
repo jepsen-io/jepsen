@@ -313,7 +313,7 @@
     (->> gen
          (gen/stagger 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 30)
+           (gen/seq (cycle [(gen/sleep 60)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
         (gen/time-limit 300))
