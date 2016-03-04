@@ -9,7 +9,7 @@
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
-                    [model     :as model]
+                    [independent :as independent]
                     [generator :as gen]
                     [nemesis   :as nemesis]
                     [store     :as store]
@@ -20,12 +20,13 @@
             [jepsen.os.debian :as debian]
             [jepsen.checker.timeline :as timeline]
             [knossos.core :as knossos]
+            [knossos.model :as model]
             [cheshire.core :as json]
             [jepsen.mongodb.core :refer :all]
             [jepsen.mongodb.mongo :as m])
   (:import (clojure.lang ExceptionInfo)))
 
-(defrecord Client [db-name coll-name id write-concern client coll]
+(defrecord Client [db-name coll-name write-concern client coll]
   client/Client
   (setup! [this test node]
     (let [client (m/cluster-client test)
@@ -33,40 +34,38 @@
                      (m/db db-name)
                      (m/collection coll-name)
                      (m/with-write-concern write-concern))]
-      ; Create document
-      (m/upsert! coll {:_id id, :value nil})
 
       (assoc this :client client, :coll coll)))
 
   (invoke! [this test op]
     ; Reads are idempotent; we can treat their failure as an info.
     (with-errors op #{:read}
-      (case (:f op)
-        ; :read (let [res (mc/find-map-by-id db coll id)]
-        :read (let [res (m/find-one coll id)]
-                (assoc op :type :ok, :value (:value res)))
+      (let [id    (key (:value op))
+            value (val (:value op))]
+        (case (:f op)
+          :read (let [res (m/find-one coll id)]
+                  (assoc op
+                         :type  :ok
+                         :value (independent/tuple id (:value res))))
 
-        :write (let [res (m/replace! coll {:_id id, :value (:value op)})]
-                 (info :write-result (pr-str res))
-                 (assert (:acknowledged? res))
-                 ; Note that modified-count will be zero, depending on the
-                 ; storage engine, if you perform a write the same as the
-                 ; current value.
-                 (assert (= 1 (:matched-count res)))
-                 (assoc op :type :ok))
+          :write (let [res (m/upsert! coll {:_id id, :value value})]
+                   ; Note that modified-count could be zero, depending on the
+                   ; storage engine, if you perform a write the same as the
+                   ; current value.
+                   (assert (< (:matched-count res) 2))
+                   (assoc op :type :ok))
 
-        :cas   (let [[value value'] (:value op)
-                     res (m/cas! coll
-                                 {:_id id, :value value}
-                                 {:_id id, :value value'})]
-                  ; Check how many documents we actually modified.
-                 (cond
-                   (not (:acknowledged? res)) (assoc op :type :info, :error res)
-                   (= 0 (:matched-count res)) (assoc op :type :fail)
-                   (= 1 (:matched-count res)) (assoc op :type :ok)
-                   true (assoc op :type :info
-                               :error (str "CAS: matched too many docs! "
-                                           res)))))))
+          :cas   (let [[value value'] value
+                       res (m/cas! coll
+                                   {:_id id, :value value}
+                                   {:_id id, :value value'})]
+                   ; Check how many documents we actually modified.
+                   (condp = (:matched-count res)
+                     0 (assoc op :type :fail)
+                     1 (assoc op :type :ok)
+                       (assoc op :type :info
+                                 :error (str "CAS: matched too many docs! "
+                                             res))))))))
   (teardown! [_ test]
     (.close ^java.io.Closeable client)))
 
@@ -75,7 +74,6 @@
   [write-concern]
   (Client. "jepsen"
            "cas"
-           0
            write-concern
            nil
            nil))
@@ -90,9 +88,20 @@
   [opts]
   (test- "document cas majority"
          (merge
-           {:client (client :majority)
-            :concurrency 10
-            :generator (std-gen (gen/reserve 5 (gen/mix [w cas cas]) r))}
+           {:client       (client :majority)
+            :concurrency  10
+            :generator    (std-gen
+                            (independent/sequential-generator
+                              (range)
+                              (fn [k]
+                                (->> (gen/mix [w cas cas])
+                                     (gen/reserve 5 r)
+                                     (gen/stagger 1)
+                                     (gen/time-limit 60)))))
+            :model        (model/cas-register)
+            :checker      (checker/compose
+                            {:linear (independent/checker checker/linearizable)
+                             :perf   (checker/perf)})}
            opts)))
 
 (defn no-read-majority-test
