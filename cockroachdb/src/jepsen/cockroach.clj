@@ -736,9 +736,9 @@
                                         (into #{} (map first final-read))))]
               {:valid?          (and (empty? lost)
                                      (empty? dups)
-                                     (and (into [] (map empty? off-order-sts)))
+                                     (every? true? (into [] (map empty? off-order-sts)))
                                      (or (not linearizable)
-                                         (and (into [] (map empty? off-order-val)))))
+                                         (every? true? (into [] (map empty? off-order-val)))))
                :retry-frac      (util/fraction (count retries) (count history))
                :abort-frac      (util/fraction (count aborts) (count history))
                :lost            (into [] lost)
