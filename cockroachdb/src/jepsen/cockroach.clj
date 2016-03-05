@@ -717,9 +717,9 @@
                   aborts    (->> all-fails
                                  (r/filter #(= :abort-uncertain (:error %)))
                                  (into []))
-                  sub-lists (->> (range (count (:nodes test)))
+                  sub-lists (->> (range multitable-spread)
                                  (map (fn [x] (->> final-read-l
-                                                   (r/filter #(= x (nth % 2)))
+                                                   (r/filter #(= x (nth % 3)))
                                                    (into ())
                                                    (reverse))))
                                  (into []))
