@@ -9,24 +9,32 @@
 (def nodes [:n1l :n2l :n3l :n4l :n5l])
 
 (defn check
-  [test nemesis]
-  (is (:valid? (:results (jepsen/run! (test nodes nemesis))))))
+  [test nemesis linearizable]
+  (is (:valid? (:results (jepsen/run! (test nodes nemesis linearizable))))))
+
+(defmacro def-split
+  [name suffix base nemesis]
+  `(do
+     (deftest ~(symbol (str name suffix))        (check ~base ~nemesis false))
+     (deftest ~(symbol (str name "-lin" suffix)) (check ~base ~nemesis true))
+     ))
+
 
 (defmacro def-tests
   [base]
-  (let [name# (string/replace (name base) "cl/" "")]
-  `(do
-     (deftest ~(symbol name#)                        (check ~base cln/none))
-     (deftest ~(symbol (str name# "-parts"))         (check ~base cln/parts))
-     (deftest ~(symbol (str name# "-majring"))       (check ~base cln/majring))
-     (deftest ~(symbol (str name# "-skews"))         (check ~base cln/skews))
-     (deftest ~(symbol (str name# "-bigskews"))      (check ~base cln/bigskews))
-     (deftest ~(symbol (str name# "-startstop"))     (check ~base cln/startstop))
-     (deftest ~(symbol (str name# "-parts-skews"))   (check ~base (cln/compose cln/parts   cln/skews)))
-     (deftest ~(symbol (str name# "-parts-bigskews")) (check ~base (cln/compose cln/parts   cln/bigskews)))
-     (deftest ~(symbol (str name# "-majring-skews")) (check ~base (cln/compose cln/majring cln/skews)))
-     (deftest ~(symbol (str name# "-startstop-skews")) (check ~base (cln/compose cln/startstop cln/skews)))
-     )))
+  (let [name# (-> base (name) (string/replace "cl/" "") (string/replace "-test" ""))]
+    `(do
+       (def-split ~name# ""                 ~base cln/none)
+       (def-split ~name# "-parts"           ~base cln/parts)
+       (def-split ~name# "-majring"         ~base cln/majring)
+       (def-split ~name# "-skews"           ~base cln/skews)
+       (def-split ~name# "-bigskews"        ~base cln/bigskews)
+       (def-split ~name# "-startstop"       ~base cln/startstop)
+       (def-split ~name# "-parts-skews"     ~base (cln/compose cln/parts   cln/skews))
+       (def-split ~name# "-parts-bigskews"  ~base (cln/compose cln/parts   cln/bigskews))
+       (def-split ~name# "-majring-skews"   ~base (cln/compose cln/majring cln/skews))
+       (def-split ~name# "-startstop-skews" ~base (cln/compose cln/startstop cln/skews))
+       )))
 
 (def-tests cl/atomic-test)
 (def-tests cl/sets-test)

@@ -81,16 +81,12 @@
 ;; (may be useful to capture the network traffic between client and server)
 (def insecure false)
 
-;; whether to start the CockroachDB cluster with --linearizable
-(def linearizable false)
-
 ;; Extra command-line arguments to give to `cockroach start`
 (def cockroach-start-arguments
   (concat [:start
            ;; ... other arguments here ...
            ]
-          (if insecure [:--insecure] [])
-          (if linearizable [:--linearizable] [])))
+          (if insecure [:--insecure] [])))
 
 ;; Home directory for the CockroachDB setup
 (def working-path "/home/ubuntu")
@@ -160,7 +156,7 @@
 
 (defn cockroach-start-cmdline
   "Construct the command line to start a CockroachDB node."
-  [extra-arg]
+  [& extra-args]
   (concat
    [:start-stop-daemon
     :--start :--background
@@ -171,7 +167,7 @@
     :--exec (c/expand-path cockroach)
     :--]
    cockroach-start-arguments
-   extra-arg
+   extra-args
    [:--logtostderr :true :>> errlog (c/lit "2>&1")]))
 
 (defmacro csql! [& body]
@@ -188,7 +184,7 @@
 
 (defn db
   "Sets up and tears down CockroachDB."
-  []
+  [linearizable]
   (reify db/DB
     (setup! [_ test node]
       (when (= node (jepsen/primary test))
@@ -219,9 +215,10 @@
         
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
-        (c/su (c/exec
-               (cockroach-start-cmdline
-                [(str "--join=" (name (jepsen/primary test)))])))
+        (c/trace (c/su (c/exec
+                        (cockroach-start-cmdline
+                         (if linearizable [:--linearizable] [])
+                         [(str "--join=" (name (jepsen/primary test)))]))))
 
         (jepsen/synchronize test)
 
@@ -354,17 +351,19 @@
 
 (defn basic-test
   "Sets up the test parameters common to all tests."
-  [nodes nemesis opts]
+  [nodes nemesis linearizable opts]
   (merge tests/noop-test
          {:nodes   (if (= jdbc-mode :cdb-cluster) nodes [:localhost])
-          :name    (str "cockroachdb-" (:name opts) 
+          :name    (str "cockroachdb-" (:name opts)
+                        (if linearizable "-lin" "")
                         (if (= jdbc-mode :cdb-cluster)
                           (str ":" (:name nemesis))
                           "-fake"))
-          :db      (db)
+          :db      (db linearizable)
           :ssh     {:username username :strict-host-key-checking false}
           :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
           :nemesis (if (= jdbc-mode :cdb-cluster) (:client nemesis) nemesis/noop)
+          :linearizable linearizable
           }
          (dissoc opts :name)
          ))
@@ -419,9 +418,10 @@
       (close-conn @conn))
     ))
 
+
 (defn atomic-test
-  [nodes nemesis]
-  (basic-test nodes nemesis
+  [nodes nemesis linearizable]
+  (basic-test nodes nemesis linearizable
               {:name    "atomic"
                :concurrency 10
                :client  (AtomicClient. (atom false))
@@ -528,8 +528,8 @@
 
 
 (defn sets-test
-  [nodes nemesis]
-  (basic-test nodes nemesis
+  [nodes nemesis linearizable]
+  (basic-test nodes nemesis linearizable
    {
     :name    "set"
     :client  (sets-client nil)
@@ -574,7 +574,7 @@
   every successfully added element is present in the read, and that the read
   contains only elements for which an add was succesful, and that all
   elements are unique and in the same order as database timestamps."
-  []
+  [linearizable]
   (reify checker/Checker
     (check [this test model history opts]
       (let [all-adds-l (->> history
@@ -660,8 +660,8 @@
 
 
 (defn monotonic-test
-  [nodes nemesis]
-  (basic-test nodes nemesis
+  [nodes nemesis linearizable]
+  (basic-test nodes nemesis linearizable
    {
     :name    "monotonic"
     :client (monotonic-client nil nil)
@@ -680,7 +680,7 @@
                       gen/clients)))
     :checker (checker/compose
               {:perf    (checker/perf)
-               :details (check-monotonic)})
+               :details (check-monotonic linearizable)})
     }
    ))
 
@@ -688,7 +688,7 @@
 
 (defn check-monotonic-split
   "Same as check-monotonic, but check ordering only from each client's perspective."
-  []
+  [linearizable]
   (reify checker/Checker
     (check [this test model history opts]
       (let [all-adds-l (->> history
@@ -796,8 +796,8 @@
 ))
 
 (defn monotonic-multitable-test
-  [nodes nemesis]
-  (basic-test nodes nemesis
+  [nodes nemesis linearizable]
+  (basic-test nodes nemesis linearizable
    {
     :name    "monotonic-multitable"
     :client (monotonic-multitable-client nil nil)
@@ -816,7 +816,7 @@
                       gen/clients)))
     :checker (checker/compose
               {:perf     (checker/perf)
-               :details  (check-monotonic-split)})
+               :details  (check-monotonic-split linearizable)})
     }
    ))
 
@@ -934,8 +934,8 @@
          :bad-reads bad-reads}))))
 
 (defn bank-test
-  [nodes nemesis]
-  (basic-test nodes nemesis
+  [nodes nemesis linearizable]
+  (basic-test nodes nemesis linearizable
     {:name "bank"
      ;:concurrency 20
      :model  {:n 4 :total 40}
