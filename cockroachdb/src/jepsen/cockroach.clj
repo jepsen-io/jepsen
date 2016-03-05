@@ -84,6 +84,7 @@
 ;; Extra command-line arguments to give to `cockroach start`
 (def cockroach-start-arguments
   (concat [:start
+           :--time-until-store-dead "2s"
            ;; ... other arguments here ...
            ]
           (if insecure [:--insecure] [])))
