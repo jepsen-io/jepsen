@@ -732,7 +732,7 @@
 
                   ; Lost records are those we definitely added but weren't read
                   lost        (into [] (set/difference
-                                        (into #{} all-adds)
+                                        (into #{} (map first all-adds))
                                         (into #{} (map first final-read))))]
               {:valid?          (and (empty? lost)
                                      (empty? dups)
@@ -775,7 +775,7 @@
           :add  (let [rt (rand-int multitable-spread)
                       dbtime (db-time c)]
                   (j/insert! c (str "mono" rt) {:val (:value op) :sts dbtime :node nodenum :tb rt})
-                  (assoc op :type :ok))
+                  (assoc op :type :ok, :value [(:value op) dbtime nodenum rt]))
 
           :read (->> (range multitable-spread)
                      (map (fn [x]
