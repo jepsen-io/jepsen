@@ -37,6 +37,10 @@
 ;; number of tables involved in the monotonic-multitable tests
 (def multitable-spread 2)
 
+
+;; number of simultaneous clients
+(def concurrency-factor 20)
+
 ;; address of the Jepsen controlling node as seen by
 ;; the database nodes. Used to filter packet captures.
 ;; replace by a string constant e.g. (def control-addr "x.y.z.w")
@@ -424,7 +428,7 @@
   [nodes nemesis linearizable]
   (basic-test nodes nemesis linearizable
               {:name    "atomic"
-               :concurrency 10
+               :concurrency concurrency-factor
                :client  (AtomicClient. (atom false))
                :generator (->> (independent/sequential-generator
                                 (range)
