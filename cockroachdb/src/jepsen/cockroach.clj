@@ -717,7 +717,7 @@
                   aborts    (->> all-fails
                                  (r/filter #(= :abort-uncertain (:error %)))
                                  (into []))
-                  sub-lists (->> (range 5)
+                  sub-lists (->> (range (count (:nodes test)))
                                  (map (fn [x] (->> final-read-l
                                                    (r/filter #(= x (nth % 2)))
                                                    (into ())
@@ -752,7 +752,7 @@
   [conn nodenum]
   (reify client/Client
     (setup! [_ test node]
-      (let [n (if (= jdbc-mode :cdb-local) (str->int (subs (name node) 1 2)) 1)
+      (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
             conn (init-conn node)]
 
         (info "Setting up client " n " for " (name node))
