@@ -557,22 +557,23 @@
   
   (invoke! [this test op]
     (let [conn (:conn this)]
-      (with-txn op [c conn]
         (case (:f op)
-          :add  (do
+          :add (with-txn op [c conn]
+                 (do
                   (j/insert! c :set {:val (:value op)})
-                  (assoc op :type :ok))
-          :read (->> (j/query c ["select val from set"])
+                  (assoc op :type :ok)))
+          :read (with-txn-notimeout op [c conn]
+                  (->> (j/query c ["select val from set"])
                      (mapv :val)
-                     (assoc op :type :ok, :value))
-          ))))
+                     (assoc op :type :ok, :value)))
+          )))
   
   (teardown! [this test]
     (let [conn (:conn this)]
       (meh (with-timeout conn nil
              (j/execute! @conn ["drop table set"])))
-      (close-conn @conn))
-    ))
+      (close-conn @conn)))
+  )
 
 
 (defn sets-test
