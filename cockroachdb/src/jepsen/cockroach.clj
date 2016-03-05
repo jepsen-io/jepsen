@@ -298,6 +298,28 @@
                res#))
        res#)))
 
+(defmacro with-txn-retries
+  "Retries body on rollbacks. Uses exponential back-off to avoid conflict storms."
+  [conn & body]
+  `(loop [retry# 10
+          trace# []
+          backoff# 10]
+     (let [res# (do ~@body)]
+       (if (some #(= (:error res#) %) [:retry-uncertainty
+                                       :retry-read-write-conflict
+                                       :retry-read-write-conflict
+                                       :retry-write-write-conflict])
+         (if (> retry# 0)
+           (do
+             ;;(let [spec# (close-conn (deref ~conn))
+             ;;      new-conn# (open-conn spec#)]
+             ;;  (info "Re-opening connection for retry...")
+             ;;  (reset! ~conn new-conn#))
+             (Thread/sleep backoff#)
+             (recur (- retry# 1) (conj trace# (:error res#)) (* backoff# 2)))
+           (assoc res# :error [:retry-fail trace#])) 
+         res#))))
+
 (defmacro with-error-handling
   "Report SQL errors as Jepsen error strings."
   [op & body]
@@ -335,6 +357,16 @@
   [op [c conn] & body]
   `(with-timeout ~conn
      (assoc ~op :type :info, :value [:timeout :url (:subname (deref ~conn))])
+     (with-txn-retries ~conn
+       (with-annotate-errors
+         (with-error-handling ~op
+           (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
+             ~@body))))))
+
+(defmacro with-txn-notimeout
+  "Wrap a evaluation within a SQL transaction without timeout."
+  [op [c conn] & body]
+  `(with-txn-retries ~conn
      (with-annotate-errors
        (with-error-handling ~op
          (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
