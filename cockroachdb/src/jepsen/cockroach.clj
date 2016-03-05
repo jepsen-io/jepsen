@@ -189,7 +189,7 @@
 
 (defn db
   "Sets up and tears down CockroachDB."
-  [linearizable]
+  [linearizable clock-fixup-needed]
   (reify db/DB
     (setup! [_ test node]
       (when (= node (jepsen/primary test))
@@ -247,8 +247,9 @@
     (teardown! [_ test node]
 
       (when (= jdbc-mode :cdb-cluster)
-        (info node "Resetting the clocks...")
-        (c/su (c/exec :ntpdate cln/ntpserver))
+        (when clock-fixup-needed
+          (info node "Resetting the clocks...")
+          (c/su (c/exec :ntpdate cln/ntpserver)))
 
         (info node "Stopping cockroachdb...")
         (meh (c/exec cockroach :quit (if insecure [:--insecure] [])))
@@ -396,7 +397,7 @@
                         (if (= jdbc-mode :cdb-cluster)
                           (str ":" (:name nemesis))
                           "-fake"))
-          :db      (db linearizable)
+          :db      (db linearizable (:clocks nemesis))
           :ssh     {:username username :strict-host-key-checking false}
           :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
           :nemesis (if (= jdbc-mode :cdb-cluster) (:client nemesis) nemesis/noop)
