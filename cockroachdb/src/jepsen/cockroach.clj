@@ -669,71 +669,77 @@
            }
           )))))
 
+(defrecord MonotonicClient [tbl-created?]
+  client/Client
 
-(defn monotonic-client
-  [conn nodenum]
-  (reify client/Client
-    (setup! [_ test node]
-      (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
-            conn (init-conn node)]
-        (info "Setting up client " n " for " (name node))
+  (setup! [this test node]
+    (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
+          conn (init-conn node)]
+      (info "Setting up client for node " n " - " (name node))
 
-        (when (= node (jepsen/primary test))
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (Thread/sleep 1000)
           (j/execute! @conn ["drop table if exists mono"])
+          (Thread/sleep 1000)
+          (info node "Creating table")
           (j/execute! @conn ["create table mono (val int, sts bigint, node int, tb int)"])
-          (j/insert! @conn :mono {:val -1 :sts 0 :node -1 :tb -1}))
+          (Thread/sleep 1000)
+          (j/insert! @conn :mono {:val -1 :sts 0 :node -1 :tb -1})))
+    
+      (assoc this :conn conn :nodenum n)))
 
-        (monotonic-client conn n)))
-
-    (invoke! [this test op]
-      (with-txn op [c conn]
+  (invoke! [this test op]
+    (let [conn (:conn this)
+          nodenum (:nodenum this)]
         (case (:f op)
-          :add  (let [curmax (->> (j/query c ["select max(val) as m from mono"] :row-fn :m)
+          :add (with-txn op [c conn]
+                 (let [curmax (->> (j/query c ["select max(val) as m from mono"] :row-fn :m)
                                   (first))
                       currow (->> (j/query c ["select * from mono where val = ?" curmax])
                                   (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
                                   (first))
                       dbtime (db-time c)]
                   (j/insert! c :mono {:val (+ 1 curmax) :sts dbtime :node nodenum :tb 0})
-                  (assoc op :type :ok, :value currow))
+                  (assoc op :type :ok, :value currow)))
 
-          :read (->> (j/query c ["select * from mono order by sts"])
+          :read (with-txn-notimeout op [c conn]
+                  (->> (j/query c ["select * from mono order by sts"])
                      (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
                      (into [])
-                     (assoc op :type :ok, :value))
+                     (assoc op :type :ok, :value)))
           )))
-    
-    (teardown! [_ test]
-      (with-timeout conn nil
-        (j/execute! @conn ["drop table if exists mono"]))
-      (close-conn @conn))
-    ))
+  
+  (teardown! [this test]
+    (let [conn (:conn this)]
+      (meh (with-timeout conn nil
+             (j/execute! @conn ["drop table if exists mono"])))
+      (close-conn @conn)))
+  )
 
 
 (defn monotonic-test
   [nodes nemesis linearizable]
   (basic-test nodes nemesis linearizable
-   {
-    :name    "monotonic"
-    :client (monotonic-client nil nil)
-    :generator (gen/phases
-                (->> (range)
-                     (map (partial array-map
-                                   :type :invoke
-                                   :f :add
-                                   :value))
-                     gen/seq
-                     (gen/stagger 1/10)
-                     (cln/with-nemesis (:generator nemesis)))
-                (gen/each
-                 (->> {:type :invoke, :f :read, :value nil}
-                      (gen/limit 2)
-                      gen/clients)))
-    :checker (checker/compose
-              {:perf    (checker/perf)
-               :details (check-monotonic linearizable)})
-    }
-   ))
+              {:name        "monotonic"
+               :concurrency concurrency-factor
+               :client      (MonotonicClient. (atom false))
+               :generator   (gen/phases
+                             (->> (range)
+                                  (map (partial array-map
+                                                :type :invoke
+                                                :f :add
+                                                :value))
+                                  gen/seq
+                                  (gen/stagger 1)
+                                  (cln/with-nemesis (:generator nemesis)))
+                             (->> {:type :invoke, :f :read, :value nil}
+                                  gen/once
+                                  gen/clients))
+               :checker     (checker/compose
+                             {:perf    (checker/perf)
+                              :details (check-monotonic linearizable)})
+               }))
 
 ;;;;;;;;;;;;;;;;;;;;;; Monotonic inserts over multiple tables ;;;;;;;;;;;;;;;;
 
@@ -799,36 +805,43 @@
                :value-reorders  off-order-val
                })))))
 
-(defn monotonic-multitable-client
-  [conn nodenum]
-  (reify client/Client
-    (setup! [_ test node]
-      (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
-            conn (init-conn node)]
+(defrecord MultitableClient [tbl-created?]
+  client/Client
+  (setup! [this test node]
+    (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
+          conn (init-conn node)]
 
-        (info "Setting up client " n " for " (name node))
-
-        (when (= node (jepsen/primary test))
+      (info "Setting up client " n " for " (name node))
+      
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
           (dorun (for [x (range multitable-spread)]
                    (do
+                     (Thread/sleep 1000)
                      (j/execute! @conn [(str "drop table if exists mono" x)])
+                     (Thread/sleep 1000)
+                     (info "Creating table " x)
                      (j/execute! @conn [(str "create table mono" x
-                                            " (val int, sts bigint, node int, tb int)")])
+                                             " (val int, sts bigint, node int, tb int)")])
+                     (Thread/sleep 1000)
                      (j/insert! @conn (str "mono" x) {:val -1 :sts 0 :node -1 :tb x})
-                     ))))
+                     )))))
+      
+      (assoc this :conn conn :nodenum n)))
 
-        (monotonic-multitable-client conn n)))
 
-
-    (invoke! [this test op]
-      (with-txn op [c conn]
-        (case (:f op)
-          :add  (let [rt (rand-int multitable-spread)
+  (invoke! [this test op]
+    (let [conn (:conn this)
+          nodenum (:nodenum this)]
+      (case (:f op)
+        :add  (with-txn op [c conn]
+                (let [rt (rand-int multitable-spread)
                       dbtime (db-time c)]
                   (j/insert! c (str "mono" rt) {:val (:value op) :sts dbtime :node nodenum :tb rt})
-                  (assoc op :type :ok, :value [(:value op) dbtime nodenum rt]))
+                  (assoc op :type :ok, :value [(:value op) dbtime nodenum rt])))
 
-          :read (->> (range multitable-spread)
+        :read (with-txn-notimeout op [c conn]
+                (->> (range multitable-spread)
                      (map (fn [x]
                             (->> (j/query c [(str "select * from mono" x " where node <> -1")])
                                  (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
@@ -836,59 +849,64 @@
                      (reduce concat)
                      (sort-by (fn [x] (nth x 1)))
                      (into [])
-                     (assoc op :type :ok, :value))
+                     (assoc op :type :ok, :value)))
         )))
 
-    (teardown! [_ test]
+  (teardown! [this test]
+    (let [conn (:conn this)]      
       (dorun (for [x (range multitable-spread)]
                (with-timeout conn nil
                  (j/execute! @conn [(str "drop table if exists mono" x)]))))
-      (close-conn @conn))
-))
+      (close-conn @conn)))
+  )
 
 (defn monotonic-multitable-test
   [nodes nemesis linearizable]
   (basic-test nodes nemesis linearizable
-   {
-    :name    "monotonic-multitable"
-    :client (monotonic-multitable-client nil nil)
-    :generator (gen/phases
-                (->> (range)
-                     (map (partial array-map
-                                   :type :invoke
-                                   :f :add
-                                   :value))
-                     gen/seq
-                     (gen/stagger 1/10)
-                     (cln/with-nemesis (:generator nemesis)))
-                (gen/each
-                 (->> {:type :invoke, :f :read, :value nil}
-                      (gen/limit 2)
-                      gen/clients)))
-    :checker (checker/compose
-              {:perf     (checker/perf)
-               :details  (check-monotonic-split linearizable)})
-    }
-   ))
+              {:name        "monotonic-multitable"
+               :concurrency concurrency-factor
+               :client      (MultitableClient. (atom false))
+               :generator   (gen/phases
+                             (->> (range)
+                                  (map (partial array-map
+                                                :type :invoke
+                                                :f :add
+                                                :value))
+                                  gen/seq
+                                  (gen/stagger 1)
+                                  (cln/with-nemesis (:generator nemesis)))
+                             (->> {:type :invoke, :f :read, :value nil}
+                                  gen/once
+                                  gen/clients))
+               :checker     (checker/compose
+                             {:perf     (checker/perf)
+                              :details  (check-monotonic-split linearizable)})
+               }))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Test for transfers between bank accounts ;;;;;;;;;;;;;;;;;;;;;;;
 
-(defrecord BankClient [conn n starting-balance]
+(defrecord BankClient [tbl-created? n starting-balance]
   client/Client
-    (setup! [this test node]
-      (let [conn (init-conn node)]
+  (setup! [this test node]
+    (let [conn (init-conn node)]
 
-        (when (= node (jepsen/primary test))
-          ;; Create initial accounts.
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (Thread/sleep 1000)
           (j/execute! @conn ["drop table if exists accounts"])
+          (Thread/sleep 1000)
+          (info "Creating table")
           (j/execute! @conn ["create table accounts (id int not null primary key, balance bigint not null)"])
           (dotimes [i n]
-            (j/insert! @conn :accounts {:id i :balance starting-balance})))
+            (Thread/sleep 500)
+            (info "Creating account" i)
+            (j/insert! @conn :accounts {:id i :balance starting-balance}))))
 
-        (assoc this :conn conn))
-      )
+      (assoc this :conn conn))
+    )
 
-    (invoke! [this test op]
+  (invoke! [this test op]
+    (let [conn (:conn this)]
       (with-txn op [c conn]
         (case (:f op)
           :read (->> (j/query c ["select balance from accounts"])
@@ -916,19 +934,14 @@
                             (do (j/update! c :accounts {:balance b1} ["id = ?" from])
                                 (j/update! c :accounts {:balance b2} ["id = ?" to])
                                 (assoc op :type :ok))))
-                 )))
+          ))))
 
-    (teardown! [_ test]
-      (with-timeout conn nil
-        (j/execute! @conn ["drop table if exists accounts"]))
-      (close-conn @conn))
-    )
-
-(defn bank-client
-  "Simulates bank account transfers between n accounts, each starting with
-  starting-balance."
-  [n starting-balance]
-  (BankClient. nil n starting-balance))
+  (teardown! [this test]
+    (let [conn (:conn this)]
+      (meh (with-timeout conn nil
+             (j/execute! @conn ["drop table if exists accounts"])))
+      (close-conn @conn)))
+  )
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
@@ -987,17 +1000,17 @@
 (defn bank-test
   [nodes nemesis linearizable]
   (basic-test nodes nemesis linearizable
-    {:name "bank"
-     ;:concurrency 20
-     :model  {:n 4 :total 40}
-     :client (bank-client 4 10)
-     :generator (gen/phases
-                  (->> (gen/mix [bank-read bank-diff-transfer])
-                       (gen/clients)
-                       (gen/stagger 1/10)
-                       (cln/with-nemesis (:generator nemesis)))
-                  (gen/clients (gen/once bank-read)))
-     :checker (checker/compose
-                {:perf (checker/perf)
-                 :details (bank-checker)})}))
+    {:name        "bank"
+     :concurrency concurrency-factor
+     :model       {:n 4 :total 40}
+     :client      (BankClient. (atom false) 4 10)
+     :generator   (gen/phases
+                   (->> (gen/mix [bank-read bank-diff-transfer])
+                        (gen/clients)
+                        (gen/stagger 1)
+                        (cln/with-nemesis (:generator nemesis)))
+                   (gen/clients (gen/once bank-read)))
+     :checker     (checker/compose
+                   {:perf (checker/perf)
+                    :details (bank-checker)})}))
 
