@@ -29,6 +29,10 @@
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
+(def nemesis-no-gen
+  {:during gen/void
+   :final gen/void})
+
 (def nemesis-single-gen
   {:during (gen/seq (cycle [(gen/sleep nemesis-delay)
                             {:type :info, :f :start}
@@ -109,7 +113,7 @@
 ;; empty nemesis
 (def none
   {:name "blank"
-   :generator nemesis-single-gen
+   :generator nemesis-no-gen
    :client nemesis/noop
    })   
 
