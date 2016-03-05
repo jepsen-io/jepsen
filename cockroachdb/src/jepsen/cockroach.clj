@@ -79,7 +79,7 @@
 
 ;; whether to start the CockroachDB cluster in insecure mode (SSL disabled)
 ;; (may be useful to capture the network traffic between client and server)
-(def insecure false)
+(def insecure true)
 
 ;; Extra command-line arguments to give to `cockroach start`
 (def cockroach-start-arguments
