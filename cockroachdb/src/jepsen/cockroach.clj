@@ -503,18 +503,22 @@
            :lost-frac       (util/fraction (count lost) (count attempts))
            :recovered-frac  (util/fraction (count recovered) (count attempts))})))))
 
-(defn sets-client
-  [conn]
-  (reify client/Client
-    (setup! [_ test node]
-      (let [conn (init-conn node)]
-        (when (= node (jepsen/primary test))
-          (j/execute! @conn ["drop table if exists set"])
-          (j/execute! @conn ["create table set (val int)"]))
-
-        (sets-client conn)))
-
-    (invoke! [this test op]
+(defrecord SetsClient [tbl-created?]
+  client/Client
+  
+  (setup! [this test node]
+    (let [conn (init-conn node)]
+      (info node "Connected")
+      
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (info node "Creating table")
+          (j/execute! @conn ["create table set (val int)"])))
+      
+      (assoc this :conn conn)))
+  
+  (invoke! [this test op]
+    (let [conn (:conn this)]
       (with-txn op [c conn]
         (case (:f op)
           :add  (do
@@ -523,11 +527,12 @@
           :read (->> (j/query c ["select val from set"])
                      (mapv :val)
                      (assoc op :type :ok, :value))
-          )))
-
-    (teardown! [_ test]
-      (with-timeout conn nil
-        (j/execute! @conn ["drop table if exists set"]))
+          ))))
+  
+  (teardown! [this test]
+    (let [conn (:conn this)]
+      (meh (with-timeout conn nil
+             (j/execute! @conn ["drop table set"])))
       (close-conn @conn))
     ))
 
@@ -535,27 +540,27 @@
 (defn sets-test
   [nodes nemesis linearizable]
   (basic-test nodes nemesis linearizable
-   {
-    :name    "set"
-    :client  (sets-client nil)
-    :generator (gen/phases
-                (->> (range)
-                     (map (partial array-map
-                                   :type :invoke
-                                   :f :add
-                                   :value))
-                     gen/seq
-                     (gen/stagger 1/10)
-                     (cln/with-nemesis (:generator nemesis)))
-                (gen/each
-                 (->> {:type :invoke, :f :read, :value nil}
-                      (gen/limit 2)
-                      gen/clients)))
-    :checker (checker/compose
-              {:perf     (checker/perf)
-               :details  (check-sets)})
-    }
-   ))
+              {:name        "set"
+               :concurrency concurrency-factor
+               :client      (SetsClient. (atom false))
+               :generator   (gen/phases
+                             (->> (range)
+                                  (map (partial array-map
+                                                :type :invoke
+                                                :f :add
+                                                :value))
+                                  gen/seq
+                                  (gen/stagger 1)
+                                  (cln/with-nemesis (:generator nemesis)))
+                             (gen/each
+                              (->> {:type :invoke, :f :read, :value nil}
+                                   (gen/limit 2)
+                                   gen/clients)))
+               :checker     (checker/compose
+                             {:perf     (checker/perf)
+                              :details  (check-sets)})
+               }
+              ))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Montonic inserts with dependency ;;;;;;;;;;;;;;;;;;;;
