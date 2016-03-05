@@ -19,7 +19,7 @@
 (def nemesis-duration 5) ; seconds
 
 ;; duration to let nemeses settle at the end
-(def nemesis-quiescence-wait 5) ; seconds
+(def nemesis-quiescence-wait 3) ; seconds
 
 ;; Location of the custom utility compiled from scripts/adjtime.c
 (def adjtime "/home/ubuntu/adjtime")
