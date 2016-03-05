@@ -113,7 +113,7 @@
 ;; How to extract db time
 (def db-timestamp
   (cond (= jdbc-mode :pg-local) "extract(microseconds from now())"
-        true "extract(epoch_nanoseconds from now())"))
+        true "extract(epoch_nanoseconds from transaction_timestamp())"))
 
 (def ssl-settings
   (if insecure ""
