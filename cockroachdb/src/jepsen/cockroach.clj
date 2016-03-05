@@ -423,6 +423,7 @@
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (info node "Creating table")
+          (j/execute! @conn ["drop table if exists test"])
           (j/execute! @conn ["create table test (id int, val int)"])))
       
       (assoc this :conn conn)))
@@ -545,6 +546,7 @@
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (info node "Creating table")
+          (j/execute! @conn ["drop table if exists set"])
           (j/execute! @conn ["create table set (val int)"])))
       
       (assoc this :conn conn)))
