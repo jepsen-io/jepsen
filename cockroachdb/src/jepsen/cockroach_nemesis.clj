@@ -91,6 +91,7 @@
   [n1 n2]
   {:name (str (:name n1) "-" (:name n2))
    :generator nemesis-double-gen
+   :clocks (or (:clocks n1) (:clocks n2))
    :client (compose-nemesis-clients {{:start1 :start, 
                                       :stop1 :stop} (:client n1)
                                      {:start2 :start,
@@ -115,25 +116,29 @@
   {:name "blank"
    :generator nemesis-no-gen
    :client nemesis/noop
+   :clocks false
    })   
 
 ;; random partitions
 (def parts
   {:name "parts"
    :generator nemesis-single-gen
-   :client (nemesis/partition-random-halves)})
+   :client (nemesis/partition-random-halves)
+   :clocks false})
 
 ;; start/stop server
 (def startstop
   {:name "startstop"
    :generator nemesis-single-gen
-   :client (nemesis/hammer-time "cockroach")})
+   :client (nemesis/hammer-time "cockroach")
+   :clocks false})
 
 ;; majorities ring
 (def majring
   {:name "majring"
    :generator nemesis-single-gen
-   :client (nemesis/partition-majorities-ring)})
+   :client (nemesis/partition-majorities-ring)
+   :clocks false})
 
 ;; Clock skew nemesis
 
@@ -158,10 +163,12 @@
 (def skews
   {:name "skews"
    :generator nemesis-single-gen
-   :client (clock-milli-scrambler 100)})
+   :client (clock-milli-scrambler 100)
+   :clocks true})
 
 (def bigskews
   {:name "bigskews"
    :generator nemesis-single-gen
-   :client (nemesis/clock-scrambler 20)})
+   :client (nemesis/clock-scrambler 20)
+   :clocks true})
 
