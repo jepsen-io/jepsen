@@ -41,3 +41,4 @@
 (def-tests cl/monotonic-test)
 (def-tests cl/monotonic-multitable-test)
 (def-tests cl/bank-test)
+(def-tests cl/bank-multitable-test)

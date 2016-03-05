@@ -998,13 +998,13 @@
         {:valid? (empty? bad-reads)
          :bad-reads bad-reads}))))
 
-(defn bank-test
-  [nodes nemesis linearizable]
+(defn bank-test-base
+  [name-suffix client nodes nemesis linearizable]
   (basic-test nodes nemesis linearizable
-    {:name        "bank"
+    {:name        (str "bank" name-suffix)
      :concurrency concurrency-factor
      :model       {:n 4 :total 40}
-     :client      (BankClient. (atom false) 4 10)
+     :client      client
      :generator   (gen/phases
                    (->> (gen/mix [bank-read bank-diff-transfer])
                         (gen/clients)
@@ -1014,3 +1014,73 @@
      :checker     (checker/compose
                    {:perf (checker/perf)
                     :details (bank-checker)})}))
+
+(defn bank-test
+  [nodes nemesis linearizable]
+  (bank-test-base "" (BankClient. (atom false) 4 10) nodes nemesis linearizable))
+
+(defrecord MultiBankClient [tbl-created? n starting-balance]
+  client/Client
+  (setup! [this test node]
+    (let [conn (init-conn node)]
+
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (dotimes [i n]
+            (Thread/sleep 500)
+            (j/execute! @conn [(str "drop table if exists accounts" i)])
+            (Thread/sleep 500)
+            (info "Creating table " i)
+            (j/execute! @conn [(str "create table accounts" i " (balance bigint not null)")])
+            (Thread/sleep 500)
+            (info "Populating account" i)
+            (j/insert! @conn (str "accounts" i) {:balance starting-balance}))))
+
+      (assoc this :conn conn))
+    )
+
+  (invoke! [this test op]
+    (let [conn (:conn this)]
+      (with-txn op [c conn]
+        (case (:f op)
+          :read (->> (range n)
+                     (map (fn [x]
+                            (->> (j/query c [(str "select balance from accounts" x)] :row-fn :balance)
+                                 first)))
+                     (into [])
+                     (assoc op :type :ok, :value))
+
+          :transfer (let [{:keys [from to amount]} (:value op)
+                          b1 (-> c
+                                 (j/query [(str "select balance from accounts" from)]
+                                          :row-fn :balance)
+                                 first
+                                 (- amount))
+                          b2 (-> c
+                                 (j/query [(str "select balance from accounts" to)]
+                                          :row-fn :balance)
+                                 first
+                                 (+ amount))]
+                      (cond (neg? b1)
+                            (assoc op :type :fail, :value [:negative from b1])
+
+                            (neg? b2)
+                            (assoc op :type :fail, :value [:negative to b2])
+
+                            true
+                            (do (j/update! c (str "accounts" from) {:balance b1} [])
+                                (j/update! c (str "accounts" to) {:balance b2} [])
+                                (assoc op :type :ok))))
+          ))))
+
+  (teardown! [this test]
+    (let [conn (:conn this)]
+      (meh (with-timeout conn nil
+             (dotimes [i n]
+               (j/execute! @conn [(str "drop table if exists accounts" i)]))))
+      (close-conn @conn)))
+  )
+
+(defn bank-multitable-test
+  [nodes nemesis linearizable]
+  (bank-test-base "-multitable" (MultiBankClient. (atom false) 4 10) nodes nemesis linearizable))
