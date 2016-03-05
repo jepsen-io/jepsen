@@ -104,7 +104,7 @@
 (def errlog (str log-path "/cockroach.stderr"))
 (def verlog (str log-path "/version.txt"))
 (def pcaplog (str log-path "/trace.pcap"))
-  
+
 
 (def log-files (if (= jdbc-mode :cdb-cluster) [errlog verlog pcaplog] []))
 
@@ -197,14 +197,14 @@
           (meh (->> (sh "git" "describe" "--tags")
                     (:out)
                     (print)))))
-        
+
       (when (= jdbc-mode :cdb-cluster)
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
           (c/su (c/exec (cockroach-start-cmdline nil)))
 
           (Thread/sleep 1000)
-          
+
           (info node "Stopping 1st CockroachDB before starting cluster...")
           (c/exec cockroach :quit (if insecure [:--insecure] [])))
 
@@ -215,9 +215,9 @@
                       :--start :--background
                       :--exec tcpdump
                       :--
-                      :-w pcaplog :host control-addr :and :port db-port                      
+                      :-w pcaplog :host control-addr :and :port db-port
                       ))
-        
+
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
         (c/trace (c/su (c/exec
@@ -284,16 +284,16 @@
 
                (re-find #"read.*encountered previous write.*uncertainty interval" e#)
                (assoc res# :error :retry-uncertainty)
-               
+
                (re-find #"retry txn" e#)
                (assoc res# :error :retry-read-write-conflict)
-               
+
                (re-find #"txn.*failed to push" e#)
                (assoc res# :error :retry-read-write-conflict)
-               
+
                (re-find #"txn aborted" e#)
                (assoc res# :error :retry-write-write-conflict)
-               
+
                true
                res#))
        res#)))
@@ -317,7 +317,7 @@
              ;;  (reset! ~conn new-conn#))
              (Thread/sleep backoff#)
              (recur (- retry# 1) (conj trace# (:error res#)) (* backoff# 2)))
-           (assoc res# :error [:retry-fail trace#])) 
+           (assoc res# :error [:retry-fail trace#]))
          res#))))
 
 (defmacro with-error-handling
@@ -351,7 +351,7 @@
                      (reset! ~conn new-conn#))
                    ~alt)
                  ~@body))
-  
+
 (defmacro with-txn
   "Wrap a evaluation within a SQL transaction with timeout."
   [op [c conn] & body]
@@ -371,7 +371,7 @@
        (with-error-handling ~op
          (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
            ~@body)))))
-  
+
 (defn db-time
   "Retrieve the current time (precise) from the database."
   [c]
@@ -427,9 +427,9 @@
           (Thread/sleep 1000)
           (info node "Creating table")
           (j/execute! @conn ["create table test (id int, val int)"])))
-      
+
       (assoc this :conn conn)))
-  
+
   (invoke! [this test op]
     (let [conn (:conn this)]
       (with-txn op [c conn]
@@ -439,18 +439,18 @@
                            (first))]
           (case (:f op)
             :read (assoc op :type :ok, :value (independent/tuple id val'))
-            
+
             :write (do
                      (if (nil? val')
                        (j/insert! c :test {:id id :val value})
                        (j/update! c :test {:val value} ["id = ?" id]))
                      (assoc op :type :ok))
-            
+
             :cas (let [[value' value] value
                        cnt (j/update! c :test {:val value} ["id = ? and val = ?" id value'])]
                    (assoc op :type (if (zero? (first cnt)) :fail :ok))))
           ))))
-  
+
   (teardown! [this test]
     (let [conn (:conn this)]
       (meh (with-timeout conn nil
@@ -540,11 +540,11 @@
 
 (defrecord SetsClient [tbl-created?]
   client/Client
-  
+
   (setup! [this test node]
     (let [conn (init-conn node)]
       (info node "Connected")
-      
+
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (Thread/sleep 1000)
@@ -552,9 +552,9 @@
           (Thread/sleep 1000)
           (info node "Creating table")
           (j/execute! @conn ["create table set (val int)"])))
-      
+
       (assoc this :conn conn)))
-  
+
   (invoke! [this test op]
     (let [conn (:conn this)]
         (case (:f op)
@@ -567,7 +567,7 @@
                      (mapv :val)
                      (assoc op :type :ok, :value)))
           )))
-  
+
   (teardown! [this test]
     (let [conn (:conn this)]
       (meh (with-timeout conn nil
@@ -686,7 +686,7 @@
           (j/execute! @conn ["create table mono (val int, sts bigint, node int, tb int)"])
           (Thread/sleep 1000)
           (j/insert! @conn :mono {:val -1 :sts 0 :node -1 :tb -1})))
-    
+
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
@@ -709,7 +709,7 @@
                      (into [])
                      (assoc op :type :ok, :value)))
           )))
-  
+
   (teardown! [this test]
     (let [conn (:conn this)]
       (meh (with-timeout conn nil
@@ -812,7 +812,7 @@
           conn (init-conn node)]
 
       (info "Setting up client " n " for " (name node))
-      
+
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (dorun (for [x (range multitable-spread)]
@@ -826,7 +826,7 @@
                      (Thread/sleep 1000)
                      (j/insert! @conn (str "mono" x) {:val -1 :sts 0 :node -1 :tb x})
                      )))))
-      
+
       (assoc this :conn conn :nodenum n)))
 
 
@@ -853,7 +853,7 @@
         )))
 
   (teardown! [this test]
-    (let [conn (:conn this)]      
+    (let [conn (:conn this)]
       (dorun (for [x (range multitable-spread)]
                (with-timeout conn nil
                  (j/execute! @conn [(str "drop table if exists mono" x)]))))
@@ -1013,4 +1013,3 @@
      :checker     (checker/compose
                    {:perf (checker/perf)
                     :details (bank-checker)})}))
-
