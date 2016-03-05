@@ -431,7 +431,7 @@
                                   (->> (gen/reserve 5 (gen/mix [w cas]) r)
                                        (gen/delay 1)
                                        (gen/limit 60))))
-                               ;;(gen/stagger 1)
+                               (gen/stagger 1)
                                (cln/with-nemesis (:generator nemesis)))
 
                :model   (model/cas-register 0)
