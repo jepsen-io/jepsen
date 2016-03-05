@@ -591,27 +591,29 @@
                                   gen/seq
                                   (gen/stagger 1)
                                   (cln/with-nemesis (:generator nemesis)))
-                             (gen/each
-                              (->> {:type :invoke, :f :read, :value nil}
-                                   (gen/limit 2)
-                                   gen/clients)))
+                             (->> {:type :invoke, :f :read, :value nil}
+                                   gen/once
+                                   gen/clients))
                :checker     (checker/compose
                              {:perf     (checker/perf)
                               :details  (check-sets)})
-               }
-              ))
+               }))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Montonic inserts with dependency ;;;;;;;;;;;;;;;;;;;;
 
 (defn check-order
   "Detect monotonicity errors over a result set (internal function)."
-  [prev rows res1 res2 ]
-  (if (empty? rows) [res1 res2]
-      (let [row (first rows)
-            nres1 (concat res1 (if (> (nth prev 1) (nth row 1)) (list (list prev row)) ()))
-            nres2 (concat res2 (if (>= (first prev) (first row)) (list (list prev row)) ()))]
-        (check-order row (rest rows) nres1 nres2))))
+  [iprev irows ires1 ires2]
+  (loop [prev iprev
+         rows irows
+         res1 ires1
+         res2 ires2]
+    (if (empty? rows) [res1 res2]
+        (let [row (first rows)
+              nres1 (concat res1 (if (> (nth prev 1) (nth row 1)) (list (list prev row)) ()))
+              nres2 (concat res2 (if (>= (first prev) (first row)) (list (list prev row)) ()))]
+          (recur row (rest rows) nres1 nres2)))))
 
 (defn monotonic-order
   "Detect monotonicity errors over a result set."
