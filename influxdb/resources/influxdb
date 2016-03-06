@@ -1,0 +1,1 @@
+export INFLUXD_OPTS="%NODES_TO_JOIN%"
