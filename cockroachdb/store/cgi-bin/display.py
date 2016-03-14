@@ -15,13 +15,14 @@ cgitb.enable()
 
 form = cgi.FieldStorage()
 
-base = os.path.abspath(os.getenv("DOCUMENT_ROOT"))
+base = os.path.realpath(os.getenv("DOCUMENT_ROOT"))
 os.chdir(base)
 path = ''
 if 'path' in form:
     path = form.getvalue('path')
-
-if len(path) == 0 or not os.path.abspath(path).startswith(base):
+repath = os.path.realpath(path)
+    
+if len(path) == 0 or not repath.startswith(base):
     path = '.'
 
 offset = 0
