@@ -10,7 +10,7 @@
   )
 
 ;; duration of 1 jepsen test
-(def test-duration 60) ; seconds
+(def test-duration 30) ; seconds
 
 ;; duration between interruptions
 (def nemesis-delay 5) ; seconds
@@ -25,7 +25,7 @@
 (def adjtime "/home/ubuntu/adjtime")
 
 ;; NTP server to use with `ntpdate`
-(def ntpserver "ntp.ubuntu.com")
+(def ntpserver "ntp.apple.com")
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
@@ -169,6 +169,6 @@
 (def bigskews
   {:name "bigskews"
    :generator nemesis-single-gen
-   :client (nemesis/clock-scrambler 20)
+   :client (nemesis/clock-scrambler 600)
    :clocks true})
 

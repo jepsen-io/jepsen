@@ -478,7 +478,7 @@
                                 (range)
                                 (fn [k]
                                   (->> (gen/reserve 5 (gen/mix [w cas]) r)
-                                       (gen/delay 1)
+                                       (gen/delay 0.5)
                                        (gen/limit 60))))
                                (gen/stagger 1)
                                (cln/with-nemesis (:generator nemesis)))
