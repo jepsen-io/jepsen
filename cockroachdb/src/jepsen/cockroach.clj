@@ -307,9 +307,9 @@
 (defmacro with-txn-retries
   "Retries body on rollbacks. Uses exponential back-off to avoid conflict storms."
   [conn & body]
-  `(loop [retry# 10
+  `(loop [retry# 30
           trace# []
-          backoff# 10]
+          backoff# 20]
      (let [res# (do ~@body)]
        (if (some #(= (:error res#) %) [:retry-uncertainty
                                        :retry-read-write-conflict
@@ -322,7 +322,8 @@
              ;;  (info "Re-opening connection for retry...")
              ;;  (reset! ~conn new-conn#))
              (Thread/sleep backoff#)
-             (recur (- retry# 1) (conj trace# (:error res#)) (* backoff# 2)))
+             (let [delay# (* backoff# (+ 4 (* 0.5 (- (rand) 0.5))))]
+               (recur (- retry# 1) (conj trace# (:error res#)) delay#)))
            (assoc res# :error [:retry-fail trace#]))
          res#))))
 
