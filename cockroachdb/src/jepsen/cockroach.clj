@@ -705,14 +705,14 @@
         (case (:f op)
           :add (with-txn op [c conn]
                  (let [curmax (->> (j/query c ["select max(val) as m from mono"] :row-fn :m)
-                                  (first))
-                      currow (->> (j/query c ["select * from mono where val = ?" curmax])
-                                  (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
-                                  (first))
-                      dbtime (db-time c)]
-                  (j/insert! c :mono {:val (+ 1 curmax) :sts dbtime :node nodenum :tb 0})
-                  (assoc op :type :ok, :value currow)))
-
+                                   (first))
+                       currow (->> (j/query c ["select * from mono where val = ?" curmax])
+                                   (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
+                                   (first))
+                       dbtime (db-time c)]
+                   (j/insert! c :mono {:val (+ 1 curmax) :sts dbtime :node nodenum :tb 0})
+                   (assoc op :type :ok, :value currow)))
+          
           :read (with-txn-notimeout op [c conn]
                   (->> (j/query c ["select * from mono order by sts"])
                      (map (fn [row] (list (:val row) (str->int (:sts row)) (:node row) (:tb row))))
