@@ -755,7 +755,7 @@
 
 (defn check-monotonic-split
   "Same as check-monotonic, but check ordering only from each client's perspective."
-  [linearizable]
+  [linearizable numnodes]
   (reify checker/Checker
     (check [this test model history opts]
       (let [all-adds-l (->> history
@@ -784,16 +784,18 @@
                   aborts    (->> all-fails
                                  (r/filter #(= :abort-uncertain (:error %)))
                                  (into []))
-                  sub-lists (->> (range multitable-spread)
+
+                  [off-order-sts off-order-val] (monotonic-order final-read-l)
+                  
+                  sub-lists (->> (range numnodes)
                                  (map (fn [x] (->> final-read-l
-                                                   (r/filter #(= x (nth % 3)))
+                                                   (r/filter #(= (+ x 1) (nth % 2)))
                                                    (into ())
                                                    (reverse))))
                                  (into []))
-                  off-order-pairs (map monotonic-order sub-lists)
 
-                  off-order-sts (map first off-order-pairs)
-                  off-order-val (map last off-order-pairs)
+                  off-order-pairs (map monotonic-order sub-lists)
+                  off-order-val-pernode (map last off-order-pairs)
 
                   dups        (into [] (for [[id freq] (frequencies (into [] (map first final-read-l))) :when (> freq 1)] id))
 
@@ -804,8 +806,9 @@
               {:valid?          (and (empty? lost)
                                      (empty? dups)
                                      (every? true? (into [] (map empty? off-order-sts)))
-                                     (or (not linearizable)
-                                         (every? true? (into [] (map empty? off-order-val)))))
+                                     ;; linearizability per client
+                                     (every? true? (into [] (map empty? off-order-val-pernode)))
+                                     )
                :retry-frac      (util/fraction (count retries) (count history))
                :abort-frac      (util/fraction (count aborts) (count history))
                :lost            (into [] lost)
@@ -813,6 +816,7 @@
                :duplicates      dups
                :order-by-errors off-order-sts
                :value-reorders  off-order-val
+               :value-reorders-pernode off-order-val-pernode
                })))))
 
 (defrecord MultitableClient [tbl-created?]
@@ -846,9 +850,10 @@
       (case (:f op)
         :add  (with-txn op [c conn]
                 (let [rt (rand-int multitable-spread)
-                      dbtime (db-time c)]
-                  (j/insert! c (str "mono" rt) {:val (:value op) :sts dbtime :node nodenum :tb rt})
-                  (assoc op :type :ok, :value [(:value op) dbtime nodenum rt])))
+                      dbtime (db-time c)
+                      v (System/nanoTime)]
+                  (j/insert! c (str "mono" rt) {:val v :sts dbtime :node nodenum :tb rt})
+                  (assoc op :type :ok, :value [v dbtime nodenum rt])))
 
         :read (with-txn-notimeout op [c conn]
                 (->> (range multitable-spread)
@@ -890,7 +895,7 @@
                                   gen/clients))
                :checker     (checker/compose
                              {:perf     (checker/perf)
-                              :details  (check-monotonic-split linearizable)})
+                              :details  (check-monotonic-split linearizable (count nodes))})
                }))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Test for transfers between bank accounts ;;;;;;;;;;;;;;;;;;;;;;;
