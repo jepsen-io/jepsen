@@ -32,7 +32,7 @@
 (import [java.net URLEncoder])
 
 ;; timeout for DB operations during tests
-(def timeout-delay 1500) ; milliseconds
+(def timeout-delay 3500) ; milliseconds
 
 ;; number of tables involved in the monotonic-multitable tests
 (def multitable-spread 2)
