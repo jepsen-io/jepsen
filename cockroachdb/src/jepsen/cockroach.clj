@@ -110,9 +110,19 @@
 ;;;;;;;;;;;;;;;;;;;; Database set-up and access functions  ;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; How to extract db time
-(def db-timestamp
-  (cond (= jdbc-mode :pg-local) "extract(microseconds from now())"
-        true "extract(epoch_nanoseconds from transaction_timestamp())"))
+(defn db-time
+  "Retrieve the current time (previse) from the database."
+  [c]
+  (cond (= jdbc-mode :pg-local)
+        (->> (j/query c ["select extract(microseconds from now()) as ts"] :row-fn :ts)
+             (first))
+        
+        true
+        (->> (j/query c [(str "select extract(epoch_nanoseconds from transaction_timestamp()) as ts,"
+                              "transaction_timestamp_unique() as gen")])
+             (map (fn [t] (format "%d%010d" (:ts t) (:gen t))))
+             (first))
+        ))
 
 (def ssl-settings
   (if insecure ""
@@ -378,14 +388,6 @@
        (with-error-handling ~op
          (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
            ~@body)))))
-
-(defn db-time
-  "Retrieve the current time (precise) from the database."
-  [c]
-  (->> (j/query c [(str "select " db-timestamp " as ts")])
-       (mapv :ts)
-       (first)))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;; Common test definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -690,9 +692,9 @@
           (j/execute! @conn ["drop table if exists mono"])
           (Thread/sleep 1000)
           (info node "Creating table")
-          (j/execute! @conn ["create table mono (val int, sts bigint, node int, tb int)"])
+          (j/execute! @conn ["create table mono (val int, sts string, node int, tb int)"])
           (Thread/sleep 1000)
-          (j/insert! @conn :mono {:val -1 :sts 0 :node -1 :tb -1})))
+          (j/insert! @conn :mono {:val -1 :sts "0" :node -1 :tb -1})))
 
       (assoc this :conn conn :nodenum n)))
 
@@ -712,7 +714,7 @@
 
           :read (with-txn-notimeout op [c conn]
                   (->> (j/query c ["select * from mono order by sts"])
-                     (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
+                     (map (fn [row] (list (:val row) (str->int (:sts row)) (:node row) (:tb row))))
                      (into [])
                      (assoc op :type :ok, :value)))
           )))
@@ -829,9 +831,9 @@
                      (Thread/sleep 1000)
                      (info "Creating table " x)
                      (j/execute! @conn [(str "create table mono" x
-                                             " (val int, sts bigint, node int, tb int)")])
+                                             " (val int, sts string, node int, tb int)")])
                      (Thread/sleep 1000)
-                     (j/insert! @conn (str "mono" x) {:val -1 :sts 0 :node -1 :tb x})
+                     (j/insert! @conn (str "mono" x) {:val -1 :sts "0" :node -1 :tb x})
                      )))))
 
       (assoc this :conn conn :nodenum n)))
@@ -851,7 +853,7 @@
                 (->> (range multitable-spread)
                      (map (fn [x]
                             (->> (j/query c [(str "select * from mono" x " where node <> -1")])
-                                 (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
+                                 (map (fn [row] (list (:val row) (str->int (:sts row)) (:node row) (:tb row))))
                                  )))
                      (reduce concat)
                      (sort-by (fn [x] (nth x 1)))
