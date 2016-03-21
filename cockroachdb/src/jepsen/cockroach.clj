@@ -88,7 +88,6 @@
 ;; Extra command-line arguments to give to `cockroach start`
 (def cockroach-start-arguments
   (concat [:start
-           :--time-until-store-dead "2s"
            ;; ... other arguments here ...
            ]
           (if insecure [:--insecure] [])))
@@ -159,11 +158,17 @@
   [node]
   (->> node db-conn-spec open-conn atom))
 
+(defn wrap-env
+  [env cmd]
+  (conj ["env" env] cmd))
+
 (defn cockroach-start-cmdline
   "Construct the command line to start a CockroachDB node."
   [& extra-args]
   (concat
-   [:start-stop-daemon
+   [:env
+    ;;:COCKROACH_TIME_UNTIL_STORE_DEAD=5s
+    :start-stop-daemon
     :--start :--background
     :--make-pidfile :--pidfile pidfile
     :--no-close
@@ -221,9 +226,9 @@
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
         (c/trace (c/su (c/exec
-                        (cockroach-start-cmdline
-                         (if linearizable [:--linearizable] [])
-                         [(str "--join=" (name (jepsen/primary test)))]))))
+                        (wrap-env (str "COCKROACH_LINEARIZABLE=" (if linearizable "true" "false"))
+                                  (cockroach-start-cmdline
+                                   [(str "--join=" (name (jepsen/primary test)))])))))
 
         (jepsen/synchronize test)
 
