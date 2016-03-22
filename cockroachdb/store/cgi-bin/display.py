@@ -221,11 +221,11 @@ elif path == '.':
                         ok = r[edn_format.Keyword('valid?')]
                         status = {True:'success',False:'danger'}[ok]
                         ts = d[1][:-5]
-                        lfile = os.path.join(dpath, "latency-raw.png")
-                        if os.path.exists(lfile):
-                            print("<a href='/" + lfile + "'>" 
-                                  "<img height=60px src='/" + lfile + "' />"
-                                  "</a>")
+                        #lfile = os.path.join(dpath, "latency-raw.png")
+                        #if os.path.exists(lfile):
+                        #    print("<a href='/" + lfile + "'>" 
+                        #          "<img height=60px src='/" + lfile + "' />"
+                        #          "</a>")
                         print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-%s btn-xs'>" % status + reltime(ts) +
                               ' <span class="glyphicon glyphicon-info-sign"></span>'
                               "</a>")
