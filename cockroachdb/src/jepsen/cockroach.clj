@@ -261,10 +261,12 @@
 
     (teardown! [_ test node]
 
+      
       (when (= jdbc-mode :cdb-cluster)
-        (when clock-fixup-needed
-          (info node "Resetting the clocks...")
-          (c/su (c/exec :ntpdate cln/ntpserver)))
+        (jepsen/synchronize test)
+        
+        (info node "Resetting the clocks...")
+        (info node (c/su (c/exec :ntpdate :-b cln/ntpserver)))
 
         (info node "Stopping cockroachdb...")
         (meh (c/exec cockroach :quit (if insecure [:--insecure] [])))
