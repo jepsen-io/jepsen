@@ -74,7 +74,7 @@ elif 'merge-logs' in form:
         dl = []
         with open(l) as f:
             for line in f:
-                if line[0] in 'IWE':
+                if line[0] in 'IWEF':
                     x = line.rstrip().split(' ', 3)
                     dl.append( (nodename, x[0][0], x[0][1:]+'-'+x[1],r.sub('',x[2]),x[3]))
         sources.append(dl)
@@ -122,7 +122,7 @@ elif 'merge-logs' in form:
     print("<h1>Merged log for " + path + "</h1>")
     print("""<table class='table table-condensed table-hover table-responsive'>""")
 
-    sd = {'I':'info','W':'warning','E':'danger'}
+    sd = {'I':'info','W':'warning','E':'danger','F':'danger'}
 
     prev = None
     for d in data:
