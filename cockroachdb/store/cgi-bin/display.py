@@ -206,7 +206,7 @@ elif path == '.':
         print("<th><a href='" + cpath + "?filter=*:" + n + "'>" +  n + "</a></th>")
     print("</tr></thead><tbody>")
     for t in tests:
-        print("<tr><td><a href='" + cpath + "?filter=" + t + ":*'>" + t + "</a></td>")
+        print("<tr><td><a href='" + cpath + "?filter=" + t + ":*'>" + t.replace("cockroachdb-","") + "</a></td>")
         for n in nemeses:
             print("<td>")
             tn = t + ':' + n

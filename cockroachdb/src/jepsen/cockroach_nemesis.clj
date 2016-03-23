@@ -129,7 +129,7 @@
 ;; start/stop server
 (defn startstop
   [n]
-  {:name "startstop"
+  {:name (str "startstop" (if (> n 1) n ""))
    :generator nemesis-single-gen
    :client (nemesis/hammer-time (comp (partial take n) shuffle) "cockroach")
    :clocks false})
@@ -148,7 +148,7 @@
 
 (defn startkill
   [n]
-  {:name "startkill"
+  {:name (str "startkill" (if (> n 1) n ""))
    :generator nemesis-single-gen
    :client (startkill-client n)
    :clocks false})
