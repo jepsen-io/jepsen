@@ -808,18 +808,22 @@
                   aborts    (->> all-fails
                                  (r/filter #(= :abort-uncertain (:error %)))
                                  (into []))
+                  processes (->> final-read-l (map #(nth % 2)) (into #{}))
 
                   [off-order-sts off-order-val] (monotonic-order final-read-l)
-                  
-                  sub-lists (->> (range numnodes)
-                                 (map (fn [x] (->> final-read-l
-                                                   (r/filter #(= (+ x 1) (nth % 2)))
-                                                   (into ())
-                                                   (reverse))))
-                                 (into []))
 
-                  off-order-pairs (map monotonic-order sub-lists)
-                  off-order-val-pernode (map last off-order-pairs)
+                  filter (fn [col] (fn [x] (->> final-read-l
+                                                (r/filter #(= x (nth % col)))
+                                                (into ())
+                                                (reverse))))
+                  
+                  test-off-order (fn [col src] (->> src
+                                                    (map (filter col))
+                                                    (map monotonic-order)
+                                                    (map last)))
+                  off-order-val-perclient (test-off-order 2 processes)
+                  off-order-val-pernode (test-off-order 4 (map #(+ 1 %) (range numnodes)))
+                  off-order-val-pertable (test-off-order 3 (range multitable-spread))
 
                   dups        (into [] (for [[id freq] (frequencies (into [] (map first final-read-l))) :when (> freq 1)] id))
 
@@ -830,8 +834,8 @@
               {:valid?          (and (empty? lost)
                                      (empty? dups)
                                      (every? true? (into [] (map empty? off-order-sts)))
-                                     ;; linearizability per client
-                                     (every? true? (into [] (map empty? off-order-val-pernode)))
+                                     ;; serializability per client
+                                     (every? true? (into [] (map empty? off-order-val-perclient)))
                                      )
                :retry-frac      (util/fraction (count retries) (count history))
                :abort-frac      (util/fraction (count aborts) (count history))
@@ -840,10 +844,12 @@
                :duplicates      dups
                :order-by-errors off-order-sts
                :value-reorders  off-order-val
+               :value-reorders-perclient off-order-val-perclient
                :value-reorders-pernode off-order-val-pernode
+               :value-reorders-pertable off-order-val-pertable
                })))))
 
-(defrecord MultitableClient [tbl-created?]
+(defrecord MultitableClient [tbl-created? cnt]
   client/Client
   (setup! [this test node]
     (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
@@ -860,9 +866,9 @@
                      (Thread/sleep 1000)
                      (info "Creating table " x)
                      (j/execute! @conn [(str "create table mono" x
-                                             " (val int, sts string, node int, tb int)")])
+                                             " (val int, sts string, node int, proc int, tb int)")])
                      (Thread/sleep 1000)
-                     (j/insert! @conn (str "mono" x) {:val -1 :sts "0" :node -1 :tb x})
+                     (j/insert! @conn (str "mono" x) {:val -1 :sts "0" :node -1 :proc -1 :tb x})
                      )))))
 
       (assoc this :conn conn :nodenum n)))
@@ -873,17 +879,19 @@
           nodenum (:nodenum this)]
       (case (:f op)
         :add  (with-txn op [c conn]
-                (let [rt (rand-int multitable-spread)
-                      dbtime (db-time c)
-                      v (System/nanoTime)]
-                  (j/insert! c (str "mono" rt) {:val v :sts dbtime :node nodenum :tb rt})
-                  (assoc op :type :ok, :value [v dbtime nodenum rt])))
-
+                  (let [rt (rand-int multitable-spread)
+                        [dbtime v] (locking cnt
+                                     (let [dbtime' (db-time c)
+                                           v' (swap! cnt inc)]
+                                       [dbtime' v']))]
+                    (j/insert! c (str "mono" rt) {:val v :sts dbtime :node nodenum :proc (:process op) :tb rt})
+                    (assoc op :type :ok, :value [v dbtime (:process op) rt nodenum])))
+                
         :read (with-txn-notimeout op [c conn]
                 (->> (range multitable-spread)
                      (map (fn [x]
                             (->> (j/query c [(str "select * from mono" x " where node <> -1")])
-                                 (map (fn [row] (list (:val row) (str->int (:sts row)) (:node row) (:tb row))))
+                                 (map (fn [row] (list (:val row) (str->int (:sts row)) (:proc row) (:tb row) (:node row))))
                                  )))
                      (reduce concat)
                      (sort-by (fn [x] (nth x 1)))
@@ -904,7 +912,7 @@
   (basic-test nodes nemesis linearizable
               {:name        "monotonic-multitable"
                :concurrency concurrency-factor
-               :client      (MultitableClient. (atom false))
+               :client      (MultitableClient. (atom false) (atom 0))
                :generator   (gen/phases
                              (->> (range)
                                   (map (partial array-map
