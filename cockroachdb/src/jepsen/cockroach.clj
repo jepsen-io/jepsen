@@ -368,7 +368,12 @@
   [conn & body]
   `(let [res# (do ~@body)]
      (with-error-handling res#
-       (if (and (:error res#) (re-find #"This connection has been closed" (:error res#)))
+       (if (and (:error res#)
+                (or (re-find #"This connection has been closed" (:error res#))
+                    (re-find #"An I/O error occurred while sending to the backend" (:error res#))
+                    (re-find #"Cannot change transaction isolation level in the middle of a transaction." (:error res#))
+                    (re-find #"current transaction is aborted, commands ignored until end of transaction block" (:error res#))
+                    ))
            (let [spec# (close-conn (deref ~conn))
                  new-conn# (open-conn spec#)]
              (info "Disconnected; re-opening connection...")
