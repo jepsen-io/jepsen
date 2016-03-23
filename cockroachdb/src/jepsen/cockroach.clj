@@ -363,6 +363,20 @@
             (assoc ~op :type :fail, :error (str "PSQLException: " m#)))
         )))
 
+(defmacro with-reconnect
+  "Reconnect if failed due to disconnect."
+  [conn & body]
+  `(let [res# (do ~@body)]
+     (with-error-handling res#
+       (if (and (:error res#) (re-find #"This connection has been closed" (:error res#)))
+           (let [spec# (close-conn (deref ~conn))
+                 new-conn# (open-conn spec#)]
+             (info "Disconnected; re-opening connection...")
+             (reset! ~conn new-conn#)
+             (do ~@body))
+           res#))))
+       
+
 (defmacro with-timeout
   "Write an evaluation within a timeout check. Re-open the connection
   if the operation time outs."
@@ -383,18 +397,20 @@
      (assoc ~op :type :info, :value [:timeout :url (:subname (deref ~conn))])
      (with-txn-retries ~conn
        (with-annotate-errors
-         (with-error-handling ~op
-           (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
-             ~@body))))))
+         (with-reconnect ~conn
+           (with-error-handling ~op
+             (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
+               ~@body)))))))
 
 (defmacro with-txn-notimeout
   "Wrap a evaluation within a SQL transaction without timeout."
   [op [c conn] & body]
   `(with-txn-retries ~conn
      (with-annotate-errors
-       (with-error-handling ~op
-         (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
-           ~@body)))))
+       (with-reconnect ~conn
+         (with-error-handling ~op
+           (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
+             ~@body))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;; Common test definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
