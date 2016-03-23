@@ -26,29 +26,25 @@ atomically and that the visible histories from all nodes are
 linearizable. During the tests, random partitions are created in the
 network to exercise the consistency protocol.
 
-For now three tests are implemented:
+The following tests are implemented:
 
 - "atomic": concurrent atomic updates to a shared register;
-- "sets":  concurrent unique appends to a shared table;
-- "monotonic-part", "monotonic-skews": concurrent ordered appends with
-  carried dependency;
-- "monotonic-multitable-part", "monotonic-multitable-skews": concurrent
-  ordered appends to separate tables;
-- "bank": concurrent transfers between rows of a shared table.
+- "sets": concurrent unique appends to a shared table;
+- "monotonic: concurrent ordered appends with carried dependency;
+- "monotonic-multitable": concurrent ordered appends to separate
+  tables;
+- "bank": concurrent transfers between rows of a shared table;
+- "bank-multitable": concurrent transfers between rows of different tables.    
+    
+Nemeses:
 
-Overview of results
--------------------
-
-As of Jan 26 2016, following the test procedure outlined below and
-the test code in this repository, during multple tests run at
-Cockroach Labs there were no serious inconsistencies found by Jepsen.
-
-- for the atomic updates, unique appends, monotonic on 1 table with
-  network partition, monotonic-spread with either partitions or clock
-  skews, and bank transfers: *no anomaly found*;
-- for monotonic on 1 table with clock skews: some
-  anomalies found when server runs *without* `--linearizable`; with
-  this flag set, the anomalies disappear.
+- "blank" no nemesis
+- "skews" clock skews up to +/- 100ms
+- "bigskews" clock jumps up to +/- 10mn
+- "parts" random network partitions
+- "majring" random network partition where each node sees a majority of other nodes
+- "startstop"  db processes are stopped and restarted with SIGSTOP/SIGCONT
+- "startkill" db processes are stopped with SIGKILL and restarted from scratch  
 
 Test details: atomic updates
 -----------------------------
@@ -57,8 +53,6 @@ One table contains a single row.
 
 Jepsen sends concurrently to different nodes either read, write or
 atomic compare-and-swap operations.
-
-Concurrently, a nemesis partitions the network between the nodes randomly.
 
 Each node may report ok, the operation is known to have succeeded;
 fail, the operation is known to have failed; and unknown otherwise
@@ -76,8 +70,6 @@ One shared table of values.
 Jepsen sends appends of unique values via different
 nodes over time.
 
-Concurrently, a nemesis partitions the network between the nodes randomly.
-
 Each node may report ok, the operation is known to have succeeded;
 fail, the operation is known to have failed; and unknown otherwise
 (e.g. the connection dropped before the answer could be read).
@@ -87,16 +79,14 @@ added two or more times; that all known-ok additions are indeed
 present in the table; and that all known-fail additions are indeed
 not present in the table.
 
-Test details: monotonic with network partition
-----------------------------------------------
+Test details: monotonic
+-----------------------
 
-One shared table of triplets (value, timestamp).
+One shared table of pairs (value, timestamp).
 
 Jepsen sends atomic transactions that append the last known max
 value + 1 and the current db's now(), concurrently to different nodes
 over time.
-
-Concurrently, a nemesis partitions the network between the nodes randomly.
 
 Each node may report ok, the operation is known to have succeeded;
 fail, the operation is known to have failed; and unknown otherwise
@@ -107,14 +97,8 @@ or more times; that all known-ok additions are indeed present in the
 table; that all max values are in the same order as the now()
 timestamps.
 
-Test details: monotonic with clock skews
-----------------------------------------
-
-Same test setup as above; however here the nemesis insert random clock
-skews of +/- 100ms on each node instead of partitions.
-
-Test details: monotonic over multiple tables, network partitions
-----------------------------------------------------------------
+Test details: monotonic over multiple tables
+--------------------------------------------
 
 Multiple (e.g. 5) tables, each containing triplets (value, timestamp, clientid).
 
@@ -123,8 +107,6 @@ Each client repeatedly:
 - inserts the value of a local (per client) counter, the db timestamp
   and its own client ID in the randomly chosen table,
 - records either success for the added value, or failure.
-
-Concurrently, a nemesis partitions the network between the nodes randomly.
 
 Each node may report ok, the operation is known to have succeeded;
 fail, the operation is known to have failed; and unknown otherwise
@@ -136,16 +118,11 @@ table; and that, per client id, the merged history for that client id
 across all tables presents the client's counter value in the same
 order as the db timestamp.
 
-Test details: monotonic over multiple tables, clock skews
-----------------------------------------------------------------
-
-Same test setup as above; however here the nemesis insert random clock
-skews of +/- 100ms on each node instead of partitions.
-
 Test details: bank transfers
 ----------------------------
 
-One shared table contains multiple bank accounts, one per row.
+One shared table contains multiple bank accounts, one per row (or one
+per table in the "bank-multitable" variant).
 
 Jepsen sends concurrently read and transfer operations via
 different nodes to/between randomly selected accounts.
