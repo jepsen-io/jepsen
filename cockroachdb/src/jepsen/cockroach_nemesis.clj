@@ -127,10 +127,30 @@
    :clocks false})
 
 ;; start/stop server
-(def startstop
+(defn startstop
+  [n]
   {:name "startstop"
    :generator nemesis-single-gen
-   :client (nemesis/hammer-time "cockroach")
+   :client (nemesis/hammer-time (comp (partial take n) shuffle) "cockroach")
+   :clocks false})
+
+;; start/kill server
+(defn startkill-client
+  [n]
+  (nemesis/node-start-stopper (comp (partial take n) shuffle)
+                              (fn start [t n]
+                                (c/su (c/exec :killall :-9 :cockroach))
+                                [:paused :cockroach])
+                              (fn stop [t n]
+                                (c/su (c/exec (:runcmd t)))
+                                [:resumed :cockroach])))
+  
+
+(defn startkill
+  [n]
+  {:name "startkill"
+   :generator nemesis-single-gen
+   :client (startkill-client n)
    :clocks false})
 
 ;; majorities ring
