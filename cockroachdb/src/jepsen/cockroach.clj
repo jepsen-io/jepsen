@@ -841,6 +841,9 @@
                                      (every? true? (into [] (map empty? off-order-sts)))
                                      ;; serializability per client
                                      (every? true? (into [] (map empty? off-order-val-perclient)))
+
+                                     ;; linearizability with --linearizable
+                                     (or (not linearizable) (every? true? (into [] (map empty? off-order-val))))
                                      )
                :retry-frac      (util/fraction (count retries) (count history))
                :abort-frac      (util/fraction (count aborts) (count history))
@@ -883,14 +886,13 @@
     (let [conn (:conn this)
           nodenum (:nodenum this)]
       (case (:f op)
-        :add  (with-txn op [c conn]
+        :add  (locking cnt
+                (with-txn op [c conn]
                   (let [rt (rand-int multitable-spread)
-                        [dbtime v] (locking cnt
-                                     (let [dbtime' (db-time c)
-                                           v' (swap! cnt inc)]
-                                       [dbtime' v']))]
+                        dbtime (db-time c)
+                        v (swap! cnt inc)]
                     (j/insert! c (str "mono" rt) {:val v :sts dbtime :node nodenum :proc (:process op) :tb rt})
-                    (assoc op :type :ok, :value [v dbtime (:process op) rt nodenum])))
+                    (assoc op :type :ok, :value [v dbtime (:process op) rt nodenum]))))
                 
         :read (with-txn-notimeout op [c conn]
                 (->> (range multitable-spread)
