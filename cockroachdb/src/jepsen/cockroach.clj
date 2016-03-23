@@ -190,6 +190,14 @@
    extra-args
    [:--logtostderr :true :>> errlog (c/lit "2>&1")]))
 
+(defn cmdline-gen
+  [firstnode linearizable]
+  (wrap-env (str "COCKROACH_LINEARIZABLE="
+                 (if linearizable "true" "false"))
+            (cockroach-start-cmdline
+             [(str "--join=" (name firstnode))]
+             )))
+
 (defmacro csql! [& body]
   "Execute SQL statements using the cockroach sql CLI."
   `(c/cd working-path
@@ -235,10 +243,7 @@
 
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
-        (c/trace (c/su (c/exec
-                        (wrap-env (str "COCKROACH_LINEARIZABLE=" (if linearizable "true" "false"))
-                                  (cockroach-start-cmdline
-                                   [(str "--join=" (name (jepsen/primary test)))])))))
+        (c/trace (c/su (c/exec (:runcmd test))))
 
         (jepsen/synchronize test)
 
@@ -412,6 +417,7 @@
           :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
           :nemesis (if (= jdbc-mode :cdb-cluster) (:client nemesis) nemesis/noop)
           :linearizable linearizable
+          :runcmd  (cmdline-gen (first nodes) linearizable)
           }
          (dissoc opts :name)
          ))
