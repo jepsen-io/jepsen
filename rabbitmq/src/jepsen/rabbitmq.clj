@@ -99,6 +99,12 @@
 
 (def queue "jepsen.queue")
 
+(defmacro with-ignore
+  "Ignores exceptions for a given body"
+  [& body]
+  `(try ~@body
+        (catch Exception _#)))
+
 (defn dequeue!
   "Given a channel and an operation, dequeues a value and returns the
   corresponding operation."
@@ -107,7 +113,7 @@
   ; then crash, the message should be re-delivered and we can count this as a
   ; failure.
   (timeout 5000 (assoc op :type :fail :value :timeout)
-           (let [[meta payload] (lb/get ch queue)
+           (let [[meta payload] (with-ignore (lb/get ch queue))
                  value          (codec/decode payload)]
              (if (nil? meta)
                (assoc op :type :fail :value :exhausted)
@@ -120,8 +126,7 @@
   `(let [~ch (lch/open ~conn)]
      (try ~@body
           (finally
-            (try (rmq/close ~ch)
-                 (catch AlreadyClosedException _#))))))
+            (with-ignore (rmq/close ~ch))))))
 
 (defrecord QueueClient [conn]
   client/Client
@@ -159,7 +164,7 @@
                                :persistent    true)
 
                    ; Block until message acknowledged
-                   (if (lco/wait-for-confirms ch 5000)
+                   (if (with-ignore (lco/wait-for-confirms ch 5000))
                      (assoc op :type :ok)
                      (assoc op :type :fail)))
 
@@ -200,7 +205,7 @@
           (lco/select ch)
           (lq/purge ch "jepsen.semaphore")
           (lb/publish ch "" "jepsen.semaphore" (byte-array 0))
-          (when-not (lco/wait-for-confirms ch 5000)
+          (when-not (with-ignore (lco/wait-for-confirms ch 5000))
             (throw (RuntimeException.
                      "couldn't enqueue initial semaphore message!")))))
 
@@ -208,14 +213,14 @@
 
   (teardown! [_ test]
     ; Purge
-    (meh (timeout 5000 nil
+    (meh (with-ignore (timeout 5000 nil
                   (with-ch [ch conn]
-                    (lq/purge ch "jepsen.semaphore"))))
+                    (lq/purge ch "jepsen.semaphore")))))
     (meh (rmq/close @ch))
     (meh (rmq/close conn)))
 
   (invoke! [this test op]
-    (case (:f op)
+    (with-ignore (case (:f op)
       :acquire (locking tag
                  (if @tag
                    (assoc op :type :fail :value :already-held)
@@ -258,6 +263,6 @@
                                 (catch ShutdownSignalException e
                                   (assoc op
                                          :type :ok
-                                         :value (.getMessage e)))))))))))
+                                         :value (.getMessage e))))))))))))
 
 (defn mutex [] (Semaphore. (atom false) nil nil nil))
