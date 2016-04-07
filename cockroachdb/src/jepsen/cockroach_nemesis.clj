@@ -10,7 +10,7 @@
   )
 
 ;; duration of 1 jepsen test
-(def test-duration 30) ; seconds
+(def test-duration 45) ; seconds
 
 ;; duration between interruptions
 (def nemesis-delay 5) ; seconds
