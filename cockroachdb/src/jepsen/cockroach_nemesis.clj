@@ -186,9 +186,39 @@
    :client (clock-milli-scrambler 100)
    :clocks true})
 
+(defn clock-scrambler-restart
+  "Randomizes the system clock of all nodes within a dt-second window.
+  Restarts the db server if it stops."
+  [dt]
+  (reify client/Client
+    (setup! [this test _]
+      this)
+
+    (invoke! [this test op]
+      (assoc op :value
+             (case (:f op)
+               :start (c/on-many (:nodes test)
+                                 (let [t (+ (/ (System/currentTimeMillis) 1000)
+                                            (- (rand-int (* 2 dt)) dt))]
+                                   (nemesis/set-time! t)))
+               :stop (c/on-many (:nodes test)
+                                (c/su (c/exec :ntpdate ntpserver))
+                                (when (= "" (try
+                                              (c/exec :ps :a c/| :grep :cockroach c/| :grep :-v :grep)
+                                              (catch RuntimeException e "")))
+                                  (try
+                                    (c/su (c/exec (:runcmd test)))
+                                    (catch RuntimeException e (.getMessage e)))))
+               )))
+
+
+    (teardown! [this test]
+      )
+))
+
 (def bigskews
   {:name "bigskews"
    :generator nemesis-single-gen
-   :client (nemesis/clock-scrambler 600)
+   :client (clock-scrambler-restart 600)
    :clocks true})
 
