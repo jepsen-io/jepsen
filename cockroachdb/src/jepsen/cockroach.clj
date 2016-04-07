@@ -111,17 +111,18 @@
 
 ;; How to extract db time
 (defn db-time
-  "Retrieve the current time (previse) from the database."
+  "Retrieve the current time (precise, monotonic) from the database."
   [c]
   (cond (= jdbc-mode :pg-local)
         (->> (j/query c ["select extract(microseconds from now()) as ts"] :row-fn :ts)
-             (first))
+             (first)
+             (str))
         
         true
-        (->> (j/query c [(str "select extract(epoch_nanoseconds from transaction_timestamp()) as ts,"
-                              "transaction_timestamp_unique() as gen")])
-             (map (fn [t] (format "%d%010d" (:ts t) (:gen t))))
-             (first))
+        (->> (j/query c ["select cluster_logical_timestamp()*10000000000::decimal as ts"] :row-fn :ts)
+             (first)
+             (.toBigInteger)
+             (str))
         ))
 
 (def ssl-settings
@@ -736,7 +737,7 @@
                  (let [curmax (->> (j/query c ["select max(val) as m from mono"] :row-fn :m)
                                    (first))
                        currow (->> (j/query c ["select * from mono where val = ?" curmax])
-                                   (map (fn [row] (list (:val row) (:sts row) (:node row) (:tb row))))
+                                   (map (fn [row] (list (:val row) (str->int (:sts row)) (:node row) (:tb row))))
                                    (first))
                        dbtime (db-time c)]
                    (j/insert! c :mono {:val (+ 1 curmax) :sts dbtime :node nodenum :tb 0})
