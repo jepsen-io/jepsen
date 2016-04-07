@@ -32,14 +32,14 @@
 (import [java.net URLEncoder])
 
 ;; timeout for DB operations during tests
-(def timeout-delay 3500) ; milliseconds
+(def timeout-delay 4500) ; milliseconds
 
 ;; number of tables involved in the monotonic-multitable tests
 (def multitable-spread 2)
 
 
 ;; number of simultaneous clients
-(def concurrency-factor 20)
+(def concurrency-factor 30)
 
 ;; address of the Jepsen controlling node as seen by
 ;; the database nodes. Used to filter packet captures.
