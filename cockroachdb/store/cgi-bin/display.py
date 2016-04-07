@@ -4,6 +4,7 @@ import cgitb
 import os
 import sys
 import glob
+import re
 import urllib
 import edn_format
 import datetime
@@ -15,13 +16,14 @@ cgitb.enable()
 
 form = cgi.FieldStorage()
 
-base = os.path.abspath(os.getenv("DOCUMENT_ROOT"))
+base = os.path.realpath(os.getenv("DOCUMENT_ROOT"))
 os.chdir(base)
 path = ''
 if 'path' in form:
     path = form.getvalue('path')
-
-if len(path) == 0 or not os.path.abspath(path).startswith(base):
+repath = os.path.realpath(path)
+    
+if len(path) == 0 or not repath.startswith(base):
     path = '.'
 
 offset = 0
@@ -63,6 +65,79 @@ if path.split('.')[-1] in self_ext:
         contents = f.read().replace(r'\n','\n')
         print(contents)
 
+elif 'merge-logs' in form:
+    r = re.compile('.*/cockroachdb/cockroach/')
+    logfiles = glob.glob(os.path.join(path, "*/cockroach.stderr"))
+    sources = []
+    for l in logfiles:
+        nodename = l.split('/')[-2]
+        dl = []
+        with open(l) as f:
+            for line in f:
+                if line[0] in 'IWEF':
+                    x = line.rstrip().split(' ', 3)
+                    dl.append( (nodename, x[0][0], x[0][1:]+'-'+x[1],r.sub('',x[2]),x[3]))
+        sources.append(dl)
+    data = []
+    pos = [0 for i in sources]
+    while True:
+        exhausted = True
+
+        lowest = -1
+        row = None
+        minval = '999999-99:99:99.999999'
+        for s,sd in enumerate(sources):
+            if pos[s] < len(sd):
+                exhausted = False
+                v = sd[pos[s]]
+                if v[2] < minval:
+                    lowest = s
+                    minval = v[2]
+                    row = v
+        if not exhausted:
+            assert lowest >= 0
+            assert row is not None
+            data.append(row)
+            pos[lowest] += 1
+        if exhausted:
+            break
+        
+    print("Content-Type: text/html;charset=utf-8\n")
+    print("""<!DOCTYPE html>
+    <html lang=en>
+    <head>
+    <title>CockroachDB Jepsen merged time log</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.0/jquery.min.js"></script>
+    <script src="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"></script></head>
+    <body><div class="container-fluid">
+    <style type=text/css>
+    td { font-family: monospace !important; }
+    .hr { height: 3px; color: solid black; }
+    </style>""")
+
+    print("<h1>Merged log for " + path + "</h1>")
+    print("""<table class='table table-condensed table-hover table-responsive'>""")
+
+    sd = {'I':'info','W':'warning','E':'danger','F':'danger'}
+
+    prev = None
+    for d in data:
+        status = sd[d[1]]
+        if prev != d[0]:
+            if prev is not None:
+                print("<tr><td colspan=4></td></tr>")
+            prev = d[0]
+        print("<tr class=%s>" % status)
+        print(''.join( ("<td>%s</td>" %s for s in d) ))
+        print("</tr>")
+    print("</table></div></body></html")
+              
+
+                         
 
 elif 'grep-err' in form:
     print("Content-Type: text/plain;charset=utf-8\n")
@@ -107,9 +182,9 @@ elif path == '.':
     <h1>CockroachDB Jepsen test results</h1>
     <p class=lead>Welcome</p>
     <p class='alert alert-info'>For test descriptions, refer to <a href="https://github.com/cockroachdb/jepsen/blob/master/cockroachdb/README.rst">the README file</a>.
-    </br>
+    <br/>
     <strong>Note</strong><br/>These tests are run irregularly.<br/>
-    They may not use the latest code from the main CockroachDB repository.</br>
+    They may not use the latest code from the main CockroachDB repository.<br/>
     Some tests are run using unmerged change sets.<br/>
     <strong>Always refer to the Version column to place test results in context.</strong>
     </p>
@@ -131,7 +206,7 @@ elif path == '.':
         print("<th><a href='" + cpath + "?filter=*:" + n + "'>" +  n + "</a></th>")
     print("</tr></thead><tbody>")
     for t in tests:
-        print("<tr><td><a href='" + cpath + "?filter=" + t + ":*'>" + t + "</a></td>")
+        print("<tr><td><a href='" + cpath + "?filter=" + t + ":*'>" + t.replace("cockroachdb-","") + "</a></td>")
         for n in nemeses:
             print("<td>")
             tn = t + ':' + n
@@ -146,11 +221,11 @@ elif path == '.':
                         ok = r[edn_format.Keyword('valid?')]
                         status = {True:'success',False:'danger'}[ok]
                         ts = d[1][:-5]
-                        lfile = os.path.join(dpath, "latency-raw.png")
-                        if os.path.exists(lfile):
-                            print("<a href='/" + lfile + "'>" 
-                                  "<img height=60px src='/" + lfile + "' />"
-                                  "</a>")
+                        #lfile = os.path.join(dpath, "latency-raw.png")
+                        #if os.path.exists(lfile):
+                        #    print("<a href='/" + lfile + "'>" 
+                        #          "<img height=60px src='/" + lfile + "' />"
+                        #          "</a>")
                         print("<a href='" + cpath + "?entry=" + ts + "#" + ts + "' class='btn btn-%s btn-xs'>" % status + reltime(ts) +
                               ' <span class="glyphicon glyphicon-info-sign"></span>'
                               "</a>")
@@ -308,6 +383,8 @@ elif path == '.':
 
                 # Node logs
                 print("<td>")
+                print("<a href='" + cpath + "?path=" + urllib.parse.quote_plus(dpath) + "&merge-logs=1' class='btn btn-%s btn-xs'>" % status +
+                      "<span class='glyphicon glyphicon-filter'></span></a>")
                 logs = sorted(glob.glob(os.path.join(dpath, "*/cockroach.stderr")))
                 if len(logs) > 0:
                     for log in logs:
