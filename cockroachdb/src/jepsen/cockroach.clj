@@ -32,7 +32,7 @@
 (import [java.net URLEncoder])
 
 ;; timeout for DB operations during tests
-(def timeout-delay 4500) ; milliseconds
+(def timeout-delay 3000) ; milliseconds
 
 ;; number of tables involved in the monotonic-multitable tests
 (def multitable-spread 2)
@@ -306,17 +306,8 @@
          (cond (nil? e#)
                res#
 
-               (re-find #"read.*encountered previous write.*uncertainty interval" e#)
-               (assoc res# :error :retry-uncertainty)
-
-               (re-find #"retry txn" e#)
-               (assoc res# :error :retry-read-write-conflict)
-
-               (re-find #"txn.*failed to push" e#)
-               (assoc res# :error :retry-read-write-conflict)
-
-               (re-find #"txn aborted" e#)
-               (assoc res# :error :retry-write-write-conflict)
+               (re-find #"restart transaction" e#)
+               (assoc res# :retry true)
 
                true
                res#))
@@ -329,10 +320,7 @@
           trace# []
           backoff# 20]
      (let [res# (do ~@body)]
-       (if (some #(= (:error res#) %) [:retry-uncertainty
-                                       :retry-read-write-conflict
-                                       :retry-read-write-conflict
-                                       :retry-write-write-conflict])
+       (if (:retry res#)
          (if (> retry# 0)
            (do
              ;;(let [spec# (close-conn (deref ~conn))
@@ -366,21 +354,27 @@
 
 (defmacro with-reconnect
   "Reconnect if failed due to disconnect."
-  [conn & body]
-  `(let [res# (do ~@body)]
-     (with-error-handling res#
-       (if (and (:error res#)
-                (or (re-find #"This connection has been closed" (:error res#))
-                    (re-find #"An I/O error occurred while sending to the backend" (:error res#))
-                    (re-find #"Cannot change transaction isolation level in the middle of a transaction." (:error res#))
-                    (re-find #"current transaction is aborted, commands ignored until end of transaction block" (:error res#))
-                    ))
+  [conn retry & body]
+  `(let [res# (do ~@body)
+         uncertain# (and (:error res#)
+                         (or (re-find #"This connection has been closed" (:error res#))
+                             (re-find #"An I/O error occurred while sending to the backend" (:error res#))
+                             (re-find #"Cannot change transaction isolation level in the middle of a transaction." (:error res#))
+                             (re-find #"current transaction is aborted, commands ignored until end of transaction block" (:error res#))
+                             ))]
+     (if uncertain#
+       (do 
+         (with-error-handling res#
            (let [spec# (close-conn (deref ~conn))
                  new-conn# (open-conn spec#)]
              (info "Disconnected; re-opening connection...")
              (reset! ~conn new-conn#)
-             (do ~@body))
-           res#))))
+             res#))
+         (if ~retry
+           (do ~@body)
+           (assoc res# :type :info, :error (str "uncertain: " (:error res#))))
+         )
+       res#)))
        
 
 (defmacro with-timeout
@@ -403,7 +397,7 @@
      (assoc ~op :type :info, :value [:timeout :url (:subname (deref ~conn))])
      (with-txn-retries ~conn
        (with-annotate-errors
-         (with-reconnect ~conn
+         (with-reconnect ~conn false
            (with-error-handling ~op
              (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
                ~@body)))))))
@@ -413,7 +407,7 @@
   [op [c conn] & body]
   `(with-txn-retries ~conn
      (with-annotate-errors
-       (with-reconnect ~conn
+       (with-reconnect ~conn true
          (with-error-handling ~op
            (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
              ~@body))))))
@@ -540,6 +534,16 @@
                       (r/filter #(= :add (:f %)))
                       (r/map :value)
                       (into #{}))
+            fails (->> history
+                      (r/filter op/fail?)
+                      (r/filter #(= :add (:f %)))
+                      (r/map :value)
+                      (into #{}))
+            unsure (->> history
+                      (r/filter op/info?)
+                      (r/filter #(= :add (:f %)))
+                      (r/map :value)
+                      (into #{}))
             final-read-l (->> history
                           (r/filter op/ok?)
                           (r/filter #(= :read (:f %)))
@@ -553,26 +557,31 @@
 
               dups        (into [] (for [[id freq] (frequencies final-read-l) :when (> freq 1)] id))
 
-              ;;The OK set is every read value which we tried to add
-              ok          (set/intersection final-read attempts)
+              ;;The OK set is every read value which we added successfully
+              ok          (set/intersection final-read adds)
 
               ;; Unexpected records are those we *never* attempted.
               unexpected  (set/difference final-read attempts)
+
+              ;; Revived records are those that were reported as failed and still appear.
+              revived  (set/intersection final-read fails)
 
               ;; Lost records are those we definitely added but weren't read
               lost        (set/difference adds final-read)
 
               ;; Recovered records are those where we didn't know if the add
               ;; succeeded or not, but we found them in the final set.
-              recovered   (set/difference ok adds)]
+              recovered   (set/intersection final-read unsure)]
 
-          {:valid?          (and (empty? lost) (empty? unexpected) (empty? dups))
+          {:valid?          (and (empty? lost) (empty? unexpected) (empty? dups) (empty? revived))
            :duplicates      dups
            :ok              (util/integer-interval-set-str ok)
            :lost            (util/integer-interval-set-str lost)
            :unexpected      (util/integer-interval-set-str unexpected)
            :recovered       (util/integer-interval-set-str recovered)
+           :revived         (util/integer-interval-set-str revived)
            :ok-frac         (util/fraction (count ok) (count attempts))
+           :revived-frac    (util/fraction (count revived) (count fails))
            :unexpected-frac (util/fraction (count unexpected) (count attempts))
            :lost-frac       (util/fraction (count lost) (count attempts))
            :recovered-frac  (util/fraction (count recovered) (count attempts))})))))
@@ -678,31 +687,46 @@
                               (r/map :value)
                               (reduce (fn [_ x] x) nil)
                               )
-            all-fails (->> history
-                           (r/filter op/fail?))]
+            fails (->> history
+                            (r/filter op/fail?)
+                            (r/filter #(= :add (:f %)))
+                            (r/map :value)
+                            (into #{}))
+                                          
+            unsure (->> history
+                            (r/filter op/info?)
+                            (r/filter #(= :add (:f %)))
+                            (r/map :value)
+                            (into #{}))]
         (if-not final-read-l
           {:valid? false
            :error  "Set was never read"})
         (let [
-              retries    (->> all-fails
-                              (r/filter #(= :retry (:error %)))
-                              (into []))
-              aborts    (->> all-fails
-                             (r/filter #(= :abort-uncertain (:error %)))
-                             (into []))
               [off-order-sts off-order-val] (monotonic-order final-read-l)
 
-              dups        (into [] (for [[id freq] (frequencies (map first final-read-l)) :when (> freq 1)] id))
+              adds   (into #{} (map first all-adds-l))
+              ok     (into #{} (map first final-read-l))
+              
+              dups        (into #{} (for [[id freq] (frequencies ok) :when (> freq 1)] id))
 
               ;; Lost records are those we definitely added but weren't read
-              lost        (set/difference (into #{} (map first all-adds-l)) (into #{} (map first final-read-l)))]
+              lost        (set/difference adds ok)
+
+              ;; Revived records are those we failed to add but were read
+              revived     (set/intersection ok fails)
+
+              ;; Recovered records are those we were not sure about and that were read
+              recovered     (set/intersection ok unsure)
+              ]
           {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts)
-                                 (empty? off-order-val)
+                                 (empty? off-order-val) (empty? revived)
                                  )
-           :retry-frac      (util/fraction (count retries) (count history))
-           :abort-frac      (util/fraction (count aborts) (count history))
+           :revived         (util/integer-interval-set-str revived)
+           :revived-frac    (util/fraction (count revived) (count fails))        
+           :recovered       (util/integer-interval-set-str recovered)
+           :recovered-frac  (util/fraction (count recovered) (count unsure))
            :lost            (util/integer-interval-set-str lost)
-           :lost-frac       (util/fraction (count lost) (count all-adds-l))
+           :lost-frac       (util/fraction (count lost) (count adds))
            :duplicates      dups
            :order-by-errors off-order-sts
            :value-reorders  off-order-val
@@ -793,52 +817,59 @@
                             (r/filter #(= :add (:f %)))
                             (r/map :value)
                             (into []))
+            fails (->> history
+                      (r/filter op/fail?)
+                      (r/filter #(= :add (:f %)))
+                      (r/map :value)
+                      (into #{}))
+            unsure (->> history
+                      (r/filter op/info?)
+                      (r/filter #(= :add (:f %)))
+                      (r/map :value)
+                      (into #{}))
             final-read-l (->> history
                               (r/filter op/ok?)
                               (r/filter #(= :read (:f %)))
                               (r/map :value)
                               (reduce (fn [_ x] x) nil)
-                              )
-            all-fails (->> history
-                           (r/filter op/fail?))]
-            (if-not final-read-l
-              {:valid? false
-               :error  "Set was never read"})
+                              )]
+        (if-not final-read-l
+          {:valid? false
+           :error  "Set was never read"})
 
-            (let [final-read  (into #{} final-read-l)
-                  all-adds    (into #{} all-adds-l)
+        (let [[off-order-sts off-order-val] (monotonic-order final-read-l)
+              
+              filter (fn [col] (fn [x] (->> final-read-l
+                                            (r/filter #(= x (nth % col)))
+                                            (into ())
+                                            (reverse))))
+              
+              test-off-order (fn [col src] (->> src
+                                                (map (filter col))
+                                                (map monotonic-order)
+                                                (map last)))
+              processes (->> final-read-l (map #(nth % 2)) (into #{}))
+              off-order-val-perclient (test-off-order 2 processes)
+              off-order-val-pernode (test-off-order 4 (map #(+ 1 %) (range numnodes)))
+              off-order-val-pertable (test-off-order 3 (range multitable-spread))
 
-                  retries    (->> all-fails
-                                  (r/filter #(= :retry (:error %)))
-                                  (into []))
-                  aborts    (->> all-fails
-                                 (r/filter #(= :abort-uncertain (:error %)))
-                                 (into []))
-                  processes (->> final-read-l (map #(nth % 2)) (into #{}))
+              adds (into #{} (map first all-adds-l))
+              ok  (into #{} (map first final-read-l))
+              
+              dups        (into #{} (for [[id freq] (frequencies ok) :when (> freq 1)] id))
 
-                  [off-order-sts off-order-val] (monotonic-order final-read-l)
+              ;; Lost records are those we definitely added but weren't read
+              lost        (set/difference adds ok)
 
-                  filter (fn [col] (fn [x] (->> final-read-l
-                                                (r/filter #(= x (nth % col)))
-                                                (into ())
-                                                (reverse))))
-                  
-                  test-off-order (fn [col src] (->> src
-                                                    (map (filter col))
-                                                    (map monotonic-order)
-                                                    (map last)))
-                  off-order-val-perclient (test-off-order 2 processes)
-                  off-order-val-pernode (test-off-order 4 (map #(+ 1 %) (range numnodes)))
-                  off-order-val-pertable (test-off-order 3 (range multitable-spread))
+              ;; Revived records are those we failed to add but were read
+              revived     (set/intersection ok fails)
 
-                  dups        (into [] (for [[id freq] (frequencies (into [] (map first final-read-l))) :when (> freq 1)] id))
-
-                  ; Lost records are those we definitely added but weren't read
-                  lost        (into [] (set/difference
-                                        (into #{} (map first all-adds))
-                                        (into #{} (map first final-read))))]
+              ;; Recovered records are those we were not sure about and that were read
+              recovered     (set/intersection ok unsure)
+              ]
               {:valid?          (and (empty? lost)
                                      (empty? dups)
+                                     (empty? revived)
                                      (every? true? (into [] (map empty? off-order-sts)))
                                      ;; serializability per client
                                      (every? true? (into [] (map empty? off-order-val-perclient)))
@@ -846,10 +877,12 @@
                                      ;; linearizability with --linearizable
                                      (or (not linearizable) (every? true? (into [] (map empty? off-order-val))))
                                      )
-               :retry-frac      (util/fraction (count retries) (count history))
-               :abort-frac      (util/fraction (count aborts) (count history))
-               :lost            (into [] lost)
-               :lost-frac       (util/fraction (count lost) (count all-adds-l))
+               :revived         (util/integer-interval-set-str revived)
+               :revived-frac    (util/fraction (count revived) (count fails))        
+               :recovered       (util/integer-interval-set-str recovered)
+               :recovered-frac  (util/fraction (count recovered) (count unsure))
+               :lost            (util/integer-interval-set-str lost)
+               :lost-frac       (util/fraction (count lost) (count adds))
                :duplicates      dups
                :order-by-errors off-order-sts
                :value-reorders  off-order-val
