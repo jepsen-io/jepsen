@@ -41,19 +41,32 @@ Fire up each VM:
 lxc-start --name n1
 ```
 
+Log into the containers, (may have to specify tty 0 to use console correctly) e.g.,:
+
+```sh
+lxc-console --name n1 -t 0
+```
+
+In the containers, update keys used by apt to verify packages:
+
+```sh
+apt-key update
+apt-get update
+```
+
 And set your root password--I use `root`/`root` by default in Jepsen.
 
 ```sh
 passwd
 ```
 
-Copy your SSH key
+Copy your SSH key (on host):
 
 ```sh
 cat ~/.ssh/id_rsa.pub
 ```
 
-and add it to root's `authorized_keys`:
+and add it to root's `authorized_keys` (in containers):
 
 ```sh
 apt-get install -y sudo vim
