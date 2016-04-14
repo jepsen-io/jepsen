@@ -45,7 +45,7 @@
 
 (deftest checker-test
   (let [even-checker (reify checker/Checker
-                       (check [this test model history]
+                       (check [this test model history opts]
                          {:valid? (even? (count history))}))
         history (->> (fn [k] (->> (range k)
                                   (map (partial array-map :value))
@@ -57,8 +57,10 @@
             :results {1 {:valid? true}
                       2 {:valid? false}
                       3 {:valid? true}}
-            :failures {2 {:valid? false}}}
+            :failures [2]}
            (checker/check (checker even-checker)
+                          {:name "independent-checker-test"
+                           :start-time 0}
                           nil
-                          nil
-                          history)))))
+                          history
+                          {})))))
