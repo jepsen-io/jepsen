@@ -105,7 +105,6 @@
                 t
                 (time.local/format-local-time t :basic-date-time)))))
   ([test & args]
-   (info :file args)
    (->> args
         flatten
         (remove nil?)
