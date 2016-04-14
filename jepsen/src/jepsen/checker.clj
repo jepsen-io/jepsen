@@ -56,7 +56,6 @@
   (reify Checker
     (check [this test model history opts]
       (let [a (linear/analysis model history)]
-        (prn :lin-subdir opts)
         (when-not (:valid? a)
           (linear.report/render-analysis!
             history a (.getCanonicalPath (store/path! test (:subdirectory opts)
