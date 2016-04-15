@@ -38,20 +38,29 @@
 
   fgen must be pure and idempotent."
   [keys fgen]
-  (let [state (atom {:keys keys
-                     :gen  (when-let [k1 (first keys)]
-                             (fgen k1))})]
+  (let [state (atom {:keys (seq keys)
+                     :gen  (when (seq keys)
+                             (fgen (first keys)))})]
     (reify Generator
       (op [this test process]
         (let [{:keys [keys gen] :as s} @state]
-          (when-let [k (first keys)]
+          (when keys
             (if-let [op (gen/op gen test process)]
-              (assoc op :value (tuple k (:value op)))
+              ; We've got an op
+              (assoc op :value (tuple (first keys) (:value op)))
+
               ; Generator exhausted
-              (when-let [keys' (next keys)]
-                (compare-and-set! state s {:keys keys'
-                                           :gen  (fgen (first keys'))})
-                (recur test process)))))))))
+              (do (swap! state (fn [s]
+                                 (if (identical? keys (:keys s))
+                                   (if-let [keys (next keys)]
+                                     ; We have another key
+                                     {:keys keys
+                                      :gen (fgen (first keys))}
+                                     ; Out of keys
+                                     {})
+                                   ; Someone else updated the key list; recur
+                                   s)))
+                  (recur test process)))))))))
 
 (defn concurrent-generator
   "Takes a positive integer n, a sequence of keys (k1 k2 ...) and a function
