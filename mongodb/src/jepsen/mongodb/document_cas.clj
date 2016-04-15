@@ -89,15 +89,16 @@
   (test- "document cas majority"
          (merge
            {:client       (client :majority)
-            :concurrency  10
+            :concurrency  100
             :generator    (std-gen
-                            (independent/sequential-generator
+                            (independent/concurrent-generator
+                              10
                               (range)
                               (fn [k]
                                 (->> (gen/mix [w cas cas])
                                      (gen/reserve 5 r)
                                      (gen/stagger 1)
-                                     (gen/time-limit 45)))))
+                                     (gen/time-limit 30)))))
             :model        (model/cas-register)
             :checker      (checker/compose
                             {:linear (independent/checker checker/linearizable)
