@@ -43,6 +43,37 @@
                   (map :value)
                   set))))))
 
+(deftest concurrent-generator-test
+  (testing "empty keys"
+    (is (= []
+           (ops (range 10) (concurrent-generator 1 [] identity)))))
+
+  (testing "Too few threads"
+    (is (thrown-with-msg?
+          Exception
+          #"With 10 worker threads and 5 nodes, you can only run 2 keys concurrently, but you requested 3 concurrent keys from jepsen\.independent/concurrent-generator"
+          (ops (range 10) (concurrent-generator 3 [] identity)))))
+
+  (testing "Uneven threads"
+    (is (thrown-with-msg?
+          Exception
+          #"This jepsen\.independent/concurrent-generator has 11 threads to work with, but can only use 10 of those threads to run 2 concurrent keys with 5 threads apiece\. Consider raising or lowering the test's :concurrency to a multiple of 5\."
+          (ops (range 11) (concurrent-generator 2 [] identity)))))
+
+  (testing "Fully concurrent"
+    (let [kmax    10
+          vmax    5
+          n       5
+          threads 100]
+      (is (= (set (for [k (range kmax), v (range vmax)] [k v]))
+             (->> (fn [k] (gen/seq (map (partial array-map :value)
+                                        (range vmax))))
+                  (concurrent-generator n (range kmax))
+                  (ops (range threads))
+                  (map :value)
+                  set))))))
+
+
 (deftest checker-test
   (let [even-checker (reify checker/Checker
                        (check [this test model history opts]

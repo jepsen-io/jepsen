@@ -10,12 +10,13 @@
 (defn ops
   "All ops from a generator"
   [threads gen]
-  (let [ops (atom [])]
+  (let [ops (atom [])
+        t   (assoc a-test :concurrency (count (filter integer? threads)))]
     (binding [gen/*threads* threads]
       (->> threads
            (map (fn [p] (future
                           (loop []
-                            (when-let [op (gen/op gen a-test p)]
+                            (when-let [op (gen/op gen t p)]
                               (swap! ops conj op)
                               (recur))))))
            doall
