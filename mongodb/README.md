@@ -27,7 +27,7 @@ java -jar target/jepsen.mongodb-0.2.0-SNAPSHOT-standalone.jar -t 500 ...
 
 ## Full usage
 
-``
+```
 $ lein run -- -h
 Usage: java -jar jepsen.mongodb.jar [OPTIONS ...]
 
