@@ -12,4 +12,5 @@
                  [byte-streams "0.1.4"]]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
-             "-XX:+UseFastAccessorMethods" "-server"])
+             "-XX:+UseFastAccessorMethods" "-server"
+             "-XX:-OmitStackTraceInFastThrow"])
