@@ -1,5 +1,6 @@
 (ns jepsen.mongodb.document-cas
   "Compare-and-set against a single document."
+  (:refer-clojure :exclude [test])
   (:require [clojure [pprint :refer :all]
                      [string :as str]]
             [clojure.java.io :as io]
@@ -26,13 +27,14 @@
             [jepsen.mongodb.mongo :as m])
   (:import (clojure.lang ExceptionInfo)))
 
-(defrecord Client [db-name coll-name write-concern client coll]
+(defrecord Client [db-name coll-name read-concern write-concern client coll]
   client/Client
   (setup! [this test node]
     (let [client (m/cluster-client test)
           coll   (-> client
                      (m/db db-name)
                      (m/collection coll-name)
+                     (m/with-read-concern  read-concern)
                      (m/with-write-concern write-concern))]
 
       (assoc this :client client, :coll coll)))
@@ -70,11 +72,17 @@
     (.close ^java.io.Closeable client)))
 
 (defn client
-  "A client which implements a register on top of an entire document."
-  [write-concern]
+  "A client which implements a register on top of an entire document.
+
+  Options:
+
+    :read-concern  e.g. :majority
+    :write-concern e.g. :majority"
+  [opts]
   (Client. "jepsen"
            "cas"
-           write-concern
+           (:read-concern opts)
+           (:write-concern opts)
            nil
            nil))
 
@@ -83,32 +91,33 @@
 (defn r   [_ _] {:type :invoke, :f :read})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defn majority-test
-  "Document-level compare and set with WriteConcern MAJORITY"
+(defn test
+  "Document-level compare and set. Options are also passed through to
+  core/test-.
+
+  Special options:
+
+    :write-concern    keyword for write concern level
+    :read-concern     keyword for read concern level
+    :time-limit       How long do we run the test for?"
   [opts]
-  (test- "document cas majority"
+  (test- (str "doc cas"
+              " r:" (name (:read-concern opts))
+              " w:" (name (:write-concern opts)))
          (merge
-           {:client       (client :majority)
+           {:client       (client opts)
             :concurrency  100
-            :generator    (std-gen
-                            (independent/concurrent-generator
-                              10
-                              (range)
-                              (fn [k]
-                                (->> (gen/mix [w cas cas])
-                                     (gen/reserve 5 r)
-                                     (gen/time-limit 30)))))
+            :generator    (->> (independent/concurrent-generator
+                                 10
+                                 (range)
+                                 (fn [k]
+                                   (->> (gen/mix [w cas cas])
+                                        (gen/reserve 5 r)
+                                        (gen/time-limit 30))))
+                               std-gen
+                               (gen/time-limit (:time-limit opts)))
             :model        (model/cas-register)
             :checker      (checker/compose
                             {:linear (independent/checker checker/linearizable)
                              :perf   (checker/perf)})}
            opts)))
-
-(defn no-read-majority-test
-  "Document-level compare and set with MAJORITY, excluding reads because mongo
-  doesn't have linearizable reads."
-  [opts]
-  (test- "document cas no-read majority"
-         (merge {:client (client :majority)
-                 :generator (std-gen (gen/mix [w cas cas]))}
-                opts)))
