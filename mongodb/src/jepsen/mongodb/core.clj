@@ -311,6 +311,7 @@
   [gen]
   (gen/phases
     (->> gen
+         (gen/stagger 1)
          (gen/nemesis
            (gen/seq (cycle [(gen/sleep 30)
                             {:type :info :f :stop}
