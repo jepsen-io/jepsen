@@ -217,7 +217,9 @@
 (defn target-replica-set-config
   "Generates the config for a replset in a given test."
   [test]
+  (assert (integer? (:protocol-version test)))
   {:_id "jepsen"
+   :protocolVersion (:protocol-version test)
    :members (->> test
                  :nodes
                  (map-indexed (fn [i node]
