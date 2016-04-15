@@ -27,7 +27,13 @@
             [jepsen.mongodb.mongo :as m])
   (:import (clojure.lang ExceptionInfo)))
 
-(defrecord Client [db-name coll-name read-concern write-concern client coll]
+(defrecord Client [db-name
+                   coll-name
+                   read-concern
+                   write-concern
+                   read-with-find-and-modify
+                   client
+                   coll]
   client/Client
   (setup! [this test node]
     (let [client (m/cluster-client test)
@@ -45,10 +51,14 @@
       (let [id    (key (:value op))
             value (val (:value op))]
         (case (:f op)
-          :read (let [res (m/find-one coll id)]
+          :read (let [doc (if read-with-find-and-modify
+                            ; CAS read
+                            (m/read-with-find-and-modify coll id)
+                            ; Normal read
+                            (m/find-one coll id))]
                   (assoc op
                          :type  :ok
-                         :value (independent/tuple id (:value res))))
+                         :value (independent/tuple id (:value doc))))
 
           :write (let [res (m/upsert! coll {:_id id, :value value})]
                    ; Note that modified-count could be zero, depending on the
@@ -83,6 +93,7 @@
            "cas"
            (:read-concern opts)
            (:write-concern opts)
+           (:read-with-find-and-modify opts)
            nil
            nil))
 
@@ -97,9 +108,10 @@
 
   Special options:
 
-    :write-concern    keyword for write concern level
-    :read-concern     keyword for read concern level
-    :time-limit       How long do we run the test for?"
+    :write-concern              Keyword for write concern level
+    :read-concern               Keyword for read concern level
+    :read-with-find-and-modify  Use findAndModify to ensure read safety
+    :time-limit                 How long do we run the test for?"
   [opts]
   (test- (str "doc cas"
               " r:" (name (:read-concern opts))
