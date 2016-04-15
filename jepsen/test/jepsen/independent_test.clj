@@ -33,12 +33,13 @@
                 (map :value)))))
 
   (testing "concurrency"
-    (let [kmax 100
-          vmax 100]
+    (let [kmax 1000
+          vmax 10]
+      ; Gotta realize the ranges to work around a concurrency bug in LongRange
       (is (= (set (for [k (range kmax), v (range vmax)] [k v]))
              (->> (fn [k] (gen/seq (map (partial array-map :value)
-                                        (range vmax))))
-                  (sequential-generator (range kmax))
+                                        (doall (range vmax)))))
+                  (sequential-generator (doall (range kmax)))
                   (ops (range 10))
                   (map :value)
                   set))))))
