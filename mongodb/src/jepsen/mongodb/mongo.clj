@@ -19,6 +19,10 @@
                                MongoDatabase
                                MongoIterable)
            (com.mongodb.client.model Filters
+                                     FindOneAndUpdateOptions
+                                     ReturnDocument
+                                     Sorts
+                                     Updates
                                      UpdateOptions
                                      )
            (com.mongodb.client.result UpdateResult)))
@@ -158,6 +162,17 @@
   (-> coll
       (.find (Filters/eq "_id" id))
       .first
+      document->map))
+
+(defn read-with-find-and-modify
+  "Perform a read of a document by ID with findAndModify."
+  [^MongoCollection coll id]
+  (-> coll
+      (with-write-concern :majority)
+      (.findOneAndUpdate (Filters/eq "_id" id)
+                         (Updates/inc "_dummy_field", 1)
+                         (-> (FindOneAndUpdateOptions.)
+                             (.returnDocument ReturnDocument/AFTER)))
       document->map))
 
 (defn update-result->map

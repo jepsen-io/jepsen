@@ -40,6 +40,8 @@
 
    [nil "--no-reads" "Disable reads, to test write safety only"]
 
+   [nil "--read-with-find-and-modify" "Use findAndModify to ensure read safety"]
+
    ["-s" "--storage-engine ENGINE" "Mongod storage engine"
     :default  "wiredTiger"
     :validate [(partial re-find #"\A\[a-zA-Z0-9]+\z") "Must be a single word"]]
