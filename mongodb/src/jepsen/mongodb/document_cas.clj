@@ -97,7 +97,6 @@
                               (fn [k]
                                 (->> (gen/mix [w cas cas])
                                      (gen/reserve 5 r)
-                                     (gen/stagger 1)
                                      (gen/time-limit 30)))))
             :model        (model/cas-register)
             :checker      (checker/compose
