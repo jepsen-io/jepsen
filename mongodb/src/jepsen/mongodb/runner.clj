@@ -68,21 +68,26 @@ Options:\n")
 
 (defn -main
   [& args]
-  (let [{:keys [options arguments summary errors]}
-        (cli/parse-opts args optspec)]
-    ; Bad args?
-    (when-not (empty? errors)
-      (dorun (map println errors))
-      (System/exit 254))
+  (try
+    (let [{:keys [options arguments summary errors]}
+          (cli/parse-opts args optspec)]
+      ; Bad args?
+      (when-not (empty? errors)
+        (dorun (map println errors))
+        (System/exit 254))
 
-    ; Help?
-    (when (:help options)
-      (println usage)
-      (println summary)
-      (System/exit 0))
+      ; Help?
+      (when (:help options)
+        (println usage)
+        (println summary)
+        (System/exit 0))
 
-    (info "Test options:\n" (with-out-str (pprint options)))
+      (info "Test options:\n" (with-out-str (pprint options)))
 
-    ; Run test
-    (let [t (jepsen/run! (dc/test options))]
-      (System/exit (if (:valid? (:results t)) 0 1)))))
+      ; Run test
+      (let [t (jepsen/run! (dc/test options))]
+        (System/exit (if (:valid? (:results t)) 0 1))))
+
+    (catch Throwable t
+      (fatal t "Oh jeez, I'm sorry, Jepsen broke. Here's why:")
+      (System/exit 255))))
