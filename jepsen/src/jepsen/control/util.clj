@@ -36,7 +36,14 @@
   [url]
   (let [filename (.getName (file url))]
     (when-not (file? filename)
-      (exec :wget url))
+      (exec :wget
+            :--retries 20
+            :--waitretry 60
+            :--retry-connrefused
+            :--dns-timeout 60
+            :--connect-timeout 60
+            :--read-timeout 60
+            url))
     filename))
 
 (defn ensure-user!
