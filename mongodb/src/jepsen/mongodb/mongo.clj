@@ -170,7 +170,7 @@
   (-> coll
       (with-write-concern :majority)
       (.findOneAndUpdate (Filters/eq "_id" id)
-                         (Updates/inc "_dummy_field", 1)
+                         (Updates/inc "_dummy_field" 1)
                          (-> (FindOneAndUpdateOptions.)
                              (.returnDocument ReturnDocument/AFTER)))
       document->map))
