@@ -112,7 +112,9 @@
                                  (range)
                                  (fn [k]
                                    (->> (gen/mix [w cas cas])
-                                        (gen/reserve 5 r)
+                                        (gen/reserve 5 (if (:no-reads opts)
+                                                         (gen/mix [w cas cas])
+                                                         r))
                                         (gen/time-limit 30))))
                                std-gen
                                (gen/time-limit (:time-limit opts)))
