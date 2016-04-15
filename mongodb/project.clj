@@ -1,6 +1,6 @@
 (defproject jepsen.mongodb "0.2.0-SNAPSHOT"
   :description "Jepsen MongoDB tests"
-  :url "https://github.com/aphyr.jepsen"
+  :url "https://github.com/aphyr/jepsen"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.7.0"]
