@@ -11,6 +11,7 @@
            (com.mongodb DB
                         MongoClient
                         MongoClientOptions
+                        ReadConcern
                         ReadPreference
                         ServerAddress
                         WriteConcern)
@@ -52,9 +53,29 @@
   [^MongoDatabase db collection-name]
   (.getCollection db collection-name))
 
+(def read-concerns
+  "A map of read concern keywords to java driver constants."
+  {:majority ReadConcern/MAJORITY
+   :local    ReadConcern/LOCAL
+   :default  ReadConcern/DEFAULT})
+
 (def write-concerns
   "A map of write concern keywords to java driver constants."
-  {:majority WriteConcern/MAJORITY})
+  {:acknowledged    WriteConcern/ACKNOWLEDGED
+   :journaled       WriteConcern/JOURNALED
+   :unacknowledged  WriteConcern/UNACKNOWLEDGED
+   :w1              WriteConcern/W1
+   :w2              WriteConcern/W2
+   :w3              WriteConcern/W3
+   :majority        WriteConcern/MAJORITY})
+
+(defn ^MongoCollection with-read-concern
+  "Returns a copy of the given collection, using the given read concern
+  keyword."
+  [^MongoCollection coll read-concern]
+  (let [read-concern (c/get read-concerns read-concern)]
+    (assert read-concern)
+    (.withReadConcern coll read-concern)))
 
 (defn ^MongoCollection with-write-concern
   "Returns a copy of the given collection, using the given write concern
