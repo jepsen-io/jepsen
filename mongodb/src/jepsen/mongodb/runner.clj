@@ -38,6 +38,8 @@
     :parse-fn keyword
     :validate [client/read-concerns (one-of client/read-concerns)]]
 
+   [nil "--no-reads" "Disable reads, to test write safety only"]
+
    ["-s" "--storage-engine ENGINE" "Mongod storage engine"
     :default  "wiredTiger"
     :validate [(partial re-find #"\A\[a-zA-Z0-9]+\z") "Must be a single word"]]
