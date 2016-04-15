@@ -311,20 +311,11 @@
   [gen]
   (gen/phases
     (->> gen
-         (gen/stagger 1)
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 60)
+           (gen/seq (cycle [(gen/sleep 30)
                             {:type :info :f :stop}
                             {:type :info :f :start}])))
-        (gen/time-limit 300))
-    ; Recover
-    (gen/nemesis
-      (gen/once {:type :info :f :stop}))
-    ; Wait for resumption of normal ops
-    (gen/clients
-      (->> gen
-           (gen/delay 1)
-           (gen/time-limit 30)))))
+        (gen/time-limit 150))))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'mongodb ', merging any
