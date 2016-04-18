@@ -1,15 +1,15 @@
 (defproject jepsen "0.1.1-SNAPSHOT"
   :description "Call Me Maybe: Network Partitions in Practice"
-  :dependencies [[org.clojure/clojure "1.7.0"]
-                 [org.clojure/data.fressian "0.2.0"]
-                 [org.clojure/tools.logging "0.2.6"]
-                 [clj-time "0.6.0"]
-                 [knossos "0.2.4"]
-                 [clj-ssh "0.5.11"]
+  :dependencies [[org.clojure/clojure "1.8.0"]
+                 [org.clojure/data.fressian "0.2.1"]
+                 [org.clojure/tools.logging "0.3.1"]
+                 [clj-time "0.11.0"]
+                 [knossos "0.2.5"]
+                 [clj-ssh "0.5.14"]
                  [gnuplot "0.1.1"]
                  [hiccup "1.0.5"]
                  [org.clojars.achim/multiset "0.1.0"]
-                 [byte-streams "0.1.4"]]
+                 [byte-streams "0.2.2"]]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"
