@@ -57,7 +57,8 @@
 (defn cut-random-link
   "Cuts a random link to any of nodes."
   [nodes]
-  (su (exec :iptables :-A :INPUT :-s (ip (rand-nth nodes)) :-j :DROP)))
+  (su (exec :iptables :-A :INPUT :-s (ip (rand-nth nodes))
+            :-m :state :--state "NEW,ESTABLISHED,RELATED" :-j :DROP)))
 
 
 (defn partition
@@ -67,7 +68,9 @@
     (let [nodes (map ip large-partition-set)]
       (when (small-partition-set *host*)
         (doseq [n nodes]
-          (exec :iptables :-A :INPUT :-s n :-j :DROP))))))
+          (exec :iptables :-A :INPUT :-s n
+                :-m :state :--state "NEW,ESTABLISHED,RELATED"
+                :-j :DROP))))))
 
 (defn iptables-list
   []
