@@ -317,7 +317,7 @@
   "Balances must all be non-negative and sum to the model's total."
   []
   (reify checker/Checker
-    (check [this test model history]
+    (check [this test model history _]
       (let [bad-reads (->> history
                            (r/filter op/ok?)
                            (r/filter #(= :read (:f %)))

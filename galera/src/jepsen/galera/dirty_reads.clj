@@ -75,7 +75,7 @@
   read."
   []
   (reify checker/Checker
-    (check [this test model history]
+    (check [this test model history _]
       (let [failed-writes (->> history
                                (r/filter op/fail?)
                                (r/filter #(= :write (:f %)))
