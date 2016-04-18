@@ -46,7 +46,7 @@
            {:valid?           true
             :duplicated       (multiset/multiset)
             :lost             (multiset/multiset)
-            :unexpected       #{}
+            :unexpected       (multiset/multiset)
             :recovered        (multiset/multiset 1)
             :ok-frac          1
             :unexpected-frac  0
@@ -71,7 +71,7 @@
                   {})
            {:valid?           false
             :lost             (multiset/multiset :enqueued)
-            :unexpected       #{:wtf}
+            :unexpected       (multiset/multiset :wtf)
             :recovered        (multiset/multiset)
             :duplicated       (multiset/multiset :dup)
             :ok-frac          1/3

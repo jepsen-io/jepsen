@@ -168,7 +168,10 @@
             ; Unexpected records are those we *never* tried to enqueue. Maybe
             ; leftovers from some earlier state. Definitely don't want your
             ; queue emitting records from nowhere!
-            unexpected (set/difference (core/set dequeues) (core/set attempts))
+            unexpected (->> dequeues
+                            (remove (core/set (keys (multiset/multiplicities
+                                                 attempts))))
+                            (into (multiset/multiset)))
 
             ; Duplicate records are those which were dequeued more times than
             ; they could have been enqueued; but were attempted at least once.
