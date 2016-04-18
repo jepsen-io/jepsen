@@ -134,4 +134,5 @@
       (is (:valid? (checker/check checker/linearizable
                                   {}
                                   (model/->CASRegister 0)
-                                  history))))))
+                                  history
+                                  {}))))))
