@@ -21,7 +21,7 @@
             [jepsen.os.debian :as debian]
             [jepsen.mongodb.mongo :as m]
             [knossos [core :as knossos]
-                     [model :as model]]
+                     [model :as model]])
   (:import (clojure.lang ExceptionInfo)))
 
 (def username "mongodb")
