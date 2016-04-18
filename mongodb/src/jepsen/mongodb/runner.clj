@@ -51,11 +51,10 @@
     :parse-fn #(Long/parseLong %)
     :validate [(complement neg?) "Must be non-negative"]]
 
-   [nil "--tarball URL" "URL of the Mongo tarball to install"
+   [nil "--tarball URL" "URL for the Mongo tarball to install. May be either HTTP, HTTPS, or a local file. For instance, --tarball https://foo.com/mongo.tgz, or file:///tmp/mongo.tgz"
     :default  "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-debian71-3.3.1.tgz"
-    :validate [(partial re-find #"^https?://.*\.(tar\.gz|tgz)")
-               "Must be an HTTP/HTTPS URL ending in .tar.gz or .tgz"]]
-
+    :validate [(partial re-find #"^(file|https?)://.*\.(tar\.gz|tgz)")
+               "Must be a file://, http://, or https:// URL ending in .tar.gz or .tgz"]]
   ])
 
 (def usage

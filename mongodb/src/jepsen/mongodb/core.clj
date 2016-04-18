@@ -34,13 +34,14 @@
   (cu/ensure-user! username)
 
   ; Download tarball
-  (let [file (c/cd "/tmp" (cu/wget! url))]
+  (let [local-file (nth (re-find #"file://(.+)" url) 1)
+        file       (or local-file (c/cd "/tmp" (str "/tmp/" (cu/wget! url))))]
     (try
       (c/cd "/opt"
             ; Clean up old dir
             (c/exec :rm :-rf "mongodb")
             ; Extract and rename
-            (c/exec :tar :xvf (str "/tmp/" file))
+            (c/exec :tar :xvf file)
             (c/exec :mv (c/lit "mongodb-linux-*") "mongodb")
             ; Create data dir
             (c/exec :mkdir :-p "mongodb/data")
@@ -48,9 +49,17 @@
             (c/exec :chown :-R (str username ":" username) "mongodb"))
     (catch RuntimeException e
       (condp re-find (.getMessage e)
-        #"tar: Unexpected EOF" (do (info "Retrying corrupt tarball download")
-                                   (c/exec :rm :-rf (str "/tmp/" file))
-                                   (install! node url))
+        #"tar: Unexpected EOF"
+        (if local-file
+          ; Nothing we can do to recover here
+          (throw (RuntimeException.
+                   (str "Local tarball " local-file " on node " (name node)
+                        " is corrupt: unexpected EOF.")))
+          (do (info "Retrying corrupt tarball download")
+              (c/exec :rm :-rf file)
+              (install! node url)))
+
+        ; Throw by default
         (throw e))))))
 
 (defn configure!
