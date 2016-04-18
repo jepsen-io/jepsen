@@ -6,7 +6,6 @@
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [org.clojure/tools.cli "0.3.3"]
                  [jepsen "0.1.1-SNAPSHOT"]
-                 [cheshire "5.6.1"]
                  [org.mongodb/mongodb-driver "3.2.2"]]
   :main jepsen.mongodb.runner
   :aot [jepsen.mongodb.runner
