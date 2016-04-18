@@ -22,7 +22,6 @@
             [jepsen.mongodb.mongo :as m]
             [knossos [core :as knossos]
                      [model :as model]]
-            [cheshire.core :as json])
   (:import (clojure.lang ExceptionInfo)))
 
 (def username "mongodb")

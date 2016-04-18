@@ -22,7 +22,6 @@
             [jepsen.checker.timeline :as timeline]
             [knossos.core :as knossos]
             [knossos.model :as model]
-            [cheshire.core :as json]
             [jepsen.mongodb.core :refer :all]
             [jepsen.mongodb.mongo :as m])
   (:import (clojure.lang ExceptionInfo)))
