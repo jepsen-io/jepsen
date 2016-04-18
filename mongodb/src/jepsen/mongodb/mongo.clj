@@ -8,8 +8,7 @@
            (java.util ArrayList
                       List)
            (org.bson Document)
-           (com.mongodb DB
-                        MongoClient
+           (com.mongodb MongoClient
                         MongoClientOptions
                         ReadConcern
                         ReadPreference
@@ -211,15 +210,10 @@
                      (document doc)
                      (.upsert (UpdateOptions.) true))
         update-result->map)
-    (catch com.mongodb.DuplicateKeyException e
-      ; This is probably
-      ; https://jira.mongodb.org/browse/SERVER-14322; we back off
-      ; randomly and retry.
-      (info "Retrying duplicate key collision")
-      (Thread/sleep (rand-int 100))
-      (retry))
     (catch com.mongodb.MongoWriteException e
-      ; Sometimes it throws this one instead, not sure why
+      ; This is probably
+      ; https://jira.mongodb.org/browse/SERVER-14322; we back off randomly
+      ; and retry.
       (if (= 11000 (.getCode e))
         (do (info "Retrying duplicate key collision")
             (Thread/sleep (rand-int 100))
