@@ -37,7 +37,7 @@
   (let [filename (.getName (file url))]
     (when-not (file? filename)
       (exec :wget
-            :--retries 20
+            :--tries 20
             :--waitretry 60
             :--retry-connrefused
             :--dns-timeout 60
