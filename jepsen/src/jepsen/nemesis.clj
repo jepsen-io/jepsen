@@ -162,7 +162,7 @@
                      (str "no nemesis can handle " (:f op))))
             (let [[fs nemesis] (first nemeses)]
               (if-let [f' (fs f)]
-                (client/invoke! nemesis test (assoc op :f f'))
+                (assoc (client/invoke! nemesis test (assoc op :f f')) :f f)
                 (recur (next nemeses))))))))
 
     (teardown! [this test]
