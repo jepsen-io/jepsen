@@ -242,10 +242,10 @@
   [test]
   (->> [(future (write-results! test))
         (future (write-history! test))
-        (future (write-fressian! test))
-        (future (update-symlinks! test))]
+        (future (write-fressian! test))]
        (map deref)
        dorun)
+  (update-symlinks! test)
   test)
 
 (defn delete-file-recursively!
