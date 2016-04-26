@@ -44,7 +44,7 @@
 
    ["-s" "--storage-engine ENGINE" "Mongod storage engine"
     :default  "wiredTiger"
-    :validate [(partial re-find #"\A\[a-zA-Z0-9]+\z") "Must be a single word"]]
+    :validate [(partial re-find #"\A[a-zA-Z0-9]+\z") "Must be a single word"]]
 
    ["-p" "--protocol-version INT" "Replication protocol version number"
     :default  1
