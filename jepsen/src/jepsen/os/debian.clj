@@ -139,6 +139,7 @@
                   :faketime
                   :unzip
                   :iptables
+                  :psmisc
                   :iputils-ping
                   :rsyslog
                   :logrotate])
