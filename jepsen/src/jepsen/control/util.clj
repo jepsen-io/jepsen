@@ -96,5 +96,5 @@
   "Kills a daemon process by command name, and cleans up pidfile."
   [cmd pidfile]
   (info "Stopping" cmd)
-  (meh (exec :killall :-9 cmd))
+  (meh (exec :pkill :-9 cmd))
   (meh (exec :rm :-rf pidfile)))

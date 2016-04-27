@@ -49,7 +49,7 @@ that (along with SSH username, password, identity files, etc) is all definable
 in your test. The account you use on those boxes needs sudo access to set up
 DBs, control firewalls, etc.
 
-Be advised that tests may mess with clocks, add apt repos, run killall -9 on
+Be advised that tests may mess with clocks, add apt repos, run pkill -9 on
 processes, and generally break things, so you shouldn't, you know, point jepsen
 at your prod machines unless you like to live dangerously, or you wrote the
 test and know exactly what it's doing.

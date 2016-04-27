@@ -146,7 +146,7 @@
   [node]
   (c/su
     (meh (c/exec :service :elasticsearch :stop))
-    (meh (c/exec :killall :-9 :elasticsearch)))
+    (meh (c/exec :pkill :-9 :elasticsearch)))
   (info node "elasticsearch stopped"))
 
 (defn nuke!
@@ -358,14 +358,14 @@
   "A nemesis that crashes a random subset of nodes."
   (nemesis/node-start-stopper
     mostly-small-nonempty-subset
-    (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
+    (fn start [test node] (c/su (c/exec :pkill :-9 :java)) [:killed node])
     (fn stop  [test node] (start! node) [:restarted node])))
 
 (def crash-primary-nemesis
   "A nemesis that crashes a random primary node."
   (nemesis/node-start-stopper
     (comp rand-nth self-primaries)
-    (fn start [test node] (c/su (c/exec :killall :-9 :java)) [:killed node])
+    (fn start [test node] (c/su (c/exec :pkill :-9 :java)) [:killed node])
     (fn stop  [test node] (start! node) [:restarted node])))
 
 (defn adds

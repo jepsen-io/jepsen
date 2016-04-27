@@ -25,7 +25,7 @@
   (reify db/DB
     (setup! [this test node]
       (c/su
-        (c/ssh* {:cmd "killall robustirc"})
+        (c/ssh* {:cmd "pkill robustirc"})
 	(try (c/exec :dpkg-query :-l :golang-go)
 	     (catch RuntimeException _
 	       (info "Installing golang-go")
@@ -80,7 +80,7 @@
 
     (teardown! [this test node]
       (c/su
-        (c/ssh* {:cmd "killall robustirc"}))
+        (c/ssh* {:cmd "pkill robustirc"}))
       )))
 
 (defn with-nemesis

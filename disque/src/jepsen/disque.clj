@@ -109,7 +109,7 @@
   [node]
   (info node "stopping disque")
   (c/su
-    (meh (c/exec :killall :-9 :disque-server))
+    (meh (c/exec :pkill :-9 :disque-server))
     (meh (c/exec :rm :-rf pidfile))))
 
 (defn wipe!

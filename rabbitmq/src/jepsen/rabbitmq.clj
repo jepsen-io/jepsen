@@ -92,7 +92,7 @@
 ;        (meh (c/exec :rabbitmqctl :force_reset))
 ;        (meh (c/exec :service :rabbitmq-server :stop))
         (info node "Nuking rabbit")
-        (meh (c/exec :killall :-9 "beam.smp" "epmd"))
+        (meh (c/exec :pkill :-9 "beam.smp" "epmd"))
         (c/exec :rm :-rf "/var/lib/rabbitmq/mnesia/")
         (c/exec :service :rabbitmq-server :stop)
         (info node "Rabbit dead")))))
