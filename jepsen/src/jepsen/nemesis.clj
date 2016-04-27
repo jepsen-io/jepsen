@@ -236,8 +236,8 @@
   ([targeter process]
    (node-start-stopper targeter
                        (fn start [t n]
-                         (c/su (c/exec :killall :-s "STOP" process))
+                         (c/su (c/exec :pkill :-s "STOP" process))
                          [:paused process])
                        (fn stop [t n]
-                         (c/su (c/exec :killall :-s "CONT" process))
+                         (c/su (c/exec :pkill :-s "CONT" process))
                          [:resumed process]))))

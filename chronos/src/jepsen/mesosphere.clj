@@ -121,13 +121,13 @@
 (defn stop-master!
   [node]
   (info node "stopping mesos-master")
-  (meh (c/exec :killall :-9 :mesos-master))
+  (meh (c/exec :pkill :-9 :mesos-master))
   (meh (c/exec :rm :-rf master-pidfile)))
 
 (defn stop-slave!
   [node]
   (info node "stopping mesos-slave")
-  (meh (c/exec :killall :-9 :mesos-slave))
+  (meh (c/exec :pkill :-9 :mesos-slave))
   (meh (c/exec :rm :-rf slave-pidfile)))
 
 (defn db

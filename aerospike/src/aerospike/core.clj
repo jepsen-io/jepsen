@@ -155,7 +155,7 @@
   (info node "stopping aerospike")
   (c/su
     (meh (c/exec :service :aerospike :stop))
-    (meh (c/exec :killall :-9 :asd))))
+    (meh (c/exec :pkill :-9 :asd))))
 
 (defn wipe!
   "Shuts down the server and wipes data."
@@ -355,7 +355,7 @@
   []
   (nemesis/node-start-stopper
     rand-nth
-    (fn start [test node] (c/su (c/exec :killall :-9 :asd)))
+    (fn start [test node] (c/su (c/exec :pkill :-9 :asd)))
     (fn stop  [test node] (start! node test))))
 
 ; Generators

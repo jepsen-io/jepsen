@@ -53,7 +53,7 @@
 
     (teardown! [_ test node]
       (c/su
-        (meh (c/exec :killall :-9 :consul))
+        (meh (c/exec :pkill :-9 :consul))
         (c/exec :rm :-rf pidfile data-dir))
       (info node "consul nuked"))))
 

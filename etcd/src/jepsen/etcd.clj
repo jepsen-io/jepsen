@@ -156,7 +156,7 @@
 
       (teardown! [_ test node]
         (c/su
-          (meh (c/exec :killall :-9 :etcd))
+          (meh (c/exec :pkill :-9 :etcd))
           (c/exec :rm :-rf pidfile data-dir log-file))
         (info node "etcd nuked")))))
 
