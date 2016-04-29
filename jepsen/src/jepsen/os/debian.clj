@@ -4,7 +4,7 @@
   (:require [clojure.set :as set]
             [jepsen.util :refer [meh]]
             [jepsen.os :as os]
-            [jepsen.control :as c]
+            [jepsen.control :as c :refer [|]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as net]
             [clojure.string :as str]))
@@ -111,12 +111,28 @@
    (add-repo! repo-name apt-line nil nil))
   ([repo-name apt-line keyserver key]
    (let [list-file (str "/etc/apt/sources.list.d/" (name repo-name) ".list")]
-     (when-not (cu/file? list-file)
+     (when-not (cu/exists? list-file)
        (info "setting up" repo-name "apt repo")
        (when (or keyserver key)
          (add-key! keyserver key))
        (c/exec :echo apt-line :> list-file)
        (update!)))))
+
+(defn install-jdk8!
+  "Installs an oracle jdk8 via webupd8. Ugh, this is such a PITA."
+  []
+  (c/su
+    (add-repo!
+      "webupd8"
+      "deb http://ppa.launchpad.net/webupd8team/java/ubuntu trusty main"
+      "hkp://keyserver.ubuntu.com:80"
+      "EEA14886")
+    (c/exec :echo "debconf shared/accepted-oracle-license-v1-1 select true" |
+            :debconf-set-selections)
+    (c/exec :echo "debconf shared/accepted-oracle-license-v1-1 seen true" |
+            :debconf-set-selections)
+    (install [:oracle-java8-installer])
+    (install [:oracle-java8-set-default])))
 
 (def os
   (reify os/OS
