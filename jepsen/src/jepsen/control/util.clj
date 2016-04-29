@@ -6,8 +6,16 @@
             [clojure.tools.logging :refer [info]]
             [clojure.string :as str]))
 
+(def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
+
 (defn file?
-  "Is a file present?"
+  [filename]
+  (throw (RuntimeException. "Use exists? instead; file? will be used to tell if
+                            something is a file, as opposed to a directory or
+                            link.")))
+
+(defn exists?
+  "Is a path present?"
   [filename]
   (try (exec :stat filename)
        true
@@ -16,9 +24,10 @@
 (defn ls
   "A seq of directory entries (not including . and ..). TODO: escaping for
   control chars in filenames (if you do this, WHO ARE YOU???)"
-  [dir]
-  (->> (str/split (exec :ls :-A dir) #"\n")
-       (remove str/blank?)))
+  ([] (ls "."))
+  ([dir]
+   (->> (str/split (exec :ls :-A dir) #"\n")
+        (remove str/blank?))))
 
 (defn ls-full
   "Like ls, but prepends dir to each entry."
@@ -30,12 +39,22 @@
          ls
          (map (partial str dir)))))
 
+(defn tmp-dir!
+  "Creates a temporary directory under /tmp/jepsen and returns its path."
+  []
+  (let [dir (str tmp-dir-base "/" (rand-int Integer/MAX_VALUE))]
+    (if (exists? dir)
+      (recur)
+      (do
+        (exec :mkdir :-p dir)
+        dir))))
+
 (defn wget!
   "Downloads a string URL and returns the filename as a string. Skips if the
   file already exists."
   [url]
   (let [filename (.getName (file url))]
-    (when-not (file? filename)
+    (when-not (exists? filename)
       (exec :wget
             :--tries 20
             :--waitretry 60
@@ -45,6 +64,54 @@
             :--read-timeout 60
             url))
     filename))
+
+(defn install-tarball!
+  "Gets the given tarball URL, caching it in /tmp/jepsen/, and extracts its
+  sole top-level directory to the given dest directory. Deletes
+  current contents of dest. Returns dest."
+  [node url dest]
+  (let [local-file (nth (re-find #"file://(.+)" url) 1)
+        file       (or local-file
+                       (do (exec :mkdir :-p tmp-dir-base)
+                           (cd tmp-dir-base
+                               (expand-path (wget! url)))))
+        tmpdir     (tmp-dir!)
+        dest       (expand-path dest)]
+    ; Clean up old dest
+    (exec :rm :-rf dest)
+    (try
+      (cd tmpdir
+          ; Extract tarball to tmpdir
+          (exec :tar :xf file)
+
+          ; Get tarball root paths
+          (let [roots (ls)]
+            (assert (pos? (count roots)) "Tarball contained no files")
+            (assert (= 1  (count roots))
+                    (str "Tarball contained multiple top-level files: "
+                         (pr-str roots)))
+
+            ; Move root to dest
+            (exec :mv (first roots) dest)))
+      (catch RuntimeException e
+        (condp re-find (.getMessage e)
+          #"tar: Unexpected EOF"
+          (if local-file
+            ; Nothing we can do to recover here
+            (throw (RuntimeException.
+                     (str "Local tarball " local-file " on node " (name node)
+                          " is corrupt: unexpected EOF.")))
+            (do (info "Retrying corrupt tarball download")
+                (exec :rm :-rf file)
+                (install-tarball! node url dest)))
+
+          ; Throw by default
+          (throw e)))
+      (finally
+        ; Clean up tmpdir
+        (exec :rm :-rf tmpdir))))
+  dest)
+
 
 (defn ensure-user!
   "Make sure a user exists."
