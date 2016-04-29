@@ -160,8 +160,16 @@
          (concat args [:>> (:logfile opts) (lit "2>&1")])))
 
 (defn stop-daemon!
-  "Kills a daemon process by command name, and cleans up pidfile."
-  [cmd pidfile]
-  (info "Stopping" cmd)
-  (meh (exec :killall :-9 cmd))
-  (meh (exec :rm :-rf pidfile)))
+  "Kills a daemon process by pidfile, or, if given a command name, kills all
+  processes with that command name, and cleans up pidfile."
+  ([pidfile]
+   (info "Stopping" pidfile)
+   (when (exists? pidfile)
+     (let [pid (Long/parseLong (exec :cat pidfile))]
+       (meh (exec :kill :-9 pid))
+       (meh (exec :rm :-rf pidfile)))))
+
+  ([cmd pidfile]
+   (info "Stopping" cmd)
+   (meh (exec :killall :-9 cmd))
+   (meh (exec :rm :-rf pidfile))))
