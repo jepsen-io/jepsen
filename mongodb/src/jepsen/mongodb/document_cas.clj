@@ -110,7 +110,8 @@
     :write-concern              Keyword for write concern level
     :read-concern               Keyword for read concern level
     :read-with-find-and-modify  Use findAndModify to ensure read safety
-    :time-limit                 How long do we run the test for?"
+    :time-limit                 How long do we run the test for?
+    :key-time-limit             How long do we test an individual key?"
   [opts]
   (test- (str "doc cas"
               " r:" (name (:read-concern opts))
@@ -126,7 +127,8 @@
                                         (gen/reserve 5 (if (:no-reads opts)
                                                          (gen/mix [w cas cas])
                                                          r))
-                                        (gen/time-limit 30))))
+                                        (gen/time-limit
+                                          (:key-time-limit opts)))))
                                std-gen
                                (gen/time-limit (:time-limit opts)))
             :model        (model/cas-register)
