@@ -23,8 +23,14 @@
   [["-h" "--help" "Print out this message and exit"]
 
    ["-t" "--time-limit SECONDS"
-    "Excluding setup and teardown, how long should tests run for?"
+    "Excluding setup and teardown, how long should tests run for, in seconds?"
     :default  150
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "Must be positive"]]
+
+   [nil "--key-time-limit SECONDS"
+    "How long should we test an individual key for, in seconds?"
+    :default  30
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
