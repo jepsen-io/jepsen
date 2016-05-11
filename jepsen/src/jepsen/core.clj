@@ -82,10 +82,14 @@
   "Given a test, evaluates (f test node) in parallel on each node, with that
   node's SSH connection bound."
   [test f]
-  (dorun (pmap (fn [[node session]]
-                 (control/with-session node session
-                   (f test node)))
-               (:sessions test))))
+  (->> (:sessions test)
+       (map (fn [[node session]]
+              (future
+                (control/with-session node session
+                  (f test node)))))
+       doall
+       (map deref)
+       dorun))
 
 (defmacro with-os
   "Wraps body in OS setup and teardown."
