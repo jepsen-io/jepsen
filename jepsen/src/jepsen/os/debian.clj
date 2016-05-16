@@ -158,7 +158,8 @@
                   :psmisc
                   :iputils-ping
                   :rsyslog
-                  :logrotate])
+                  :logrotate
+                  :libsnmp30])
 
         ; Fucking systemd breaks a bunch of packages
         (if (installed? :systemd)
