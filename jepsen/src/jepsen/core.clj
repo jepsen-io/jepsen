@@ -425,7 +425,7 @@
                                            :sessions)]
 
                           (info "Run complete, writing")
-                          (when (:name test) (store/save! test))
+                          (when (:name test) (store/save-1! test))
 
                           (info "Analyzing")
                           (let [test (assoc test :results (checker/check-safe
@@ -435,5 +435,5 @@
                                                             (:history test)))]
 
                             (info "Analysis complete")
-                            (when (:name test) (store/save! test))
+                            (when (:name test) (store/save-2! test))
                           test)))))))))))))
