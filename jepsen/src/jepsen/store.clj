@@ -226,8 +226,7 @@
 (defn write-history!
   "Writes out a history.txt file."
   [test]
-  (with-out-file test "history.txt"
-    (util/print-history (:history test))))
+  (util/pwrite-history! (path! test "history.txt") (:history test)))
 
 (defn write-fressian!
   "Write the entire test as a .fressian file"
@@ -237,11 +236,22 @@
                 out    (fress/create-writer file :handlers write-handlers)]
       (fress/write-object out test))))
 
-(defn save!
-  "Writes a test to disk and updates latest symlinks. Returns test."
+(defn save-1!
+  "Writes a history and fressian file to disk and updates latest symlinks.
+  Returns test."
+  [test]
+  (->> [(future (write-history! test))
+        (future (write-fressian! test))]
+       (map deref)
+       dorun)
+  (update-symlinks! test)
+  test)
+
+(defn save-2!
+  "Phase 2: after computing results, we re-write the fressian file and also
+  dump results as edn. Returns test."
   [test]
   (->> [(future (write-results! test))
-        (future (write-history! test))
         (future (write-fressian! test))]
        (map deref)
        dorun)
