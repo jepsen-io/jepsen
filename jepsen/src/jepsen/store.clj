@@ -137,9 +137,9 @@
   "Loads a specific test by name and time."
   [test-name test-time]
   (with-open [file (io/input-stream (fressian-file {:name       test-name
-                                                    :start-time test-time}))
-              in   (fress/create-reader file :handlers read-handlers)]
-    (fress/read-object in)))
+                                                    :start-time test-time}))]
+    (let [in (fress/create-reader file :handlers read-handlers)]
+      (fress/read-object in))))
 
 (defn dir?
   "Is this a directory?"
@@ -232,9 +232,9 @@
   "Write the entire test as a .fressian file"
   [test]
   (let [test (apply dissoc test nonserializable-keys)]
-    (with-open [file   (io/output-stream (fressian-file! test))
-                out    (fress/create-writer file :handlers write-handlers)]
-      (fress/write-object out test))))
+    (with-open [file   (io/output-stream (fressian-file! test))]
+      (let [out (fress/create-writer file :handlers write-handlers)]
+        (fress/write-object out test)))))
 
 (defn save-1!
   "Writes a history and fressian file to disk and updates latest symlinks.

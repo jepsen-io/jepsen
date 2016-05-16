@@ -126,7 +126,7 @@
              (map deref)
              (concat-files! f))
        (finally
-         (doseq [f files] (.delete f)))))))
+         (doseq [f files] (.delete ^File f)))))))
 
 (defn log-op
   "Logs an operation and returns it."
