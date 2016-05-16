@@ -286,6 +286,7 @@
   [url]
   (reify db/DB
     (setup! [_ test node]
+      (debian/install [:libsnmp30])
       (doto node
         (install! url)
         (configure! test)
