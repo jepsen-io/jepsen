@@ -14,6 +14,14 @@
            (java.io File
                     RandomAccessFile)))
 
+(defn real-pmap
+  "Like pmap, but launches futures instead of using a bounded threadpool."
+  [f coll]
+  (->> coll
+       (map (fn launcher [x] (future (f x))))
+       doall
+       (map deref)))
+
 (defn processors
   "How many processors on this platform?"
   []
