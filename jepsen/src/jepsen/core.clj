@@ -168,7 +168,7 @@
                     (conj-op! test (assoc op
                                           :type :info
                                           :time  (relative-time-nanos)
-                                          :value (str "indeterminate: "
+                                          :error (str "indeterminate: "
                                                       (if (.getCause t)
                                                         (.. t getCause
                                                             getMessage)
