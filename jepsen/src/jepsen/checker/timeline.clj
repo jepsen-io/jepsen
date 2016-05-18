@@ -3,31 +3,10 @@
   (:require [clojure.core.reducers :as r]
             [clojure.string :as str]
             [hiccup.core :as h]
+            [knossos.history :as history]
             [jepsen.util :as util]
+            [jepsen.store :as store]
             [jepsen.checker :as checker]))
-
-(defn processes
-  "What processes are in a history?"
-  [history]
-  (->> history
-       (r/map :process)
-       (into #{})))
-
-(defn pairs
-  "Yields a lazy sequence of [info] | [invoke, ok|fail] pairs from a history]"
-  ([history]
-   (pairs {} history))
-  ([invocations [op & ops]]
-   (lazy-seq
-     (when op
-       (case (:type op)
-         :info        (cons [op] (pairs invocations ops))
-         :invoke      (do (assert (not (contains? invocations (:process op))))
-                          (pairs (assoc invocations (:process op) op) ops))
-         (:ok :fail)  (do (assert (contains? invocations (:process op)))
-                          (cons [(get invocations (:process op)) op]
-                                (pairs (dissoc invocations (:process op))
-                                       ops))))))))
 
 (defn style
   "Generate a CSS style fragment from a map."
@@ -36,54 +15,84 @@
        (map (fn [kv] (str (name (key kv)) ":" (val kv))))
        (str/join ";")))
 
-(def timescale "Nanoseconds per pixel" 1e6)
-(def col-width "pixels" 100)
+(def timescale    "Nanoseconds per pixel" 1e6)
+(def col-width    "pixels" 100)
+(def gutter-width "pixels" 106)
+(def height       "pixels" 16)
 
 (def stylesheet
   (str ".ops        { position: absolute; }\n"
-       ".op         { position: absolute; }\n"
+       ".op         { position: absolute;
+                      padding:  2px; }\n"
        ".op.invoke  { background: #C1DEFF; }\n"
        ".op.ok      { background: #B7FFB7; }\n"
        ".op.fail    { background: #FFD4D5; }\n"
        ".op.info    { background: #FEFFC1; }\n"))
 
+(defn pairs
+  "Pairs up ops from each process in a history. Yields a lazy sequence of [info]
+  or [invoke, ok|fail|info] pairs."
+  ([history]
+   (pairs {} history))
+  ([invocations [op & ops]]
+   (lazy-seq
+     (when op
+       (case (:type op)
+         :info        (if (contains? invocations (:process op))
+                        ; Info following invoke
+                        (cons [(get invocations (:process op)) op]
+                              (pairs (dissoc invocations (:process op)) ops))
+                        ; Unmatched info
+                        (cons [op] (pairs invocations ops)))
+         :invoke      (do (assert (not (contains? invocations (:process op))))
+                          (pairs (assoc invocations (:process op) op) ops))
+         (:ok :fail)  (do (assert (contains? invocations (:process op)))
+                          (cons [(get invocations (:process op)) op]
+                                (pairs (dissoc invocations (:process op))
+                                       ops))))))))
+
 (defn pair->div
   "Turns a pair of start/stop operations into a div."
-  [process-index [start stop]]
+  [history process-index [start stop]]
   (let [p (:process start)
-        op (or stop start)]
-    (when (:time start)
-      [:div {:class (str "op " (name (:type op)))
-             :style (style {:width  col-width
-                            :left   (* col-width (get process-index p))
-                            :height (if stop
-                                      (/ (- (:time stop) (:time start))
-                                         timescale)
-                                      16)
-                            :top    (/ (:time start) timescale)})
-             :title (when stop (str (long (util/nanos->ms
-                                            (- (:time stop) (:time start))))
-                                    " ms"))}
-       (str (:process op) ": " (:f op) " " (:value op))])))
+        op (or stop start)
+        s {:width  col-width
+           :left   (* gutter-width (get process-index p))
+           :top    (* height (:index start))}]
+    [:div {:class (str "op " (name (:type op)))
+           :style (style (cond (= :info (:type stop))
+                               (assoc s :height (* height
+                                                   (- (inc (count history))
+                                                      (:index start))))
+
+                               stop
+                               (assoc s :height (* height
+                                                   (- (:index stop)
+                                                      (:index start))))
+
+                               true
+                               (assoc s :height height)))
+           :title (when stop (str (long (util/nanos->ms
+                                          (- (:time stop) (:time start))))
+                                  " ms"))}
+     (str (:process op) " " (name (:f op)) " " (:value start)
+          (when (not= (:value start) (:value stop))
+            (str "<br />" (:value stop))))]))
 
 (defn process-index
   "Maps processes to columns"
   [history]
-  (->> (processes history)
-       (sort (fn [a b]
-               (if (keyword? a)
-                 (if (keyword? b)
-                   (compare a b)
-                   -1)
-                 (if (keyword? b)
-                   1
-                   (compare a b)))))
-  (reduce (fn [m p] (assoc m p (count m)))
+  (->> history
+       history/processes
+       history/sort-processes
+       (reduce (fn [m p] (assoc m p (count m)))
                {})))
 
-(def html
+(defn html
+  []
   (reify checker/Checker
     (check [this test model history opts]
+      (prn "checking")
       (->> (h/html [:html
                     [:head
                      [:style stylesheet]]
@@ -92,8 +101,11 @@
                      [:p  (str (:start-time test))]
                      [:div {:class "ops"}
                       (->> history
+                           history/complete
+                           history/index
                            pairs
                            (map (partial pair->div
+                                         history
                                          (process-index history))))]]])
-           (spit "timeline.html"))
+           (spit (store/path! test (:subdirectory opts) "timeline.html")))
       {:valid? true})))
