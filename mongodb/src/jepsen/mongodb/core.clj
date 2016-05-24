@@ -84,10 +84,18 @@
   [node]
   (cu/stop-daemon! "mongod" "/opt/mongodb/pidfile"))
 
+(defn savelog!
+  "Saves Mongod log"
+  [node]
+  (info node "copying mongod.log file to /root/")
+  (c/su
+    (c/exec :cp :-f "/opt/mongodb/mongod.log" "/root/")))
+
 (defn wipe!
   "Shuts down MongoDB and wipes data."
   [node]
   (stop! node)
+  (savelog! node)
   (info node "deleting data files")
   (c/su
     (c/exec :rm :-rf (c/lit "/opt/mongodb/*.log"))))
