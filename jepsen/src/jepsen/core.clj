@@ -85,8 +85,9 @@
   [test f]
   (->> (:sessions test)
        (real-pmap (fn [[node session]]
+                    (with-thread-name (str "jepsen node " (name node))
                       (control/with-session node session
-                        (f test node))))
+                        (f test node)))))
        dorun))
 
 (defmacro with-os
