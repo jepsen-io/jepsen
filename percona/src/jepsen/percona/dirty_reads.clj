@@ -45,7 +45,7 @@
     (assoc this :node node))
 
   (invoke! [this test op]
-    (timeout 5000 (assoc ~op :type :info, :value :timed-out)
+    (timeout 5000 (assoc op :type :info, :value :timed-out)
       (percona/with-error-handling op
         (percona/with-txn-aborts op
           (j/with-db-transaction [c (percona/conn-spec node)
