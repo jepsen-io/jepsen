@@ -4,7 +4,7 @@
                  [org.clojure/data.fressian "0.2.1"]
                  [org.clojure/tools.logging "0.3.1"]
                  [clj-time "0.11.0"]
-                 [knossos "0.2.6"]
+                 [knossos "0.2.7"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.1"]
                  [hiccup "1.0.5"]
