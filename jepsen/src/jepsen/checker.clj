@@ -6,7 +6,7 @@
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
-            [jepsen.util :as util]
+            [jepsen.util :as util :refer [meh]]
             [jepsen.store :as store]
             [jepsen.checker.perf :as perf]
             [multiset.core :as multiset]
@@ -57,9 +57,11 @@
     (check [this test model history opts]
       (let [a (linear/analysis model history)]
         (when-not (:valid? a)
-          (linear.report/render-analysis!
-            history a (.getCanonicalPath (store/path! test (:subdirectory opts)
-                                                      "linear.svg"))))
+          (meh
+            ; Renderer can't handle really broad concurrencies yet
+            (linear.report/render-analysis!
+              history a (.getCanonicalPath (store/path! test (:subdirectory opts)
+                                                      "linear.svg")))))
         ; Writing these can take *hours* so we truncate
         (assoc a
                :final-paths (take 10 (:final-paths a))
