@@ -46,6 +46,13 @@
                                     (doseq [e set]
                                       (.writeObject w e))))}
 
+       clojure.lang.MapEntry
+       {"map-entry" (reify WriteHandler
+                      (write [_ w e]
+                        (.writeTag    w "map-entry" 2)
+                        (.writeObject w (key e))
+                        (.writeObject w (val e))))}
+
        multiset.core.MultiSet
        {"multiset" (reify WriteHandler
                      (write [_ w set]
@@ -71,13 +78,18 @@
                                    (persistent! s))))
 
        "persistent-sorted-set" (reify ReadHandler
-                               (read [_ rdr tag component-count]
-                                 (loop [i component-count
-                                        s (sorted-set)]
-                                   (if (pos? i)
-                                     (recur (dec i)
-                                            (conj s (.readObject rdr)))
-                                     s))))
+                                 (read [_ rdr tag component-count]
+                                   (loop [i component-count
+                                          s (sorted-set)]
+                                     (if (pos? i)
+                                       (recur (dec i)
+                                              (conj s (.readObject rdr)))
+                                       s))))
+
+       "map-entry" (reify ReadHandler
+                     (read [_ rdr tag component-count]
+                       (clojure.lang.MapEntry. (.readObject rdr)
+                                               (.readObject rdr))))
 
        "multiset" (reify ReadHandler
                     (read [_ rdr tag component-count]
