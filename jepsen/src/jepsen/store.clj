@@ -252,8 +252,10 @@
   "Writes a history and fressian file to disk and updates latest symlinks.
   Returns test."
   [test]
-  (->> [(future (write-history! test))
-        (future (write-fressian! test))]
+  (->> [(future (util/with-thread-name "jepsen history"
+                  (write-history! test)))
+        (future (util/with-thread-name "jepsen fressian"
+                  (write-fressian! test)))]
        (map deref)
        dorun)
   (update-symlinks! test)
@@ -263,8 +265,9 @@
   "Phase 2: after computing results, we re-write the fressian file and also
   dump results as edn. Returns test."
   [test]
-  (->> [(future (write-results! test))
-        (future (write-fressian! test))]
+  (->> [(future (util/with-thread-name "jepsen results" (write-results! test)))
+        (future (util/with-thread-name "jepsen fressian"
+                  (write-fressian! test)))]
        (map deref)
        dorun)
   (update-symlinks! test)
