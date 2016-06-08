@@ -52,65 +52,69 @@
 (defn wget!
   "Downloads a string URL and returns the filename as a string. Skips if the
   file already exists."
-  [url]
-  (let [filename (.getName (file url))]
-    (when-not (exists? filename)
-      (exec :wget
-            :--tries 20
-            :--waitretry 60
-            :--retry-connrefused
-            :--dns-timeout 60
-            :--connect-timeout 60
-            :--read-timeout 60
-            url))
-    filename))
+  ([url]
+   (wget! url false))
+  ([url force?]
+   (let [filename (.getName (file url))]
+     (when (or force? (not (exists? filename)))
+       (exec :wget
+             :--tries 20
+             :--waitretry 60
+             :--retry-connrefused
+             :--dns-timeout 60
+             :--connect-timeout 60
+             :--read-timeout 60
+             url))
+     filename)))
 
 (defn install-tarball!
   "Gets the given tarball URL, caching it in /tmp/jepsen/, and extracts its
   sole top-level directory to the given dest directory. Deletes
   current contents of dest. Returns dest."
-  [node url dest]
-  (let [local-file (nth (re-find #"file://(.+)" url) 1)
-        file       (or local-file
-                       (do (exec :mkdir :-p tmp-dir-base)
-                           (cd tmp-dir-base
-                               (expand-path (wget! url)))))
-        tmpdir     (tmp-dir!)
-        dest       (expand-path dest)]
-    ; Clean up old dest
-    (exec :rm :-rf dest)
-    (try
-      (cd tmpdir
-          ; Extract tarball to tmpdir
-          (exec :tar :xf file)
+  ([node url dest]
+   (node url dest false))
+  ([node url dest force?]
+   (let [local-file (nth (re-find #"file://(.+)" url) 1)
+         file       (or local-file
+                        (do (exec :mkdir :-p tmp-dir-base)
+                            (cd tmp-dir-base
+                                (expand-path (wget! url force?)))))
+         tmpdir     (tmp-dir!)
+         dest       (expand-path dest)]
+     ; Clean up old dest
+     (exec :rm :-rf dest)
+     (try
+       (cd tmpdir
+           ; Extract tarball to tmpdir
+           (exec :tar :xf file)
 
-          ; Get tarball root paths
-          (let [roots (ls)]
-            (assert (pos? (count roots)) "Tarball contained no files")
-            (assert (= 1  (count roots))
-                    (str "Tarball contained multiple top-level files: "
-                         (pr-str roots)))
+           ; Get tarball root paths
+           (let [roots (ls)]
+             (assert (pos? (count roots)) "Tarball contained no files")
+             (assert (= 1  (count roots))
+                     (str "Tarball contained multiple top-level files: "
+                          (pr-str roots)))
 
-            ; Move root to dest
-            (exec :mv (first roots) dest)))
-      (catch RuntimeException e
-        (condp re-find (.getMessage e)
-          #"tar: Unexpected EOF"
-          (if local-file
-            ; Nothing we can do to recover here
-            (throw (RuntimeException.
-                     (str "Local tarball " local-file " on node " (name node)
-                          " is corrupt: unexpected EOF.")))
-            (do (info "Retrying corrupt tarball download")
-                (exec :rm :-rf file)
-                (install-tarball! node url dest)))
+             ; Move root to dest
+             (exec :mv (first roots) dest)))
+       (catch RuntimeException e
+         (condp re-find (.getMessage e)
+           #"tar: Unexpected EOF"
+           (if local-file
+             ; Nothing we can do to recover here
+             (throw (RuntimeException.
+                      (str "Local tarball " local-file " on node " (name node)
+                           " is corrupt: unexpected EOF.")))
+             (do (info "Retrying corrupt tarball download")
+                 (exec :rm :-rf file)
+                 (install-tarball! node url dest)))
 
-          ; Throw by default
-          (throw e)))
-      (finally
-        ; Clean up tmpdir
-        (exec :rm :-rf tmpdir))))
-  dest)
+           ; Throw by default
+           (throw e)))
+       (finally
+         ; Clean up tmpdir
+         (exec :rm :-rf tmpdir))))
+   dest))
 
 
 (defn ensure-user!
