@@ -128,6 +128,8 @@
         (loop [process process]
           ; Obtain an operation to execute
           (when-let [op (generator/op gen test process)]
+            (assert (map? op) (str "Expected an operation map from " gen
+                                   ", but got " (pr-str op) " instead."))
             (let [op (assoc op
                             :process process
                             :time    (relative-time-nanos))]

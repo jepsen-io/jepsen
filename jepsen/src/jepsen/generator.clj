@@ -65,9 +65,9 @@
   process is likely (clients aren't required to respect the node they're given)
   talking to, if process is an integer. Otherwise, nil."
   [test process]
-  (let [thread (process->thread)]
+  (let [thread (process->thread test process)]
     (when (integer? thread)
-      (nth (:nodes test) (mod thread (:nodes test))))))
+      (nth (:nodes test) (mod thread (count (:nodes test)))))))
 
 (def void
   "A generator which terminates immediately"
