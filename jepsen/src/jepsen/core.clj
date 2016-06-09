@@ -290,21 +290,20 @@
     ; Register history with test's active set.
     (swap! (:active-histories test) conj history)
 
-    ; Launch nemesis
-    (with-nemesis test
-      ; Launch clients
-      (with-resources [clients
-                       #(client/setup! (:client test) test %) ; Specialize to node
-                       #(client/teardown! % test)
-                       (if (empty? (:nodes test))
-                         ; If you've specified an empty node set, we'll still
-                         ; give you `concurrency` clients, with nil.
-                         (repeat (:concurrency test) nil)
-                         (->> test
-                              :nodes
-                              cycle
-                              (take (:concurrency test))))]
-
+    ; Launch clients
+    (with-resources [clients
+                     #(client/setup! (:client test) test %) ; Specialize to node
+                     #(client/teardown! % test)
+                     (if (empty? (:nodes test))
+                       ; If you've specified an empty node set, we'll still
+                       ; give you `concurrency` clients, with nil.
+                       (repeat (:concurrency test) nil)
+                       (->> test
+                            :nodes
+                            cycle
+                            (take (:concurrency test))))]
+      ; Launch nemesis
+      (with-nemesis test
         ; Begin workload
         (let [workers (mapv (partial worker test)
                             (iterate inc 0) ; PIDs
