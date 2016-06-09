@@ -188,9 +188,10 @@
         histories (:active-histories test)]
     (future
       (with-thread-name "jepsen nemesis"
+        (info "Nemesis starting")
         (loop []
           (when-let [op (generator/op gen test :nemesis)]
-            (assert (map? op) (str "Expected an operation map for nemesis from"
+            (assert (map? op) (str "Expected an operation map for nemesis from "
                                    gen
                                    ", but got " (pr-str op) " instead."))
             (let [op (assoc op
