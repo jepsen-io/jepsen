@@ -216,7 +216,8 @@
                    :start (if-let [ns (-> test :nodes targeter util/coll)]
                             (if (compare-and-set! nodes nil ns)
                               (c/on-many ns (start! test c/*host*))
-                              (str "nemesis already disrupting " @nodes))
+                              (str "nemesis already disrupting "
+                                   (pr-str @nodes)))
                             :no-target)
                    :stop (if-let [ns @nodes]
                            (let [value (c/on-many ns (stop! test c/*host*))]
