@@ -56,9 +56,18 @@
 (defn process->thread
   "Given a process identifier, return the corresponding thread identifier."
   [test process]
-  (if (number? process)
+  (if (integer? process)
     (mod process (:concurrency test))
     process))
+
+(defn process->node
+  "Given a test and a process identifier, returns the corresponding node this
+  process is likely (clients aren't required to respect the node they're given)
+  talking to, if process is an integer. Otherwise, nil."
+  [test process]
+  (let [thread (process->thread)]
+    (when (integer? thread)
+      (nth (:nodes test) (mod thread (:nodes test))))))
 
 (def void
   "A generator which terminates immediately"
