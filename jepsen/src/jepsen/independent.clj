@@ -133,7 +133,11 @@
                   ; Also assuming concurrency aligns with thread-count; not sure
                   ; how this composes when nested given the process->thread
                   ; mapping
-                  _ (assert (= (:concurrency test) thread-count))
+                  _ (assert (= (:concurrency test) thread-count)
+                            (str "Expected test :concurrency ("
+                                 (:concurrency test)
+                                 ") to be equal to number of integer threads ("
+                                 thread-count ")"))
 
                   ; Let a "chunk" be a contiguous set of threads covering every
                   ; node. A "group" is made up of chunks.
