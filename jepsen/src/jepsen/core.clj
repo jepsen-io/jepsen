@@ -393,45 +393,39 @@
                                      (CyclicBarrier. (count (:nodes test)))
                                      ::no-barrier))
                         ; Currently running histories
-                        :active-histories (atom #{}))]
+                        :active-histories (atom #{}))
+            test (control/with-ssh (:ssh test)
+                   (with-resources [sessions
+                                    (bound-fn* control/session)
+                                    control/disconnect
+                                    (:nodes test)]
+                     ; Index sessions by node name and add to test
+                     (let [test (->> sessions
+                                     (map vector (:nodes test))
+                                     (into {})
+                                     (assoc test :sessions))]
+                       ; Setup
+                       (with-os test
+                         (with-db test
+                           (generator/with-threads (cons :nemesis
+                                                         (range (:concurrency test)))
+                             (util/with-relative-time
+                               ; Run a single case
+                               (let [test (assoc test :history (run-case! test))
+                                     ; Remove state
+                                     test (dissoc test
+                                                  :barrier
+                                                  :active-histories
+                                                  :sessions)]
+                                 (info "Run complete, writing")
+                                 (when (:name test) (store/save-1! test))
+                                 test))))))))
+            _ (info "Analyzing")
+            test (assoc test :results (checker/check-safe
+                                        (:checker test)
+                                        test
+                                        (:model test)
+                                        (:history test)))]
 
-        ; Open SSH conns
-        (control/with-ssh (:ssh test)
-          (with-resources [sessions
-                           (bound-fn* control/session)
-                           control/disconnect
-                           (:nodes test)]
-
-            ; Index sessions by node name and add to test
-            (let [test (->> sessions
-                            (map vector (:nodes test))
-                            (into {})
-                            (assoc test :sessions))]
-
-              ; Setup
-              (with-os test
-                (with-db test
-                  (generator/with-threads (cons :nemesis
-                                                (range (:concurrency test)))
-                    (util/with-relative-time
-                        ; Run a single case
-                        (let [test (assoc test :history (run-case! test))
-                              ; Remove state
-                              test (dissoc test
-                                           :barrier
-                                           :active-histories
-                                           :sessions)]
-
-                          (info "Run complete, writing")
-                          (when (:name test) (store/save-1! test))
-
-                          (info "Analyzing")
-                          (let [test (assoc test :results (checker/check-safe
-                                                            (:checker test)
-                                                            test
-                                                            (:model test)
-                                                            (:history test)))]
-
-                            (info "Analysis complete")
-                            (when (:name test) (store/save-2! test))
-                          test)))))))))))))
+        (info "Analysis complete")
+        (when (:name test) (store/save-2! test))))))
