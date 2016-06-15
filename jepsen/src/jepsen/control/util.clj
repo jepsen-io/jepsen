@@ -56,7 +56,9 @@
    (wget! url false))
   ([url force?]
    (let [filename (.getName (file url))]
-     (when (or force? (not (exists? filename)))
+     (when force?
+       (exec :rm :-f filename))
+     (when (not (exists? filename))
        (exec :wget
              :--tries 20
              :--waitretry 60
