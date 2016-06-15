@@ -96,6 +96,39 @@
       (control/with-session p (get-in test [:sessions p])
         (db/setup-primary! (:db test) test p)))))
 
+(defn snarf-logs!
+  "Downloads logs for a test."
+  [test]
+  ; Download logs
+  (when (satisfies? db/LogFiles (:db test))
+    (info "Snarfing log files")
+    (control/on-nodes test
+              (fn [test node]
+                (let [full-paths (db/log-files (:db test) test node)
+                      ; A map of full paths to short paths
+                      paths      (->> full-paths
+                                      (map #(str/split % #"/"))
+                                      util/drop-common-proper-prefix
+                                      (map (partial str/join "/"))
+                                      (zipmap full-paths))]
+                  (doseq [[remote local] paths]
+                    (info "downloading" remote "to" local)
+                    (try
+                      (control/download
+                        remote
+                        (.getCanonicalPath
+                          (store/path! test (name node)
+                                       ; strip leading /
+                                       (str/replace local #"^/" ""))))
+                      (catch java.io.IOException e
+                        (if (= "Pipe closed" (.getMessage e))
+                          (info remote "pipe closed")
+                          (throw e)))
+                      (catch java.lang.IllegalArgumentException e
+                        ; This is a jsch bug where the file is just being
+                        ; created
+                        (info remote "doesn't exist")))))))))
+
 (defmacro with-db
   "Wraps body in DB setup and teardown."
   [test & body]
@@ -104,6 +137,11 @@
      (setup-primary! ~test)
 
      ~@body
+     (catch Throwable t#
+       ; Emergency log dump!
+       (snarf-logs! ~test)
+       (store/update-symlinks! ~test)
+       (throw t#))
      (finally
        (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
@@ -235,39 +273,6 @@
          (info "Tearing down nemesis")
          (client/teardown! nemesis# ~test)
          (info "Nemesis torn down")))))
-
-(defn snarf-logs!
-  "Downloads logs for a test."
-  [test]
-  ; Download logs
-  (when (satisfies? db/LogFiles (:db test))
-    (info "Snarfing log files")
-    (control/on-nodes test
-              (fn [test node]
-                (let [full-paths (db/log-files (:db test) test node)
-                      ; A map of full paths to short paths
-                      paths      (->> full-paths
-                                      (map #(str/split % #"/"))
-                                      util/drop-common-proper-prefix
-                                      (map (partial str/join "/"))
-                                      (zipmap full-paths))]
-                  (doseq [[remote local] paths]
-                    (info "downloading" remote "to" local)
-                    (try
-                      (control/download
-                        remote
-                        (.getCanonicalPath
-                          (store/path! test (name node)
-                                       ; strip leading /
-                                       (str/replace local #"^/" ""))))
-                      (catch java.io.IOException e
-                        (if (= "Pipe closed" (.getMessage e))
-                          (info remote "pipe closed")
-                          (throw e)))
-                      (catch java.lang.IllegalArgumentException e
-                        ; This is a jsch bug where the file is just being
-                        ; created
-                        (info remote "doesn't exist")))))))))
 
 (defn run-case!
   "Spawns nemesis and clients, runs a single test case, snarf the logs, and
