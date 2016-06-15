@@ -3,6 +3,8 @@
   state in this namespace because we want to make it as simple as possible for
   scripts to open connections to various nodes."
   (:require [clj-ssh.ssh    :as ssh]
+            [jepsen.util    :as util :refer [real-pmap
+                                             with-thread-name]]
             [clojure.string :as str]
             [clojure.tools.logging :refer [warn info debug]]))
 
@@ -251,6 +253,17 @@
           (map deref)
           (map vector hosts#)
           (into {}))))
+
+(defn on-nodes
+  "Given a test, evaluates (f test node) in parallel on each node, with that
+  node's SSH connection bound."
+  [test f]
+  (->> (:sessions test)
+       (real-pmap (fn [[node session]]
+                    (with-thread-name (str "jepsen node " (name node))
+                      (with-session node session
+                        [node (f test node)]))))
+       (into {})))
 
 (defn go
   [host]

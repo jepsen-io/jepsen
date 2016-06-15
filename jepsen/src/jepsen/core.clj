@@ -79,25 +79,14 @@
          ; Clean up resources
          (dorun (real-pmap (fcatch ~stop) ~sym))))))
 
-(defn on-nodes
-  "Given a test, evaluates (f test node) in parallel on each node, with that
-  node's SSH connection bound."
-  [test f]
-  (->> (:sessions test)
-       (real-pmap (fn [[node session]]
-                    (with-thread-name (str "jepsen node " (name node))
-                      (control/with-session node session
-                        (f test node)))))
-       dorun))
-
 (defmacro with-os
   "Wraps body in OS setup and teardown."
   [test & body]
   `(try
-     (on-nodes ~test (partial os/setup! (:os ~test)))
+     (control/on-nodes ~test (partial os/setup! (:os ~test)))
      ~@body
      (finally
-       (on-nodes ~test (partial os/teardown! (:os ~test))))))
+       (control/on-nodes ~test (partial os/teardown! (:os ~test))))))
 
 (defn setup-primary!
   "Given a test, sets up the database primary, if the DB supports it."
@@ -111,12 +100,12 @@
   "Wraps body in DB setup and teardown."
   [test & body]
   `(try
-     (on-nodes ~test (partial db/cycle! (:db ~test)))
+     (control/on-nodes ~test (partial db/cycle! (:db ~test)))
      (setup-primary! ~test)
 
      ~@body
      (finally
-       (on-nodes ~test (partial db/teardown! (:db ~test))))))
+       (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
 (defn worker
   "Spawns a future to execute a particular process in the history."
@@ -253,7 +242,7 @@
   ; Download logs
   (when (satisfies? db/LogFiles (:db test))
     (info "Snarfing log files")
-    (on-nodes test
+    (control/on-nodes test
               (fn [test node]
                 (let [full-paths (db/log-files (:db test) test node)
                       ; A map of full paths to short paths
