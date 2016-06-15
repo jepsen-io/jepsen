@@ -92,7 +92,6 @@
   []
   (reify checker/Checker
     (check [this test model history opts]
-      (prn "checking")
       (->> (h/html [:html
                     [:head
                      [:style stylesheet]]
