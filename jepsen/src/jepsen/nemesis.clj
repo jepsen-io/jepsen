@@ -23,13 +23,8 @@
   reject messages from, and makes the appropriate changes. Does not heal the
   network first, so repeated calls to partition! are cumulative right now."
   [test grudge]
-  (->> grudge
-       (map (fn [[node frenemies]]
-              (future
-                (snub-nodes! test node frenemies))))
-       doall
-       (map deref)
-       dorun))
+  (c/on-nodes test (fn snub [test node]
+                     (snub-nodes! test node (get grudge node)))))
 
 (defn bisect
   "Given a sequence, cuts it in half; smaller half first."
