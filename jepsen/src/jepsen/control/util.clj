@@ -177,5 +177,5 @@
 
   ([cmd pidfile]
    (info "Stopping" cmd)
-   (meh (exec :killall :-9 cmd))
+   (meh (exec :killall :-9 :-w cmd))
    (meh (exec :rm :-rf pidfile))))
