@@ -158,6 +158,8 @@ sed  -i 's,^PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config
 systemctl restart sshd
 ```
 
+Remove systemd.
+
 Detach from the container with Control+a q, and repeat for the remaining nodes.
 
 On the control node, drop entries in `~/.ssh/config` for nodes:
