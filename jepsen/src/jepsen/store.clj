@@ -207,17 +207,18 @@
         (into {}))))
 
 (defn update-symlinks!
-  "Creates `latest` symlinks to the given test."
+  "Creates `latest` symlinks to the given test, if a store directory exists."
   [test]
   (doseq [dest [["latest"] [(:name test) "latest"]]]
     ; did you just tell me to go fuck myself
-    (let [src  (.toPath (path test))
-          dest (.. FileSystems
-                   getDefault
-                   (getPath base-dir (into-array dest)))]
-      (Files/deleteIfExists dest)
-      (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
-                                (make-array FileAttribute 0)))))
+    (when (.exists (path test))
+      (let [src  (.toPath (path test))
+            dest (.. FileSystems
+                     getDefault
+                     (getPath base-dir (into-array dest)))]
+        (Files/deleteIfExists dest)
+        (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
+                                  (make-array FileAttribute 0))))))
 
 (defmacro with-out-file
   "Binds stdout to a file for the duration of body."
