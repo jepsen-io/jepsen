@@ -55,7 +55,7 @@ construct using the `db` function we just wrote:
 ```
 
 `noop-test`, like all Jepsen tests, is a map with keys like `:os`, `:name`,
-`:db`, etc. See [jepsen.core](jepsen/src/jepsen/core.clj) for an overview of
+`:db`, etc. See [jepsen.core](../../master/jepsen/src/jepsen/core.clj) for an overview of
 test structure, and `jepsen.core/run` for the full definition of a test.
 
 Right now `noop-test` has stub implementations for those keys. But we can
