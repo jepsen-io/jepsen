@@ -28,7 +28,7 @@
   "When did we last run an apt-get update, in seconds ago"
   []
   (- (Long/parseLong (c/exec :date "+%s"))
-     (Long/parseLong (c/exec :stat :-c "%Y" "/var/cache/apt/pkgcache.bin"))))
+     (Long/parseLong (c/exec :stat :-c "%Y" "/var/cache/apt/pkgcache.bin" "||" :echo 0))))
 
 (defn update!
   "Apt-get update."
