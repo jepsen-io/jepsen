@@ -86,7 +86,8 @@
           (c/exec :rm "DEB-GPG-KEY-crate"))
     (debian/add-repo! "crate" "deb https://cdn.crate.io/downloads/apt/stable/ jessie main")
     (debian/install [:crate])
-    (c/exec :update-rc.d :crate :disable)))
+    (c/exec :update-rc.d :crate :disable))
+  (info node "crate installed"))
 
 (defn majority
   "n/2+1"
@@ -108,12 +109,14 @@
                              (json/generate-string
                                (vals (c/on-nodes test (fn [_ _]
                                                         (cnet/local-ip)))))))
-            :> "/etc/crate/crate.yml")))
+            :> "/etc/crate/crate.yml"))
+  (info node "configured"))
 
 (defn start!
   [node]
   (c/su
-    (c/exec :service :crate :start)))
+    (c/exec :service :crate :start)
+    (info node "started")))
 
 (defn db
   []
@@ -126,6 +129,7 @@
 
     (teardown! [_ test node]
       (cu/grepkill! "crate")
+      (info node "killed")
       (c/exec :rm :-rf (c/lit "/var/log/crate/*"))
       (c/exec :rm :-rf (c/lit "/var/lib/crate/*")))
 
@@ -209,6 +213,7 @@
   [opts]
   (merge tests/noop-test
          {:name    "crate"
+          :os      debian/os
           :db      (db)
           :client  (client)
           :checker (checker/compose
