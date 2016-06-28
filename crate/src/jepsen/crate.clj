@@ -210,8 +210,7 @@
           :db      (db)
           :client  (client)
           :checker (checker/compose
-                     {:timeline (independent/checker (timeline/html))
-                      :multi    (independent/checker (multiversion-checker))
+                     {:multi    (independent/checker (multiversion-checker))
                       :perf     (checker/perf)})
           :concurrency 100
           :nemesis (nemesis/partition-majorities-ring)
