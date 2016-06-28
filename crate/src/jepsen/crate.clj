@@ -173,7 +173,9 @@
 
                   (and (= 5000 (.errorCode e))
                        (re-find #"rejected execution" (str e)))
-                  (assoc op :type :info, :error :rejected-execution)
+                  (do ; Back off a bit
+                      (Thread/sleep 100)
+                      (assoc op :type :info, :error :rejected-execution))
 
                   :else
                   (throw e)))))))
