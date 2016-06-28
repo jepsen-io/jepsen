@@ -158,7 +158,7 @@ sed  -i 's,^PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config
 systemctl restart sshd
 ```
 
-Remove systemd.
+[Remove systemd](http://without-systemd.org/wiki/index.php/How_to_remove_systemd_from_a_Debian_jessie/sid_installation).
 
 Detach from the container with Control+a q, and repeat for the remaining nodes.
 
