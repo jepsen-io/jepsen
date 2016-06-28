@@ -220,7 +220,7 @@
                      {:multi    (independent/checker (multiversion-checker))
                       :perf     (checker/perf)})
           :concurrency 100
-          :nemesis (nemesis/partition-majorities-ring)
+          :nemesis (nemesis/partition-random-halves)
           :generator (->> (independent/concurrent-generator
                             10
                             (range)
