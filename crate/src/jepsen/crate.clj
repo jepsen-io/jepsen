@@ -153,7 +153,7 @@
 
       (invoke! [this test op]
         (let [[k v] (:value op)]
-          (timeout 500 (assoc op :type :fail)
+          (timeout 500 (assoc op :type :fail, :error :timeout)
             (try
               (case (:f op)
                 :read (->> (sql! conn "select value, \"_version\"
@@ -178,7 +178,7 @@
                   (and (= 5000 (.errorCode e))
                        (re-find #"rejected execution" (str e)))
                   (do ; Back off a bit
-                      (Thread/sleep 100)
+                      (Thread/sleep 1000)
                       (assoc op :type :info, :error :rejected-execution))
 
                   :else
@@ -227,9 +227,9 @@
                             (fn [id]
                               (->> (gen/reserve 5 (r) (w)))))
                           (gen/nemesis
-                            (gen/seq (cycle [(gen/sleep 20)
+                            (gen/seq (cycle [(gen/sleep 120)
                                              {:type :info, :f :start}
-                                             (gen/sleep 200)
+                                             (gen/sleep 120)
                                              {:type :info, :f :stop}])))
-                          (gen/time-limit 300))}
+                          (gen/time-limit 360))}
          opts))
