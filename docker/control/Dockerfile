@@ -1,7 +1,7 @@
-FROM kojiromike/dind
+FROM ubuntu:16.04
 MAINTAINER jake@apache.org
 
-ENV JEPSEN_GIT_URL http://github.com/aphyr/jepsen
+ARG JEPSEN_GIT_URL=http://github.com/aphyr/jepsen
 ENV LEIN_ROOT true
 
 #
@@ -25,9 +25,8 @@ RUN chmod +x /usr/bin/lein
 RUN git clone $JEPSEN_GIT_URL /jepsen
 RUN cd /jepsen/jepsen && lein install
 
-
-ADD ./build-dockerized-jepsen.sh /usr/local/bin/build-dockerized-jepsen.sh
-RUN chmod +x /usr/local/bin/build-dockerized-jepsen.sh
-
 ADD ./bashrc /root/.bashrc
+ADD ./init.sh /init.sh
+RUN chmod +x /init.sh
 
+CMD /init.sh
