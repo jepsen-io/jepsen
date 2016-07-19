@@ -25,7 +25,7 @@
 (def adjtime "/home/ubuntu/adjtime")
 
 ;; NTP server to use with `ntpdate`
-(def ntpserver "ntp.apple.com")
+(def ntpserver "ntp.ubuntu.com")
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 

@@ -135,10 +135,13 @@
                   :man-db
                   :faketime
                   :unzip
+                  :ntpdate
                   :iptables
                   :iputils-ping
                   :rsyslog
+		  :tcpdump
                   :logrotate])
+	(c/su (c/exec :service :ntp :stop))
 )
 
       (meh (net/heal)))

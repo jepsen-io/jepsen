@@ -255,13 +255,8 @@
         (jepsen/synchronize test)
       )
 
-      (info node "Testing JDBC connection...")
-      (let [conn (init-conn node)]
-        (j/with-db-transaction [c @conn :isolation isolation-level]
-          (into [] (j/query c ["select 1"])))
-        (close-conn @conn))
-
       (info node "Setup complete")
+      (jepsen/synchronize test)
       )
 
 
@@ -275,7 +270,7 @@
         (info node (c/su (c/exec :ntpdate :-b cln/ntpserver)))
 
         (info node "Stopping cockroachdb...")
-        (meh (c/exec cockroach :quit (if insecure [:--insecure] [])))
+        (meh (c/exec :timeout :5s cockroach :quit (if insecure [:--insecure] [])))
         (meh (c/exec :killall -9 :cockroach))
 
         (info node "Erasing the store...")
@@ -287,8 +282,6 @@
         (info node "Clearing the logs...")
         (meh (c/su (c/exec :chown username log-files)))
         (c/exec :truncate :-c :--size 0 log-files)
-
-        (jepsen/synchronize test)
         ))
 
 
@@ -313,6 +306,12 @@
                res#))
        res#)))
 
+;; FIXME: CockroachDB features a custom txn retry protocol, documented in
+;; https://www.cockroachlabs.com/docs/build-a-test-app.html#step-4-execute-transactions-from-a-client
+;; However it seems that the JDBC driver and/or clojure sqldb package does
+;; not enable one to reuse the transaction after an exception was thrown. So
+;; we use a (more overweight) traditional retry loop here instead. This
+;; may reduce performance.
 (defmacro with-txn-retries
   "Retries body on rollbacks. Uses exponential back-off to avoid conflict storms."
   [conn & body]
@@ -323,6 +322,7 @@
        (if (:retry res#)
          (if (> retry# 0)
            (do
+             (info "Retrying from " res#) 
              ;;(let [spec# (close-conn (deref ~conn))
              ;;      new-conn# (open-conn spec#)]
              ;;  (info "Re-opening connection for retry...")
@@ -456,10 +456,10 @@
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (Thread/sleep 1000)
-          (j/execute! @conn ["drop table if exists test"])
+          (with-txn-notimeout {} [c conn] (j/execute! c ["drop table if exists test"]))
           (Thread/sleep 1000)
           (info node "Creating table")
-          (j/execute! @conn ["create table test (id int, val int)"])))
+          (with-txn-notimeout {} [c conn] (j/execute! c ["create table test (id int, val int)"]))))
 
       (assoc this :conn conn)))
 
@@ -596,10 +596,10 @@
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (Thread/sleep 1000)
-          (j/execute! @conn ["drop table if exists set"])
+          (with-txn-notimeout {} [c conn] (j/execute! c ["drop table if exists set"]))
           (Thread/sleep 1000)
           (info node "Creating table")
-          (j/execute! @conn ["create table set (val int)"])))
+          (with-txn-notimeout {} [c conn] (j/execute! c ["create table set (val int)"]))))
 
       (assoc this :conn conn)))
 
@@ -705,9 +705,10 @@
               [off-order-sts off-order-val] (monotonic-order final-read-l)
 
               adds   (into #{} (map first all-adds-l))
-              ok     (into #{} (map first final-read-l))
+              lok     (into [] (map first final-read-l))
+              ok      (into #{} lok)
               
-              dups        (into #{} (for [[id freq] (frequencies ok) :when (> freq 1)] id))
+              dups        (into #{} (for [[id freq] (frequencies lok) :when (> freq 1)] id))
 
               ;; Lost records are those we definitely added but weren't read
               lost        (set/difference adds ok)
@@ -744,12 +745,12 @@
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (Thread/sleep 1000)
-          (j/execute! @conn ["drop table if exists mono"])
+          (with-txn-notimeout {} [c conn] (j/execute! c ["drop table if exists mono"]))
           (Thread/sleep 1000)
           (info node "Creating table")
-          (j/execute! @conn ["create table mono (val int, sts string, node int, tb int)"])
+          (with-txn-notimeout {} [c conn] (j/execute! c ["create table mono (val int, sts string, node int, tb int)"]))
           (Thread/sleep 1000)
-          (j/insert! @conn :mono {:val -1 :sts "0" :node -1 :tb -1})))
+          (with-txn-notimeout {} [c conn] (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1}))))
 
       (assoc this :conn conn :nodenum n)))
 
@@ -854,9 +855,10 @@
               off-order-val-pertable (test-off-order 3 (range multitable-spread))
 
               adds (into #{} (map first all-adds-l))
-              ok  (into #{} (map first final-read-l))
+              lok     (into [] (map first final-read-l))
+              ok      (into #{} lok)
               
-              dups        (into #{} (for [[id freq] (frequencies ok) :when (> freq 1)] id))
+              dups        (into #{} (for [[id freq] (frequencies lok) :when (> freq 1)] id))
 
               ;; Lost records are those we definitely added but weren't read
               lost        (set/difference adds ok)
@@ -904,13 +906,13 @@
           (dorun (for [x (range multitable-spread)]
                    (do
                      (Thread/sleep 1000)
-                     (j/execute! @conn [(str "drop table if exists mono" x)])
+                     (with-txn-notimeout {} [c conn] (j/execute! c [(str "drop table if exists mono" x)]))
                      (Thread/sleep 1000)
                      (info "Creating table " x)
-                     (j/execute! @conn [(str "create table mono" x
-                                             " (val int, sts string, node int, proc int, tb int)")])
+                     (with-txn-notimeout {} [c conn] (j/execute! c [(str "create table mono" x
+                                             " (val int, sts string, node int, proc int, tb int)")]))
                      (Thread/sleep 1000)
-                     (j/insert! @conn (str "mono" x) {:val -1 :sts "0" :node -1 :proc -1 :tb x})
+                     (with-txn-notimeout {} [c conn] (j/insert! c (str "mono" x) {:val -1 :sts "0" :node -1 :proc -1 :tb x}))
                      )))))
 
       (assoc this :conn conn :nodenum n)))
@@ -981,14 +983,14 @@
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (Thread/sleep 1000)
-          (j/execute! @conn ["drop table if exists accounts"])
+          (with-txn-notimeout {} [c conn] (j/execute! c ["drop table if exists accounts"]))
           (Thread/sleep 1000)
           (info "Creating table")
-          (j/execute! @conn ["create table accounts (id int not null primary key, balance bigint not null)"])
+          (with-txn-notimeout {} [c conn] (j/execute! c ["create table accounts (id int not null primary key, balance bigint not null)"]))
           (dotimes [i n]
             (Thread/sleep 500)
             (info "Creating account" i)
-            (j/insert! @conn :accounts {:id i :balance starting-balance}))))
+            (with-txn-notimeout {} [c conn] (j/insert! c :accounts {:id i :balance starting-balance})))))
 
       (assoc this :conn conn))
     )
@@ -1115,13 +1117,13 @@
         (when (compare-and-set! tbl-created? false true)
           (dotimes [i n]
             (Thread/sleep 500)
-            (j/execute! @conn [(str "drop table if exists accounts" i)])
+            (with-txn-notimeout {} [c conn] (j/execute! c [(str "drop table if exists accounts" i)]))
             (Thread/sleep 500)
             (info "Creating table " i)
-            (j/execute! @conn [(str "create table accounts" i " (balance bigint not null)")])
+            (with-txn-notimeout {} [c conn] (j/execute! c [(str "create table accounts" i " (balance bigint not null)")]))
             (Thread/sleep 500)
             (info "Populating account" i)
-            (j/insert! @conn (str "accounts" i) {:balance starting-balance}))))
+            (with-txn-notimeout {} [c conn] (j/insert! c (str "accounts" i) {:balance starting-balance})))))
 
       (assoc this :conn conn))
     )
