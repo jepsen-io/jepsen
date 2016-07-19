@@ -1,7 +1,7 @@
 Jepsen testing for CockroachDB
 ==============================
 
-CockroachDB__ is a novel distributed database engine developed at
+CockroachDB__ is a new distributed database engine developed at
 `Cockroach Labs`__.
 
 .. __: https://github.com/cockroachdb/cockroach
@@ -21,31 +21,72 @@ What is being tested?
 ---------------------
 
 The tests run concurrent operations to some shared data from different
-nodes in a CockroachDB cluster and checks that the data is updated
-atomically and that the visible histories from all nodes are
-linearizable. During the tests, random partitions are created in the
-network to exercise the consistency protocol.
+nodes in a CockroachDB cluster and checks that the operations preserve
+the consistency properties defined in each test.  During the tests,
+various combinations of nemeses can be added to interfere with the
+database operations and exercise the database's consistency protocols.
 
 The following tests are implemented:
 
-- "atomic": concurrent atomic updates to a shared register;
-- "sets": concurrent unique appends to a shared table;
-- "monotonic: concurrent ordered appends with carried dependency;
-- "monotonic-multitable": concurrent ordered appends to separate
-  tables;
-- "bank": concurrent transfers between rows of a shared table;
-- "bank-multitable": concurrent transfers between rows of different tables.    
+``atomic``
+  concurrent atomic updates to a shared register;
+  
+``sets``
+  concurrent unique appends to a shared table;
+
+``monotonic``
+  concurrent ordered appends with carried dependency;
+
+``monotonic-multitable``
+  concurrent ordered appends to separate tables;
+
+``bank``
+  concurrent transfers between rows of a shared table;
+
+``bank-multitable``
+  concurrent transfers between rows of different tables.    
     
 Nemeses:
 
-- "blank" no nemesis
-- "skews" clock skews up to +/- 100ms
-- "bigskews" clock jumps up to +/- 10mn
-- "parts" random network partitions
-- "majring" random network partition where each node sees a majority of other nodes
-- "startstop"  db processes are stopped and restarted with SIGSTOP/SIGCONT
-- "startkill" db processes are stopped with SIGKILL and restarted from scratch  
+``blank``
+  no nemesis
 
+``skews``
+  clock skews up to +/- 100ms
+  
+``bigskews``
+  clock jumps up to +/- 10mn
+  
+``parts``
+  random network partitions
+  
+``majring``
+  random network partition where each node sees a majority of other nodes
+  
+``startstop``
+  db processes on 1 node are stopped and restarted with SIGSTOP/SIGCONT
+
+``startstop``
+  db processes on 2 nodes are stopped and restarted with SIGSTOP/SIGCONT
+
+``startkill``
+  db processes on 1 node are stopped with SIGKILL and restarted from scratch  
+
+``startkill2``
+  db processes on 2 nodes are stopped with SIGKILL and restarted from scratch  
+
+``skews-startkill2``, ``majring-startkill2``, ``parts-skews``, ``parts-startkill2``, ``majring-skews``, ``startstop-skews``
+  Combinations of the above
+
+To run a test::
+
+  lein test :only jepsen.cockroach-test/XXXXXX-YYYYYY
+  # where XXXXXX is the name of one of the tests
+  # and YYYYYY one of the nemeses.
+  #
+  # NB: The "blank" nemesis is a special case; the test
+  # is then simply called with jepsen.cockroach-test/XXXXXX.
+  
 Test details: atomic updates
 -----------------------------
 
@@ -140,8 +181,8 @@ How to run the Jepsen tests for CockroachDB
 Overview: One computer will run the Jepsen framework, and will send
 requests to other computers running the CockroachDB
 database. After a while, the trace of accesses is analyzed and checked
-for inconsistencies. If the database does its job properly, Jepsen's
-checker (Knossos) will report that no inconsistencies were found;
+for inconsistencies. If the database does its job properly, a Jepsen
+checker will report that no inconsistencies were found;
 otherwise it will indicate at which point the database started to
 perform invalid operations. Optionally, some performance metrics are
 also reported at the end.
@@ -153,9 +194,7 @@ How to get there:
    .. __: http://leiningen.org/
 
 2. configure a 5-node CockroachDB cluster, for example using the
-   configuration in CockroachDB's ``cloud/aws`` subdirectory. This
-   should create 5 Ubuntu-based VMs on EC2 with a pre-initialized,
-   already running CockroachDB distributed database.
+   configuration in CockroachDB's ``cloud/aws`` subdirectory. 
 
    .. note:: As of Jan 27th 2016, some additional tweaking may be required on
       top of the default configuration to get the database up and
@@ -207,9 +246,12 @@ How to get there:
    To disable SSL instead, set ``insecure`` to false in ``src/jepsen/cockroach.clj``.
 
 7. run ``lein test`` from the ``cockroachdb`` test directory. This
-   will run the Jepsen tests and exercise the database.
+   will run the Jepsen tests and exercise the database. To run a single test use::
 
-8. Wait for the results of the tests. there will
+       lein test :only jepsen.cockroach-test/....
+       # (see instructions above in section "What is being tested?")
+
+8. Wait for the results of the tests. There will
    be multiple reports, one per test. Each report ends with
    detailed data structure containing the test's results, including
    either ``:valid? true`` or ``:valid? false`` depending on whether
