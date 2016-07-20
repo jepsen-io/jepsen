@@ -15,7 +15,7 @@
                             :name     "store-test"
                             :multiset (into (multiset/multiset)
                                             [1 1 2 3 5 8])))]
-    (save! t)
+    (save-1! t)
     (let [ts     (tests "store-test")
           [k t'] (first ts)]
       (is (= 1 (count ts)))
