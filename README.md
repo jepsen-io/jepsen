@@ -1,5 +1,3 @@
-# Jepsen
-
 Breaking distributed systems so you don't have to.
 
 Jepsen is a Clojure library. A test is a Clojure program which uses the Jepsen
