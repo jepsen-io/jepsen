@@ -85,23 +85,23 @@
         ; You'll need debian testing for this
         (debian/install [:git-core])
 
-        ; Install golang 1.5.2
+        ; Install golang 1.6.3
         (c/su
           (c/cd "/opt"
-                (when-not (cu/file? "go")
-                  (info node "installing golang 1.5.2")
-                  (c/exec :wget :-c "https://storage.googleapis.com/golang/go1.5.2.linux-amd64.tar.gz")
-                  (c/exec :tar :xzf "go1.5.2.linux-amd64.tar.gz")
-                  (c/exec :rm :-f "go1.5.2.linux-amd64.tar.gz"))))
+                (when-not (cu/exists? "go")
+                  (info node "installing golang 1.6.3")
+                  (c/exec :wget :-c "https://storage.googleapis.com/golang/go1.6.3.linux-amd64.tar.gz")
+                  (c/exec :tar :xzf "go1.6.3.linux-amd64.tar.gz")
+                  (c/exec :rm :-f "go1.6.3.linux-amd64.tar.gz"))))
         
         (c/su
           (c/cd "/opt"
-                (when-not (cu/file? "etcd")
+                (when-not (cu/exists? "etcd")
                   (info node "cloning etcd")
                   (c/exec :git :clone "https://github.com/coreos/etcd")))
 
           (c/cd "/opt/etcd"
-                (when-not (cu/file? "bin/etcd")
+                (when-not (cu/exists? "bin/etcd")
                   (info node "building etcd")
                   (c/exec :env (c/lit "GOROOT=/opt/go") (c/lit "PATH=$PATH:/opt/go/bin")
                           (c/lit "./build"))))
