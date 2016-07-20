@@ -24,7 +24,7 @@
                  :db        (db)
                  :client    (cas-client)
                  :model     (model/cas-register)
-                 :checker   (checker/compose {:html   timeline/html
+                 :checker   (checker/compose {;:html   timeline/html
                                               :linear checker/linearizable})
                  :nemesis   (nemesis/partition-random-halves)
                  :generator (gen/phases
