@@ -43,7 +43,7 @@
   [cmd]
   (let [cmd'    (str cmd ".no-faketime")
         wrapper (faketime-script cmd')]
-    (when-not (cu/file? cmd')
+    (when-not (cu/exists? cmd')
       (info "Installing faketime wrapper.")
       (c/exec :mv cmd cmd')
       (c/exec :echo wrapper :> cmd)
