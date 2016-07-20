@@ -24,7 +24,7 @@
                  :db        (db)
                  :client    (cas-client)
                  :model     (model/cas-register)
-                 :checker   (checker/compose {;:html   timeline/html
+                 :checker   (checker/compose {:html   (timeline/html)
                                               :linear checker/linearizable})
                  :nemesis   (nemesis/partition-random-halves)
                  :generator (gen/phases
@@ -43,5 +43,4 @@
 ;                              (gen/sleep 10)
                               (gen/clients
                                 (gen/once {:type :invoke :f :read})))))]
-    (is (:valid? (:results test)))
-    (report/linearizability (:linear (:results test)))))
+    (is (:valid? (:results test)))))

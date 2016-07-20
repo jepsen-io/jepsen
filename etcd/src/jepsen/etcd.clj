@@ -177,7 +177,8 @@
       (try+
         (case (:f op)
           :read  (let [value (-> client
-                                 (v/get k {:consistent? true})
+                                 (v/get k {;:consistent? true})
+                                           :quorum? true})
                                  (json/parse-string true))]
                    (assoc op :type :ok :value value))
 
@@ -194,19 +195,19 @@
 
         ; A few common ways etcd can fail
         (catch java.net.SocketTimeoutException e
-          (assoc op :type fail :value :timed-out))
+          (assoc op :type fail :error :timed-out))
 
         (catch [:body "command failed to be committed due to node failure\n"] e
-          (assoc op :type fail :value :node-failure))
+          (assoc op :type fail :error :node-failure))
 
         (catch [:status 307] e
-          (assoc op :type fail :value :redirect-loop))
+          (assoc op :type fail :error :redirect-loop))
 
         (catch (and (instance? clojure.lang.ExceptionInfo %)) e
-          (assoc op :type fail :value e))
+          (assoc op :type fail :error e))
 
         (catch (and (:errorCode %) (:message %)) e
-          (assoc op :type fail :value e)))))
+          (assoc op :type fail :error e)))))
 
   (teardown! [_ test]))
 
