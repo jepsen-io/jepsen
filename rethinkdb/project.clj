@@ -4,7 +4,7 @@
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [com.apa512/rethinkdb "0.12.2-SNAPSHOT"]
                  [clj-time "0.9.0"]
-                 [jepsen "0.1.0-SNAPSHOT"]
+                 [jepsen "0.1.2"]
                  [cheshire "5.4.0"]]
   :jvm-opts ["-Xmx64g"
              "-XX:+UseConcMarkSweepGC"
