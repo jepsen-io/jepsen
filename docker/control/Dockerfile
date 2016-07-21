@@ -1,7 +1,6 @@
 FROM ubuntu:16.04
 MAINTAINER jake@apache.org
 
-ARG JEPSEN_GIT_URL=http://github.com/aphyr/jepsen
 ENV LEIN_ROOT true
 
 #
@@ -16,13 +15,16 @@ RUN apt-get -y -q update && \
         libjna-java \
         git \
         gnuplot \
-        wget
+        wget \
+	vim # not required by jepsen itself, just for ease of use
 
+RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && \
+    mv lein /usr/bin && \
+    chmod +x /usr/bin/lein && \
+    lein self-install
 
-RUN cd / && wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && mv /lein /usr/bin 
-RUN chmod +x /usr/bin/lein
-
-RUN git clone $JEPSEN_GIT_URL /jepsen
+# You need to locate jepsen in this directory (up.sh does that automatically)
+ADD jepsen /jepsen
 RUN cd /jepsen/jepsen && lein install
 
 ADD ./bashrc /root/.bashrc
