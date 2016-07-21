@@ -74,7 +74,7 @@
   sole top-level directory to the given dest directory. Deletes
   current contents of dest. Returns dest."
   ([node url dest]
-   (install! node url dest false))
+   (install-tarball! node url dest false))
   ([node url dest force?]
    (let [local-file (nth (re-find #"file://(.+)" url) 1)
          file       (or local-file

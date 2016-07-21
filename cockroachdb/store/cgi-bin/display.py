@@ -306,7 +306,7 @@ elif path == '.':
                     db_version_file = dv[0]
                     # n = db_version_split.split('/')[-2]
                     with open(db_version_file) as vf:
-                        db_thisver = vf.read().split('\n')[1].split(':')[1].strip()
+                        db_thisver = vf.read().split('\n')[0].split(':')[1].strip()
 
                 if not first and db_thisver != db_lastver:
                     print("<tr class='info'><td colspan=12 class='text-center small'><strong>New CockroachDB version</strong></td></tr>")
