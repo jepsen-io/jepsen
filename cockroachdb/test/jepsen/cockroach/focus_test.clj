@@ -14,7 +14,7 @@
           (jepsen/run!
             (register/test
               {:ssh           nil
-               :nodes         [:n1]
+               :nodes         [:n1 :n2 :n3 :n4 :n5]
                :nemesis       cln/none
                :linearizable  true
                :os            debian/os
