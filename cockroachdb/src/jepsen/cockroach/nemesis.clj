@@ -1,4 +1,4 @@
-(ns jepsen.cockroach-nemesis
+(ns jepsen.cockroach.nemesis
   "Nemeses for CockroachDB"
   (:require
     [jepsen
