@@ -318,14 +318,14 @@
   "Logs info about the results of a test to stdout, and returns test."
   [test]
   (info (str
-          (if (:valid? (:results test))
-            "Everything looks good! ヽ(‘ー`)ノ"
-            "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")
-          "\n\n"
           (with-out-str
             (pprint (:results test)))
           (when (:error (:results test))
-            (str "\n\n" (:error (:results test))))))
+            (str "\n\n" (:error (:results test))))
+          "\n\n"
+          (if (:valid? (:results test))
+            "Everything looks good! ヽ(‘ー`)ノ"
+            "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")))
   test)
 
 (defn run!
