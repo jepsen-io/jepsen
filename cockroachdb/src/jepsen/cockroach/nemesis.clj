@@ -1,13 +1,11 @@
 (ns jepsen.cockroach.nemesis
   "Nemeses for CockroachDB"
-  (:require
-    [jepsen
-     [client :as client]
-     [control :as c]
-     [nemesis :as nemesis]
-     [generator :as gen]
-     [util :as util]])
-  )
+  (:require [jepsen
+             [client :as client]
+             [control :as c]
+             [nemesis :as nemesis]
+             [generator :as gen]
+             [util :as util]]))
 
 ;; duration of 1 jepsen test
 (def test-duration 45) ; seconds
@@ -62,40 +60,15 @@
                     {:type :info, :f :stop2}])
    })
 
-(defn compose-nemesis-clients
-  ;; Our own version of nemesis/compose because Jepsen's is broken
-  "Takes a map of fs to nemeses and returns a single nemesis which, depending
-  on (:f op), routes to the appropriate child nemesis. "
-  [nemeses]
-  (assert (map? nemeses))
-  (reify client/Client
-    (setup! [this test node]
-      (compose-nemesis-clients (util/map-vals #(client/setup! % test node) nemeses)))
-
-    (invoke! [this test op]
-      (let [f (:f op)]
-        (loop [nemeses nemeses]
-          (if-not (seq nemeses)
-            (throw (IllegalArgumentException.
-                     (str "no nemesis can handle " (:f op))))
-            (let [[fs nemesis] (first nemeses)]
-              (if-let [f' (fs f)]
-                ;; need to re-assoc on return because jepsen/run asserts :f is preserved.
-                (assoc (client/invoke! nemesis test (assoc op :f f')) :f f)
-                (recur (next nemeses))))))))
-
-    (teardown! [this test]
-      (util/map-vals #(client/teardown! % test) nemeses))))
-
 (defn compose
   [n1 n2]
   {:name (str (:name n1) "-" (:name n2))
    :generator nemesis-double-gen
    :clocks (or (:clocks n1) (:clocks n2))
-   :client (compose-nemesis-clients {{:start1 :start, 
-                                      :stop1 :stop} (:client n1)
-                                     {:start2 :start,
-                                      :stop2 :stop} (:client n2)})})
+   :client (nemesis/compose {{:start1 :start,
+                              :stop1 :stop} (:client n1)
+                             {:start2 :start,
+                              :stop2 :stop} (:client n2)})})
 
 (defn with-nemesis
   "Wraps a client generator in a nemesis that induces failures and eventually

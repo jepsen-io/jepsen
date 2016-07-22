@@ -35,7 +35,15 @@
 
 (def nemeses
   "Supported nemeses"
-  {"none" cln/none})
+  {"none"          `cln/none
+   "parts"         `cln/parts
+   "majority-ring" `cln/majring
+   "skews"         `cln/skews
+   "big-skews"     `cln/bigskews
+   "start-stop"    `(cln/startstop 1)
+   "start-stop-2"  `(cln/startstop 2)
+   "start-kill"    `(cln/startkill 1)
+   "start-kill-2"  `(cln/startkill 2)})
 
 (def optspec
   "Command line options for tools.cli"
@@ -52,12 +60,12 @@
                             (assoc m k [v]) ; Replace with given host
                             (update m k conj v)))]
 
-   [nil "--nemesis" "Which nemesis to use"
+   [nil "--nemesis NAME" "Which nemesis to use"
     :default cln/none
     :parse-fn nemeses
-    :validate [boolean (one-of nemeses)]]
+    :validate [identity (one-of nemeses)]]
 
-   ["-o" "--os" "debian, ubuntu, or none"
+   ["-o" "--os NAME" "debian, ubuntu, or none"
     :default debian/os
     :parse-fn oses
     :validate [identity (one-of oses)]]
@@ -185,9 +193,17 @@ Test names: " (str/join ", " (keys tests))
         (move-logfile!)
         ; Run test!
         (try
-          (when-not (:valid? (:results (jepsen/run! (test-fn options))))
-            (move-logfile!)
-            (System/exit 1))
+          ; Rehydrate test
+          (let [test (-> options
+                         ; Construct a fresh nemesis
+                         (update :nemesis eval)
+                         ; Construct test
+                         test-fn
+                         ; Run!
+                         jepsen/run!)]
+            (when-not (:valid? (:results test))
+              (move-logfile!)
+              (System/exit 1)))
           (catch com.jcraft.jsch.JSchException e
             (info e "SSH connection fault; aborting test and moving on")
             (move-logfile!))))
