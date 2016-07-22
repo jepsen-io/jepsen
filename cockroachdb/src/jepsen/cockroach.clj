@@ -11,7 +11,8 @@
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [knossos.op :as op]
-            [jepsen [client :as client]
+            [jepsen
+             [client :as client]
              [core :as jepsen]
              [db :as db]
              [os :as os]
@@ -27,6 +28,7 @@
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
             [jepsen.os.ubuntu :as ubuntu]
+            [jepsen.os.debian :as debian]
             [jepsen.cockroach-nemesis :as cln]))
 
 (import [java.net URLEncoder])
@@ -224,6 +226,7 @@
   the tarball."
   [test node]
   (c/su
+    (debian/install [:tcpdump])
     (cu/ensure-user! cockroach-user)
     (cu/install-tarball! node (:tarball test) working-path false)
     (c/exec :mkdir :-p working-path)
@@ -236,8 +239,6 @@
   [opts]
   (reify db/DB
     (setup! [_ test node]
-      (install! test node)
-
       (when (= node (jepsen/primary test))
         (store/with-out-file test "jepsen-version.txt"
           (meh (->> (sh "git" "describe" "--tags")
@@ -245,6 +246,8 @@
                     (print)))))
 
       (when (= jdbc-mode :cdb-cluster)
+        (install! test node)
+
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")
           (c/su (c/exec (cockroach-start-cmdline nil)))
@@ -256,16 +259,18 @@
 
         (info node "Starting packet capture (filtering on" (control-addr)
               ")...")
+        (c/trace
         (c/su (c/exec :start-stop-daemon
                       :--start :--background
                       :--exec tcpdump
                       :--
-                      :-w pcaplog :host (control-addr) :and :port db-port
-                      ))
+                      :-w pcaplog :host (control-addr) :and :port db-port)))
 
         (info node "Starting CockroachDB...")
         (c/exec cockroach :version :> verlog (c/lit "2>&1"))
         (c/trace (c/su (c/exec (:runcmd test))))
+
+        (info node "Cochroach started")
 
         (jepsen/synchronize test)
 
