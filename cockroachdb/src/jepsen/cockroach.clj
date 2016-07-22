@@ -41,11 +41,17 @@
 ;; number of simultaneous clients
 (def concurrency-factor 30)
 
-;; address of the Jepsen controlling node as seen by
-;; the database nodes. Used to filter packet captures.
-;; replace by a string constant e.g. (def control-addr "x.y.z.w")
-;; if the following doesnt work.
-(def control-addr (.getHostAddress (java.net.InetAddress/getLocalHost)))
+(defn control-addr
+  "Address of the Jepsen control node, as seen by the local node. Used to
+  filter packet captures."
+  []
+  ; We drop any sudo binding here to make sure we aren't looking at a subshell
+  (let [line (binding [c/*sudo* nil]
+               (c/exec :env | :grep "SSH_CLIENT"))
+        matches (re-find #"SSH_CLIENT=(.+?)\s" line)]
+    (assert matches)
+    (matches 1)))
+
 (def tcpdump "/usr/sbin/tcpdump")
 
 ;; which database to use during the tests.
@@ -59,6 +65,10 @@
 ;; Unix username to log into via SSH for :cdb-cluster,
 ;; or to log into to localhost for :pg-local and :cdb-local
 (def username "ubuntu")
+
+(def cockroach-user
+  "User to run cockroachdb as"
+  "cockroach")
 
 ;; Isolation level to use with test transactions.
 (def isolation-level :serializable)
@@ -93,18 +103,17 @@
           (if insecure [:--insecure] [])))
 
 ;; Home directory for the CockroachDB setup
-(def working-path "/home/ubuntu")
+(def working-path "/opt/cockroach")
 
 ;; Location of various files
 (def cockroach (str working-path "/cockroach"))
 (def store-path (str working-path "/cockroach-data"))
 (def log-path (str working-path "/logs"))
 (def pidfile (str working-path "/pid"))
+
 (def errlog (str log-path "/cockroach.stderr"))
 (def verlog (str log-path "/version.txt"))
 (def pcaplog (str log-path "/trace.pcap"))
-
-
 (def log-files (if (= jdbc-mode :cdb-cluster) [errlog verlog pcaplog] []))
 
 ;;;;;;;;;;;;;;;;;;;; Database set-up and access functions  ;;;;;;;;;;;;;;;;;;;;;;;
@@ -183,7 +192,7 @@
     :--start :--background
     :--make-pidfile :--pidfile pidfile
     :--no-close
-    :--chuid username
+    :--chuid cockroach-user
     :--chdir working-path
     :--exec (c/expand-path cockroach)
     :--]
@@ -211,15 +220,23 @@
          ))
 
 (defn install!
-  "Installs CockroachDB on the given node, given a tarball url."
-  [node url]
-  (cu/install-tarball! node url cockroach))
+  "Installs CockroachDB on the given node. Test should include a :tarball url
+  the tarball."
+  [test node]
+  (c/su
+    (cu/ensure-user! cockroach-user)
+    (cu/install-tarball! node (:tarball test) working-path false)
+    (c/exec :mkdir :-p working-path)
+    (c/exec :mkdir :-p log-path)
+    (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path))
+  (info node "Cockroach installed"))
 
 (defn db
   "Sets up and tears down CockroachDB."
-  [linearizable clock-fixup-needed]
+  [opts]
   (reify db/DB
     (setup! [_ test node]
+      (install! test node)
 
       (when (= node (jepsen/primary test))
         (store/with-out-file test "jepsen-version.txt"
@@ -237,14 +254,13 @@
           (info node "Stopping 1st CockroachDB before starting cluster...")
           (c/exec cockroach :quit (if insecure [:--insecure] [])))
 
-        (jepsen/synchronize test)
-
-        (info node "Starting packet capture (filtering on " control-addr ")...")
+        (info node "Starting packet capture (filtering on" (control-addr)
+              ")...")
         (c/su (c/exec :start-stop-daemon
                       :--start :--background
                       :--exec tcpdump
                       :--
-                      :-w pcaplog :host control-addr :and :port db-port
+                      :-w pcaplog :host (control-addr) :and :port db-port
                       ))
 
         (info node "Starting CockroachDB...")
@@ -257,22 +273,13 @@
           (info node "Creating database...")
           (csql! (str "create database " dbname)))
 
-        (jepsen/synchronize test)
-      )
-
-      (info node "Setup complete")
-      (jepsen/synchronize test)
-      )
+      (info node "Setup complete")))
 
 
     (teardown! [_ test node]
-
-      
       (when (= jdbc-mode :cdb-cluster)
-        (jepsen/synchronize test)
-        
-        (info node "Resetting the clocks...")
-        (info node (c/su (c/exec :ntpdate :-b cln/ntpserver)))
+;        (info node "Resetting the clocks...")
+;        (info node (c/su (c/exec :ntpdate :-b cln/ntpserver)))
 
         (info node "Stopping cockroachdb...")
         (meh (c/exec :timeout :5s cockroach :quit (if insecure [:--insecure] [])))
@@ -285,10 +292,11 @@
         (meh (c/su (c/exec :killall -9 :tcpdump)))
 
         (info node "Clearing the logs...")
-        (meh (c/su (c/exec :chown username log-files)))
-        (c/exec :truncate :-c :--size 0 log-files)
-        ))
-
+        (c/su
+          (doseq [f log-files]
+            (when (cu/exists? f)
+              (c/exec :truncate :-c :--size 0 f)
+              (c/exec :chown cockroach-user f))))))
 
     db/LogFiles
     (log-files [_ test node] log-files)
@@ -425,20 +433,19 @@
 
 (defn basic-test
   "Sets up the test parameters common to all tests."
-  [nodes nemesis linearizable opts]
+  [opts]
   (merge tests/noop-test
-         {:nodes   (if (= jdbc-mode :cdb-cluster) nodes [:localhost])
+         {:nodes   (if (= jdbc-mode :cdb-cluster) (:nodes opts) [:localhost])
           :name    (str "cockroachdb-" (:name opts)
-                        (if linearizable "-lin" "")
+                        (if (:linearizable opts) "-lin" "")
                         (if (= jdbc-mode :cdb-cluster)
-                          (str ":" (:name nemesis))
+                          (str ":" (:name (:nemesis opts)))
                           "-fake"))
-          :db      (db linearizable (:clocks nemesis))
+          :db      (db opts)
           :ssh     {:username username :strict-host-key-checking false}
           :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
-          :nemesis (if (= jdbc-mode :cdb-cluster) (:client nemesis) nemesis/noop)
-          :linearizable linearizable
-          :runcmd  (cmdline-gen (first nodes) linearizable)
-          }
-         (dissoc opts :name)
-         ))
+          :nemesis (if (= jdbc-mode :cdb-cluster)
+                     (:client (:nemesis opts))
+                     nemesis/noop)
+          :runcmd  (cmdline-gen (first (:nodes opts)) (:linearizable opts))}
+         (dissoc opts :name :nodes :nemesis)))

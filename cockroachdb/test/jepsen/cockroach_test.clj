@@ -4,6 +4,7 @@
             [jepsen.core :as jepsen]
             [jepsen.control :as control]
             [jepsen.cockroach :as cl]
+            [jepsen.cockroach [register :as register]]
             [jepsen.cockroach-nemesis :as cln]))
 
 (def nodes [:n1l :n2l :n3l :n4l :n5l])
