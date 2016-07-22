@@ -2,11 +2,13 @@
   "Single atomic register test"
   (:refer-clojure :exclude [test])
   (:require [jepsen [cockroach :as c]
+                    [cockroach-nemesis :as cln]
                     [client :as client]
                     [checker :as checker]
                     [generator :as gen]
-                    [independent :as independent]]
-            [clojure.java.jdbc :as :j]
+                    [independent :as independent]
+                    [util :refer [meh]]]
+            [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer :all]
             [knossos.model :as model]))
 
@@ -27,7 +29,7 @@
           (c/with-txn-notimeout {} [c conn] (j/execute! c ["drop table if exists test"]))
           (Thread/sleep 1000)
           (info node "Creating table")
-          (with-txn-notimeout {} [c conn] (j/execute! c ["create table test (id int, val int)"]))))
+          (c/with-txn-notimeout {} [c conn] (j/execute! c ["create table test (id int, val int)"]))))
 
       (assoc this :conn conn)))
 
@@ -54,29 +56,29 @@
 
   (teardown! [this test]
     (let [conn (:conn this)]
-      (meh (with-timeout conn nil
+      (meh (c/with-timeout conn nil
              (j/execute! @conn ["drop table test"])))
-      (close-conn @conn))
+      (c/close-conn @conn))
     ))
 
 (defn test
-  [nodes nemesis linearizable]
-  (basic-test nodes nemesis linearizable
-              {:name    "atomic"
-               :concurrency concurrency-factor
-               :client  (AtomicClient. (atom false))
-               :generator (->> (independent/sequential-generator
-                                 (range)
-                                 (fn [k]
-                                   (->> (gen/reserve 5 (gen/mix [w cas]) r)
-                                        (gen/delay 0.5)
-                                        (gen/limit 60))))
-                               (gen/stagger 1)
-                               (cln/with-nemesis (:generator nemesis)))
+  [opts]
+  (c/basic-test
+    (merge
+      {:name    "atomic"
+       :concurrency c/concurrency-factor
+       :client  (AtomicClient. (atom false))
+       :generator (->> (independent/sequential-generator
+                         (range)
+                         (fn [k]
+                           (->> (gen/reserve 5 (gen/mix [w cas]) r)
+                                (gen/delay 0.5)
+                                (gen/limit 60))))
+                       (gen/stagger 1)
+                       (cln/with-nemesis (:generator (:nemesis opts))))
 
-               :model   (model/cas-register 0)
-               :checker (checker/compose
-                          {:perf   (checker/perf)
-                           :details (independent/checker checker/linearizable) })
-               }
-              ))
+       :model   (model/cas-register 0)
+       :checker (checker/compose
+                  {:perf   (checker/perf)
+                   :details (independent/checker checker/linearizable) })}
+      opts)))
