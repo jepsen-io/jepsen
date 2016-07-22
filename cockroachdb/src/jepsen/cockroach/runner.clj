@@ -35,15 +35,22 @@
 
 (def nemeses
   "Supported nemeses"
-  {"none"          `cln/none
-   "parts"         `cln/parts
-   "majority-ring" `cln/majring
-   "skews"         `cln/skews
-   "big-skews"     `cln/bigskews
-   "start-stop"    `(cln/startstop 1)
-   "start-stop-2"  `(cln/startstop 2)
-   "start-kill"    `(cln/startkill 1)
-   "start-kill-2"  `(cln/startkill 2)})
+  {"none"                       `cln/none
+   "parts"                      `cln/parts
+   "majority-ring"              `cln/majring
+   "skews"                      `cln/skews
+   "big-skews"                  `cln/bigskews
+   "start-stop"                 `(cln/startstop 1)
+   "start-stop-2"               `(cln/startstop 2)
+   "start-kill"                 `(cln/startkill 1)
+   "start-kill-2"               `(cln/startkill 2)
+   "skews-start-kill-2"         `(cln/compose cln/skews      (cln/startkill 2))
+   "majority-ring-start-kill-2" `(cln/compose cln/majring    (cln/startkill 2))
+   "parts-skews"                `(cln/compose cln/parts      cln/skews)
+   "parts-big-skews"            `(cln/compose cln/parts      cln/bigskews)
+   "parts-start-kill-2"         `(cln/compose cln/parts      (cln/startkill 2))
+   "majority-ring-skews"        `(cln/compose cln/majring    cln/skews)
+   "start-stop-skews"           `(cln/compose cln/startstop  cln/skews)})
 
 (def optspec
   "Command line options for tools.cli"
