@@ -2,12 +2,12 @@
   "Single atomic register test"
   (:refer-clojure :exclude [test])
   (:require [jepsen [cockroach :as c]
-                    [cockroach-nemesis :as cln]
                     [client :as client]
                     [checker :as checker]
                     [generator :as gen]
                     [independent :as independent]
                     [util :refer [meh]]]
+            [jepsen.cockroach.nemesis :as cln]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer :all]
             [knossos.model :as model]))
