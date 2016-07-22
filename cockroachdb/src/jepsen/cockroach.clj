@@ -1,6 +1,6 @@
 (ns jepsen.cockroach
-    "Tests for CockroachDB"
-    (:require [clojure.tools.logging :refer :all]
+  "Tests for CockroachDB"
+  (:require [clojure.tools.logging :refer :all]
             [clojure.java.jdbc :as j]
             [clj-ssh.ssh :as ssh]
             [clojure.core.reducers :as r]
@@ -29,7 +29,7 @@
             [jepsen.control.net :as cn]
             [jepsen.os.ubuntu :as ubuntu]
             [jepsen.os.debian :as debian]
-            [jepsen.cockroach-nemesis :as cln]))
+            [jepsen.cockroach.nemesis :as cln]))
 
 (import [java.net URLEncoder])
 
@@ -447,7 +447,6 @@
                           (str ":" (:name (:nemesis opts)))
                           "-fake"))
           :db      (db opts)
-          :ssh     {:username username :strict-host-key-checking false}
           :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
           :nemesis (if (= jdbc-mode :cdb-cluster)
                      (:client (:nemesis opts))
