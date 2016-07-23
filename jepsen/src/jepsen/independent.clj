@@ -65,9 +65,9 @@
 (defn concurrent-generator
   "Takes a positive integer n, a sequence of keys (k1 k2 ...) and a function
   (fgen k) which, when called with a key, yields a generator. Returns a
-  generator which runs n keys concurrently. Once a key's generator is
-  exhausted, it obtains a new key, constructs a new generator from key, and
-  moves on.
+  generator which runs tests on independent keys concurrently, with n threads
+  per key. Once a key's generator is exhausted, it obtains a new key,
+  constructs a new generator from key, and moves on.
 
   The nemesis does not run in subgenerators; only normal workers evaluate these
   operations.
@@ -138,27 +138,15 @@
                                  (:concurrency test)
                                  ") to be equal to number of integer threads ("
                                  thread-count ")"))
-
-                  ; Let a "chunk" be a contiguous set of threads covering every
-                  ; node. A "group" is made up of chunks.
-                  chunk-size  (count (:nodes test))
-                  ; How many whole chunks can we run, given the set of threads?
-                  chunk-count (quot thread-count chunk-size)
-                  ; Make sure there are enough chunks to run concurrently
-                  _ (assert (<= n chunk-count)
-                            (str "With " thread-count
-                                 " worker threads and " chunk-size
-                                 " nodes, you can only run " chunk-count
-                                 " keys concurrently, but you requested " n
-                                 " concurrent keys from"
-                                 " jepsen.independent/concurrent-generator"))
-                  group-size   (* chunk-size (quot chunk-count n))
-                  group-count  (quot thread-count group-size)]
-              (assert (= thread-count (* group-size n))
+                  ; So, we're running groups of n threads, which means we have:
+                  group-size  n
+                  group-count (quot thread-count group-size)]
+              (assert (= thread-count (* group-size group-count))
                       (str "This jepsen.independent/concurrent-generator has "
                            thread-count
                            " threads to work with, but can only use "
-                           (* group-size n) " of those threads to run " n
+                           (* group-size group-count)
+                           " of those threads to run " group-count
                            " concurrent keys with " group-size
                            " threads apiece. Consider raising or lowering the"
                            " test's :concurrency to a multiple of " group-size
