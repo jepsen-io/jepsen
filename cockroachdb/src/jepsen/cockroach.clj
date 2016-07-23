@@ -308,6 +308,15 @@
     )
   )
 
+(defn with-idempotent
+  "Takes a predicate on operation functions, and an op, presumably resulting
+  from a client call. If (idempotent? (:f op)) is truthy, remaps :info types to
+  :fail."
+  [idempotent? op]
+  (if (and (idempotent? (:f op)) (= :info (:type op)))
+    (assoc op :type :fail)
+    op))
+
 (defmacro with-annotate-errors
   "Replace complex CockroachDB errors by a simple error message."
   [& body]
@@ -412,7 +421,7 @@
   "Wrap a evaluation within a SQL transaction with timeout."
   [op [c conn] & body]
   `(with-timeout ~conn
-     (assoc ~op :type :info, :value [:timeout :url (:subname (deref ~conn))])
+     (assoc ~op :type :info, :error [:timeout :url (:subname (deref ~conn))])
      (with-txn-retries ~conn
        (with-annotate-errors
          (with-reconnect ~conn false
