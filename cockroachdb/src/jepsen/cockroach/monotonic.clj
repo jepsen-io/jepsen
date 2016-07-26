@@ -5,38 +5,38 @@
                     [client :as client]
                     [checker :as checker]
                     [generator :as gen]
-                    [independent :as independent]]
-            [clojure.java.jdbc :as :j]
+                    [independent :as independent]
+                    [util :as util :refer [meh]]]
+            [jepsen.cockroach.nemesis :as cln]
+            [clojure.core.reducers :as r]
+            [clojure.java.jdbc :as j]
+            [clojure.set :as set]
             [clojure.tools.logging :refer :all]
-            [knossos.model :as model]))
+            [knossos.model :as model]
+            [knossos.op :as op]))
 
-(defn check-order
-  "Detect monotonicity errors over a result set (internal function)."
-  [iprev irows ires1 ires2]
-  (loop [prev iprev
-         rows irows
-         res1 ires1
-         res2 ires2]
-    (if (empty? rows) [res1 res2]
-        (let [row (first rows)
-              nres1 (concat res1 (if (> (nth prev 1) (nth row 1)) (list (list prev row)) ()))
-              nres2 (concat res2 (if (>= (first prev) (first row)) (list (list prev row)) ()))]
-          (recur row (rest rows) nres1 nres2)))))
+;; number of tables involved in the monotonic-multitable tests
+(def multitable-spread 2)
 
-(defn monotonic-order
-  "Detect monotonicity errors over a result set."
-  [rows]
-  (check-order (first rows) (rest rows) () ()))
+(defn non-monotonic
+  "Given a comparator (e.g. <, >=), a function f, and an ordered sequence of
+  elements xs, returns pairs of successive elements [x x'] where (compare (f x)
+  (f x')) does not hold."
+  [compare f xs]
+  (->> xs
+       (partition 2 1)
+       (remove (fn [[x x']] (compare (f x) (f x'))))))
 
 (defn check-monotonic
   "Given a set of :add operations followed by a final :read, verifies that
-  every successfully added element is present in the read, and that the read
+  every potentially added element is present in the read, and that the read
   contains only elements for which an add was succesful, and that all
   elements are unique and in the same order as database timestamps."
-  [linearizable]
+  []
   (reify checker/Checker
     (check [this test model history opts]
-      (let [all-adds-l (->> history
+      (let [; all-adds-l and final-read-l are vectors of op :values
+            all-adds-l (->> history
                             (r/filter op/ok?)
                             (r/filter #(= :add (:f %)))
                             (r/map :value)
@@ -45,131 +45,155 @@
                               (r/filter op/ok?)
                               (r/filter #(= :read (:f %)))
                               (r/map :value)
-                              (reduce (fn [_ x] x) nil)
-                              )
+                              (reduce (fn [_ x] x) nil))
+
+            ; Fails and unsure are sets of vals
             fails (->> history
                             (r/filter op/fail?)
                             (r/filter #(= :add (:f %)))
                             (r/map :value)
+                            (r/map :val)
                             (into #{}))
-                                          
             unsure (->> history
                             (r/filter op/info?)
                             (r/filter #(= :add (:f %)))
                             (r/map :value)
+                            (r/map :val)
                             (into #{}))]
         (if-not final-read-l
           {:valid? false
-           :error  "Set was never read"})
-        (let [
-              [off-order-sts off-order-val] (monotonic-order final-read-l)
+           :error  "Set was never read"}
+          (let [; TODO: why don't we verify timestamps are totally ordered?
+                off-order-sts (non-monotonic <= :sts final-read-l)
+                off-order-val (non-monotonic <  :val final-read-l)
 
-              adds   (into #{} (map first all-adds-l))
-              lok     (into [] (map first final-read-l))
-              ok      (into #{} lok)
-              
-              dups        (into #{} (for [[id freq] (frequencies lok) :when (> freq 1)] id))
+                adds   (set (map :val all-adds-l))
+                lok    (mapv :val final-read-l)
+                ok     (set lok)
+                dups   (set (for [[id freq] (frequencies lok)
+                                  :when (> freq 1)]
+                              id))
 
-              ;; Lost records are those we definitely added but weren't read
-              lost        (set/difference adds ok)
+                ;; Lost records are those we definitely added but weren't read
+                lost        (set/difference adds ok)
 
-              ;; Revived records are those we failed to add but were read
-              revived     (set/intersection ok fails)
+                ; TODO: ok and fails have different representations and will
+                ; never intersect
 
-              ;; Recovered records are those we were not sure about and that were read
-              recovered     (set/intersection ok unsure)
-              ]
-          {:valid?          (and (empty? lost) (empty? dups) (empty? off-order-sts)
-                                 (empty? off-order-val) (empty? revived)
-                                 )
-           :revived         (util/integer-interval-set-str revived)
-           :revived-frac    (util/fraction (count revived) (count fails))        
-           :recovered       (util/integer-interval-set-str recovered)
-           :recovered-frac  (util/fraction (count recovered) (count unsure))
-           :lost            (util/integer-interval-set-str lost)
-           :lost-frac       (util/fraction (count lost) (count adds))
-           :duplicates      dups
-           :order-by-errors off-order-sts
-           :value-reorders  off-order-val
-           }
-          )))))
+                ;; Revived records are those we failed to add but were read
+                revived     (set/intersection ok fails)
 
+                ;; Recovered records are those we were not sure about and that
+                ;; were read
+                recovered     (set/intersection ok unsure)]
+            {:valid?          (and (empty? lost)
+                                   (empty? dups)
+                                   (empty? off-order-sts)
+                                   (empty? off-order-val)
+                                   (empty? revived))
+             :revived         (util/integer-interval-set-str revived)
+             :revived-frac    (util/fraction (count revived) (count fails))
+             :recovered       (util/integer-interval-set-str recovered)
+             :recovered-frac  (util/fraction (count recovered) (count unsure))
+             :lost            (util/integer-interval-set-str lost)
+             :lost-frac       (util/fraction (count lost) (count adds))
+             :duplicates      dups
+             :order-by-errors off-order-sts
+             :value-reorders  off-order-val}))))))
 
-(defrecord MonotonicClient [tbl-created?]
+(defn parse-row
+  "Translates a DB row back into our local representation, by converting string
+  timestamps to bigints."
+  [row]
+  (update row :sts bigint))
+
+; tb is a table identifier--always zero here
+; sts is a system timestamp--a 96 bit integer in cockroach, but represented as
+; a string in the table and an arbitrary-precision integer in clojure
+
+; Rows are externally represented as (val, sts, node, tb)
+(defrecord MonotonicClient [tbl-created? conn nodenum]
   client/Client
 
   (setup! [this test node]
-    (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
-          conn (init-conn node)]
+    (let [n (if (= c/jdbc-mode :cdb-cluster)
+              (.indexOf (vec (:nodes test)) node)
+              1)
+          conn (c/init-conn node)]
       (info "Setting up client for node " n " - " (name node))
 
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (Thread/sleep 1000)
-          (with-txn-notimeout {} [c conn] (j/execute! c ["drop table if exists mono"]))
-          (Thread/sleep 1000)
+          ; TODO: drop timeouts?
+          (c/with-txn-notimeout {} [c conn]
+            (j/execute! c ["drop table if exists mono"]))
           (info node "Creating table")
-          (with-txn-notimeout {} [c conn] (j/execute! c ["create table mono (val int, sts string, node int, tb int)"]))
-          (Thread/sleep 1000)
-          (with-txn-notimeout {} [c conn] (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1}))))
+          (c/with-txn-notimeout {} [c conn]
+            (j/execute!
+              c ["create table mono (val int, sts string, node int, tb int)"]))
+          ; Initial row
+          (c/with-txn-notimeout {} [c conn]
+            (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1}))))
 
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
-    (let [conn (:conn this)
-          nodenum (:nodenum this)]
-        (case (:f op)
-          :add (with-txn op [c conn]
-                 (let [curmax (->> (j/query c ["select max(val) as m from mono"] :row-fn :m)
-                                   (first))
-                       currow (->> (j/query c ["select * from mono where val = ?" curmax])
-                                   (map (fn [row] (list (:val row) (str->int (:sts row)) (:node row) (:tb row))))
-                                   (first))
-                       dbtime (db-time c)]
-                   (j/insert! c :mono {:val (+ 1 curmax) :sts dbtime :node nodenum :tb 0})
-                   (assoc op :type :ok, :value currow)))
-          
-          :read (with-txn-notimeout op [c conn]
-                  (->> (j/query c ["select * from mono order by sts"])
-                     (map (fn [row] (list (:val row) (str->int (:sts row)) (:node row) (:tb row))))
-                     (into [])
-                     (assoc op :type :ok, :value)))
-          )))
+    (case (:f op)
+      :add (c/with-txn op [c conn]
+             (let [curmax (->> (j/query c ["select max(val) as m from mono"]
+                                        :row-fn :m)
+                               (first))
+                   currow (->> (j/query c ["select * from mono where val = ?"
+                                           curmax]
+                                        :row-fn parse-row)
+                               (first))
+                   dbtime (c/db-time c)]
+               (j/insert! c :mono {:val   (inc curmax)
+                                   :sts   dbtime
+                                   :node  nodenum
+                                   :tb    0})
+               ; TODO: return new row, not previous row
+               (assoc op :type :ok, :value currow)))
+
+      :read (c/with-txn-notimeout op [c conn]
+              (->> (j/query c ["select * from mono order by sts"]
+                            :row-fn parse-row)
+                   vec
+                   (assoc op :type :ok, :value)))))
 
   (teardown! [this test]
-    (let [conn (:conn this)]
-      (meh (with-timeout conn nil
-             (j/execute! @conn ["drop table if exists mono"])))
-      (close-conn @conn)))
-  )
+    (meh (c/with-timeout conn nil
+           (j/execute! @conn ["drop table if exists mono"])))
+    (c/close-conn @conn)))
 
-
-(defn monotonic-test
-  [nodes nemesis linearizable]
-  (basic-test nodes nemesis linearizable
-              {:name        "monotonic"
-               :concurrency concurrency-factor
-               :client      (MonotonicClient. (atom false))
-               :generator   (gen/phases
-                             (->> (range)
-                                  (map (partial array-map
-                                                :type :invoke
-                                                :f :add
-                                                :value))
-                                  gen/seq
-                                  (gen/stagger 1)
-                                  (cln/with-nemesis (:generator nemesis)))
-                             (->> {:type :invoke, :f :read, :value nil}
-                                  gen/once
-                                  gen/clients))
-               :checker     (checker/compose
-                             {:perf    (checker/perf)
-                              :details (check-monotonic linearizable)})
-               }))
+(defn test
+  [opts]
+  (c/basic-test
+    (merge
+      {:name        "monotonic"
+       :concurrency c/concurrency-factor
+       :client      (MonotonicClient. (atom false) nil nil)
+       :generator   (gen/phases
+                      (->> (range)
+                           (map (partial array-map
+                                         :type :invoke
+                                         :f :add
+                                         :value))
+                           gen/seq
+                           (gen/stagger 1)
+                           (cln/with-nemesis (:generator (:nemesis opts))))
+                      (->> {:type :invoke, :f :read, :value nil}
+                           gen/once
+                           gen/clients))
+       :checker     (checker/compose
+                      {:perf    (checker/perf)
+                       :details (check-monotonic)})}
+      opts)))
 
 
 (defn check-monotonic-split
-  "Same as check-monotonic, but check ordering only from each client's perspective."
+  "Same as check-monotonic, but check ordering only from each client's
+  perspective."
   [linearizable numnodes]
   (reify checker/Checker
     (check [this test model history opts]
@@ -192,72 +216,82 @@
                               (r/filter op/ok?)
                               (r/filter #(= :read (:f %)))
                               (r/map :value)
-                              (reduce (fn [_ x] x) nil)
-                              )]
+                              (reduce (fn [_ x] x) nil))]
         (if-not final-read-l
           {:valid? false
-           :error  "Set was never read"})
+           :error  "Set was never read"}
 
-        (let [[off-order-sts off-order-val] (monotonic-order final-read-l)
+          (let [off-order-sts (non-monotonic <= :sts final-read-l)
+                off-order-val (non-monotonic <  :val final-read-l)
 
-              filter (fn [col] (fn [x] (->> final-read-l
-                                            (r/filter #(= x (nth % col)))
-                                            (into ())
-                                            (reverse))))
+                ; TODO: ??????
+                filter (fn [col]
+                         (fn [x]
+                           (->> final-read-l
+                                (r/filter #(= x (get % col)))
+                                (into []))))
 
-              test-off-order (fn [col src] (->> src
-                                                (map (filter col))
-                                                (map monotonic-order)
-                                                (map last)))
-              processes (->> final-read-l (map #(nth % 2)) (into #{}))
-              off-order-val-perclient (test-off-order 2 processes)
-              off-order-val-pernode (test-off-order 4 (map #(+ 1 %) (range numnodes)))
-              off-order-val-pertable (test-off-order 3 (range multitable-spread))
+                test-off-order (fn [col src]
+                                 (->> src
+                                      (map (filter col))
+                                      (map (partial non-monotonic < :val))))
+                processes (set (map :process final-read-l))
+                off-order-val-perclient (test-off-order :proc processes)
+                off-order-val-pernode   (test-off-order :node (range numnodes))
+                off-order-val-pertable  (test-off-order
+                                          :tb (range multitable-spread))
 
-              adds (into #{} (map first all-adds-l))
-              lok     (into [] (map first final-read-l))
-              ok      (into #{} lok)
+                ; TODO: standardize on :value or (-> :value :val), the
+                ; difference/intersections below don't use the same
+                ; representation
+                adds    (set (map :value all-adds-l))
+                lok     (mapv first final-read-l)
+                ok      (set lok)
 
-              dups        (into #{} (for [[id freq] (frequencies lok) :when (> freq 1)] id))
+                dups        (set (for [[id freq] (frequencies lok)
+                                       :when (> freq 1)]
+                                   id))
 
-              ;; Lost records are those we definitely added but weren't read
-              lost        (set/difference adds ok)
+                ;; Lost records are those we definitely added but weren't read
+                lost        (set/difference adds ok)
 
-              ;; Revived records are those we failed to add but were read
-              revived     (set/intersection ok fails)
+                ;; Revived records are those we failed to add but were read
+                revived     (set/intersection ok fails)
 
-              ;; Recovered records are those we were not sure about and that were read
-              recovered     (set/intersection ok unsure)
-              ]
-{:valid?          (and (empty? lost)
-                                     (empty? dups)
-                                     (empty? revived)
-                                     (every? true? (into [] (map empty? off-order-sts)))
-                                     ;; serializability per client
-                                     (every? true? (into [] (map empty? off-order-val-perclient)))
+                ;; Recovered records are those we were not sure about and that
+                ;; were read
+                recovered     (set/intersection ok unsure)]
+            {:valid?          (and (empty? lost)
+                                   (empty? dups)
+                                   (empty? revived)
+                                   (every? empty? off-order-sts)
+                                   ;; serializability per client
+                                   (every? empty? off-order-val-perclient)
 
-                                     ;; linearizability with --linearizable
-                                     (or (not linearizable) (every? true? (into [] (map empty? off-order-val))))
-                                     )
-               :revived         (util/integer-interval-set-str revived)
-               :revived-frac    (util/fraction (count revived) (count fails))        
-               :recovered       (util/integer-interval-set-str recovered)
-               :recovered-frac  (util/fraction (count recovered) (count unsure))
-               :lost            (util/integer-interval-set-str lost)
-               :lost-frac       (util/fraction (count lost) (count adds))
-               :duplicates      dups
-               :order-by-errors off-order-sts
-               :value-reorders  off-order-val
-               :value-reorders-perclient off-order-val-perclient
-               :value-reorders-pernode off-order-val-pernode
-               :value-reorders-pertable off-order-val-pertable
-               })))))
+                                   ;; linearizability with --linearizable
+                                   (or (not linearizable)
+                                       (every? empty? off-order-val)))
+             :revived         (util/integer-interval-set-str revived)
+             :revived-frac    (util/fraction (count revived) (count fails))
+             :recovered       (util/integer-interval-set-str recovered)
+             :recovered-frac  (util/fraction (count recovered) (count unsure))
+             :lost            (util/integer-interval-set-str lost)
+             :lost-frac       (util/fraction (count lost) (count adds))
+             :duplicates                dups
+             :order-by-errors           off-order-sts
+             :value-reorders            off-order-val
+             :value-reorders-perclient  off-order-val-perclient
+             :value-reorders-pernode    off-order-val-pernode
+             :value-reorders-pertable   off-order-val-pertable}))))))
 
-(defrecord MultitableClient [tbl-created? cnt]
+; Tuples are [val sts process table node]
+(defrecord MultitableClient [tbl-created? cnt conn nodenum]
   client/Client
   (setup! [this test node]
-    (let [n (if (= jdbc-mode :cdb-cluster) (str->int (subs (name node) 1 2)) 1)
-          conn (init-conn node)]
+    (let [n (if (= c/jdbc-mode :cdb-cluster)
+              (.indexOf (vec (:nodes test)) node)
+              1)
+          conn (c/init-conn node)]
 
       (info "Setting up client " n " for " (name node))
 
@@ -265,70 +299,77 @@
         (when (compare-and-set! tbl-created? false true)
           (dorun (for [x (range multitable-spread)]
                    (do
-                     (Thread/sleep 1000)
-                     (with-txn-notimeout {} [c conn] (j/execute! c [(str "drop table if exists mono" x)]))
-                     (Thread/sleep 1000)
+                     (c/with-txn-notimeout {} [c conn]
+                       (j/execute! c [(str "drop table if exists mono" x)]))
                      (info "Creating table " x)
-                     (with-txn-notimeout {} [c conn] (j/execute! c [(str "create table mono" x
-                                             " (val int, sts string, node int, proc int, tb int)")]))
-                     (Thread/sleep 1000)
-                     (with-txn-notimeout {} [c conn] (j/insert! c (str "mono" x) {:val -1 :sts "0" :node -1 :proc -1 :tb x}))
-                     )))))
+                     (c/with-txn-notimeout {} [c conn]
+                       (j/execute! c [(str "create table mono" x
+                                           " (val int, sts string, node int, proc int, tb int)")]))
+                     (c/with-txn-notimeout {} [c conn]
+                       (j/insert! c (str "mono" x)
+                                  {:val -1
+                                   :sts "0"
+                                   :node -1
+                                   :proc -1
+                                   :tb x})))))))
 
       (assoc this :conn conn :nodenum n)))
 
-
   (invoke! [this test op]
-    (let [conn (:conn this)
-          nodenum (:nodenum this)]
-      (case (:f op)
-        :add  (locking cnt
-                (with-txn op [c conn]
-                  (let [rt (rand-int multitable-spread)
-                        dbtime (db-time c)
-                        v (swap! cnt inc)]
-                    (j/insert! c (str "mono" rt) {:val v :sts dbtime :node nodenum :proc (:process op) :tb rt})
-                    (assoc op :type :ok, :value [v dbtime (:process op) rt nodenum]))))
-                
-        :read (with-txn-notimeout op [c conn]
-                (->> (range multitable-spread)
-                     (map (fn [x]
-                            (->> (j/query c [(str "select * from mono" x " where node <> -1")])
-                                 (map (fn [row] (list (:val row) (str->int (:sts row)) (:proc row) (:tb row) (:node row))))
-                                 )))
-                     (reduce concat)
-                     (sort-by (fn [x] (nth x 1)))
-                     (into [])
-                     (assoc op :type :ok, :value)))
-        )))
+    (case (:f op)
+      ; This remove all concurrency from the test, which may not be what we
+      ; want.
+      :add (locking cnt
+             (c/with-txn op [c conn]
+               (let [rt      (rand-int multitable-spread)
+                     dbtime  (c/db-time c)
+                     v       (swap! cnt inc)
+                     row     {:val v
+                              :sts dbtime
+                              :proc (:process op)
+                              :tb   rt
+                              :node nodenum}]
+                 (j/insert! c (str "mono" rt) row)
+                 (assoc op :type :ok :value row))))
+
+      :read (c/with-txn-notimeout op [c conn]
+              (->> (range multitable-spread)
+                   (mapcat (fn [x]
+                             (j/query c [(str "select * from mono" x
+                                              " where node <> -1")]
+                                      :row-fn parse-row)))
+                   (sort-by :sts)
+                   vec
+                   (assoc op :type :ok, :value)))))
 
   (teardown! [this test]
-    (let [conn (:conn this)]
-      (dorun (for [x (range multitable-spread)]
-               (with-timeout conn nil
-                 (j/execute! @conn [(str "drop table if exists mono" x)]))))
-      (close-conn @conn)))
-  )
+    (dorun (for [x (range multitable-spread)]
+             (c/with-timeout conn nil
+               (j/execute! @conn [(str "drop table if exists mono" x)]))))
+    (c/close-conn @conn)))
 
-(defn monotonic-multitable-test
-  [nodes nemesis linearizable]
-  (basic-test nodes nemesis linearizable
-              {:name        "monotonic-multitable"
-               :concurrency concurrency-factor
-               :client      (MultitableClient. (atom false) (atom 0))
-               :generator   (gen/phases
-                             (->> (range)
-                                  (map (partial array-map
-                                                :type :invoke
-                                                :f :add
-                                                :value))
-                                  gen/seq
-                                  (gen/stagger 1)
-                                  (cln/with-nemesis (:generator nemesis)))
-                             (->> {:type :invoke, :f :read, :value nil}
-                                  gen/once
-                                  gen/clients))
-               :checker     (checker/compose
-                             {:perf     (checker/perf)
-                              :details  (check-monotonic-split linearizable (count nodes))})
-               }))
+(defn multitable-test
+  [opts]
+  (c/basic-test
+    (merge
+      {:name        "monotonic-multitable"
+       :concurrency c/concurrency-factor
+       :client      (MultitableClient. (atom false) (atom 0) nil nil)
+       :generator   (gen/phases
+                      (->> (range)
+                           (map (partial array-map
+                                         :type :invoke
+                                         :f :add
+                                         :value))
+                           gen/seq
+                           (gen/stagger 1)
+                           (cln/with-nemesis (:generator (:nemesis opts))))
+                      (->> {:type :invoke, :f :read, :value nil}
+                           gen/once
+                           gen/clients))
+       :checker     (checker/compose
+                      {:perf     (checker/perf)
+                       :details  (check-monotonic-split
+                                   (:linearizable opts)
+                                   (count (:nodes test)))})}
+      opts)))
