@@ -36,10 +36,6 @@
 ;; timeout for DB operations during tests
 (def timeout-delay 3000) ; milliseconds
 
-;; number of tables involved in the monotonic-multitable tests
-(def multitable-spread 2)
-
-
 ;; number of simultaneous clients
 (def concurrency-factor 30)
 

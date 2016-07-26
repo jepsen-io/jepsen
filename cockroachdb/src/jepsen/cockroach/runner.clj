@@ -12,6 +12,7 @@
             [jepsen.core :as jepsen]
             [jepsen.cockroach :as cockroach]
             [jepsen.cockroach [register :as register]
+                              [monotonic :as monotonic]
                               [nemesis :as cln]]))
 
 (defn one-of
@@ -23,7 +24,9 @@
 
 (def tests
   "A map of test names to test constructors."
-  {"register"    register/test})
+  {"register"             register/test
+   "monotonic"            monotonic/test
+   "monotonic-multitable" monotonic/multitable-test})
 
 (def default-hosts [:n1 :n2 :n3 :n4 :n5])
 
@@ -68,7 +71,7 @@
                             (update m k conj v)))]
 
    [nil "--nemesis NAME" "Which nemesis to use"
-    :default cln/none
+    :default `cln/none
     :parse-fn nemeses
     :validate [identity (one-of nemeses)]]
 
