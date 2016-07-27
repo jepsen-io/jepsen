@@ -194,4 +194,3 @@
    :generator nemesis-single-gen
    :client (clock-scrambler-restart 600)
    :clocks true})
-

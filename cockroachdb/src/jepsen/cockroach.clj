@@ -15,6 +15,7 @@
              [client :as client]
              [core :as jepsen]
              [db :as db]
+             [faketime :as faketime]
              [os :as os]
              [tests :as tests]
              [control :as c :refer [|]]
@@ -124,40 +125,42 @@
         (->> (j/query c ["select extract(microseconds from now()) as ts"] :row-fn :ts)
              (first)
              (str))
-        
+
         true
         (->> (j/query c ["select cluster_logical_timestamp()*10000000000::decimal as ts"] :row-fn :ts)
              (first)
              (.toBigInteger)
-             (str))
-        ))
+             (str))))
 
 (def ssl-settings
-  (if insecure ""
-      (str "?ssl=true"
-           "&sslcert=" client-cert
-           "&sslkey=" client-key
-           "&sslrootcert=" ca-cert
-           "&sslfactory=org.postgresql.ssl.jdbc4.LibPQFactory"))
-  )
+  (if insecure
+    ""
+    (str "?ssl=true"
+         "&sslcert=" client-cert
+         "&sslkey=" client-key
+         "&sslrootcert=" ca-cert
+         "&sslfactory=org.postgresql.ssl.jdbc4.LibPQFactory")))
 
 (defn db-conn-spec
-   "Assemble a JDBC connection specification for a given Jepsen node."
+  "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
   (merge {:classname  "org.postgresql.Driver"  :subprotocol "postgresql"}
-         (cond (= jdbc-mode :cdb-cluster)
-               {:subname      (str "//" (name node) ":" db-port "/" dbname ssl-settings)
-                :user        db-user
-                :password    db-passwd}
-               (= jdbc-mode :cdb-local)
-               {:subname      (str "//localhost:" db-port "/" dbname ssl-settings)
-                :user        db-user
-                :password    db-passwd}
-               (= jdbc-mode :pg-local)
-               {:subname      (str "//localhost/" pg-dbname)
-                :user        pg-user
-                :password    pg-passwd
-                })))
+         (case jdbc-mode
+           :cdb-cluster
+           {:subname     (str "//" (name node) ":" db-port "/" dbname
+                              ssl-settings)
+            :user        db-user
+            :password    db-passwd}
+
+           :cdb-local
+           {:subname     (str "//localhost:" db-port "/" dbname ssl-settings)
+            :user        db-user
+            :password    db-passwd}
+
+           :pg-local
+           {:subname     (str "//localhost/" pg-dbname)
+            :user        pg-user
+            :password    pg-passwd})))
 
 (defn open-conn
   "Given a Jepsen node, opens a new connection."
@@ -198,12 +201,13 @@
    extra-args
    [:--logtostderr :true :>> errlog (c/lit "2>&1")]))
 
-(defn cmdline-gen
-  [firstnode linearizable]
+(defn runcmd
+  "The command to run cockroach for a given test"
+  [test]
   (wrap-env (str "COCKROACH_LINEARIZABLE="
-                 (if linearizable "true" "false"))
+                 (if (:linearizable test) "true" "false"))
             (cockroach-start-cmdline
-             [(str "--join=" (name firstnode))]
+             [(str "--join=" (name (jepsen/primary test)))]
              )))
 
 (defmacro csql! [& body]
@@ -372,8 +376,7 @@
             (assoc ~op :type :fail, :error mm#)))
         (catch org.postgresql.util.PSQLException e#
           (let [m# (.getMessage e#)]
-            (assoc ~op :type :fail, :error (str "PSQLException: " m#)))
-        )))
+            (assoc ~op :type :fail, :error (str "PSQLException: " m#))))))
 
 (defmacro with-reconnect
   "Reconnect if failed due to disconnect."
@@ -386,7 +389,7 @@
                              (re-find #"current transaction is aborted, commands ignored until end of transaction block" (:error res#))
                              ))]
      (if uncertain#
-       (do 
+       (do
          (with-error-handling res#
            (let [spec# (close-conn (deref ~conn))
                  new-conn# (open-conn spec#)]
@@ -395,10 +398,8 @@
              res#))
          (if ~retry
            (do ~@body)
-           (assoc res# :type :info, :error (str "uncertain: " (:error res#))))
-         )
+           (assoc res# :type :info, :error (str "uncertain: " (:error res#)))))
        res#)))
-       
 
 (defmacro with-timeout
   "Write an evaluation within a timeout check. Re-open the connection
@@ -422,7 +423,8 @@
        (with-annotate-errors
          (with-reconnect ~conn false
            (with-error-handling ~op
-             (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
+             (j/with-db-transaction [~c (deref ~conn)
+                                     :isolation isolation-level]
                ~@body)))))))
 
 (defmacro with-txn-notimeout
@@ -444,17 +446,18 @@
 (defn basic-test
   "Sets up the test parameters common to all tests."
   [opts]
-  (merge tests/noop-test
-         {:nodes   (if (= jdbc-mode :cdb-cluster) (:nodes opts) [:localhost])
-          :name    (str "cockroachdb-" (:name opts)
-                        (if (:linearizable opts) "-lin" "")
-                        (if (= jdbc-mode :cdb-cluster)
-                          (str ":" (:name (:nemesis opts)))
-                          "-fake"))
-          :db      (db opts)
-          :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
-          :nemesis (if (= jdbc-mode :cdb-cluster)
-                     (:client (:nemesis opts))
-                     nemesis/noop)
-          :runcmd  (cmdline-gen (first (:nodes opts)) (:linearizable opts))}
-         (dissoc opts :name :nodes :nemesis)))
+  (let [t (merge
+            tests/noop-test
+            {:nodes   (if (= jdbc-mode :cdb-cluster) (:nodes opts) [:localhost])
+             :name    (str "cockroachdb-" (:name opts)
+                           (if (:linearizable opts) "-lin" "")
+                           (if (= jdbc-mode :cdb-cluster)
+                             (str ":" (:name (:nemesis opts)))
+                             "-fake"))
+             :db      (db opts)
+             :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
+             :nemesis (if (= jdbc-mode :cdb-cluster)
+                        (:client (:nemesis opts))
+                        nemesis/noop)}
+            (dissoc opts :name :nodes :nemesis))]
+    (assoc t :runcmd (runcmd t))))
