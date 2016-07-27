@@ -14,7 +14,8 @@
             [jepsen.cockroach [bank :as bank]
                               [register :as register]
                               [monotonic :as monotonic]
-                              [nemesis :as cln]]))
+                              [nemesis :as cln]
+                              [sets :as sets]]))
 
 (defn one-of
   "Takes a collection and returns a string like \"Must be one of ...\" and a
@@ -29,7 +30,8 @@
    "bank-multitable"      bank/multitable-test
    "register"             register/test
    "monotonic"            monotonic/test
-   "monotonic-multitable" monotonic/multitable-test})
+   "monotonic-multitable" monotonic/multitable-test
+   "sets"                 sets/test})
 
 (def default-hosts [:n1 :n2 :n3 :n4 :n5])
 

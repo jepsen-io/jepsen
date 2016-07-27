@@ -1,14 +1,19 @@
 (ns jepsen.cockroach.sets
-  "Single atomic register test"
+  "Set test"
   (:refer-clojure :exclude [test])
   (:require [jepsen [cockroach :as c]
              [client :as client]
              [checker :as checker]
              [generator :as gen]
-             [independent :as independent]]
-            [clojure.java.jdbc :as :j]
+             [independent :as independent]
+             [util :as util :refer [meh]]]
+            [jepsen.cockroach.nemesis :as cln]
+            [clojure.java.jdbc :as j]
+            [clojure.core.reducers :as r]
+            [clojure.set :as set]
             [clojure.tools.logging :refer :all]
-            [knossos.model :as model]))
+            [knossos.model :as model]
+            [knossos.op :as op]))
 
 (defn check-sets
   "Given a set of :add operations followed by a final :read, verifies that
@@ -45,98 +50,102 @@
                               (reduce (fn [_ x] x) nil))]
         (if-not final-read-l
           {:valid? false
-           :error  "Set was never read"})
+           :error  "Set was never read"}
 
-        (let [final-read  (into #{} final-read-l)
+          (let [final-read  (set final-read-l)
 
-              dups        (into [] (for [[id freq] (frequencies final-read-l) :when (> freq 1)] id))
+                dups        (into [] (for [[id freq] (frequencies final-read-l)
+                                           :when (> freq 1)]
+                                       id))
 
-              ;;The OK set is every read value which we added successfully
-              ok          (set/intersection final-read adds)
+                ;;The OK set is every read value which we added successfully
+                ok          (set/intersection final-read adds)
 
-              ;; Unexpected records are those we *never* attempted.
-              unexpected  (set/difference final-read attempts)
+                ;; Unexpected records are those we *never* attempted.
+                unexpected  (set/difference final-read attempts)
 
-              ;; Revived records are those that were reported as failed and still appear.
-              revived  (set/intersection final-read fails)
+                ;; Revived records are those that were reported as failed and
+                ;; still appear.
+                revived  (set/intersection final-read fails)
 
-              ;; Lost records are those we definitely added but weren't read
-              lost        (set/difference adds final-read)
+                ;; Lost records are those we definitely added but weren't read
+                lost        (set/difference adds final-read)
 
-              ;; Recovered records are those where we didn't know if the add
-              ;; succeeded or not, but we found them in the final set.
-              recovered   (set/intersection final-read unsure)]
+                ;; Recovered records are those where we didn't know if the add
+                ;; succeeded or not, but we found them in the final set.
+                recovered   (set/intersection final-read unsure)]
 
-          {:valid?          (and (empty? lost) (empty? unexpected) (empty? dups) (empty? revived))
-           :duplicates      dups
-           :ok              (util/integer-interval-set-str ok)
-           :lost            (util/integer-interval-set-str lost)
-           :unexpected      (util/integer-interval-set-str unexpected)
-           :recovered       (util/integer-interval-set-str recovered)
-           :revived         (util/integer-interval-set-str revived)
-           :ok-frac         (util/fraction (count ok) (count attempts))
-           :revived-frac    (util/fraction (count revived) (count fails))
-           :unexpected-frac (util/fraction (count unexpected) (count attempts))
-           :lost-frac       (util/fraction (count lost) (count attempts))
-           :recovered-frac  (util/fraction (count recovered) (count attempts))})))))
+            {:valid?          (and (empty? lost)
+                                   (empty? unexpected)
+                                   (empty? dups)
+                                   (empty? revived))
+             :duplicates      dups
+             :ok              (util/integer-interval-set-str ok)
+             :lost            (util/integer-interval-set-str lost)
+             :unexpected  (util/integer-interval-set-str unexpected)
+             :recovered (util/integer-interval-set-str recovered)
+             :revived (util/integer-interval-set-str revived)
+             :ok-frac      (util/fraction (count ok) (count attempts))
+             :revived-frac   (util/fraction (count revived) (count fails))
+             :unexpected-frac (util/fraction (count unexpected) (count attempts))
+             :lost-frac       (util/fraction (count lost) (count attempts))
+             :recovered-frac  (util/fraction (count recovered) (count attempts))}))))))
 
-(defrecord SetsClient [tbl-created?]
+(defrecord SetsClient [tbl-created? conn]
   client/Client
 
   (setup! [this test node]
-    (let [conn (init-conn node)]
+    (let [conn (c/init-conn node)]
       (info node "Connected")
 
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
           (Thread/sleep 1000)
-          (with-txn-notimeout {} [c conn] (j/execute! c ["drop table if exists set"]))
+          (c/with-txn-notimeout {} [c conn]
+            (j/execute! c ["drop table if exists set"]))
           (Thread/sleep 1000)
           (info node "Creating table")
-          (with-txn-notimeout {} [c conn] (j/execute! c ["create table set (val int)"]))))
+          (c/with-txn-notimeout {} [c conn]
+            (j/execute! c ["create table set (val int)"]))))
 
       (assoc this :conn conn)))
 
   (invoke! [this test op]
-    (let [conn (:conn this)]
-      (case (:f op)
-        :add (with-txn op [c conn]
-               (do
-                 (j/insert! c :set {:val (:value op)})
-                 (assoc op :type :ok)))
-        :read (with-txn-notimeout op [c conn]
-                (->> (j/query c ["select val from set"])
-                     (mapv :val)
-                     (assoc op :type :ok, :value)))
-        )))
+    (case (:f op)
+      :add (c/with-txn op [c conn]
+             (do
+               (j/insert! c :set {:val (:value op)})
+               (assoc op :type :ok)))
+      :read (c/with-txn-notimeout op [c conn]
+              (->> (j/query c ["select val from set"])
+                   (mapv :val)
+                   (assoc op :type :ok, :value)))))
 
   (teardown! [this test]
-    (let [conn (:conn this)]
-      (meh (with-timeout conn nil
-             (j/execute! @conn ["drop table set"])))
-      (close-conn @conn)))
-  )
+    (meh (c/with-timeout conn nil
+           (j/execute! @conn ["drop table set"])))
+    (c/close-conn @conn)))
 
-
-(defn sets-test
-  [nodes nemesis linearizable]
-  (basic-test nodes nemesis linearizable
-              {:name        "set"
-               :concurrency concurrency-factor
-               :client      (SetsClient. (atom false))
-               :generator   (gen/phases
-                              (->> (range)
-                                   (map (partial array-map
-                                                 :type :invoke
-                                                 :f :add
-                                                 :value))
-                                   gen/seq
-                                   (gen/stagger 1)
-                                   (cln/with-nemesis (:generator nemesis)))
-                              (->> {:type :invoke, :f :read, :value nil}
-                                   gen/once
-                                   gen/clients))
-               :checker     (checker/compose
-                              {:perf     (checker/perf)
-                               :details  (check-sets)})
-               }))
+(defn test
+  [opts]
+  (c/basic-test
+    (merge
+      {:name        "set"
+       :concurrency c/concurrency-factor
+       :client      (SetsClient. (atom false) nil)
+       :generator   (gen/phases
+                      (->> (range)
+                           (map (partial array-map
+                                         :type :invoke
+                                         :f :add
+                                         :value))
+                           gen/seq
+                           (gen/stagger 1)
+                           (cln/with-nemesis (:generator (:nemesis opts))))
+                      (->> {:type :invoke, :f :read, :value nil}
+                           gen/once
+                           gen/clients))
+       :checker     (checker/compose
+                      {:perf     (checker/perf)
+                       :details  (check-sets)})}
+      opts)))
