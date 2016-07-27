@@ -11,7 +11,8 @@
             [jepsen.os.ubuntu :as ubuntu]
             [jepsen.core :as jepsen]
             [jepsen.cockroach :as cockroach]
-            [jepsen.cockroach [register :as register]
+            [jepsen.cockroach [bank :as bank]
+                              [register :as register]
                               [monotonic :as monotonic]
                               [nemesis :as cln]]))
 
@@ -24,7 +25,9 @@
 
 (def tests
   "A map of test names to test constructors."
-  {"register"             register/test
+  {"bank"                 bank/test
+   "bank-multitable"      bank/multitable-test
+   "register"             register/test
    "monotonic"            monotonic/test
    "monotonic-multitable" monotonic/multitable-test})
 
