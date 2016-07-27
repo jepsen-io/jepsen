@@ -181,7 +181,7 @@
 
 (defn wrap-env
   [env cmd]
-  (conj ["env" env] cmd))
+  ["env" env cmd])
 
 (defn cockroach-start-cmdline
   "Construct the command line to start a CockroachDB node."
@@ -204,11 +204,12 @@
 (defn runcmd
   "The command to run cockroach for a given test"
   [test]
-  (wrap-env (str "COCKROACH_LINEARIZABLE="
+  (wrap-env [(str "COCKROACH_LINEARIZABLE="
                  (if (:linearizable test) "true" "false"))
+             (str "COCKROACH_MAX_OFFSET=" "5s")]
             (cockroach-start-cmdline
-             [(str "--join=" (name (jepsen/primary test)))]
-             )))
+              [(str "--join=" (name (jepsen/primary test)))]
+              )))
 
 (defmacro csql! [& body]
   "Execute SQL statements using the cockroach sql CLI."
@@ -256,6 +257,8 @@
 
           (info node "Stopping 1st CockroachDB before starting cluster...")
           (c/exec cockroach :quit (if insecure [:--insecure] [])))
+
+        (jepsen/synchronize test)
 
         (info node "Starting packet capture (filtering on" (control-addr)
               ")...")
