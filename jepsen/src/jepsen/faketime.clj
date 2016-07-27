@@ -5,7 +5,7 @@
             [jepsen.control :as c]
             [jepsen.control.util :as cu]))
 
-(defn faketime-script
+(defn script
   "A sh script which invokes cmd with a faketime wrapper. Takes an initial
   offset in seconds, and a clock rate to run at."
   [cmd init-offset rate]
@@ -17,12 +17,12 @@
          (c/expand-path cmd)
          " \"$@\"")))
 
-(defn faketime-wrapper!
+(defn wrap!
   "Replaces an executable with a faketime wrapper, moving the original to
   x.no-faketime. Idempotent."
-  [cmd]
+  [cmd init-offset rate]
   (let [cmd'    (str cmd ".no-faketime")
-        wrapper (faketime-script cmd')]
+        wrapper (script cmd' init-offset rate)]
     (if (cu/exists? cmd')
       (do (info "Installing faketime wrapper.")
           (c/exec :echo wrapper :> cmd))
