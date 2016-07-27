@@ -15,7 +15,6 @@
              [client :as client]
              [core :as jepsen]
              [db :as db]
-             [faketime :as faketime]
              [os :as os]
              [tests :as tests]
              [control :as c :refer [|]]
@@ -144,7 +143,8 @@
 (defn db-conn-spec
   "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
-  (merge {:classname  "org.postgresql.Driver"  :subprotocol "postgresql"}
+  (merge {:classname    "org.postgresql.Driver"
+          :subprotocol  "postgresql"}
          (case jdbc-mode
            :cdb-cluster
            {:subname     (str "//" (name node) ":" db-port "/" dbname
@@ -208,8 +208,7 @@
                  (if (:linearizable test) "true" "false"))
              (str "COCKROACH_MAX_OFFSET=" "5s")]
             (cockroach-start-cmdline
-              [(str "--join=" (name (jepsen/primary test)))]
-              )))
+              [(str "--join=" (name (jepsen/primary test)))])))
 
 (defmacro csql! [& body]
   "Execute SQL statements using the cockroach sql CLI."
@@ -219,8 +218,7 @@
            [cockroach :sql]
            (if insecure [:--insecure] nil)
            [:-e ~@body]
-           [:>> errlog (c/lit "2>&1")]))
-         ))
+           [:>> errlog (c/lit "2>&1")]))))
 
 (defn install!
   "Installs CockroachDB on the given node. Test should include a :tarball url
@@ -290,7 +288,8 @@
 ;        (info node (c/su (c/exec :ntpdate :-b cln/ntpserver)))
 
         (info node "Stopping cockroachdb...")
-        (meh (c/exec :timeout :5s cockroach :quit (if insecure [:--insecure] [])))
+        (meh (c/exec :timeout :5s cockroach :quit
+                     (if insecure [:--insecure] [])))
         (meh (c/exec :killall -9 :cockroach))
 
         (info node "Erasing the store...")
@@ -307,9 +306,7 @@
               (c/exec :chown cockroach-user f))))))
 
     db/LogFiles
-    (log-files [_ test node] log-files)
-    )
-  )
+    (log-files [_ test node] log-files)))
 
 (defn with-idempotent
   "Takes a predicate on operation functions, and an op, presumably resulting
@@ -352,7 +349,7 @@
        (if (:retry res#)
          (if (> retry# 0)
            (do
-             (info "Retrying from " res#) 
+             (info "Retrying from " res#)
              ;;(let [spec# (close-conn (deref ~conn))
              ;;      new-conn# (open-conn spec#)]
              ;;  (info "Re-opening connection for retry...")
