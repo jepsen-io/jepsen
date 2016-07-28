@@ -5,10 +5,9 @@
              [control :as c]
              [nemesis :as nemesis]
              [generator :as gen]
-             [util :as util]]))
-
-;; duration of 1 jepsen test
-(def test-duration 45) ; seconds
+             [util :as util]]
+            [clojure.pprint :refer [pprint]]
+            [clojure.tools.logging :refer :all]))
 
 ;; duration between interruptions
 (def nemesis-delay 5) ; seconds
@@ -62,35 +61,33 @@
 
 (defn compose
   [n1 n2]
-  {:name (str (:name n1) "-" (:name n2))
-   :generator nemesis-double-gen
-   :clocks (or (:clocks n1) (:clocks n2))
-   :client (nemesis/compose {{:start1 :start,
-                              :stop1 :stop} (:client n1)
-                             {:start2 :start,
-                              :stop2 :stop} (:client n2)})})
+  (merge nemesis-double-gen
+         {:name (str (:name n1) "-" (:name n2))
+          :clocks (or (:clocks n1) (:clocks n2))
+          :client (nemesis/compose {{:start1 :start,
+                                     :stop1 :stop} (:client n1)
+                                    {:start2 :start,
+                                     :stop2 :stop} (:client n2)})}))
 
 (defn with-nemesis
   "Wraps a client generator in a nemesis that induces failures and eventually
   stops."
   [nemesis-gen client]
-  (gen/phases
-   (->> client
-        (gen/nemesis (:during nemesis-gen))
-        (gen/time-limit test-duration))
-   (gen/nemesis (:final nemesis-gen))
-   (gen/log "waiting for quiescence")
-   (gen/sleep nemesis-quiescence-wait)))
+  (->> client
+       (gen/nemesis
+         (gen/phases (:during nemesis-gen)
+                     (:final nemesis-gen)
+                     (gen/log "waiting for quiescence")
+                     (gen/sleep nemesis-quiescence-wait)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;; Nemesis definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; empty nemesis
 (def none
-  {:name "blank"
-   :generator nemesis-no-gen
-   :client nemesis/noop
-   :clocks false
-   })   
+  (merge nemesis-no-gen
+         {:name "blank"
+          :client nemesis/noop
+          :clocks false}))
 
 ;; random partitions
 (def parts
@@ -102,10 +99,11 @@
 ;; start/stop server
 (defn startstop
   [n]
-  {:name (str "startstop" (if (> n 1) n ""))
-   :generator nemesis-single-gen
-   :client (nemesis/hammer-time (comp (partial take n) shuffle) "cockroach")
-   :clocks false})
+  (merge nemesis-single-gen
+         {:name (str "startstop" (if (> n 1) n ""))
+          :client (nemesis/hammer-time
+                    (comp (partial take n) shuffle) "cockroach")
+          :clocks false}))
 
 ;; start/kill server
 (defn startkill-client
@@ -117,47 +115,54 @@
                               (fn stop [t n]
                                 (c/su (c/exec (:runcmd t)))
                                 [:resumed :cockroach])))
-  
 
 (defn startkill
   [n]
-  {:name (str "startkill" (if (> n 1) n ""))
-   :generator nemesis-single-gen
-   :client (startkill-client n)
-   :clocks false})
+  (merge nemesis-single-gen
+         {:name (str "startkill" (if (> n 1) n ""))
+          :client (startkill-client n)
+          :clocks false}))
 
 ;; majorities ring
 (def majring
-  {:name "majring"
-   :generator nemesis-single-gen
-   :client (nemesis/partition-majorities-ring)
-   :clocks false})
+  (merge nemesis-single-gen
+         {:name "majring"
+          :client (nemesis/partition-majorities-ring)
+          :clocks false}))
+
+;; Little convenience macro
+(defmacro on-nodes [test & body]
+  `(c/on-nodes ~test (fn [test# node#] ~@body)))
 
 ;; Clock skew nemesis
+
+(defn reset-clocks!
+  "Reset all clocks on all nodes in a test"
+  [test]
+  (on-nodes test (c/su (c/exec :ntpdate ntpserver))))
 
 (defn clock-milli-scrambler
   "Randomizes the system clock of all nodes within a dt-millisecond window."
   [dt]
   (reify client/Client
     (setup! [this test _]
+      (reset-clocks! test)
       this)
 
     (invoke! [this test op]
       (assoc op :value
-             (c/on-many (:nodes test)
-                        (c/su
+             (on-nodes test
+                       (c/su
                          (c/exec adjtime (str (- (rand-int (* 2 dt)) dt)))))))
 
     (teardown! [this test]
-      (c/on-many (:nodes test)
-                 (c/su (c/exec :ntpdate ntpserver))))
-    ))
+      (reset-clocks! test))))
 
 (def skews
-  {:name "skews"
-   :generator nemesis-single-gen
-   :client (clock-milli-scrambler 100)
-   :clocks true})
+  (merge nemesis-single-gen
+         {:name "skews"
+          :client (clock-milli-scrambler 100)
+          :clocks true}))
 
 (defn clock-scrambler-restart
   "Randomizes the system clock of all nodes within a dt-second window.
@@ -165,32 +170,33 @@
   [dt]
   (reify client/Client
     (setup! [this test _]
+      (reset-clocks! test)
       this)
 
     (invoke! [this test op]
       (assoc op :value
              (case (:f op)
-               :start (c/on-many (:nodes test)
-                                 (let [t (+ (/ (System/currentTimeMillis) 1000)
-                                            (- (rand-int (* 2 dt)) dt))]
-                                   (nemesis/set-time! t)))
-               :stop (c/on-many (:nodes test)
-                                (c/su (c/exec :ntpdate ntpserver))
-                                (when (= "" (try
-                                              (c/exec :ps :a c/| :grep :cockroach c/| :grep :-v :grep)
-                                              (catch RuntimeException e "")))
-                                  (try
-                                    (c/su (c/exec (:runcmd test)))
-                                    (catch RuntimeException e (.getMessage e)))))
-               )))
+               :start (on-nodes test
+                                  (let [t (+ (/ (System/currentTimeMillis) 1000)
+                                             (- (rand-int (* 2 dt)) dt))]
+                                    (nemesis/set-time! t)))
+               :stop (on-nodes test
+                                 (c/su (c/exec :ntpdate ntpserver))
+                                 (when (= "" (try
+                                               (c/exec :ps :a c/|
+                                                       :grep :cockroach c/|
+                                                       :grep :-v :grep)
+                                               (catch RuntimeException e "")))
+                                   (try
+                                     (c/su (c/exec (:runcmd test)))
+                                     (catch RuntimeException e (.getMessage e))))))))
 
 
     (teardown! [this test]
-      )
-))
+      (reset-clocks! test))))
 
 (def bigskews
-  {:name "bigskews"
-   :generator nemesis-single-gen
-   :client (clock-scrambler-restart 600)
-   :clocks true})
+  (merge nemesis-single-gen
+         {:name "bigskews"
+          :client (clock-scrambler-restart 60)
+          :clocks true}))

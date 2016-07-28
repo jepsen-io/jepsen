@@ -206,7 +206,7 @@
   [test]
   (wrap-env [(str "COCKROACH_LINEARIZABLE="
                  (if (:linearizable test) "true" "false"))
-             (str "COCKROACH_MAX_OFFSET=" "5s")]
+             (str "COCKROACH_MAX_OFFSET=" "250ms")]
             (cockroach-start-cmdline
               [(str "--join=" (name (jepsen/primary test)))])))
 
@@ -225,7 +225,7 @@
   the tarball."
   [test node]
   (c/su
-    (debian/install [:tcpdump])
+    (debian/install [:tcpdump :ntpdate])
     (cu/ensure-user! cockroach-user)
     (cu/install-tarball! node (:tarball test) working-path false)
     (c/exec :mkdir :-p working-path)
@@ -456,8 +456,19 @@
                              "-fake"))
              :db      (db opts)
              :os      (if (= jdbc-mode :cdb-cluster) ubuntu/os os/noop)
+             :client  (:client (:client opts))
              :nemesis (if (= jdbc-mode :cdb-cluster)
                         (:client (:nemesis opts))
-                        nemesis/noop)}
-            (dissoc opts :name :nodes :nemesis))]
+                        nemesis/noop)
+             :generator (gen/phases
+                          (->> (gen/nemesis (:during (:nemesis opts))
+                                            (:during (:client opts)))
+                               (gen/time-limit (:time-limit opts)))
+                          ; Quiesce nemesis
+                          (gen/log "Waiting for quiescence")
+                          (->> (gen/nemesis (:final (:nemesis opts)))
+                               (gen/time-limit 15))
+                          ; Final client
+                          (gen/clients (:final (:client opts))))}
+            (dissoc opts :name :nodes :client :nemesis))]
     (assoc t :runcmd (runcmd t))))

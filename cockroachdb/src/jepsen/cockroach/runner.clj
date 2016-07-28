@@ -22,7 +22,7 @@
   list of names. For maps, uses keys."
   [coll]
   (str "Must be one of "
-       (pr-str (sort (map name (if (map? coll) (keys coll) coll))))))
+       (str/join ", " (sort (map name (if (map? coll) (keys coll) coll))))))
 
 (def tests
   "A map of test names to test constructors."
@@ -107,7 +107,7 @@
 
    ["-t" "--time-limit SECONDS"
     "Excluding setup and teardown, how long should a test run for, in seconds?"
-    :default  150
+    :default  60
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
