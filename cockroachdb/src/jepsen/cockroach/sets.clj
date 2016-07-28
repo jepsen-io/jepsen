@@ -132,19 +132,15 @@
     (merge
       {:name        "set"
        :concurrency c/concurrency-factor
-       :client      (SetsClient. (atom false) nil)
-       :generator   (gen/phases
-                      (->> (range)
-                           (map (partial array-map
-                                         :type :invoke
-                                         :f :add
-                                         :value))
-                           gen/seq
-                           (gen/stagger 1)
-                           (cln/with-nemesis (:generator (:nemesis opts))))
-                      (->> {:type :invoke, :f :read, :value nil}
-                           gen/once
-                           gen/clients))
+       :client      {:client (SetsClient. (atom false) nil)
+                     :during (->> (range)
+                                  (map (partial array-map
+                                                :type :invoke
+                                                :f :add
+                                                :value))
+                                  gen/seq
+                                  (gen/stagger 1))
+                     :final (gen/once {:type :invoke, :f :read, :value nil})}
        :checker     (checker/compose
                       {:perf     (checker/perf)
                        :details  (check-sets)})}
