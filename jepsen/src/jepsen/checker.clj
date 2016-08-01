@@ -110,31 +110,31 @@
                           (r/map :value)
                           (reduce (fn [_ x] x) nil))]
         (if-not final-read
-          {:valid? false
-           :error  "Set was never read"})
+          {:valid? :unknown
+           :error  "Set was never read"}
 
-        (let [; The OK set is every read value which we tried to add
-              ok          (set/intersection final-read attempts)
+          (let [; The OK set is every read value which we tried to add
+                ok          (set/intersection final-read attempts)
 
-              ; Unexpected records are those we *never* attempted.
-              unexpected  (set/difference final-read attempts)
+                ; Unexpected records are those we *never* attempted.
+                unexpected  (set/difference final-read attempts)
 
-              ; Lost records are those we definitely added but weren't read
-              lost        (set/difference adds final-read)
+                ; Lost records are those we definitely added but weren't read
+                lost        (set/difference adds final-read)
 
-              ; Recovered records are those where we didn't know if the add
-              ; succeeded or not, but we found them in the final set.
-              recovered   (set/difference ok adds)]
+                ; Recovered records are those where we didn't know if the add
+                ; succeeded or not, but we found them in the final set.
+                recovered   (set/difference ok adds)]
 
-          {:valid?          (and (empty? lost) (empty? unexpected))
-           :ok              (util/integer-interval-set-str ok)
-           :lost            (util/integer-interval-set-str lost)
-           :unexpected      (util/integer-interval-set-str unexpected)
-           :recovered       (util/integer-interval-set-str recovered)
-           :ok-frac         (util/fraction (count ok) (count attempts))
-           :unexpected-frac (util/fraction (count unexpected) (count attempts))
-           :lost-frac       (util/fraction (count lost) (count attempts))
-           :recovered-frac  (util/fraction (count recovered) (count attempts))})))))
+            {:valid?          (and (empty? lost) (empty? unexpected))
+             :ok              (util/integer-interval-set-str ok)
+             :lost            (util/integer-interval-set-str lost)
+             :unexpected      (util/integer-interval-set-str unexpected)
+             :recovered       (util/integer-interval-set-str recovered)
+             :ok-frac         (util/fraction (count ok) (count attempts))
+             :unexpected-frac (util/fraction (count unexpected) (count attempts))
+             :lost-frac       (util/fraction (count lost) (count attempts))
+             :recovered-frac  (util/fraction (count recovered) (count attempts))}))))))
 
 (defn fraction
   "a/b, but if b is zero, returns unity."
