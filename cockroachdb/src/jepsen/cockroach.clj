@@ -230,7 +230,9 @@
     (cu/install-tarball! node (:tarball test) working-path false)
     (c/exec :mkdir :-p working-path)
     (c/exec :mkdir :-p log-path)
-    (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path))
+    (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path)
+    (info node "Setting date!")
+    (c/exec :ntpdate :-b cln/ntpserver))
   (info node "Cockroach installed"))
 
 (defn db

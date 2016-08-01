@@ -15,7 +15,8 @@
                               [register :as register]
                               [monotonic :as monotonic]
                               [nemesis :as cln]
-                              [sets :as sets]]))
+                              [sets :as sets]
+                              [sequential :as sequential]]))
 
 (defn one-of
   "Takes a collection and returns a string like \"Must be one of ...\" and a
@@ -31,7 +32,8 @@
    "register"             register/test
    "monotonic"            monotonic/test
    "monotonic-multitable" monotonic/multitable-test
-   "sets"                 sets/test})
+   "sets"                 sets/test
+   "sequential"           sequential/test})
 
 (def default-hosts [:n1 :n2 :n3 :n4 :n5])
 
