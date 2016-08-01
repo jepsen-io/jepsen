@@ -56,6 +56,8 @@ test and know exactly what it's doing.
 
 See [lxc.md](doc/lxc.md) for some of my notes on setting up LXC instances.
 
+You can also use [Docker Compose](docker/README.md) for setting up Docker instances.
+
 ## Running a test
 
 Once you've got everything set up, you should be able to run `cd aerospike;
