@@ -62,28 +62,34 @@
                            (independent/tuple k)
                            (assoc op :type :ok, :value))
 
-                :add (do (if-let [cur (-> conn
-                                          (c/sql! "select elements, _version
-                                                  from sets where id = ?"
-                                                  k)
-                                          :rows
-                                          first)]
-                           (let [els' (-> (:elements cur)
-                                          json/parse-string
-                                          (conj v)
-                                          json/generate-string)]
-                             (assert (number? (:_version cur)))
-                             (c/sql! conn "update sets set elements = ?
-                                          where id = ? and _version = ?"
-                                     els' k (:_version cur)))
-                           (let [els' (json/generate-string [v])]
-                             (c/sql! conn "insert into sets (id, elements)
-                                          values (?, ?)"
-                                     k els')))
-                         (assoc op :type :ok)))))))
+                :add (if-let [cur (-> conn
+                                      (c/sql! "select elements, _version
+                                              from sets where id = ?"
+                                              k)
+                                      :rows
+                                      first)]
+                       (let [els' (-> (:elements cur)
+                                      json/parse-string
+                                      (conj v)
+                                      json/generate-string)
+                             _ (assert (number? (:_version cur)))
+                             res (c/sql! conn "update sets set elements = ?
+                                              where id = ? and _version = ?"
+                                         els' k (:_version cur))]
+                         (case (:row-count res)
+                           0 (assoc op :type :fail)
+                           1 (assoc op :type :ok)
+                           2 (assoc op :type :info
+                                    :error (str "Updated " (:row-count res)
+                                                " rows!?"))))
+                       (let [els' (json/generate-string [v])]
+                         (c/sql! conn "insert into sets (id, elements)
+                                      values (?, ?)"
+                                 k els')
+                         (assoc op :type :ok))))))))
 
-                  (teardown! [this test]
-                             (.close conn))))))
+      (teardown! [this test]
+        (.close conn))))))
 
 (defn r [] {:type :invoke, :f :read, :value nil})
 (defn w []
