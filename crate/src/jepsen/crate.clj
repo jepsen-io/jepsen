@@ -137,6 +137,30 @@
     (log-files [_ test node]
       ["/var/log/crate/crate.log"])))
 
+(defmacro with-errors
+  "Unified error handling: takes an operation, evaluates body in a try/catch,
+  and maps common exceptions to short errors."
+  [op & body]
+  `(try ~@body
+        (catch SQLActionException e#
+          (cond
+            (and (= 5000 (.errorCode e#))
+                 (re-find #"blocked by: \[.+no master\];" (str e#)))
+            (assoc ~op :type :fail, :error :no-master)
+
+            (and (= 4091 (.errorCode e#))
+                 (re-find #"document with the same primary key" (str e#)))
+            (assoc ~op :type :fail, :error :duplicate-key)
+
+            (and (= 5000 (.errorCode e#))
+                 (re-find #"rejected execution" (str e#)))
+            (do ; Back off a bit
+                (Thread/sleep 1000)
+                (assoc ~op :type :info, :error :rejected-execution))
+
+            :else
+            (throw e#)))))
+
 (defn client
   ([] (client nil))
   ([conn]
