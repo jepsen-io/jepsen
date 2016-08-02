@@ -17,10 +17,8 @@
             [jepsen.os.debian     :as debian]
             [jepsen.checker.timeline :as timeline]
             [jepsen.crate         :as c]
-            [cheshire.core        :as json]
             [clojure.string       :as str]
-            [clojure.java.io      :as io]
-            [clojure.java.shell   :refer [sh]]
+            [clojure.set          :as set]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
             [knossos.op           :as op])
@@ -40,7 +38,7 @@
         (let [conn (c/await-client (c/connect node) test)]
           (when (deliver initialized? true)
             (c/sql! conn "create table dirty_read (
-                           id integer primary key,
+                           id integer primary key
                          ) with (number_of_replicas = \"0-all\")"))
           (client conn)))
 
@@ -57,16 +55,22 @@
                                         :id)]
                              (assoc op :type (if v :ok :fail)))
 
+                     ; Refresh table
+                     :refresh (do (c/sql! conn "refresh table dirty_read")
+                                  (assoc op :type :ok))
+
                      ; Perform a full read of all IDs
-                     :strong-read (->> (c/sql! conn
-                                               "select id from sets")
-                                       :rows
-                                       (map :id)
-                                       (into (sorted-set))
-                                       (assoc op :type :ok, :value))
+                     :strong-read (do (c/sql! conn "refresh table dirty_read")
+                                      (->> (c/sql! conn
+                                                   "select id from dirty_read")
+                                           :rows
+                                           (map :id)
+                                           (into (sorted-set))
+                                           (assoc op :type :ok, :value)))
 
                      ; Add an ID
-                     :write (do (c/sql! "insert into dirty_read (id) values (?)"
+                     :write (do (c/sql! conn
+                                        "insert into dirty_read (id) values (?)"
                                         (:value op))
                                 (assoc op :type :ok))))))
 
@@ -93,25 +97,37 @@
             strong-read-sets (->> ok
                                   (filter #(= :strong-read (:f %)))
                                   (map :value))
-            strong-reads (reduce set/union strong-read-sets)
-            unseen       (set/difference strong-reads reads)
-            dirty        (set/difference reads strong-reads)
-            lost         (set/difference writes strong-reads)]
+            on-all       (reduce set/intersection strong-read-sets)
+            on-some      (reduce set/union strong-read-sets)
+            not-on-all   (set/difference on-some  on-all)
+            unseen       (set/difference on-some  reads)
+            dirty        (set/difference reads    on-some)
+            lost         (set/difference writes   on-some)
+            some-lost    (set/difference writes   on-all)
+            nodes-agree? (= on-all on-some)]
         ; We expect one strong read per node
         (info :strong-read-sets (count strong-read-sets))
         (info :concurrency (:concurrency test))
-        (assert (= (count strong-read-sets) (:concurrency test)))
-        ; All strong reads had darn well better be equal
-        (assert (apply = (map count (cons strong-reads strong-read-sets))))
 
-        {:valid?            (and (empty? dirty) (empty? lost))
-         :read-count        (count reads)
-         :strong-read-count (count strong-reads)
-         :unseen-count      (count unseen)
-         :dirty-count       (count dirty)
-         :dirty             dirty
-         :lost-count        (count lost)
-         :lost              lost}))))
+        ; Everyone should have read something
+        (assert (= (count strong-read-sets) (:concurrency test)))
+
+        {:valid?                         (and nodes-agree?
+                                              (empty? dirty)
+                                              (empty? lost))
+         :nodes-agree?                   nodes-agree?
+         :read-count                     (count reads)
+         :on-all-count                   (count on-all)
+         :on-some-count                  (count on-some)
+         :unseen-count                   (count unseen)
+         :not-on-all-count               (count not-on-all)
+         :not-on-all                     not-on-all
+         :dirty-count                    (count dirty)
+         :dirty                          dirty
+         :lost-count                     (count lost)
+         :lost                           lost
+         :some-lost-count                (count some-lost)
+         :some-lost                      some-lost}))))
 
 (defn sr  [_ _] {:type :invoke, :f :strong-read, :value nil})
 
@@ -153,9 +169,9 @@
           :db      (c/db)
           :client  (client)
           :checker (checker/compose
-                     {:set  (independent/checker checker/set)
-                      :perf (checker/perf)})
-          :concurrency 100
+                     {:dirty-read (checker)
+                      :perf       (checker/perf)})
+          :concurrency 15
           :nemesis (nemesis/partition-random-halves)
           :generator (gen/phases
                        (->> (rw-gen)
@@ -165,9 +181,11 @@
                                                {:type :info, :f :start}
                                                (gen/sleep 120)
                                                {:type :info, :f :stop}])))
-                            (time-limit 200))
+                            (gen/time-limit 200))
                        (gen/nemesis (gen/once {:type :info :f :stop}))
+                       (gen/clients (gen/each
+                                      (gen/once {:type :invoke, :f :refresh})))
                        (gen/log "Waiting for quiescence")
-                       (gen/sleep 30)
+                       (gen/sleep 10)
                        (gen/clients (gen/each (gen/once sr))))}
          opts))

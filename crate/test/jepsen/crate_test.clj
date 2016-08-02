@@ -3,7 +3,7 @@
             [jepsen.core :as jepsen]
             [jepsen.crate :refer :all]
             [jepsen.crate.lost-updates :as lost-updates]
-            [jepsen.create.dirty-read :as dirty-read]))
+            [jepsen.crate.dirty-read :as dirty-read]))
 
 ;(deftest a-test
 ;  (jepsen/run! (an-test {})))
