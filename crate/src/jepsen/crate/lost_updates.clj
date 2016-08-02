@@ -99,31 +99,39 @@
 
 (defn test
   [opts]
-  (merge tests/noop-test
-         {:name    "crate lost-updates"
-          :os      debian/os
-          :db      (c/db)
-          :client  (client)
-          :checker (checker/compose
-                     {:set  (independent/checker checker/set)
-                      :perf (checker/perf)})
-          :concurrency 20
-          :nemesis (nemesis/partition-random-halves)
-          :generator (->> (independent/concurrent-generator
-                            2
-                            (range)
-                            (fn [id]
+  (let [time-limit      380
+        quiescence-time 20
+        nemesis-time    (- time-limit quiescence-time)]
+    (merge tests/noop-test
+           {:name    "crate lost-updates"
+            :os      debian/os
+            :db      (c/db)
+            :client  (client)
+            :checker (checker/compose
+                       {:set  (independent/checker checker/set)
+                        :perf (checker/perf)})
+            :concurrency 100
+            :nemesis (nemesis/partition-random-halves)
+            :generator (->> (independent/concurrent-generator
+                              10
+                              (range)
+                              (fn [id]
+                                (gen/phases
+                                  (gen/time-limit nemesis-time
+                                                  (gen/delay 1/100 (w)))
+                                  ; Wait for quiescence
+                                  (gen/sleep quiescence-time)
+                                  (gen/each
+                                    (gen/once (r))))))
+                            (gen/time-limit time-limit)
+                            (gen/nemesis
                               (gen/phases
-                                (gen/time-limit 10 (gen/delay 1 (w)))
-                                ; Wait for quiescence
-                                (gen/sleep 20)
-                                (gen/each
-                                  (gen/once (r))))))
-                          (gen/nemesis
-                            nil)
-;                            (gen/seq (cycle [(gen/sleep 120)
-;                                             {:type :info, :f :start}
-;                                             (gen/sleep 120)
-;                                             {:type :info, :f :stop}])))
-                          (gen/time-limit 60))}
-         opts))
+                                (->> (gen/seq (cycle [(gen/sleep 120)
+                                                      {:type :info, :f :start}
+                                                      (gen/sleep 120)
+                                                      {:type :info, :f :stop}]))
+                                     (gen/time-limit nemesis-time))
+                                (gen/once {:type :info, :f :stop})
+                                (gen/log "Waiting for quiescence")
+                                (gen/sleep quiescence-time))))}
+           opts)))
