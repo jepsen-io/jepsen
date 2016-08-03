@@ -29,7 +29,8 @@
             [jepsen.control.net :as cn]
             [jepsen.os.ubuntu :as ubuntu]
             [jepsen.os.debian :as debian]
-            [jepsen.cockroach.nemesis :as cln]))
+            [jepsen.cockroach.nemesis :as cln]
+            [jepsen.cockroach.error :as error]))
 
 (import [java.net URLEncoder])
 
@@ -170,9 +171,20 @@
 (defn close-conn
   "Given a JDBC connection, closes it and returns the underlying spec."
   [conn]
-  (when-let [c (:connection conn)]
+  (when-let [c (j/db-find-connection conn)]
     (.close c))
   (dissoc conn :connection))
+
+(defn client
+  "Constructs a network client for a node."
+  [node]
+  (error/client
+    (fn open []
+      (let [spec (db-conn-spec node)
+            conn (j/get-connection spec)
+            spec' (j/add-connection spec conn)]
+        spec'))
+    close-conn))
 
 (defn init-conn
   "Given a Jepsen node, create an atom with a connection object therein."
@@ -206,7 +218,7 @@
   [test]
   (wrap-env [(str "COCKROACH_LINEARIZABLE="
                  (if (:linearizable test) "true" "false"))
-             (str "COCKROACH_MAX_OFFSET=" "250ms")]
+             (str "COCKROACH_MAX_OFFSET=" "1000ms")]
             (cockroach-start-cmdline
               [(str "--join=" (name (jepsen/primary test)))])))
 
@@ -230,9 +242,7 @@
     (cu/install-tarball! node (:tarball test) working-path false)
     (c/exec :mkdir :-p working-path)
     (c/exec :mkdir :-p log-path)
-    (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path)
-    (info node "Setting date!")
-    (c/exec :ntpdate :-b cln/ntpserver))
+    (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path))
   (info node "Cockroach installed"))
 
 (defn db
@@ -248,6 +258,10 @@
 
       (when (= jdbc-mode :cdb-cluster)
         (install! test node)
+
+        (info node "Setting date!")
+        (c/exec :ntpdate :-b cln/ntpserver)
+        (jepsen/synchronize test)
 
         (when (= node (jepsen/primary test))
           (info node "Starting CockroachDB once to initialize cluster...")

@@ -22,6 +22,7 @@
              [independent :as independent]
              [util :as util :refer [meh]]]
             [jepsen.cockroach.nemesis :as cln]
+            [jepsen.cockroach.error :as e]
             [clojure.java.jdbc :as j]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
@@ -46,62 +47,56 @@
   [key-count k]
   (mapv (partial str k "_") (range key-count)))
 
-(defmacro with-errors
-  "We're doing multiple transactions per block here and want exceptions to
-  prevent subsequent txns from running."
-  [op [c conn] & body]
-  `(c/with-annotate-errors
-     (c/with-reconnect ~conn true
-       (c/with-error-handling ~op
-         ~@body))))
-
-(defrecord Client [table-count key-count table-created? conn]
+(defrecord Client [table-count table-created? client]
   client/Client
 
   (setup! [this test node]
     (Thread/sleep 2000)
-    (let [conn (c/init-conn node)]
+    (let [client (e/open! (c/client node))]
       (locking table-created?
         (when (compare-and-set! table-created? false true)
-          (c/with-txn-notimeout {} [c conn]
-            (info "Creating tables" (pr-str (table-names table-count)))
-            (try
+          (e/with-conn [c client]
+            (e/with-timeout 5000
+              (info "Creating tables" (pr-str (table-names table-count)))
               (doseq [t (table-names table-count)]
-                (j/execute! @conn [(str "drop table if exists " t)])
-                (j/execute! @conn [(str "create table " t " (key varchar(255))")])
-                (info "Created table" t))
-              (catch java.sql.BatchUpdateException e
-                (info e "caught")
-                (info (.getNextException e) "next")
-                (throw e))))))
+                (j/execute! c [(str "drop table if exists " t)])
+                (j/execute! c [(str "create table " t " (key varchar(255))")])
+                (info "Created table" t))))))
 
-      (assoc this :conn conn)))
+      (assoc this :client client)))
 
   (invoke! [this test op]
-    (with-errors op [c conn]
-      (let [ks (subkeys key-count (:value op))]
-        (case (:f op)
-          :write (do (doseq [k ks]
-                       (j/insert! @conn (key->table table-count k) {:key k})))
-          (assoc op :type :ok))
-        :read (->> ks
-                   reverse
-                   (mapv (fn [k]
-                           (first
-                             (j/query @conn [(str "select key from "
-                                                  (key->table table-count k)
-                                                  " where key = ?") k]
-                                      :row-fn :key))))
-                   (vector (:value op))
-                   (assoc op :type :ok, :value)))))
+    (e/with-exception->op op
+      (e/with-conn [c client]
+        (e/with-timeout 5000
+          (e/with-txn-retry
+            (let [ks (subkeys (:key-count test) (:value op))]
+              (case (:f op)
+                :write (do (doseq [k ks]
+                             (j/insert! c (key->table table-count k) {:key k}))
+                           (assoc op :type :ok))
+
+                :read (->> ks
+                           reverse
+                           (mapv (fn [k]
+                                   (first
+                                     (j/query c
+                                              [(str "select key from "
+                                                    (key->table table-count k)
+                                                    " where key = ?") k]
+                                              :row-fn :key))))
+                           (vector (:value op))
+                           (assoc op :type :ok, :value)))))))))
 
   (teardown! [this test]
     (try
-      (doseq [t (table-names table-count)]
-        (c/with-timeout conn nil
-          (j/execute! @conn ["drop table ?" t])))
+      (e/with-conn [c client]
+        (e/with-timeout 5000
+          (doseq [t (table-names table-count)]
+            (j/execute! c [(str "drop table " t)]))))
+
       (finally
-        (c/close-conn @conn)))))
+        (e/close! client)))))
 
 (defn writes
   "We emit sequential integer keys for writes, logging the most recent n keys
@@ -132,15 +127,44 @@
     (gen/reserve n (writes last-written)
                  (reads last-written))))
 
+(defn checker
+  []
+  (reify checker/Checker
+    (check [this test model history opts]
+      (assert (integer? (:key-count test)))
+      (let [reads (->> history
+                       (r/filter op/ok?)
+                       (r/filter #(= :read (:f %)))
+                       (r/map :value)
+                       (into []))
+            none (filter (comp (partial every? nil?) second) reads)
+            bad  (filter (fn [[k ks]]
+                           (and (not (every? nil? ks))
+                                (not (= (subkeys (:key-count test) k)
+                                        (reverse ks)))))
+                         reads)
+            all  (filter (fn [[k ks]]
+                           (= (subkeys (:key-count test) k)
+                             (reverse ks)))
+                         reads)]
+        {:valid?      (not (seq bad))
+         :all-count   (count all)
+         :none-count  (count none)
+         :bad-count   (count bad)
+         :bad         bad}))))
+
 (defn test
   [opts]
   (let [gen (gen 5)]
   (c/basic-test
     (merge
       {:name "sequential"
-       :concurrency c/concurrency-factor
-       :client {:client (Client. 10 2 (atom false) nil)
-                :during (gen/limit 10 (gen/stagger 1 gen))
-                :final  (gen/once (gen/filter #(= :read (:f %)) gen))}
-       :checker (checker/perf)}
+       :key-count 2
+       :concurrency 15 ; c/concurrency-factor
+       :client {:client (Client. 10 (atom false) nil)
+                :during (gen/stagger 1 gen)
+                :final  nil}
+       :checker (checker/compose
+                  {:perf (checker/perf)
+                   :sequential (checker)})}
       opts))))
