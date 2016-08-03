@@ -10,6 +10,8 @@
   pooling. So we're going to wrap connections in an atom--when operations on a
   conn fail, we'll close the conn and open a new one."
   (:require [clojure.java.jdbc :as j]
+            [clojure.pprint :refer [pprint]]
+            [clojure.tools.logging :refer :all]
             [jepsen.util :as util]))
 
 (defn client
@@ -31,7 +33,7 @@
   [client]
   (locking client
     (when-not (conn client)
-      (reset! (:conn client) ((:conn-fn client)))))
+      (reset! (:conn client) ((:open client)))))
   client)
 
 (defn close!
@@ -58,8 +60,9 @@
      (try (let [~c (conn ~client)]
             ~@body)
           (catch Exception e#
-            (info e# "Encountered with DB connection; reopening.")
-            (reopen! client)))))
+            (info "Encountered error with DB connection open; reopening.")
+            (reopen! ~client)
+            (throw e#)))))
 
 (defmacro with-timeout
   "Like util/timeout, but throws (RuntimeException. \"timeout\") for timeouts.
@@ -67,5 +70,53 @@
   gets reset, so we don't accidentally hand off the connection to a later
   invocation with some incomplete transaction."
   [dt & body]
-  `(util/timeout dt (throw (RuntimeException. "timeout"))
+  `(util/timeout ~dt (throw (RuntimeException. "timeout"))
                  ~@body))
+
+(defmacro with-txn-retry
+  "Catches PSQL 'restart transaction' errors and retries body a bunch of times,
+  with exponential backoffs."
+  [& body]
+  `(util/with-retry [attempts# 30
+                     backoff# 20]
+     ~@body
+     (catch org.postgresql.util.PSQLException e#
+       (if (and (pos? attempts#)
+                (re-find #"ERROR: restart transaction: retry txn"
+                         (.getMessage e#)))
+         (do (Thread/sleep backoff#)
+             (~'retry (dec attempts#)
+                      (* backoff# (+ 4 (* 0.5 (- (rand) 0.5))))))
+         (throw e#)))))
+
+(defn exception->op
+  "Takes an exception and maps it to a partial op, like {:type :info, :error
+  ...}. nil if unrecognized."
+  [e]
+  (let [m (.getMessage e)]
+    (condp instance? e
+      java.sql.SQLTransactionRollbackException
+      {:type :fail, :error [:rollback m]}
+
+      java.sql.BatchUpdateException
+      (let [m' (if (re-find #"getNextExc" m)
+                 (.getMessage (.getNextException e))
+                 m)]
+        {:type :info, :error [:batch-update m']})
+
+      org.postgresql.util.PSQLException
+      {:type :info, :error [:psql-exception m]}
+
+      (condp re-find m
+        #"^timeout$"
+        {:type :info, :error :timeout}))))
+
+(defmacro with-exception->op
+  "Takes an operation and a body. Evaluates body, catches exceptions, and maps
+  them to ops with :type :info and a descriptive :error."
+  [op & body]
+  `(try ~@body
+        (catch Exception e#
+          (if-let [ex-op# (exception->op e#)]
+            (merge ~op ex-op#)
+            (throw e#)))))
