@@ -28,11 +28,11 @@ node.name: "$NAME"
 #path.data: /path/to/data1,/path/to/data2
 
 # Recommended: The amount of Crate instances in the full cluster
-gateway.expected_nodes: $N
+#gateway.expected_nodes: $N
 
 # Recommended: More then half of the Crate instances in the full cluster
-gateway.recover_after_nodes: $MAJORITY
-discovery.zen.minimum_master_nodes: $MAJORITY
+# gateway.recover_after_nodes: $MAJORITY
+# discovery.zen.minimum_master_nodes: $MAJORITY
 
 # most cloud environments don't support multicast discovery
 #discovery.zen.ping:
@@ -738,26 +738,6 @@ discovery.zen.publish_timeout: 3s
 #
 #cluster.info.update.interval: 30s
 
-
-################################## Slow Log ##################################
-
-# Shard level query and fetch threshold logging.
-
-#index.search.slowlog.threshold.query.warn: 10s
-#index.search.slowlog.threshold.query.info: 5s
-#index.search.slowlog.threshold.query.debug: 2s
-#index.search.slowlog.threshold.query.trace: 500ms
-
-#index.search.slowlog.threshold.fetch.warn: 1s
-#index.search.slowlog.threshold.fetch.info: 800ms
-#index.search.slowlog.threshold.fetch.debug: 500ms
-#index.search.slowlog.threshold.fetch.trace: 200ms
-
-#index.indexing.slowlog.threshold.index.warn: 10s
-#index.indexing.slowlog.threshold.index.info: 5s
-#index.indexing.slowlog.threshold.index.debug: 2s
-#index.indexing.slowlog.threshold.index.trace: 500ms
-
 ################################## GC Logging ################################
 
 #monitor.jvm.gc.young.warn: 1000ms
@@ -771,19 +751,17 @@ discovery.zen.publish_timeout: 3s
 
 ###################################### SQL ####################################
 
+# Defines whether SQL statements resulting in modification operations are
+# allowed on this node.
+#
+#node.sql.read_only: false
+
 # A SQL DML operation over a huge amount of rows (such as INSERT FROM SUBQUERY,
 # UPDATE or COPY FROM) can take an enormous amount of time and resources
 # of your cluster. To execute such queries more failsafe even with
 # slower hardware increase this timeout
 #
 #bulk.request_timeout: 1m
-
-# A SQL DML operation can cause lots of operations on the master
-# node when new partitions need to be created.
-# Those operations are not handled by the bulk.request_timeout setting.
-# If this setting is omitted a timeout of 10s per single master operation is used.
-#
-#bulk.partition_creation_timeout: 10s
 
 ########################## SQL Query Circuit Breaker ##########################
 
