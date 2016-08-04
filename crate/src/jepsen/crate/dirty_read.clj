@@ -77,6 +77,31 @@
       (teardown! [this test]
         (.close conn))))))
 
+(defn es-client
+  "Elasticsearch based client. Wraps an underlying Crate client for some ops."
+  ([] (es-client (client) nil))
+  ([crate es]
+   (reify client/Client
+     (setup! [this test node]
+       (let [crate (client/setup! crate test node)
+             es    (c/es-connect node)]
+         (es-client crate es)))
+
+     (invoke! [this test op]
+       (timeout 10000 (assoc op :type :info, :error :timeout)
+                (case (:f op)
+                  :strong-read
+                  (->> (c/search-table es)
+                       (map #(get (:source %) "id"))
+                       (into (sorted-set))
+                       (assoc op :type :ok, :value))
+
+                  (client/invoke! crate test op))))
+
+     (teardown! [this test]
+       (client/teardown! crate test)
+       (.close es)))))
+
 (defn checker
   "Verifies that we never read an element from a transaction which did not
   commmit (and hence was not visible in a final strong read).
@@ -176,7 +201,7 @@
           :generator (gen/phases
                        (->> (rw-gen)
                             (gen/stagger 1/100)
-                            (gen/nemesis
+                            (gen/nemesis ;nil)
                               (gen/seq (cycle [(gen/sleep 40)
                                                {:type :info, :f :start}
                                                (gen/sleep 120)

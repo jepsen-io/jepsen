@@ -24,12 +24,61 @@
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
             [knossos.op           :as op])
-  (:import (io.crate.client CrateClient)
+  (:import (java.net InetAddress)
+           (io.crate.client CrateClient)
            (io.crate.action.sql SQLActionException
                                 SQLResponse
                                 SQLRequest)
-           (io.crate.shade.org.elasticsearch.client.transport
-             NoNodeAvailableException)))
+           (org.elasticsearch.common.unit TimeValue)
+           (org.elasticsearch.common.settings
+             Settings)
+           (org.elasticsearch.common.transport
+             InetSocketTransportAddress)
+           (org.elasticsearch.client.transport
+             TransportClient)))
+
+;; ES client
+
+(defn es-connect
+  "Open an elasticsearch connection to a node."
+  [node]
+  (-> (TransportClient/builder)
+      (.settings (-> (Settings/settingsBuilder)
+                     (.put "cluster.name" "crate")
+                     (.put "client.transport.sniff" false)
+                     (.build)))
+      (.build)
+      (.addTransportAddress (InetSocketTransportAddress.
+                              (InetAddress/getByName (name node))
+                              4300))))
+
+(defn search-table
+  [^TransportClient client]
+  (loop [results []
+         scroll  (-> client
+                    (.prepareSearch (into-array String []))
+                    (.setScroll (TimeValue. 60000))
+                    (.setSize 128)
+                    (.execute)
+                    (.actionGet))]
+    (let [hits (.getHits (.getHits scroll))]
+      (if (zero? (count hits))
+        ; Done
+        results
+
+        (recur
+          (->> hits
+               seq
+               (map (fn [hit]
+                      {:id      (.id hit)
+                       :version (.version hit)
+                       :source  (.getSource hit)}))
+               (into results))
+          (-> client
+              (.prepareSearchScroll (.getScrollId scroll))
+              (.setScroll (TimeValue. 60000))
+              (.execute)
+              (.actionGet)))))))
 
 ;; Client
 (defn connect
@@ -68,7 +117,7 @@
            (with-retry []
              (sql! client "select * from sys.nodes")
              client
-             (catch NoNodeAvailableException e
+             (catch io.crate.shade.org.elasticsearch.client.transport.NoNodeAvailableException e
                (Thread/sleep 1000)
                (retry)))))
 
@@ -85,7 +134,7 @@
           (c/exec :apt-key :add "DEB-GPG-KEY-crate")
           (c/exec :rm "DEB-GPG-KEY-crate"))
     (debian/add-repo! "crate" "deb https://cdn.crate.io/downloads/apt/stable/ jessie main")
-    (debian/install [:crate])
+    (debian/install {:crate "0.55.2-1~jessie"})
     (c/exec :update-rc.d :crate :disable))
   (info node "crate installed"))
 
