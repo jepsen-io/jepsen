@@ -218,7 +218,7 @@
   [test]
   (wrap-env [(str "COCKROACH_LINEARIZABLE="
                  (if (:linearizable test) "true" "false"))
-             (str "COCKROACH_MAX_OFFSET=" "1000ms")]
+             (str "COCKROACH_MAX_OFFSET=" "3000ms")]
             (cockroach-start-cmdline
               [(str "--join=" (name (jepsen/primary test)))])))
 

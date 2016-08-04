@@ -127,6 +127,11 @@
     (gen/reserve n (writes last-written)
                  (reads last-written))))
 
+(defn trailing-nil?
+  "Does the given sequence contain a nil anywhere after a non-nil element?"
+  [coll]
+  (some nil? (drop-while nil? coll)))
+
 (defn checker
   []
   (reify checker/Checker
@@ -138,33 +143,31 @@
                        (r/map :value)
                        (into []))
             none (filter (comp (partial every? nil?) second) reads)
-            bad  (filter (fn [[k ks]]
-                           (and (not (every? nil? ks))
-                                (not (= (subkeys (:key-count test) k)
-                                        (reverse ks)))))
-                         reads)
+            some (filter (comp (partial some nil?) second) reads)
+            bad  (filter (comp trailing-nil? second) reads)
             all  (filter (fn [[k ks]]
                            (= (subkeys (:key-count test) k)
                              (reverse ks)))
                          reads)]
         {:valid?      (not (seq bad))
          :all-count   (count all)
+         :some-count  (count some)
          :none-count  (count none)
          :bad-count   (count bad)
          :bad         bad}))))
 
 (defn test
   [opts]
-  (let [gen (gen 5)]
-  (c/basic-test
-    (merge
-      {:name "sequential"
-       :key-count 2
-       :concurrency 15 ; c/concurrency-factor
-       :client {:client (Client. 10 (atom false) nil)
-                :during (gen/stagger 1 gen)
-                :final  nil}
-       :checker (checker/compose
-                  {:perf (checker/perf)
-                   :sequential (checker)})}
-      opts))))
+  (let [gen (gen 30)]
+    (c/basic-test
+      (merge
+        {:name "sequential"
+         :key-count 5
+         :concurrency 90
+         :client {:client (Client. 10 (atom false) nil)
+                  :during (gen/stagger 1/100 gen)
+                  :final  nil}
+         :checker (checker/compose
+                    {:perf (checker/perf)
+                     :sequential (checker)})}
+        opts))))
