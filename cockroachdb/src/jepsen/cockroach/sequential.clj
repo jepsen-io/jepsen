@@ -76,7 +76,8 @@
                              (j/insert! c (key->table table-count k) {:key k}))
                            (assoc op :type :ok))
 
-                :read (->> ks
+                :read (j/with-db-transaction [c c :isolation c/isolation-level]
+                        (->> ks
                            reverse
                            (mapv (fn [k]
                                    (first
@@ -86,7 +87,7 @@
                                                     " where key = ?") k]
                                               :row-fn :key))))
                            (vector (:value op))
-                           (assoc op :type :ok, :value)))))))))
+                           (assoc op :type :ok, :value))))))))))
 
   (teardown! [this test]
     (try
