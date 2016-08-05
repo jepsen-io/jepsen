@@ -93,15 +93,21 @@
          (es-client crate es)))
 
      (invoke! [this test op]
-       (timeout 10000 (assoc op :type :info, :error :timeout)
-                (case (:f op)
-                  :strong-read
-                  (->> (c/search-table es)
-                       (map #(get (:source %) "id"))
-                       (into (sorted-set))
-                       (assoc op :type :ok, :value))
+       (if-not (#{:write :strong-read} (:f op))
+         (client/invoke! crate test op)
 
-                  (client/invoke! crate test op))))
+         (timeout 10000 (assoc op :type :info, :error :timeout)
+                  (case (:f op)
+                    :strong-read
+                    (->> (c/es-search es)
+                         (map #(get (:source %) "id"))
+                         (into (sorted-set))
+                         (assoc op :type :ok, :value))
+
+                    :write
+                    (do (c/es-index! es "dirty_read" "default"
+                                     {:id (:value op)})
+                        (assoc op :type :ok))))))
 
      (teardown! [this test]
        (client/teardown! crate test)
@@ -130,7 +136,7 @@
             on-all       (reduce set/intersection strong-read-sets)
             on-some      (reduce set/union strong-read-sets)
             not-on-all   (set/difference on-some  on-all)
-            unseen       (set/difference on-some  reads)
+            unchecked    (set/difference on-some  reads)
             dirty        (set/difference reads    on-some)
             lost         (set/difference writes   on-some)
             some-lost    (set/difference writes   on-all)
@@ -149,7 +155,7 @@
          :read-count                     (count reads)
          :on-all-count                   (count on-all)
          :on-some-count                  (count on-some)
-         :unseen-count                   (count unseen)
+         :unchecked-count                (count unchecked)
          :not-on-all-count               (count not-on-all)
          :not-on-all                     not-on-all
          :dirty-count                    (count dirty)
@@ -197,7 +203,7 @@
          {:name    "crate lost-updates"
           :os      debian/os
           :db      (c/db)
-          :client  (client)
+          :client  (es-client)
           :checker (checker/compose
                      {:dirty-read (checker)
                       :perf       (checker/perf)})
@@ -205,7 +211,6 @@
           :nemesis (nemesis/partition-random-halves)
           :generator (gen/phases
                        (->> (rw-gen)
-                            (gen/stagger 1/100)
                             (gen/nemesis ;nil)
                               (gen/seq (cycle [(gen/sleep 40)
                                                {:type :info, :f :start}
