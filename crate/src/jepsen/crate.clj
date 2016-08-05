@@ -52,7 +52,19 @@
                               (InetAddress/getByName (name node))
                               4300))))
 
-(defn search-table
+(defn es-index!
+  "Index a record"
+  [^TransportClient client index type doc]
+  (assert (:id doc))
+  (let [res (-> client
+                (.prepareIndex index type (str (:id doc)))
+                (.setSource (json/generate-string doc))
+                (.get))]; why not execute/actionGet?
+    (when-not (.isCreated res)
+      (throw (RuntimeException. "Document not created")))
+    res))
+
+(defn es-search
   [^TransportClient client]
   (loop [results []
          scroll  (-> client
