@@ -30,8 +30,8 @@
              NoNodeAvailableException)))
 
 (defn client
-  ([] (client nil))
-  ([conn]
+  ([] (client nil (atom 0)))
+  ([conn limit]
    (let [initialized? (promise)]
     (reify client/Client
       (setup! [this test node]
@@ -40,10 +40,13 @@
             (c/sql! conn "create table dirty_read (
                            id integer primary key
                          ) with (number_of_replicas = \"0-all\")"))
-          (client conn)))
+          (client conn limit)))
 
       (invoke! [this test op]
-        (timeout 500 (assoc op :type :info, :error :timeout)
+        (timeout (case (:f op)
+                   :refresh 60000
+                   500)
+                 (assoc op :type :info, :error :timeout)
                  (c/with-errors op
                    (case (:f op)
                      ; Read a specific ID
@@ -60,16 +63,18 @@
                                   (assoc op :type :ok))
 
                      ; Perform a full read of all IDs
-                     :strong-read (do (c/sql! conn "refresh table dirty_read")
-                                      (->> (c/sql! conn
-                                                   "select id from dirty_read")
-                                           :rows
-                                           (map :id)
-                                           (into (sorted-set))
-                                           (assoc op :type :ok, :value)))
+                     :strong-read
+                     (do (->> (c/sql! conn
+                                      "select id from dirty_read LIMIT ?"
+                                      (+ 100 @limit)) ; who knows
+                              :rows
+                              (map :id)
+                              (into (sorted-set))
+                              (assoc op :type :ok, :value)))
 
                      ; Add an ID
-                     :write (do (c/sql! conn
+                     :write (do (swap! limit inc)
+                                (c/sql! conn
                                         "insert into dirty_read (id) values (?)"
                                         (:value op))
                                 (assoc op :type :ok))))))
