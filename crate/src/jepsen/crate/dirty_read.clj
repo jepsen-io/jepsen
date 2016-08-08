@@ -217,7 +217,7 @@
                                                {:type :info, :f :start}
                                                (gen/sleep 20)
                                                {:type :info, :f :stop}])))
-                            (gen/time-limit 60))
+                            (gen/time-limit 100))
                        (gen/nemesis (gen/once {:type :info :f :stop}))
                        (gen/clients (gen/each
                                       (gen/once {:type :invoke, :f :refresh})))
