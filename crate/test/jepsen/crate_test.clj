@@ -12,4 +12,5 @@
 ;  (jepsen/run! (lost-updates/test {})))
 
 (deftest dirty-read-test
-  (jepsen/run! (dirty-read/test {})))
+  (every? (comp :valid? :results)
+          (take 100 (repeatedly #(jepsen/run! (dirty-read/test {}))))))
