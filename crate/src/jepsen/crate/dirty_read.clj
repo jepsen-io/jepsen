@@ -45,7 +45,8 @@
       (invoke! [this test op]
         (timeout (case (:f op)
                    :refresh 60000
-                   500)
+                   :strong-read 60000
+                   100)
                  (assoc op :type :info, :error :timeout)
                  (c/with-errors op
                    (case (:f op)
@@ -93,7 +94,7 @@
          (es-client crate es)))
 
      (invoke! [this test op]
-       (if-not (#{:write :strong-read} (:f op))
+       (if-not (#{:strong-read} (:f op))
          (client/invoke! crate test op)
 
          (timeout 10000 (assoc op :type :info, :error :timeout)
@@ -212,11 +213,11 @@
           :generator (gen/phases
                        (->> (rw-gen)
                             (gen/nemesis ;nil)
-                              (gen/seq (cycle [(gen/sleep 40)
+                              (gen/seq (cycle [(gen/sleep 10)
                                                {:type :info, :f :start}
-                                               (gen/sleep 120)
+                                               (gen/sleep 20)
                                                {:type :info, :f :stop}])))
-                            (gen/time-limit 200))
+                            (gen/time-limit 60))
                        (gen/nemesis (gen/once {:type :info :f :stop}))
                        (gen/clients (gen/each
                                       (gen/once {:type :invoke, :f :refresh})))

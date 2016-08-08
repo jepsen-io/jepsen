@@ -487,6 +487,9 @@ discovery.zen.ping.timeout: 1s
 #
 discovery.zen.publish_timeout: 3s
 
+
+discovery.zen.join_timeout: 5s
+
 # Unicast discovery allows to explicitly control which nodes will be used
 # to discover the cluster. It can be used when multicast is not present,
 # or to restrict the cluster communication-wise.
@@ -510,9 +513,9 @@ discovery.zen.publish_timeout: 3s
 
 # Ping configuration
 #
-#discovery.zen.fd.ping_timeout: 30s
-#discovery.zen.fd.ping_retries: 3
-#discovery.zen.fd.ping_interval: 1s
+discovery.zen.fd.ping_timeout: 1s
+discovery.zen.fd.ping_retries: 2
+discovery.zen.fd.ping_interval: 1s
 #
 ############################## Discovery via DNS #############################
 
