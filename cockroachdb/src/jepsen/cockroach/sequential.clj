@@ -76,7 +76,7 @@
                              (j/insert! c (key->table table-count k) {:key k}))
                            (assoc op :type :ok))
 
-                :read (j/with-db-transaction [c c :isolation c/isolation-level]
+                :read ;(j/with-db-transaction [c c :isolation c/isolation-level]
                         (->> ks
                            reverse
                            (mapv (fn [k]
@@ -87,7 +87,7 @@
                                                     " where key = ?") k]
                                               :row-fn :key))))
                            (vector (:value op))
-                           (assoc op :type :ok, :value))))))))))
+                           (assoc op :type :ok, :value)))))))))
 
   (teardown! [this test]
     (try
@@ -159,12 +159,12 @@
 
 (defn test
   [opts]
-  (let [gen (gen 30)]
+  (let [gen (gen 300)]
     (c/basic-test
       (merge
         {:name "sequential"
          :key-count 5
-         :concurrency 90
+         :concurrency 900
          :client {:client (Client. 10 (atom false) nil)
                   :during (gen/stagger 1/100 gen)
                   :final  nil}
