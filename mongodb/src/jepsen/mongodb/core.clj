@@ -197,6 +197,9 @@
                        (catch Throwable t
                          (.close conn)
                          (throw t))))
+                   (catch com.mongodb.MongoSocketReadTimeoutException e
+                     (info "Mongo socket read timeout waiting for conn; retrying")
+                     nil)
 ;                   (catch com.mongodb.MongoServerSelectionException e
 ;                     nil))
                     ; Todo: figure out what Mongo 3.x throws when servers
