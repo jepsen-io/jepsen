@@ -31,9 +31,10 @@
   []
   (.build
     (doto (MongoClientOptions/builder)
-      (.maxWaitTime     20000)
-      (.connectTimeout  5000)
-      (.socketTimeout   10000))))
+      (.serverSelectionTimeout   60000)
+      (.maxWaitTime              20000)
+      (.connectTimeout           5000)
+      (.socketTimeout            10000))))
 
 (defn client
   "Creates a new Mongo client."
