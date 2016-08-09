@@ -273,11 +273,6 @@
              (recur))
          res#))))
 
-(defn code?
-  "Is x a list or a cons?"
-  [x]
-  (or (instance? clojure.lang.Cons x) (list? x)))
-
 (defrecord Retry [bindings])
 
 (defmacro with-retry
@@ -291,7 +286,7 @@
   (assert (even? (count initial-bindings)))
   (let [bindings-count (/ (count initial-bindings) 2)
         body (walk/prewalk (fn [form]
-                             (if (and (code? form)
+                             (if (and (seq? form)
                                       (= 'retry (first form)))
                                (do (assert (= bindings-count
                                               (count (rest form))))
