@@ -159,12 +159,12 @@
 
 (defn test
   [opts]
-  (let [gen (gen 300)]
+  (let [gen (gen 30)]
     (c/basic-test
       (merge
         {:name "sequential"
          :key-count 5
-         :concurrency 900
+         :concurrency 90
          :client {:client (Client. 10 (atom false) nil)
                   :during (gen/stagger 1/100 gen)
                   :final  nil}
