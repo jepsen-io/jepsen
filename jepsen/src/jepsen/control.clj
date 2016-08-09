@@ -259,11 +259,19 @@
   node's SSH connection bound."
   [test f]
   (->> (:sessions test)
-       (real-pmap (fn [[node session]]
+       (real-pmap (bound-fn [[node session]]
                     (with-thread-name (str "jepsen node " (name node))
                       (with-session node session
                         [node (f test node)]))))
        (into {})))
+
+(defmacro with-test-nodes
+  "Given a test, evaluates body in parallel on each node, with that node's SSH
+  connection bound."
+  [test & body]
+  `(on-nodes ~test
+             (fn [test# node#]
+               ~@body)))
 
 (defn go
   [host]

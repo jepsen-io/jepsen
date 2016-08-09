@@ -27,23 +27,24 @@
                          :DROP :-w))))
 
     (heal! [net test]
-      (on-many (:nodes test) (su
-                               (exec :iptables :-F :-w)
-                               (exec :iptables :-X :-w))))
+      (with-test-nodes test
+        (su
+          (exec :iptables :-F :-w)
+          (exec :iptables :-X :-w))))
 
     (slow! [net test]
-      (on-many (:nodes test)
-               (su (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
-                         :10ms :distribution :normal))))
+      (with-test-nodes test
+        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
+                  :10ms :distribution :normal))))
 
     (flaky! [net test]
-      (on-many (:nodes test)
-               (su (exec :tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
-                         "75%"))))
+      (with-test-nodes test
+        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
+                  "75%"))))
 
     (fast! [net test]
-      (on-many (:nodes test)
-               (exec :tc :qdisc :del :dev :eth0 :root)))))
+      (with-test-nodes test
+        (exec :tc :qdisc :del :dev :eth0 :root)))))
 
 (def ipfilter
   "IPFilter rules"
@@ -52,18 +53,19 @@
       (on dest (su (exec :echo :block :in :from src :to :any | :ipf :-f :-))))
 
     (heal! [net test]
-      (on-many (:nodes test) (su (exec :ipf :-Fa))))
+      (with-test-nodes test
+        (su (exec :ipf :-Fa))))
 
     (slow! [net test]
-      (on-many (:nodes test)
-               (su (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
-                         :10ms :distribution :normal))))
+      (with-test-nodes test
+        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
+                  :10ms :distribution :normal))))
 
     (flaky! [net test]
-      (on-many (:nodes test)
-               (su (exec :tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
-                         "75%"))))
+      (with-test-nodes test
+        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
+                  "75%"))))
 
     (fast! [net test]
-      (on-many (:nodes test)
-               (exec :tc :qdisc :del :dev :eth0 :root)))))
+      (with-test-nodes test
+        (exec :tc :qdisc :del :dev :eth0 :root)))))
