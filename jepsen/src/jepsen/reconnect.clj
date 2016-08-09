@@ -10,24 +10,41 @@
   Connect/close/reconnect lock the wrapper, but multiple threads may acquire
   the current connection at once."
   (:require [clojure.tools.logging :refer [info warn]]
-            [jepsen.util :as util]))
+            [jepsen.util :as util])
+  (:import (java.util.concurrent.locks ReentrantReadWriteLock)))
 
 (defn wrapper
   "A wrapper is a stateful construct for talking to a database. Options:
 
- :name     An optional name for this wrapper (for debugging logs)
+  :name     An optional name for this wrapper (for debugging logs)
   :open     A function which generates a new conn
   :close    A function which closes a conn
-  :log?     Whether to log reconnect messages
-  :retries  Number of times to transparently retry operations after reconnect"
+  :log?     Whether to log reconnect messages"
   [options]
   (assert (ifn? (:open options)))
   (assert (ifn? (:close options)))
   {:open    (:open options)
    :close   (:close options)
-   :retries (:retries options 0)
    :log?    (:log? options)
+   :name    (:name options)
+   :lock    (ReentrantReadWriteLock.)
    :conn    (atom nil)})
+
+(defmacro with-lock
+  [wrapper lock-method & body]
+  `(let [lock# (~lock-method ^ReentrantReadWriteLock (:lock ~wrapper))]
+     (.lock lock#)
+     (try ~@body
+          (finally
+            (.unlock lock#)))))
+
+(defmacro with-read-lock
+  [wrapper & body]
+  `(with-lock ~wrapper .readLock ~@body))
+
+(defmacro with-write-lock
+  [wrapper & body]
+  `(with-lock ~wrapper .writeLock ~@body))
 
 (defn conn
   "Active connection for a wrapper, if one exists."
@@ -37,7 +54,7 @@
 (defn open!
   "Given a wrapper, opens a connection. Noop if conn is already open."
   [wrapper]
-  (locking wrapper
+  (with-write-lock wrapper
     (when-not (conn wrapper)
       (reset! (:conn wrapper) ((:open wrapper)))))
   wrapper)
@@ -45,7 +62,7 @@
 (defn close!
   "Closes a wrapper."
   [wrapper]
-  (locking wrapper
+  (with-write-lock wrapper
     (when-let [c (conn wrapper)]
       ((:close wrapper) c)
       (reset! (:conn wrapper) nil)))
@@ -54,23 +71,21 @@
 (defn reopen!
   "Reopens a wrapper's connection."
   [wrapper]
-  (locking wrapper
+  (with-write-lock wrapper
     (-> wrapper close! open!)))
 
 (defmacro with-conn
-  "Takes a connection from the wrapper, and evaluates body with that connection
-  bound to c. If any Exception is thrown, closes the connection and opens a new
-  one. Locks wrapper."
+  "Acquires a read lock, takes a connection from the wrapper, and evaluates
+  body with that connection bound to c. If any Exception is thrown, closes the
+  connection and opens a new one."
   [[c wrapper] & body]
-  `(util/with-retry [retries# (:retries ~wrapper)]
-     (try (let [~c (conn ~wrapper)]
-          ~@body)
+  `(try (with-read-lock ~wrapper
+          (let [~c (conn ~wrapper)]
+            ~@body))
         (catch Exception e#
           (when (:log? ~wrapper)
             (warn (str "Encountered error with conn "
                        (pr-str (:name wrapper))
-                      "; reopening")))
+                       "; reopening")))
           (reopen! ~wrapper)
-          (if (pos? retries#)
-            (~'retry (dec retries#))
-            (throw e#))))))
+          (throw e#))))
