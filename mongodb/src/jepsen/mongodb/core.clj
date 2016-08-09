@@ -305,7 +305,12 @@
         (join! test)))
 
     (teardown! [_ test node]
-      (wipe! node))))
+      (wipe! node))
+
+    db/LogFiles
+    (log-files [_ test node]
+      ["/opt/mongodb/stdout.log"
+       "/opt/mongodb/mongod.log"])))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operation functions which
