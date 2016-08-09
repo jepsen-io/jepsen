@@ -8,6 +8,8 @@
                  [jepsen "0.1.1-SNAPSHOT"]
                  [org.mongodb/mongodb-driver "3.2.2"]]
   :jvm-opts ["-Xmx16g"
+             "-Xms16g"
+             "-Xmn4g"
              "-XX:+UseConcMarkSweepGC"
              "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled"
