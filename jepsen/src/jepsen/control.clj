@@ -5,18 +5,19 @@
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap
                                              with-thread-name]]
+            [jepsen.reconnect :as rc]
             [clojure.string :as str]
             [clojure.tools.logging :refer [warn info debug]]))
 
 ; STATE STATE STATE STATE
-(def ^:dynamic *host*     "Current hostname"              nil)
-(def ^:dynamic *session*  "Current clj-ssh session"       nil)
-(def ^:dynamic *trace*    "Shall we trace commands?"      false)
-(def ^:dynamic *dir*      "Working directory"             "/")
-(def ^:dynamic *sudo*     "User to sudo to"               nil)
-(def ^:dynamic *username* "Username"                      "root")
-(def ^:dynamic *password* "Password (for login and sudo)" "root")
-(def ^:dynamic *port*     "SSH listening port"            22)
+(def ^:dynamic *host*     "Current hostname"                nil)
+(def ^:dynamic *session*  "Current clj-ssh session wrapper" nil)
+(def ^:dynamic *trace*    "Shall we trace commands?"        false)
+(def ^:dynamic *dir*      "Working directory"               "/")
+(def ^:dynamic *sudo*     "User to sudo to"                 nil)
+(def ^:dynamic *username* "Username"                        "root")
+(def ^:dynamic *password* "Password (for login and sudo)"   "root")
+(def ^:dynamic *port*     "SSH listening port"              22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 
@@ -114,7 +115,8 @@
 (defn ssh*
   "Evaluates an SSH action against the current host."
   [action]
-  (ssh/ssh *session* action))
+  (rc/with-conn [s *session*]
+    (ssh/ssh s action)))
 
 (defn exec*
   "Like exec, but does not escape."
@@ -141,17 +143,20 @@
   "Evaluates an SCP from the current host to the node."
   [current-path node-path]
   (warn "scp* is deprecated: use (upload current-path node-path) instead.")
-  (ssh/scp-to *session* current-path node-path))
+  (rc/with-conn [s *session*]
+    (ssh/scp-to *session* current-path node-path)))
 
 (defn upload
   "Copies local path(s) to remote node. Takes arguments for clj-ssh/scp-to."
   [& args]
-  (apply ssh/scp-to *session* args))
+  (rc/with-conn [s *session*]
+    (apply ssh/scp-to s args)))
 
 (defn download
   "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from."
   [& args]
-  (apply ssh/scp-from *session* args))
+  (rc/with-conn [s *session*]
+    (apply ssh/scp-from s args)))
 
 (defn expand-path
   "Expands path relative to the current directory."
@@ -188,8 +193,8 @@
   `(binding [*trace* true]
      ~@body))
 
-(defn session
-  "Opens a session to the given host."
+(defn clj-ssh-session
+  "Opens a raw session to the given host."
   [host]
   (let [host  (name host)
         agent (ssh/ssh-agent {})
@@ -204,9 +209,19 @@
                         :strict-host-key-checking *strict-host-key-checking*})
       (ssh/connect))))
 
-(def disconnect
+(defn session
+  "Wraps clj-ssh-session in a wrapper for reconnection."
+  [host]
+  (rc/open!
+    (rc/wrapper {:open    #(clj-ssh-session host)
+                 :close   ssh/disconnect
+                 :log?    true
+                 :retries 3})))
+
+(defn disconnect
   "Close a session"
-  ssh/disconnect)
+  [session]
+  (rc/close! session))
 
 (defmacro with-ssh
   "Takes a map of SSH configuration and evaluates body in that scope. Options:
@@ -224,7 +239,6 @@
                                              *strict-host-key-checking*)]
      ~@body))
 
-
 (defmacro with-session
   "Binds a host and session and evaluates body. Does not open or close session;
   this is just for the namespace dynamics state."
@@ -238,9 +252,11 @@
   session when body completes."
   [host & body]
   `(let [session# (session ~host)]
-     (ssh/with-connection session#
+     (try
        (with-session ~host session#
-         ~@body))))
+         ~@body)
+       (finally
+         (disconnect session#)))))
 
 (defmacro on-many
   "Takes a list of hosts, executes body on each host in parallel, and returns a
