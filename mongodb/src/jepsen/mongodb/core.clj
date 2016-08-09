@@ -32,6 +32,11 @@
   ; Add user
   (cu/ensure-user! username)
 
+  (dotimes [i 10]
+    (info node "sleeping")
+    (c/exec :sleep 5))
+  (info node "done")
+
   ; Download tarball
   (let [local-file (nth (re-find #"file://(.+)" url) 1)
         file       (or local-file (c/cd "/tmp" (str "/tmp/" (cu/wget! url))))]

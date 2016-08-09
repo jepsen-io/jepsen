@@ -4,6 +4,7 @@
   scripts to open connections to various nodes."
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap
+                                             with-retry
                                              with-thread-name]]
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
@@ -20,6 +21,7 @@
 (def ^:dynamic *port*     "SSH listening port"              22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
+(def ^:dynamic *retries*  "How many times to retry conns" 5)
 
 (defrecord Literal [string])
 
@@ -113,10 +115,18 @@
   (str/trim-newline (:out result)))
 
 (defn ssh*
-  "Evaluates an SSH action against the current host."
+  "Evaluates an SSH action against the current host. Retries packet corrupt
+  errors."
   [action]
-  (rc/with-conn [s *session*]
-    (ssh/ssh s action)))
+  (with-retry [tries *retries*]
+    (rc/with-conn [s *session*]
+      (ssh/ssh s action))
+    (catch com.jcraft.jsch.JSchException e
+      (if (and (pos? tries)
+               (= "Packet corrupt" (.getMessage e)))
+        (do (Thread/sleep 1000)
+            (retry (dec tries)))
+        (throw e)))))
 
 (defn exec*
   "Like exec, but does not escape."
@@ -214,9 +224,9 @@
   [host]
   (rc/open!
     (rc/wrapper {:open    #(clj-ssh-session host)
+                 :name    [:control host]
                  :close   ssh/disconnect
-                 :log?    true
-                 :retries 3})))
+                 :log?    true}))) 
 
 (defn disconnect
   "Close a session"
