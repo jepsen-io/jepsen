@@ -39,11 +39,10 @@
       (c/cd "/opt"
             ; Clean up old dir
             (c/exec :rm :-rf "mongodb")
-            ; Extract and rename
-            (c/exec :tar :xvf file)
-            (c/exec :mv (c/lit "mongodb-linux-*") "mongodb")
-            ; Create data dir
+            ; Create mongodb & data dir
             (c/exec :mkdir :-p "mongodb/data")
+            ; Extract to mongodb
+            (c/exec :tar :xvf file :-C "mongodb" :--strip-components=1)
             ; Permissions
             (c/exec :chown :-R (str username ":" username) "mongodb"))
     (catch RuntimeException e
