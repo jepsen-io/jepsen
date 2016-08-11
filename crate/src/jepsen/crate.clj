@@ -37,6 +37,22 @@
            (org.elasticsearch.client.transport
              TransportClient)))
 
+(defn map->kw-map
+  "Turns any map into a kw-keyed persistent map."
+  [x]
+  (condp instance? x
+    java.util.Map
+    (reduce (fn [m pair]
+              (assoc m (keyword (key pair)) (val pair)))
+            {}
+            x)
+
+    java.util.List
+    (map map->kw-map x)
+
+    true
+    x))
+
 ;; ES client
 
 (defn es-connect
@@ -64,6 +80,19 @@
       (throw (RuntimeException. "Document not created")))
     res))
 
+(defn es-get
+  "Get a record by ID. Returns nil when record does not exist."
+  [^TransportClient client index type id]
+  (let [res (-> client
+                (.prepareGet index type (str id))
+                (.get))]
+    (when (.isExists res)
+      {:index   (.getIndex res)
+       :type    (.getType res)
+       :id      (.getId res)
+       :version (.getVersion res)
+       :source  (map->kw-map (.getSource res))})))
+
 (defn es-search
   [^TransportClient client]
   (loop [results []
@@ -84,7 +113,7 @@
                (map (fn [hit]
                       {:id      (.id hit)
                        :version (.version hit)
-                       :source  (.getSource hit)}))
+                       :source  (map->kw-map (.getSource hit))}))
                (into results))
           (-> client
               (.prepareSearchScroll (.getScrollId scroll))
