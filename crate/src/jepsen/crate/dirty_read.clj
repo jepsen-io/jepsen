@@ -84,26 +84,37 @@
         (.close conn))))))
 
 (defn es-client
-  "Elasticsearch based client. Wraps an underlying Crate client for some ops."
-  ([] (es-client (client) nil))
-  ([crate es]
+  "Elasticsearch based client. Wraps an underlying Crate client for some ops.
+  Options:
+
+  :es-ops     Set of operation :f's to put through elasticsearch (instead of
+              crate)"
+  ([opts] (es-client (:es-ops opts) (client) nil))
+  ([es-ops crate es]
+   (assert (set? es-ops))
    (reify client/Client
      (setup! [this test node]
        (let [crate (client/setup! crate test node)
              es    (c/es-connect node)]
-         (es-client crate es)))
+         (es-client es-ops crate es)))
 
      (invoke! [this test op]
-       (if-not (#{:strong-read} (:f op))
+       (if-not (es-ops (:f op))
          (client/invoke! crate test op)
 
          (timeout 10000 (assoc op :type :info, :error :timeout)
                   (case (:f op)
                     :strong-read
                     (->> (c/es-search es)
-                         (map #(get (:source %) "id"))
+                         (map (comp :id :source))
                          (into (sorted-set))
                          (assoc op :type :ok, :value))
+
+                    :read
+                    (let [v (-> (c/es-get es "dirty_read" "default" (:value op))
+                                :source
+                                :id)]
+                         (assoc op :type (if v :ok :fail)))
 
                     :write
                     (do (c/es-index! es "dirty_read" "default"
@@ -170,8 +181,9 @@
 
 (defn rw-gen
   "While one process writes to a node, we want another process to see that the
-  in-flight write is visible, in the instant before the node crashes."
-  []
+  in-flight write is visible, in the instant before the node crashes. w
+  controls the number of writers."
+  [w]
   (let [; What did we write last?
         write (atom -1)
         ; A vector of in-flight writes on each node.
@@ -188,8 +200,8 @@
               t (gen/process->thread test process)
               ; node index
               n (mod process (count (:nodes test)))]
-          (if (= t n)
-            ; The first n processes perform writes
+          (if (< t w)
+            ; The first w processes perform writes
             (let [v (swap! write inc)]
               ; Record the in-progress write
               (swap! in-flight assoc n v)
@@ -199,25 +211,36 @@
             {:type :invoke, :f :read, :value (nth @in-flight n)}))))))
 
 (defn test
+  "Options:
+
+  :concurrency  - Number of concurrent clients
+  :es-ops       - Set of operations to perform using an ES client directly
+  :time-limit   - Time, in seconds, to run the main body of the test."
   [opts]
   (merge tests/noop-test
-         {:name    "crate lost-updates"
+         {:name    (let [o (:es-ops opts)]
+                     (str "crate lost-updates "
+                          (str/join " " [(str "r="  (if (:read o)  "e" "c"))
+                                         (str "w="  (if (:write o) "e" "c"))
+                                         (str "sr=" (if (:strong-read o)
+                                                      "e" "c"))])))
           :os      debian/os
           :db      (c/db)
-          :client  (es-client)
+          :client  (es-client opts)
           :checker (checker/compose
                      {:dirty-read (checker)
                       :perf       (checker/perf)})
-          :concurrency 15
+          :concurrency (:concurrency opts)
           :nemesis (nemesis/partition-random-halves)
           :generator (gen/phases
-                       (->> (rw-gen)
+                       (->> (rw-gen (/ (:concurrency opts) 3))
+                            (gen/stagger 1/10)
                             (gen/nemesis ;nil)
                               (gen/seq (cycle [(gen/sleep 10)
                                                {:type :info, :f :start}
                                                (gen/sleep 20)
                                                {:type :info, :f :stop}])))
-                            (gen/time-limit 100))
+                            (gen/time-limit (:time-limit opts)))
                        (gen/nemesis (gen/once {:type :info :f :stop}))
                        (gen/clients (gen/each
                                       (gen/once {:type :invoke, :f :refresh})))

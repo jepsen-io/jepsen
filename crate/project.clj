@@ -10,6 +10,7 @@
              "-XX:+CMSParallelRemarkEnabled"
              "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods"
+             "-XX:-OmitStackTraceInFastThrow"
              "-XX:MaxInlineLevel=32"
              "-XX:MaxRecursiveInlineLevel=2"
              "-server"]
