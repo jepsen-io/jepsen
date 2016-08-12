@@ -6,6 +6,7 @@
              [checker :as checker]
              [generator :as gen]
              [independent :as independent]
+             [reconnect :as rc]
              [util :as util :refer [meh]]]
             [jepsen.cockroach.nemesis :as cln]
             [clojure.java.jdbc :as j]
@@ -95,36 +96,39 @@
   client/Client
 
   (setup! [this test node]
-    (let [conn (c/init-conn node)]
+    (let [conn (c/client node)]
       (info node "Connected")
 
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (Thread/sleep 1000)
-          (c/with-txn-notimeout {} [c conn]
-            (j/execute! c ["drop table if exists set"]))
-          (Thread/sleep 1000)
-          (info node "Creating table")
-          (c/with-txn-notimeout {} [c conn]
+          (rc/with-conn [c conn]
+            (Thread/sleep 1000)
+            (j/execute! c ["drop table if exists set"])
+            (Thread/sleep 1000)
+            (info node "Creating table")
             (j/execute! c ["create table set (val int)"]))))
 
       (assoc this :conn conn)))
 
   (invoke! [this test op]
-    (case (:f op)
-      :add (c/with-txn op [c conn]
-             (do
-               (j/insert! c :set {:val (:value op)})
-               (assoc op :type :ok)))
-      :read (c/with-txn-notimeout op [c conn]
-              (->> (j/query c ["select val from set"])
-                   (mapv :val)
-                   (assoc op :type :ok, :value)))))
+    (c/with-exception->op op
+      (rc/with-conn [c conn]
+        (c/with-txn-retry
+          (case (:f op)
+            :add (c/with-timeout
+                   (do
+                     (j/insert! c :set {:val (:value op)})
+                     (assoc op :type :ok)))
+            :read (->> (j/query c ["select val from set"])
+                       (mapv :val)
+                       (assoc op :type :ok, :value)))))))
 
   (teardown! [this test]
-    (meh (c/with-timeout conn nil
-           (j/execute! @conn ["drop table set"])))
-    (c/close-conn @conn)))
+    (try
+      (c/with-timeout
+        (rc/with-conn [c conn]
+          (j/execute! c ["drop table set"])))
+      (finally (rc/close! conn)))))
 
 (defn test
   [opts]

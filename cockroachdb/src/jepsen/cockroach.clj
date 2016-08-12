@@ -24,13 +24,13 @@
              [nemesis :as nemesis]
              [generator :as gen]
              [independent :as independent]
+             [reconnect :as rc]
              [util :as util :refer [meh]]]
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
             [jepsen.os.ubuntu :as ubuntu]
             [jepsen.os.debian :as debian]
-            [jepsen.cockroach.nemesis :as cln]
-            [jepsen.cockroach.error :as error]))
+            [jepsen.cockroach.nemesis :as cln]))
 
 (import [java.net URLEncoder])
 
@@ -163,11 +163,6 @@
             :user        pg-user
             :password    pg-passwd})))
 
-(defn open-conn
-  "Given a Jepsen node, opens a new connection."
-  [spec]
-  (j/add-connection spec (j/get-connection spec)))
-
 (defn close-conn
   "Given a JDBC connection, closes it and returns the underlying spec."
   [conn]
@@ -176,20 +171,18 @@
   (dissoc conn :connection))
 
 (defn client
-  "Constructs a network client for a node."
+  "Constructs a network client for a node, and opens it"
   [node]
-  (error/client
-    (fn open []
-      (let [spec (db-conn-spec node)
-            conn (j/get-connection spec)
-            spec' (j/add-connection spec conn)]
-        spec'))
-    close-conn))
-
-(defn init-conn
-  "Given a Jepsen node, create an atom with a connection object therein."
-  [node]
-  (->> node db-conn-spec open-conn atom))
+  (rc/open!
+    (rc/wrapper
+      {:name [:cockroach node]
+       :open (fn open []
+               (let [spec (db-conn-spec node)
+                     conn (j/get-connection spec)
+                     spec' (j/add-connection spec conn)]
+                 spec'))
+       :close close-conn
+       :log? false})))
 
 (defn wrap-env
   [env cmd]
@@ -333,125 +326,69 @@
     (assoc op :type :fail)
     op))
 
-(defmacro with-annotate-errors
-  "Replace complex CockroachDB errors by a simple error message."
-  [& body]
-  `(let [res# (do ~@body)]
-     (if (= (:type res#) :fail)
-       (let [e# (:error res#)]
-         (cond (nil? e#)
-               res#
-
-               (re-find #"restart transaction" e#)
-               (assoc res# :retry true)
-
-               true
-               res#))
-       res#)))
-
-;; FIXME: CockroachDB features a custom txn retry protocol, documented in
-;; https://www.cockroachlabs.com/docs/build-a-test-app.html#step-4-execute-transactions-from-a-client
-;; However it seems that the JDBC driver and/or clojure sqldb package does
-;; not enable one to reuse the transaction after an exception was thrown. So
-;; we use a (more overweight) traditional retry loop here instead. This
-;; may reduce performance.
-(defmacro with-txn-retries
-  "Retries body on rollbacks. Uses exponential back-off to avoid conflict storms."
-  [conn & body]
-  `(loop [retry# 30
-          trace# []
-          backoff# 20]
-     (let [res# (do ~@body)]
-       (if (:retry res#)
-         (if (> retry# 0)
-           (do
-             (info "Retrying from " res#)
-             ;;(let [spec# (close-conn (deref ~conn))
-             ;;      new-conn# (open-conn spec#)]
-             ;;  (info "Re-opening connection for retry...")
-             ;;  (reset! ~conn new-conn#))
-             (Thread/sleep backoff#)
-             (let [delay# (* backoff# (+ 4 (* 0.5 (- (rand) 0.5))))]
-               (recur (- retry# 1) (conj trace# (:error res#)) delay#)))
-           (assoc res# :error [:retry-fail trace#]))
-         res#))))
-
-(defmacro with-error-handling
-  "Report SQL errors as Jepsen error strings."
-  [op & body]
-  `(try ~@body
-        (catch java.sql.SQLTransactionRollbackException e#
-          (let [m# (.getMessage e#)]
-            (assoc ~op :type :fail, :error (str "SQLTransactionRollbackException: " m#))))
-        (catch java.sql.BatchUpdateException e#
-          (let [m# (.getMessage e#)
-                mm# (if (re-find #"getNextExc" m#)
-                      (str "BatchUpdateException: " m# "\n"
-                           (.getMessage (.getNextException e#)))
-                      m#)]
-            (assoc ~op :type :fail, :error mm#)))
-        (catch org.postgresql.util.PSQLException e#
-          (let [m# (.getMessage e#)]
-            (assoc ~op :type :fail, :error (str "PSQLException: " m#))))))
-
-(defmacro with-reconnect
-  "Reconnect if failed due to disconnect."
-  [conn retry & body]
-  `(let [res# (do ~@body)
-         uncertain# (and (:error res#)
-                         (or (re-find #"This connection has been closed" (:error res#))
-                             (re-find #"An I/O error occurred while sending to the backend" (:error res#))
-                             (re-find #"Cannot change transaction isolation level in the middle of a transaction." (:error res#))
-                             (re-find #"current transaction is aborted, commands ignored until end of transaction block" (:error res#))
-                             ))]
-     (if uncertain#
-       (do
-         (with-error-handling res#
-           (let [spec# (close-conn (deref ~conn))
-                 new-conn# (open-conn spec#)]
-             (info "Disconnected; re-opening connection...")
-             (reset! ~conn new-conn#)
-             res#))
-         (if ~retry
-           (do ~@body)
-           (assoc res# :type :info, :error (str "uncertain: " (:error res#)))))
-       res#)))
-
 (defmacro with-timeout
-  "Write an evaluation within a timeout check. Re-open the connection
-  if the operation time outs."
-  [conn alt & body]
+  "Like util/timeout, but throws (RuntimeException. \"timeout\") for timeouts.
+  Throwing means that when we time out inside a with-conn, the connection state
+  gets reset, so we don't accidentally hand off the connection to a later
+  invocation with some incomplete transaction."
+  [& body]
   `(util/timeout timeout-delay
-                 (do
-                   (let [spec# (close-conn (deref ~conn))
-                         new-conn# (open-conn spec#)]
-                     (info "Re-opening connection...")
-                     (reset! ~conn new-conn#))
-                   ~alt)
+                 (throw (RuntimeException. "timeout"))
                  ~@body))
 
-(defmacro with-txn
-  "Wrap a evaluation within a SQL transaction with timeout."
-  [op [c conn] & body]
-  `(with-timeout ~conn
-     (assoc ~op :type :info, :error [:timeout :url (:subname (deref ~conn))])
-     (with-txn-retries ~conn
-       (with-annotate-errors
-         (with-reconnect ~conn false
-           (with-error-handling ~op
-             (j/with-db-transaction [~c (deref ~conn)
-                                     :isolation isolation-level]
-               ~@body)))))))
+(defmacro with-txn-retry
+  "Catches PSQL 'restart transaction' errors and retries body a bunch of times,
+  with exponential backoffs."
+  [& body]
+  `(util/with-retry [attempts# 30
+                     backoff# 20]
+     ~@body
+     (catch org.postgresql.util.PSQLException e#
+       (if (and (pos? attempts#)
+                (re-find #"ERROR: restart transaction"
+                         (.getMessage e#)))
+         (do (Thread/sleep backoff#)
+             (~'retry (dec attempts#)
+                      (* backoff# (+ 4 (* 0.5 (- (rand) 0.5))))))
+         (throw e#)))))
 
-(defmacro with-txn-notimeout
-  "Wrap a evaluation within a SQL transaction without timeout."
-  [op [c conn] & body]
-  `(with-txn-retries ~conn
-     (with-annotate-errors
-       (with-reconnect ~conn true
-         (with-error-handling ~op
-           (j/with-db-transaction [~c (deref ~conn) :isolation isolation-level]
-             ~@body))))))
+(defmacro with-txn
+  "Wrap a evaluation within a SQL transaction."
+  [[c conn] & body]
+  `(j/with-db-transaction [~c ~conn :isolation isolation-level]
+     ~@body))
+
+(defn exception->op
+  "Takes an exception and maps it to a partial op, like {:type :info, :error
+  ...}. nil if unrecognized."
+  [e]
+  (let [m (.getMessage e)]
+    (condp instance? e
+      java.sql.SQLTransactionRollbackException
+      {:type :fail, :error [:rollback m]}
+
+      java.sql.BatchUpdateException
+      (let [m' (if (re-find #"getNextExc" m)
+                 (.getMessage (.getNextException e))
+                 m)]
+        {:type :info, :error [:batch-update m']})
+
+      org.postgresql.util.PSQLException
+      {:type :info, :error [:psql-exception m]}
+
+      (condp re-find m
+        #"^timeout$"
+        {:type :info, :error :timeout}))))
+
+(defmacro with-exception->op
+  "Takes an operation and a body. Evaluates body, catches exceptions, and maps
+  them to ops with :type :info and a descriptive :error."
+  [op & body]
+  `(try ~@body
+        (catch Exception e#
+          (if-let [ex-op# (exception->op e#)]
+            (merge ~op ex-op#)
+            (throw e#)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;; Common test definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

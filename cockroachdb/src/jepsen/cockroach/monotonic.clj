@@ -6,6 +6,7 @@
                     [checker :as checker]
                     [generator :as gen]
                     [independent :as independent]
+                    [reconnect :as rc]
                     [util :as util :refer [meh]]]
             [jepsen.cockroach.nemesis :as cln]
             [clojure.core.reducers :as r]
@@ -119,52 +120,60 @@
     (let [n (if (= c/jdbc-mode :cdb-cluster)
               (.indexOf (vec (:nodes test)) node)
               1)
-          conn (c/init-conn node)]
+          conn (c/client node)]
       (info "Setting up client for node " n " - " (name node))
 
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          ; TODO: drop timeouts?
-          (c/with-txn-notimeout {} [c conn]
-            (j/execute! c ["drop table if exists mono"]))
-          (info node "Creating table")
-          (c/with-txn-notimeout {} [c conn]
-            (j/execute!
-              c ["create table mono (val int, sts string, node int, tb int)"]))
-          ; Initial row
-          (c/with-txn-notimeout {} [c conn]
-            (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1}))))
+          (rc/with-conn [c conn]
+            (c/with-timeout
+              (j/execute! c ["drop table if exists mono"])
+              (info node "Creating table")
+              (j/execute!
+                c ["create table mono (val int, sts string, node int, tb int)"])
+              (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1})))))
 
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
-    (case (:f op)
-      :add (c/with-txn op [c conn]
-             (let [curmax (->> (j/query c ["select max(val) as m from mono"]
-                                        :row-fn :m)
-                               (first))
-                   currow (->> (j/query c ["select * from mono where val = ?"
-                                           curmax]
-                                        :row-fn parse-row)
-                               (first))
-                   dbtime (c/db-time c)]
-               (j/insert! c :mono {:val   (inc curmax)
-                                   :sts   dbtime
-                                   :node  nodenum
-                                   :tb    0})
-               ; TODO: return new row, not previous row
-               (assoc op :type :ok, :value currow)))
+    (c/with-exception->op op
+      (rc/with-conn [c conn]
+        (case (:f op)
+          :add
+          (c/with-timeout
+            (c/with-txn-retry
+              (c/with-txn [c c]
+                (let [curmax (->> (j/query c
+                                           ["select max(val) as m from mono"]
+                                           :row-fn :m)
+                                  (first))
+                      currow (->> (j/query c ["select * from mono where val = ?"
+                                              curmax]
+                                           :row-fn parse-row)
+                                  (first))
+                      dbtime (c/db-time c)]
+                  (j/insert! c :mono {:val   (inc curmax)
+                                      :sts   dbtime
+                                      :node  nodenum
+                                      :tb    0})
+                  ; TODO: return new row, not previous row
+                  (assoc op :type :ok, :value currow)))))
 
-      :read (c/with-txn-notimeout op [c conn]
+          :read
+          (c/with-txn-retry
+            (c/with-txn [c c]
               (->> (j/query c ["select * from mono order by sts"]
                             :row-fn parse-row)
                    vec
-                   (assoc op :type :ok, :value)))))
+                   (assoc op :type :ok, :value))))))))
 
   (teardown! [this test]
-    (meh (c/with-timeout conn nil
-           (j/execute! @conn ["drop table if exists mono"])))
-    (c/close-conn @conn)))
+    (try
+      (c/with-timeout
+        (rc/with-conn [c conn]
+          (j/execute! c ["drop table if exists mono"])))
+      (finally
+        (rc/close! conn)))))
 
 (defn test
   [opts]
@@ -172,19 +181,17 @@
     (merge
       {:name        "monotonic"
        :concurrency c/concurrency-factor
-       :client      (MonotonicClient. (atom false) nil nil)
-       :generator   (gen/phases
-                      (->> (range)
-                           (map (partial array-map
-                                         :type :invoke
-                                         :f :add
-                                         :value))
-                           gen/seq
-                           (gen/stagger 1)
-                           (cln/with-nemesis (:generator (:nemesis opts))))
-                      (->> {:type :invoke, :f :read, :value nil}
-                           gen/once
-                           gen/clients))
+       :client      {:client (MonotonicClient. (atom false) nil nil)
+                     :during (->> (range)
+                                  (map (partial array-map
+                                                :type :invoke
+                                                :f :add
+                                                :value))
+                                  gen/seq
+                                  (gen/stagger 1))
+                     :final (->> {:type :invoke, :f :read, :value nil}
+                                 gen/once
+                                 gen/clients)}
        :checker     (checker/compose
                       {:perf    (checker/perf)
                        :details (check-monotonic)})}
@@ -291,62 +298,68 @@
     (let [n (if (= c/jdbc-mode :cdb-cluster)
               (.indexOf (vec (:nodes test)) node)
               1)
-          conn (c/init-conn node)]
+          conn (c/client node)]
 
       (info "Setting up client " n " for " (name node))
 
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (dorun (for [x (range multitable-spread)]
-                   (do
-                     (c/with-txn-notimeout {} [c conn]
-                       (j/execute! c [(str "drop table if exists mono" x)]))
-                     (info "Creating table " x)
-                     (c/with-txn-notimeout {} [c conn]
-                       (j/execute! c [(str "create table mono" x
-                                           " (val int, sts string, node int, proc int, tb int)")]))
-                     (c/with-txn-notimeout {} [c conn]
-                       (j/insert! c (str "mono" x)
-                                  {:val -1
-                                   :sts "0"
-                                   :node -1
-                                   :proc -1
-                                   :tb x})))))))
+          (rc/with-conn [c conn]
+            (doseq [x (range multitable-spread)]
+              (do
+                (j/execute! c [(str "drop table if exists mono" x)])
+                (info "Creating table " x)
+                (j/execute! c [(str "create table mono" x
+                                    " (val int, sts string, node int,"
+                                    " proc int, tb int)")])
+                (j/insert! c (str "mono" x)
+                           {:val -1
+                            :sts "0"
+                            :node -1
+                            :proc -1
+                            :tb x}))))))
 
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
-    (case (:f op)
-      ; This remove all concurrency from the test, which may not be what we
-      ; want.
-      :add (locking cnt
-             (c/with-txn op [c conn]
-               (let [rt      (rand-int multitable-spread)
-                     dbtime  (c/db-time c)
-                     v       (swap! cnt inc)
-                     row     {:val v
-                              :sts dbtime
-                              :proc (:process op)
-                              :tb   rt
-                              :node nodenum}]
-                 (j/insert! c (str "mono" rt) row)
-                 (assoc op :type :ok :value row))))
+    (c/with-exception->op op
+      (rc/with-conn [c conn]
+        (case (:f op)
+          ; This removes all concurrency from the test, which may not be what
+          ; we want.
+          :add (locking cnt
+                 (c/with-timeout
+                   (c/with-txn-retry
+                     (let [rt      (rand-int multitable-spread)
+                           dbtime  (c/db-time c)
+                           v       (swap! cnt inc)
+                           row     {:val v
+                                    :sts dbtime
+                                    :proc (:process op)
+                                    :tb   rt
+                                    :node nodenum}]
+                       (j/insert! c (str "mono" rt) row)
+                       (assoc op :type :ok :value row)))))
 
-      :read (c/with-txn-notimeout op [c conn]
-              (->> (range multitable-spread)
-                   (mapcat (fn [x]
-                             (j/query c [(str "select * from mono" x
-                                              " where node <> -1")]
-                                      :row-fn parse-row)))
-                   (sort-by :sts)
-                   vec
-                   (assoc op :type :ok, :value)))))
+          :read (c/with-txn-retry
+                  (c/with-txn [c c]
+                    (->> (range multitable-spread)
+                         (mapcat (fn [x]
+                                   (j/query c [(str "select * from mono" x
+                                                    " where node <> -1")]
+                                            :row-fn parse-row)))
+                         (sort-by :sts)
+                         vec
+                         (assoc op :type :ok, :value))))))))
 
   (teardown! [this test]
-    (dorun (for [x (range multitable-spread)]
-             (c/with-timeout conn nil
-               (j/execute! @conn [(str "drop table if exists mono" x)]))))
-    (c/close-conn @conn)))
+    (try
+      (c/with-timeout
+        (rc/with-conn [c conn]
+          (doseq [x (range multitable-spread)]
+            (j/execute! c [(str "drop table if exists mono" x)]))))
+      (finally
+        (rc/close! conn)))))
 
 (defn multitable-test
   [opts]
@@ -354,19 +367,16 @@
     (merge
       {:name        "monotonic-multitable"
        :concurrency c/concurrency-factor
-       :client      (MultitableClient. (atom false) (atom 0) nil nil)
-       :generator   (gen/phases
-                      (->> (range)
-                           (map (partial array-map
-                                         :type :invoke
-                                         :f :add
-                                         :value))
-                           gen/seq
-                           (gen/stagger 1)
-                           (cln/with-nemesis (:generator (:nemesis opts))))
-                      (->> {:type :invoke, :f :read, :value nil}
-                           gen/once
-                           gen/clients))
+       :client      {:client (MultitableClient. (atom false) (atom 0) nil nil)
+                     :during (->> (range)
+                                  (map (partial array-map
+                                                :type :invoke
+                                                :f :add
+                                                :value))
+                                  gen/seq
+                                  (gen/stagger 1))
+                     :final (gen/clients
+                              (gen/once {:type :invoke, :f :read, :value nil}))}
        :checker     (checker/compose
                       {:perf     (checker/perf)
                        :details  (check-monotonic-split

@@ -20,7 +20,8 @@
              [checker :as checker]
              [generator :as gen]
              [independent :as independent]
-             [util :as util :refer [meh]]]
+             [util :as util :refer [meh]]
+             [reconnect :as rc]]
             [jepsen.cockroach.nemesis :as cln]
             [jepsen.cockroach.error :as e]
             [clojure.java.jdbc :as j]
@@ -52,11 +53,11 @@
 
   (setup! [this test node]
     (Thread/sleep 2000)
-    (let [client (e/open! (c/client node))]
+    (let [client (c/client node)]
       (locking table-created?
         (when (compare-and-set! table-created? false true)
-          (e/with-conn [c client]
-            (e/with-timeout 5000
+          (rc/with-conn [c client]
+            (c/with-timeout
               (info "Creating tables" (pr-str (table-names table-count)))
               (doseq [t (table-names table-count)]
                 (j/execute! c [(str "drop table if exists " t)])
@@ -66,10 +67,10 @@
       (assoc this :client client)))
 
   (invoke! [this test op]
-    (e/with-exception->op op
-      (e/with-conn [c client]
-        (e/with-timeout 5000
-          (e/with-txn-retry
+    (c/with-exception->op op
+      (rc/with-conn [c client]
+        (c/with-timeout
+          (c/with-txn-retry
             (let [ks (subkeys (:key-count test) (:value op))]
               (case (:f op)
                 :write (do (doseq [k ks]
@@ -91,13 +92,13 @@
 
   (teardown! [this test]
     (try
-      (e/with-conn [c client]
-        (e/with-timeout 5000
+      (rc/with-conn [c client]
+        (c/with-timeout
           (doseq [t (table-names table-count)]
             (j/execute! c [(str "drop table " t)]))))
 
       (finally
-        (e/close! client)))))
+        (rc/close! client)))))
 
 (defn writes
   "We emit sequential integer keys for writes, logging the most recent n keys
