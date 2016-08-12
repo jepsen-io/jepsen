@@ -6,6 +6,7 @@
              [checker :as checker]
              [generator :as gen]
              [independent :as independent]
+             [reconnect :as rc]
              [util :as util :refer [meh]]]
             [jepsen.cockroach.nemesis :as cln]
             [clojure.core.reducers :as r]
@@ -17,60 +18,68 @@
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
   (setup! [this test node]
-    (let [conn (c/init-conn node)]
+    (let [conn (c/client node)]
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (Thread/sleep 1000)
-          (c/with-txn-notimeout {} [c conn]
-            (j/execute! c ["drop table if exists accounts"]))
-          (Thread/sleep 1000)
-          (info "Creating table")
-          (c/with-txn-notimeout {} [c conn]
+          (rc/with-conn [c conn]
+            (Thread/sleep 1000)
+            (j/execute! c ["drop table if exists accounts"])
+            (Thread/sleep 1000)
+            (info "Creating table")
             (j/execute! c ["create table accounts
                            (id      int not null primary key,
-                            balance bigint not null)"]))
-          (dotimes [i n]
-            (Thread/sleep 500)
-            (info "Creating account" i)
-            (c/with-txn-notimeout {} [c conn]
+                           balance bigint not null)"])
+            (dotimes [i n]
+              (Thread/sleep 500)
+              (info "Creating account" i)
               (j/insert! c :accounts {:id i :balance starting-balance})))))
 
       (assoc this :conn conn)))
 
   (invoke! [this test op]
-    (c/with-txn op [c conn]
-      (case (:f op)
-        :read (->> (j/query c ["select balance from accounts"])
-                   (mapv :balance)
-                   (assoc op :type :ok, :value))
+    (c/with-exception->op op
+      (rc/with-conn [c conn]
+        (c/with-timeout
+          (c/with-txn-retry
+            (c/with-txn [c c]
+              (case (:f op)
+                :read (->> (j/query c ["select balance from accounts"])
+                           (mapv :balance)
+                           (assoc op :type :ok, :value))
 
-        :transfer
-        (let [{:keys [from to amount]} (:value op)
-              b1 (-> c
-                     (j/query ["select balance from accounts where id = ?" from]
-                              :row-fn :balance)
-                     first
-                     (- amount))
-              b2 (-> c
-                     (j/query ["select balance from accounts where id = ?" to]
-                              :row-fn :balance)
-                     first
-                     (+ amount))]
-          (cond (neg? b1)
-                (assoc op :type :fail, :value [:negative from b1])
+                :transfer
+                (let [{:keys [from to amount]} (:value op)
+                      b1 (-> c
+                             (j/query
+                               ["select balance from accounts where id = ?"
+                                from] :row-fn :balance)
+                             first
+                             (- amount))
+                      b2 (-> c
+                             (j/query
+                               ["select balance from accounts where id = ?" to]
+                               :row-fn :balance)
+                             first
+                             (+ amount))]
+                  (cond
+                    (neg? b1)
+                    (assoc op :type :fail, :value [:negative from b1])
 
-                (neg? b2)
-                (assoc op :type :fail, :value [:negative to b2])
+                    (neg? b2)
+                    (assoc op :type :fail, :value [:negative to b2])
 
-                true
-                (do (j/update! c :accounts {:balance b1} ["id = ?" from])
-                    (j/update! c :accounts {:balance b2} ["id = ?" to])
-                    (assoc op :type :ok)))))))
+                    true
+                    (do (j/update! c :accounts {:balance b1} ["id = ?" from])
+                        (j/update! c :accounts {:balance b2} ["id = ?" to])
+                        (assoc op :type :ok)))))))))))
 
   (teardown! [this test]
-    (meh (c/with-timeout conn nil
-           (j/execute! @conn ["drop table if exists accounts"])))
-    (c/close-conn @conn)))
+    (try
+      (c/with-timeout
+        (rc/with-conn [c conn]
+          (j/execute! c ["drop table if exists accounts"])))
+      (finally
+        (rc/close! conn)))))
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
@@ -132,16 +141,15 @@
     (merge
       {:concurrency c/concurrency-factor
        :model       {:n 4 :total 40}
-       :generator   (gen/phases
-                      (->> (gen/mix [bank-read bank-diff-transfer])
-                           (gen/clients)
-                           (gen/stagger 1)
-                           (cln/with-nemesis (:generator (:nemesis opts))))
-                      (gen/clients (gen/once bank-read)))
+       :client      {:client (:client opts)
+                     :during (->> (gen/mix [bank-read bank-diff-transfer])
+                                  (gen/clients)
+                                  (gen/stagger 1))
+                     :final (gen/clients (gen/once bank-read))}
        :checker     (checker/compose
                       {:perf    (checker/perf)
                        :details (bank-checker)})}
-      opts)))
+      (dissoc opts :client))))
 
 (defn test
   [opts]
@@ -154,65 +162,71 @@
 (defrecord MultiBankClient [tbl-created? n starting-balance conn]
   client/Client
   (setup! [this test node]
-    (let [conn (c/init-conn node)]
-
+    (let [conn (c/client node)]
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (dotimes [i n]
-            (Thread/sleep 500)
-            (c/with-txn-notimeout {} [c conn]
-              (j/execute! c [(str "drop table if exists accounts" i)]))
-            (Thread/sleep 500)
-            (info "Creating table " i)
-            (c/with-txn-notimeout {} [c conn]
+          (rc/with-conn [c conn]
+            (dotimes [i n]
+              (Thread/sleep 500)
+              (j/execute! c [(str "drop table if exists accounts" i)])
+              (Thread/sleep 500)
+              (info "Creating table " i)
               (j/execute! c [(str "create table accounts" i
-                                  " (balance bigint not null)")]))
-            (Thread/sleep 500)
-            (info "Populating account" i)
-            (c/with-txn-notimeout {} [c conn]
+                                  " (balance bigint not null)")])
+              (Thread/sleep 500)
+              (info "Populating account" i)
               (j/insert! c (str "accounts" i) {:balance starting-balance})))))
 
       (assoc this :conn conn)))
 
   (invoke! [this test op]
-    (c/with-txn op [c conn]
-      (case (:f op)
-        :read
-        (->> (range n)
-             (mapv (fn [x]
-                     (->> (j/query c [(str "select balance from accounts"
-                                           x)] :row-fn :balance)
-                          first)))
-             (assoc op :type :ok, :value))
+    (c/with-exception->op op
+      (rc/with-conn [c conn]
+        (c/with-timeout
+          (c/with-txn-retry
+            (c/with-txn [c c]
+              (case (:f op)
+                :read
+                (->> (range n)
+                     (mapv (fn [x]
+                             (->> (j/query
+                                    c [(str "select balance from accounts" x)]
+                                    :row-fn :balance)
+                                  first)))
+                     (assoc op :type :ok, :value))
 
-        :transfer
-        (let [{:keys [from to amount]} (:value op)
-              b1 (-> c
-                     (j/query [(str "select balance from accounts" from)]
-                              :row-fn :balance)
-                     first
-                     (- amount))
-              b2 (-> c
-                     (j/query [(str "select balance from accounts" to)]
-                              :row-fn :balance)
-                     first
-                     (+ amount))]
-          (cond (neg? b1)
-                (assoc op :type :fail, :value [:negative from b1])
+                :transfer
+                (let [{:keys [from to amount]} (:value op)
+                      b1 (-> c
+                             (j/query
+                               [(str "select balance from accounts" from)]
+                               :row-fn :balance)
+                             first
+                             (- amount))
+                      b2 (-> c
+                             (j/query [(str "select balance from accounts" to)]
+                                      :row-fn :balance)
+                             first
+                             (+ amount))]
+                  (cond (neg? b1)
+                        (assoc op :type :fail, :value [:negative from b1])
 
-                (neg? b2)
-                (assoc op :type :fail, :value [:negative to b2])
+                        (neg? b2)
+                        (assoc op :type :fail, :value [:negative to b2])
 
-                true
-                (do (j/update! c (str "accounts" from) {:balance b1} [])
-                    (j/update! c (str "accounts" to) {:balance b2} [])
-                    (assoc op :type :ok)))))))
+                        true
+                        (do (j/update! c (str "accounts" from) {:balance b1} [])
+                            (j/update! c (str "accounts" to) {:balance b2} [])
+                            (assoc op :type :ok)))))))))))
 
   (teardown! [this test]
-    (meh (c/with-timeout conn nil
-           (dotimes [i n]
-             (j/execute! @conn [(str "drop table if exists accounts" i)]))))
-    (c/close-conn @conn)))
+    (try
+      (rc/with-conn [c conn]
+        (c/with-timeout
+          (dotimes [i n]
+            (j/execute! c [(str "drop table if exists accounts" i)]))))
+      (finally
+        (rc/close! conn)))))
 
 (defn multitable-test
   [opts]
