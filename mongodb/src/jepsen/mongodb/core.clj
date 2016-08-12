@@ -296,7 +296,7 @@
   [url]
   (reify db/DB
     (setup! [_ test node]
-      (util/timeout 100000
+      (util/timeout 300000
                     (throw (RuntimeException.
                              (str "Mongo setup on " node "timed out!")))
                     (debian/install [:libc++1 :libsnmp30])
