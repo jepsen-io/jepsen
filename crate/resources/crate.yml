@@ -479,7 +479,7 @@ discovery.zen.minimum_master_nodes: $MAJORITY
 # Set this option to a higher value on a slow or congested network
 # to minimize discovery failures:
 #
-discovery.zen.ping.timeout: 1s
+discovery.zen.ping_timeout: 1s
 #
 
 # Time a node is waiting for responses from other nodes to a published

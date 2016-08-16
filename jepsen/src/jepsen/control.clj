@@ -107,7 +107,14 @@
   [result]
   (if (zero? (:exit result))
     result
-    (throw (RuntimeException. (str (:err result) "\n" (:out result))))))
+    (throw
+      (RuntimeException.
+        (str (:cmd (:action result))
+             " returned non-zero exit status " (:exit result)
+             " on " (:host result) ". STDOUT:\n"
+             (:out result)
+             "\n\nSTDERR:\n"
+             (:err result))))))
 
 (defn just-stdout
   "Returns the stdout from an ssh result, trimming any newlines at the end."
@@ -120,11 +127,14 @@
   [action]
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
-      (ssh/ssh s action))
+      (assoc (ssh/ssh s action)
+             :host   *host*
+             :action action))
     (catch com.jcraft.jsch.JSchException e
       (if (and (pos? tries)
-               (= "Packet corrupt" (.getMessage e)))
-        (do (Thread/sleep 1000)
+               (or (= "session is down" (.getMessage e))
+                   (= "Packet corrupt" (.getMessage e))))
+        (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
         (throw e)))))
 
