@@ -14,10 +14,14 @@
   []
   (->> (store/tests)
        (mapcat (fn [[test-name runs]]
-                 (map (fn [[test-time full-test]]
-                        {:name        test-name
-                         :start-time  test-time
-                         :results     (store/load-results test-name test-time)})
+                 (keep (fn [[test-time full-test]]
+                         (try
+                           {:name        test-name
+                            :start-time  test-time
+                            :results     (store/load-results test-name test-time)}
+                           (catch java.io.FileNotFoundException e
+                             ; Incomplete test
+                             nil)))
                       runs)))))
 
 (defn test-header
@@ -65,6 +69,7 @@
 
 (defn file
   [req]
+  (info "file" (:uri req))
   (assert (not (re-find #"\.\." (:uri req))))
   (let [path ((re-find #"^/file/(.+)$" (:uri req)) 1)]
     (response/file-response path
@@ -74,12 +79,13 @@
 
 (defn app [req]
 ;  (info :req (with-out-str (pprint req)))
-  (condp re-find (:uri req)
-    #"^/$"     (home req)
-    #"^/file/" (file req)
-    {:status 404
-     :headers {"Content-Type" "test/plain"}
-     :body    "sorry, sorry--sorry!"}))
+  (let [req (assoc req :uri (java.net.URLDecoder/decode (:uri req) "UTF-8"))]
+    (condp re-find (:uri req)
+      #"^/$"     (home req)
+      #"^/file/" (file req)
+      {:status 404
+       :headers {"Content-Type" "test/plain"}
+       :body    "sorry, sorry--sorry!"})))
 
 (defn serve!
   "Starts an http server with the given httpkit options."
