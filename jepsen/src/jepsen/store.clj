@@ -153,6 +153,15 @@
     (let [in (fress/create-reader file :handlers read-handlers)]
       (fress/read-object in))))
 
+(defn load-results
+  "Loads only a results.edn by name and time."
+  [test-name test-time]
+  (with-open [file (java.io.PushbackReader.
+                     (io/reader (path {:name       test-name
+                                       :start-time test-time}
+                                      "results.edn")))]
+    (clojure.edn/read file)))
+
 (defn dir?
   "Is this a directory?"
   [^File f]
