@@ -50,8 +50,9 @@
 
      (invoke! [this test op]
        (timeout (case (:f op)
-                  :refresh 120000
-                  :strong-read 60000
+                  :refresh      120000
+                  :strong-read  60000
+                  :write        10000
                   100)
                 (assoc op :type :info, :error :timeout)
                 (try
