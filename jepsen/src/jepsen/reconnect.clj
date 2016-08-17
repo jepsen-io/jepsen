@@ -56,7 +56,13 @@
   [wrapper]
   (with-write-lock wrapper
     (when-not (conn wrapper)
-      (reset! (:conn wrapper) ((:open wrapper)))))
+      (let [new-conn ((:open wrapper))]
+        (when (nil? new-conn)
+          (throw (IllegalStateException.
+                   (str "Reconnect wrapper " (:name wrapper)
+                        "'s :open function returned nil "
+                        "instead of a connection!"))))
+        (reset! (:conn wrapper) new-conn))))
   wrapper)
 
 (defn close!
@@ -72,21 +78,45 @@
   "Reopens a wrapper's connection."
   [wrapper]
   (with-write-lock wrapper
-    (-> wrapper close! open!)))
+    (when-let [c (conn wrapper)]
+      ((:close wrapper) c))
+    (let [c' ((:open wrapper))]
+      (when (nil? c')
+        (throw (IllegalStateException.
+                 (str "Reconnect wrapper " (:name wrapper)
+                      "'s :open function returned nil "
+                      "instead of a connection!"))))
+      (reset! (:conn wrapper) c')))
+  wrapper)
 
 (defmacro with-conn
   "Acquires a read lock, takes a connection from the wrapper, and evaluates
   body with that connection bound to c. If any Exception is thrown, closes the
   connection and opens a new one."
   [[c wrapper] & body]
-  `(try (with-read-lock ~wrapper
-          (let [~c (conn ~wrapper)]
-            (assert ~c)
-            ~@body))
-        (catch Exception e#
-          (when (:log? ~wrapper)
-            (warn (str "Encountered error with conn "
-                       (pr-str (:name wrapper))
-                       "; reopening")))
-          (reopen! ~wrapper)
-          (throw e#))))
+  ; We want to hold the read lock while executing the body, but we're going to
+  ; release it in complicated ways, so we can't use the with-read-lock macro
+  ; here.
+  `(let [read-lock# (.readLock ^ReentrantReadWriteLock (:lock ~wrapper))]
+     (.lock read-lock#)
+     (let [~c (conn ~wrapper)]
+       (try ~@body
+            (catch Exception e#
+              ; We can't acquire the write lock until we release our read lock,
+              ; because ???
+              (.unlock read-lock#)
+              (try
+                (with-write-lock ~wrapper
+                  (when (identical? ~c (conn ~wrapper))
+                    ; This is the same conn that yielded the error
+                    (when (:log? ~wrapper)
+                      (warn (str "Encountered error with conn "
+                                 (pr-str (:name ~wrapper))
+                                 "; reopening")))
+                    (reopen! ~wrapper)))
+                (finally
+                  (.lock read-lock#)))
+              ; Right, that's done with, now we can propagate the exception
+              (throw e#))
+            (finally
+              (.unlock read-lock#))))))
