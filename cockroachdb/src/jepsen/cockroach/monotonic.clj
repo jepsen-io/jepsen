@@ -127,17 +127,21 @@
         (when (compare-and-set! tbl-created? false true)
           (rc/with-conn [c conn]
             (c/with-timeout
-              (j/execute! c ["drop table if exists mono"])
+              (c/with-txn-retry
+                (j/execute! c ["drop table if exists mono"]))
               (info node "Creating table")
-              (j/execute!
-                c ["create table mono (val int, sts string, node int, tb int)"])
-              (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1})))))
+              (c/with-txn-retry
+                (j/execute!
+                  c ["create table mono (val int, sts string, node int, tb int)"]))
+              (c/with-txn-retry
+                (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1}))))))
 
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
     (c/with-exception->op op
       (rc/with-conn [c conn]
+        (assert c)
         (case (:f op)
           :add
           (c/with-timeout
@@ -374,7 +378,7 @@
                                                 :f :add
                                                 :value))
                                   gen/seq
-                                  (gen/stagger 1))
+                                  (gen/stagger 5))
                      :final (gen/clients
                               (gen/once {:type :invoke, :f :read, :value nil}))}
        :checker     (checker/compose

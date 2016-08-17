@@ -35,7 +35,7 @@
 (import [java.net URLEncoder])
 
 ;; timeout for DB operations during tests
-(def timeout-delay 3000) ; milliseconds
+(def timeout-delay 10000) ; milliseconds
 
 ;; number of simultaneous clients
 (def concurrency-factor 30)
@@ -180,6 +180,7 @@
                (let [spec (db-conn-spec node)
                      conn (j/get-connection spec)
                      spec' (j/add-connection spec conn)]
+                 (assert spec')
                  spec'))
        :close close-conn
        :log? false})))
@@ -253,42 +254,45 @@
         (install! test node)
 
         (info node "Setting date!")
-        (c/exec :ntpdate :-b cln/ntpserver)
+        (c/su (c/exec :ntpdate :-b cln/ntpserver))
         (jepsen/synchronize test)
 
-        (when (= node (jepsen/primary test))
-          (info node "Starting CockroachDB once to initialize cluster...")
-          (c/su (c/exec (cockroach-start-cmdline nil)))
+        (c/sudo cockroach-user
+                (when (= node (jepsen/primary test))
+                  (info node "Starting CockroachDB once to initialize cluster")
+                  (c/exec (cockroach-start-cmdline nil))
 
-          (Thread/sleep 1000)
+                  (Thread/sleep 1000)
 
-          (info node "Stopping 1st CockroachDB before starting cluster...")
-          (c/exec cockroach :quit (if insecure [:--insecure] [])))
+                  (info node "Stopping 1st CockroachDB before starting cluster")
+                  (c/exec cockroach :quit (if insecure [:--insecure] [])))
 
-        (jepsen/synchronize test)
+                (jepsen/synchronize test)
 
-        (info node "Starting packet capture (filtering on" (control-addr)
-              ")...")
-        (c/trace
-        (c/su (c/exec :start-stop-daemon
-                      :--start :--background
-                      :--exec tcpdump
-                      :--
-                      :-w pcaplog :host (control-addr) :and :port db-port)))
+                (info node "Starting packet capture (filtering on"
+                      (control-addr)
+                      ")...")
+                (c/trace
+                  (c/su (c/exec :start-stop-daemon
+                                :--start :--background
+                                :--exec tcpdump
+                                :--
+                                :-w pcaplog :host (control-addr)
+                                :and :port db-port)))
 
-        (info node "Starting CockroachDB...")
-        (c/exec cockroach :version :> verlog (c/lit "2>&1"))
-        (c/trace (c/su (c/exec (:runcmd test))))
+                (info node "Starting CockroachDB...")
+                (c/exec cockroach :version :> verlog (c/lit "2>&1"))
+                (c/trace (c/su (c/exec (:runcmd test))))
 
-        (info node "Cochroach started")
+                (info node "Cochroach started")
 
-        (jepsen/synchronize test)
+                (jepsen/synchronize test)
 
-        (when (= node (jepsen/primary test))
-          (info node "Creating database...")
-          (csql! (str "create database " dbname)))
+                (when (= node (jepsen/primary test))
+                  (info node "Creating database...")
+                  (csql! (str "create database " dbname))))
 
-      (info node "Setup complete")))
+        (info node "Setup complete")))
 
 
     (teardown! [_ test node]
@@ -302,7 +306,7 @@
         (meh (c/exec :killall -9 :cockroach))
 
         (info node "Erasing the store...")
-        (c/exec :rm :-rf store-path)
+        (c/su (c/exec :rm :-rf store-path))
 
         (info node "Stopping tcpdump...")
         (meh (c/su (c/exec :killall -9 :tcpdump)))
@@ -378,7 +382,9 @@
 
       (condp re-find m
         #"^timeout$"
-        {:type :info, :error :timeout}))))
+        {:type :info, :error :timeout}
+
+        nil))))
 
 (defmacro with-exception->op
   "Takes an operation and a body. Evaluates body, catches exceptions, and maps

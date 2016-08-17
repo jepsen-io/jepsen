@@ -3,7 +3,7 @@
   :url "https://github.com/aphyr/jepsen"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.7.0"]
+  :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/tools.cli "0.3.3"]
                  [jepsen "0.1.3-SNAPSHOT"]
                  [org.mongodb/mongodb-driver "3.2.2"]]
