@@ -173,10 +173,19 @@
     (apply ssh/scp-to s args)))
 
 (defn download
-  "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from."
+  "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from.
+  Retres failures."
   [& args]
-  (rc/with-conn [s *session*]
-    (apply ssh/scp-from s args)))
+  (with-retry [tries *retries*]
+    (rc/with-conn [s *session*]
+      (apply ssh/scp-from s args))
+    (catch com.jcraft.jsch.JSchException e
+      (if (and (pos? tries)
+               (or (= "session is down" (.getMessage e))
+                   (= "Packet corrupt" (.getMessage e))))
+        (do (Thread/sleep (+ 1000 (rand-int 1000)))
+            (retry (dec tries)))
+        (throw e)))))
 
 (defn expand-path
   "Expands path relative to the current directory."
