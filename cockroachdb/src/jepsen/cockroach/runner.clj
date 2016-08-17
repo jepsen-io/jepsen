@@ -10,6 +10,7 @@
             [jepsen.os.debian :as debian]
             [jepsen.os.ubuntu :as ubuntu]
             [jepsen.core :as jepsen]
+            [jepsen.web :as web]
             [jepsen.cockroach :as cockroach]
             [jepsen.cockroach [bank :as bank]
                               [register :as register]
@@ -62,6 +63,31 @@
    "majority-ring-skews"        `(cln/compose cln/majring    cln/skews)
    "start-stop-skews"           `(cln/compose cln/startstop  cln/skews)})
 
+(defn repeated-opt
+  "Helper for vector options where we want to replace the default vector
+  (checking via identical?) if any options are passed, building a vector for
+  multiple args. If parse-map is provided (a map of string cmdline options to
+  parsed values), the special word \"all\" can be used to specify every value
+  in the map."
+  ([short-opt long-opt docstring default]
+   [short-opt long-opt docstring
+    :default default
+    :assoc-fn (fn [m k v]
+                (if (identical? (get m k) default)
+                  (assoc m k [v])
+                  (update m k conj v)))])
+  ([short-opt long-opt docstring default parse-map]
+   [short-opt long-opt docstring
+    :default default
+    :parse-fn (assoc parse-map "all" :all)
+    :validate [identity (one-of parse-map)]
+    :assoc-fn (fn [m k v]
+                (if (= :all v)
+                  (assoc m k (vals parse-map))
+                  (if (identical? (get m k) default)
+                    (assoc m k [v])
+                    (update m k conj v))))]))
+
 (def optspec
   "Command line options for tools.cli"
   [[nil "--force-download" "Always download HTTP/S tarballs"]
@@ -71,16 +97,11 @@
    ["-l" "--linearizable" "Whether to run cockroack in linearizable mode"
     :default false]
 
-   ["-n" "--node HOSTNAME" "Node(s) to run test on"
-    :default default-hosts
-    :assoc-fn (fn [m k v] (if (identical? (get m k) default-hosts)
-                            (assoc m k [v]) ; Replace with given host
-                            (update m k conj v)))]
+   (repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on" default-hosts)
 
-   [nil "--nemesis NAME" "Which nemesis to use"
-    :default `cln/none
-    :parse-fn nemeses
-    :validate [identity (one-of nemeses)]]
+   (repeated-opt nil "--nemesis NAME" "Which nemeses to use"
+                 [`cln/none]
+                 nemeses)
 
    ["-o" "--os NAME" "debian, ubuntu, or none"
     :default debian/os
@@ -101,13 +122,20 @@
     :default false
     :assoc-fn (fn [m k v] (assoc-in m [:ssh k] v))]
 
+   [nil "--ssh-private-key FILE" "Path to an SSH identity file"
+    :assoc-fn (fn [m k v] (assoc-in m [:ssh :private-key-path] v))]
+
    ["-c" "--test-count NUMBER"
     "How many times should we repeat a test?"
     :default  1
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
-   ["-t" "--time-limit SECONDS"
+   (repeated-opt "-t" "--test NAME" "Test(s) to run"
+                 []
+                 tests)
+
+   [nil "--time-limit SECONDS"
     "Excluding setup and teardown, how long should a test run for, in seconds?"
     :default  60
     :parse-fn #(Long/parseLong %)
@@ -123,7 +151,7 @@
                "Must be a file://, http://, or https:// URL including .tar"]]])
 
 (def usage
-  (str "Usage: java -jar jepsen.cockroach.jar TEST-NAME [OPTIONS ...]
+  (str "Usage: java -jar jepsen.cockroach.jar test [OPTIONS ...]
 
 Runs a Jepsen test and exits with a status code:
 
@@ -132,24 +160,7 @@ Runs a Jepsen test and exits with a status code:
   254   Invalid arguments
   255   Internal Jepsen error
 
-Test names: " (str/join ", " (keys tests))
-       "\n\nOptions:\n"))
-
-(defn validate-test-name
-  "Takes a tools.cli result map, and adds an error if the given
-  arguments don't specify a valid test. Associates :test-fn otherwise."
-  [parsed]
-  (if (= 1 (count (:arguments parsed)))
-    (let [test-name (first (:arguments parsed))]
-      (if-let [f (get tests test-name)]
-        (assoc parsed :test-fn f)
-        (update parsed :errors conj
-                (str "I don't know how to run " test-name
-                     ", but I do know about "
-                     (str/join ", " (keys tests))))))
-    (update parsed :errors conj
-            (str "No test name was provided. "
-                 (one-of tests)))))
+Options:\n"))
 
 (defn validate-tarball
   "Ensures a tarball is present."
@@ -180,18 +191,23 @@ Test names: " (str/join ", " (keys tests))
       (io/copy f f2)
       (spit f "" :append false))))
 
+(defn log-test
+  [t]
+  (info "Testing\n" (with-out-str (pprint t)))
+  t)
+
 (defn -main
   [& args]
   (try
     (let [{:keys [options
                   arguments
                   summary
-                  errors
-                  test-fn]} (-> args
+                  errors]} (-> args
                                (cli/parse-opts optspec)
-                               validate-test-name
                                validate-tarball)
-          options (rename-keys options {:node :nodes})]
+          options (rename-keys options {:node    :nodes
+                                        :nemesis :nemeses
+                                        :test    :test-fns})]
 
       ; Help?
       (when (:help options)
@@ -199,31 +215,30 @@ Test names: " (str/join ", " (keys tests))
         (println summary)
         (System/exit 0))
 
+      ; Server
+      (when (= ["serve"] arguments)
+        (web/serve! {})
+        (while true (Thread/sleep 1000000)))
+
       ; Bad args?
       (when-not (empty? errors)
         (dorun (map println errors))
         (System/exit 254))
 
-      (println "Test:\n" (with-out-str (pprint (test-fn options))))
-
-      (dotimes [i (:test-count options)]
+      (doseq [test-fn (:test-fns options)
+              nemesis (:nemeses options)
+              i       (range (:test-count options))]
         (move-logfile!)
-        ; Run test!
-        (try
-          ; Rehydrate test
-          (let [test (-> options
-                         ; Construct a fresh nemesis
-                         (update :nemesis eval)
-                         ; Construct test
-                         test-fn
-                         ; Run!
-                         jepsen/run!)]
-            (when-not (:valid? (:results test))
-              (move-logfile!)
-              (System/exit 1)))
-          (catch com.jcraft.jsch.JSchException e
-            (info e "SSH connection fault; aborting test and moving on")
-            (move-logfile!))))
+        ; Rehydrate test and run
+        (let [test (-> options
+                       (dissoc :test-fns)               ; No longer needed
+                       (assoc :nemesis (eval nemesis))  ; Construct new nemesis
+                       test-fn                          ; Construct test
+                       log-test
+                       jepsen/run!)]                    ; Run!
+          (when-not (:valid? (:results test))
+            (move-logfile!)
+            (System/exit 1))))
 
       (move-logfile!)
       (System/exit 0))
@@ -231,4 +246,3 @@ Test names: " (str/join ", " (keys tests))
       (move-logfile!)
       (fatal t "Oh jeez, I'm sorry, Jepsen broke. Here's why:")
       (System/exit 255))))
-

@@ -81,6 +81,7 @@
   [[c wrapper] & body]
   `(try (with-read-lock ~wrapper
           (let [~c (conn ~wrapper)]
+            (assert ~c)
             ~@body))
         (catch Exception e#
           (when (:log? ~wrapper)

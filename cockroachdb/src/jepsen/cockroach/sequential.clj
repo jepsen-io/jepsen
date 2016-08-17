@@ -23,7 +23,6 @@
              [util :as util :refer [meh]]
              [reconnect :as rc]]
             [jepsen.cockroach.nemesis :as cln]
-            [jepsen.cockroach.error :as e]
             [clojure.java.jdbc :as j]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
