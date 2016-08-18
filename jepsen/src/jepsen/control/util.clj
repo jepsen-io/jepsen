@@ -157,6 +157,7 @@
   (apply exec :start-stop-daemon :--start
          :--background
          :--make-pidfile
+         :--remove-pidfile
          :--pidfile  (:pidfile opts)
          :--chdir    (:chdir opts)
          :--no-close
