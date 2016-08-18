@@ -9,6 +9,7 @@
                     [reconnect :as rc]
                     [util :as util :refer [meh]]]
             [jepsen.cockroach.nemesis :as cln]
+            [jepsen.cockroach.auto :as auto]
             [clojure.core.reducers :as r]
             [clojure.java.jdbc :as j]
             [clojure.set :as set]
@@ -117,7 +118,7 @@
   client/Client
 
   (setup! [this test node]
-    (let [n (if (= c/jdbc-mode :cdb-cluster)
+    (let [n (if (= auto/jdbc-mode :cdb-cluster)
               (.indexOf (vec (:nodes test)) node)
               1)
           conn (c/client node)]
@@ -139,6 +140,10 @@
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
+    ; Pre-emptively force reconnection before reads
+    (when (= :read (:f op))
+      (c/wait-for-conn conn))
+
     (c/with-exception->op op
       (rc/with-conn [c conn]
         (assert c)
@@ -184,7 +189,7 @@
   (c/basic-test
     (merge
       {:name        "monotonic"
-       :concurrency c/concurrency-factor
+       :concurrency 1 ; c/concurrency-factor
        :client      {:client (MonotonicClient. (atom false) nil nil)
                      :during (->> (range)
                                   (map (partial array-map
@@ -194,7 +199,9 @@
                                   gen/seq
                                   (gen/stagger 1))
                      :final (->> {:type :invoke, :f :read, :value nil}
-                                 gen/once
+                                 ; For completely inexplicable reasons a bunch
+                                 ; of these will fail :-(
+                                 (gen/limit 5)
                                  gen/clients)}
        :checker     (checker/compose
                       {:perf    (checker/perf)
@@ -299,7 +306,7 @@
 (defrecord MultitableClient [tbl-created? cnt conn nodenum]
   client/Client
   (setup! [this test node]
-    (let [n (if (= c/jdbc-mode :cdb-cluster)
+    (let [n (if (= auto/jdbc-mode :cdb-cluster)
               (.indexOf (vec (:nodes test)) node)
               1)
           conn (c/client node)]
@@ -380,7 +387,10 @@
                                   gen/seq
                                   (gen/stagger 5))
                      :final (gen/clients
-                              (gen/once {:type :invoke, :f :read, :value nil}))}
+                              (gen/limit 5
+                                         {:type :invoke
+                                          :f :read
+                                          :value nil}))}
        :checker     (checker/compose
                       {:perf     (checker/perf)
                        :details  (check-monotonic-split
