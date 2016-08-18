@@ -135,6 +135,12 @@
                  []
                  tests)
 
+   [nil "--recovery-time SECONDS"
+    "How long to wait for cluster recovery before final ops."
+    :default 60
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "Must be positive"]]
+
    [nil "--time-limit SECONDS"
     "Excluding setup and teardown, how long should a test run for, in seconds?"
     :default  60

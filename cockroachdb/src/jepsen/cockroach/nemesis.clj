@@ -6,6 +6,7 @@
              [nemesis :as nemesis]
              [generator :as gen]
              [util :as util]]
+            [jepsen.cockroach.auto :as auto]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]))
 
@@ -20,9 +21,6 @@
 
 ;; Location of the custom utility compiled from scripts/adjtime.c
 (def adjtime "/home/ubuntu/adjtime")
-
-;; NTP server to use with `ntpdate`
-(def ntpserver "ntp.ubuntu.com")
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
@@ -134,19 +132,12 @@
 (defmacro on-nodes [test & body]
   `(c/on-nodes ~test (fn [test# node#] ~@body)))
 
-;; Clock skew nemesis
-
-(defn reset-clocks!
-  "Reset all clocks on all nodes in a test"
-  [test]
-  (on-nodes test (c/su (c/exec :ntpdate ntpserver))))
-
 (defn clock-milli-scrambler
   "Randomizes the system clock of all nodes within a dt-millisecond window."
   [dt]
   (reify client/Client
     (setup! [this test _]
-      (reset-clocks! test)
+      (auto/reset-clocks! test)
       this)
 
     (invoke! [this test op]
@@ -156,7 +147,7 @@
                          (c/exec adjtime (str (- (rand-int (* 2 dt)) dt)))))))
 
     (teardown! [this test]
-      (reset-clocks! test))))
+      (auto/reset-clocks! test))))
 
 (def skews
   (merge nemesis-single-gen
@@ -170,7 +161,7 @@
   [dt]
   (reify client/Client
     (setup! [this test _]
-      (reset-clocks! test)
+      (auto/reset-clocks! test)
       this)
 
     (invoke! [this test op]
@@ -180,20 +171,16 @@
                                   (let [t (+ (/ (System/currentTimeMillis) 1000)
                                              (- (rand-int (* 2 dt)) dt))]
                                     (nemesis/set-time! t)))
-               :stop (on-nodes test
-                                 (c/su (c/exec :ntpdate ntpserver))
-                                 (when (= "" (try
-                                               (c/exec :ps :a c/|
-                                                       :grep :cockroach c/|
-                                                       :grep :-v :grep)
-                                               (catch RuntimeException e "")))
-                                   (try
-                                     (c/su (c/exec (:runcmd test)))
-                                     (catch RuntimeException e (.getMessage e))))))))
-
+               :stop (do (c/with-test-nodes test (auto/reset-clock!))
+                         (c/on-nodes test (fn [test node]
+                                            (try
+                                              (auto/start! test node)
+                                              :started
+                                              (catch RuntimeException e
+                                                (.getMessage e)))))))))
 
     (teardown! [this test]
-      (reset-clocks! test))))
+      (auto/reset-clocks! test))))
 
 (def bigskews
   (merge nemesis-single-gen
