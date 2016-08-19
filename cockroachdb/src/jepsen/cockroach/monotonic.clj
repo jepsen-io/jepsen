@@ -208,99 +208,100 @@
                        :details (check-monotonic)})}
       opts)))
 
+(defn non-monotonic-by
+  "Like non-monotonic, but breaks up coll by (f coll), and yields a map of (f
+  coll) to non-monotonic values."
+  [f comparator field coll]
+  (->> coll
+       (group-by f)
+       (map (fn [[k sub-coll]]
+              [k (non-monotonic comparator field sub-coll)]))
+       (into (sorted-map))))
 
 (defn check-monotonic-split
-  "Same as check-monotonic, but check ordering only from each client's
-  perspective."
-  [linearizable numnodes]
+  "Checker which verifies that timestamps and values proceed monotonically, as
+  well as checking for lost updates, duplicates, etc. If global? is true,
+  verifies a global order for values; if global? is false, only checks on a
+  per-process basis."
+  [linearizable global?]
   (reify checker/Checker
     (check [this test model history opts]
-      (let [all-adds-l (->> history
+      (let [add-values (->> history
                             (r/filter op/ok?)
                             (r/filter #(= :add (:f %)))
                             (r/map :value)
                             (into []))
-            fails (->> history
-                      (r/filter op/fail?)
-                      (r/filter #(= :add (:f %)))
-                      (r/map :value)
-                      (into #{}))
-            unsure (->> history
-                        (r/filter op/info?)
-                        (r/filter #(= :add (:f %)))
-                        (r/map :value)
-                        (into #{}))
-            final-read-l (->> history
-                              (r/filter op/ok?)
-                              (r/filter #(= :read (:f %)))
-                              (r/map :value)
-                              (reduce (fn [_ x] x) nil))]
-        (if-not final-read-l
+            fail-values (->> history
+                             (r/filter op/fail?)
+                             (r/filter #(= :add (:f %)))
+                             (r/map :value)
+                             (into #{}))
+            info-values (->> history
+                             (r/filter op/info?)
+                             (r/filter #(= :add (:f %)))
+                             (r/map :value)
+                             (into #{}))
+            final-read-values (->> history
+                                   (r/filter op/ok?)
+                                   (r/filter #(= :read (:f %)))
+                                   (r/map :value)
+                                   (reduce (fn [_ x] x) nil))]
+        (if-not final-read-values
           {:valid? false
            :error  "Set was never read"}
 
-          (let [off-order-sts (non-monotonic <= :sts final-read-l)
-                off-order-val (non-monotonic <  :val final-read-l)
+          (let [off-order-stss (non-monotonic <= :sts final-read-values)
+                off-order-vals (non-monotonic <  :val final-read-values)
 
-                ; TODO: ??????
-                filter (fn [col]
-                         (fn [x]
-                           (->> final-read-l
-                                (r/filter #(= x (get % col)))
-                                (into []))))
+                off-order-vals-per-process
+                (non-monotonic-by :proc < :val final-read-values)
+                off-order-vals-per-node
+                (non-monotonic-by :node < :val final-read-values)
+                off-order-vals-per-table
+                (non-monotonic-by :tb < :val final-read-values)
 
-                test-off-order (fn [col src]
-                                 (->> src
-                                      (map (filter col))
-                                      (map (partial non-monotonic < :val))))
-                processes (set (map :process final-read-l))
-                off-order-val-perclient (test-off-order :proc processes)
-                off-order-val-pernode   (test-off-order :node (range numnodes))
-                off-order-val-pertable  (test-off-order
-                                          :tb (range multitable-spread))
-
-                ; TODO: standardize on :value or (-> :value :val), the
-                ; difference/intersections below don't use the same
-                ; representation
-                adds    (set (map :value all-adds-l))
-                lok     (mapv first final-read-l)
-                ok      (set lok)
-
-                dups        (set (for [[id freq] (frequencies lok)
-                                       :when (> freq 1)]
-                                   id))
+                fails         (set (map :val fail-values))
+                infos         (set (map :val info-values))
+                adds          (set (map :val add-values))
+                final-reads   (map :val final-read-values)
+                dups          (set (for [[id freq] (frequencies final-reads)
+                                         :when (> freq 1)]
+                                     id))
+                final-reads   (set final-reads)
 
                 ;; Lost records are those we definitely added but weren't read
-                lost        (set/difference adds ok)
+                lost        (set/difference adds final-reads)
 
                 ;; Revived records are those we failed to add but were read
-                revived     (set/intersection ok fails)
+                revived     (set/intersection final-reads fails)
 
                 ;; Recovered records are those we were not sure about and that
                 ;; were read
-                recovered     (set/intersection ok unsure)]
+                recovered     (set/intersection final-reads infos)]
             {:valid?          (and (empty? lost)
                                    (empty? dups)
                                    (empty? revived)
-                                   (every? empty? off-order-sts)
-                                   ;; serializability per client
-                                   (every? empty? off-order-val-perclient)
-
+                                   (empty? off-order-stss)
+                                   (if global?
+                                     (empty? off-order-vals)
+                                     true)
+                                   (every? empty?
+                                           (vals off-order-vals-per-process))
                                    ;; linearizability with --linearizable
                                    (or (not linearizable)
-                                       (every? empty? off-order-val)))
+                                       (every? empty? off-order-vals)))
              :revived         (util/integer-interval-set-str revived)
              :revived-frac    (util/fraction (count revived) (count fails))
              :recovered       (util/integer-interval-set-str recovered)
-             :recovered-frac  (util/fraction (count recovered) (count unsure))
+             :recovered-frac  (util/fraction (count recovered) (count infos))
              :lost            (util/integer-interval-set-str lost)
              :lost-frac       (util/fraction (count lost) (count adds))
-             :duplicates                dups
-             :order-by-errors           off-order-sts
-             :value-reorders            off-order-val
-             :value-reorders-perclient  off-order-val-perclient
-             :value-reorders-pernode    off-order-val-pernode
-             :value-reorders-pertable   off-order-val-pertable}))))))
+             :duplicates                  dups
+             :order-by-errors             off-order-stss
+             :value-reorders              off-order-vals
+             :value-reorders-per-process  off-order-vals-per-process
+             :value-reorders-per-node     off-order-vals-per-node
+             :value-reorders-per-table    off-order-vals-per-table}))))))
 
 ; Tuples are [val sts process table node]
 (defrecord MultitableClient [tbl-created? cnt conn nodenum]
@@ -318,17 +319,20 @@
           (rc/with-conn [c conn]
             (doseq [x (range multitable-spread)]
               (do
-                (j/execute! c [(str "drop table if exists mono" x)])
+                (c/with-txn-retry
+                  (j/execute! c [(str "drop table if exists mono" x)]))
                 (info "Creating table " x)
-                (j/execute! c [(str "create table mono" x
-                                    " (val int, sts string, node int,"
-                                    " proc int, tb int)")])
-                (j/insert! c (str "mono" x)
-                           {:val -1
-                            :sts "0"
-                            :node -1
-                            :proc -1
-                            :tb x}))))))
+                (c/with-txn-retry
+                  (j/execute! c [(str "create table mono" x
+                                      " (val int, sts string, node int,"
+                                      " proc int, tb int)")]))
+                (c/with-txn-retry
+                  (j/insert! c (str "mono" x)
+                             {:val -1
+                              :sts "0"
+                              :node -1
+                              :proc -1
+                              :tb x})))))))
 
       (assoc this :conn conn :nodenum n)))
 
