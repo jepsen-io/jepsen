@@ -134,5 +134,6 @@
             :model        (model/cas-register)
             :checker      (checker/compose
                             {:linear (independent/checker checker/linearizable)
+                             :timeline (timeline/html)
                              :perf   (checker/perf)})}
            opts)))
