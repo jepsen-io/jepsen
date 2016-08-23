@@ -66,7 +66,7 @@ INFO "Copying .. to control/jepsen"
 (
     rm -rf ./control/jepsen
     mkdir ./control/jepsen
-    (cd ..; tar cf - .)  | tar Cxf ./control/jepsen -
+    (cd ..; tar --exclude=./docker -cf - .)  | tar Cxf ./control/jepsen -
 )
 
 
