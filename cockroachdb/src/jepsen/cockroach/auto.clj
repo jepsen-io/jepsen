@@ -124,7 +124,6 @@
         ; Upload
         (c/exec :mkdir :-p "/opt/jepsen")
         (c/exec :chmod "a+rwx" "/opt/jepsen")
-        (info "path" (.getCanonicalPath tmp-file))
         (c/upload (.getCanonicalPath tmp-file) "/opt/jepsen/bumptime.c")
         (c/cd "/opt/jepsen"
               (c/exec :gcc "bumptime.c")

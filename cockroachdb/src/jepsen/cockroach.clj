@@ -157,6 +157,7 @@
                 (jepsen/synchronize test)
 
                 (when (= node (jepsen/primary test))
+                  (Thread/sleep 2000)
                   (info node "Creating database...")
                   (auto/csql! (str "create database " dbname))))
 
