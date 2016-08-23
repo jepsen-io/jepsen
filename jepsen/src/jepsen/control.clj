@@ -169,8 +169,16 @@
 (defn upload
   "Copies local path(s) to remote node. Takes arguments for clj-ssh/scp-to."
   [& args]
-  (rc/with-conn [s *session*]
-    (apply ssh/scp-to s args)))
+  (with-retry [tries *retries*]
+    (rc/with-conn [s *session*]
+      (apply ssh/scp-to s args))
+    (catch com.jcraft.jsch.JSchException e
+      (if (and (pos? tries)
+               (or (= "session is down" (.getMessage e))
+                   (= "Packet corrupt" (.getMessage e))))
+        (do (Thread/sleep (+ 1000 (rand-int 1000)))
+            (retry (dec tries)))
+        (throw e)))))
 
 (defn download
   "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from.
