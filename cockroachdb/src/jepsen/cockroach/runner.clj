@@ -50,8 +50,9 @@
    "parts"                      `cln/parts
    "majority-ring"              `cln/majring
    "skews"                      `cln/skews
-   "big-skews"                  `cln/bigskews
-   "critical-skews"             `cln/critical-skews
+   "small-skews"                `cln/small-skews
+   "big-skews"                  `cln/big-skews
+   "huge-skews"                 `cln/huge-skews
    "start-stop"                 `(cln/startstop 1)
    "start-stop-2"               `(cln/startstop 2)
    "start-kill"                 `(cln/startkill 1)

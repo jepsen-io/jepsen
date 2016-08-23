@@ -128,70 +128,64 @@
           :client (nemesis/partition-majorities-ring)
           :clocks false}))
 
-;; Little convenience macro
-(defmacro on-nodes [test & body]
-  `(c/on-nodes ~test (fn [test# node#] ~@body)))
-
-(defn clock-milli-scrambler
-  "Randomizes the system clock of all nodes within a dt-millisecond window."
-  [dt]
+(defn restarting
+  "Wraps a nemesis. After underlying nemesis has completed :stop, restarts
+  nodes."
+  [nem]
   (reify client/Client
-    (setup! [this test _]
-      (auto/reset-clocks! test)
+    (setup! [this test node]
+      (client/setup! nem test node)
       this)
 
     (invoke! [this test op]
-      (assoc op :value
-             (on-nodes test
-                       (c/su
-                         (c/exec adjtime (str (- (rand-int (* 2 dt)) dt)))))))
+      (let [op' (client/invoke! nem test op)]
+        (if (= :stop (:f op))
+          (let [stop (c/on-nodes test (fn [test node]
+                                        (try
+                                          (auto/start! test node)
+                                          :started
+                                          (catch RuntimeException e
+                                            (.getMessage e)))))]
+            (assoc op' :value [(:value op') stop]))
+          op')))
 
     (teardown! [this test]
-      (auto/reset-clocks! test))))
+      (client/teardown! nem test))))
 
-(def skews
-  (merge nemesis-single-gen
-         {:name "skews"
-          :client (clock-milli-scrambler 100)
-          :clocks true}))
-
-(defn bumptime-restart
+(defn bump-time
   "On randomly selected nodes, adjust the system clock by dt seconds.  Uses
   millisecond precision.  Restarts the db server if it stops."
   [dt]
-  (reify client/Client
-    (setup! [this test _]
-      (auto/reset-clocks! test)
-      this)
+  (restarting
+    (reify client/Client
+      (setup! [this test _]
+        (auto/reset-clocks! test)
+        this)
 
-    (invoke! [this test op]
-      (assoc op :value
-             (case (:f op)
-               :start (on-nodes test
-                                (if (< (rand) 0.5)
-                                  (do (c/su (c/exec "/opt/jepsen/bumptime"
-                                                    (* 1000 dt)))
-                                      dt)
-                                  0))
-               :stop (do (c/with-test-nodes test (auto/reset-clock!))
-                         (c/on-nodes test (fn [test node]
-                                            (try
-                                              (auto/start! test node)
-                                              :started
-                                              (catch RuntimeException e
-                                                (.getMessage e)))))))))
+      (invoke! [this test op]
+        (assoc op :value
+               (case (:f op)
+                 :start (c/with-test-nodes test
+                          (if (< (rand) 0.5)
+                            (do (c/su (c/exec "/opt/jepsen/bumptime"
+                                              (* 1000 dt)))
+                                dt)
+                            0))
+                 :stop (c/with-test-nodes test
+                         (auto/reset-clock!)))))
 
-    (teardown! [this test]
-      (auto/reset-clocks! test))))
+      (teardown! [this test]
+        (auto/reset-clocks! test)))))
 
-(def critical-skews
+(defn skew
+  "A skew nemesis"
+  [name offset]
   (merge nemesis-single-gen
-         {:name "critical-skews"
-          :client (bumptime-restart 0.250)
+         {:name   name
+          :client (bump-time offset)
           :clocks true}))
 
-(def bigskews
-  (merge nemesis-single-gen
-         {:name "bigskews"
-          :client (bumptime-restart 60)
-          :clocks true}))
+(def small-skews    (skew "small-skews"     0.100))
+(def critical-skews (skew "critical-skews"  0.250))
+(def big-skews      (skew "big-skews"       0.5))
+(def huge-skews     (skew "huge-skews"      60))
