@@ -1,11 +1,13 @@
 (ns jepsen.cockroach.auto
   "Cockroach automation functions, for starting, stopping, etc."
   (:require [clojure.tools.logging :refer :all]
+            [clojure.java.io :as io]
             [jepsen.util :as util]
             [jepsen [core :as jepsen]
                     [control :as c :refer [|]]]
             [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian])
+  (:import (java.io File)))
 
 (def cockroach-user "User to run cockroachdb as" "cockroach")
 
@@ -109,6 +111,27 @@
            [:-e ~@body]
            [:>> errlog (c/lit "2>&1")]))))
 
+(defn install-bumptime!
+  "Install time adjusting binary"
+  []
+  (c/su
+    (debian/install [:build-essential])
+    ; Write out resource to file
+    (let [tmp-file (File/createTempFile "jepsen-bumptime" ".c")]
+      (try
+        (with-open [r (io/reader (io/resource "bumptime.c"))]
+          (io/copy r tmp-file))
+        ; Upload
+        (c/exec :mkdir :-p "/opt/jepsen")
+        (c/exec :chmod "a+rwx" "/opt/jepsen")
+        (info "path" (.getCanonicalPath tmp-file))
+        (c/upload (.getCanonicalPath tmp-file) "/opt/jepsen/bumptime.c")
+        (c/cd "/opt/jepsen"
+              (c/exec :gcc "bumptime.c")
+              (c/exec :mv "a.out" "bumptime"))
+        (finally
+          (.delete tmp-file))))))
+
 (defn install!
   "Installs CockroachDB on the given node. Test should include a :tarball url
   the tarball."
@@ -120,6 +143,7 @@
     (c/exec :mkdir :-p working-path)
     (c/exec :mkdir :-p log-path)
     (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path))
+  (install-bumptime!)
   (info node "Cockroach installed"))
 
 (defn init!

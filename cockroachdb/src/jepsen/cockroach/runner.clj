@@ -51,6 +51,7 @@
    "majority-ring"              `cln/majring
    "skews"                      `cln/skews
    "big-skews"                  `cln/bigskews
+   "critical-skews"             `cln/critical-skews
    "start-stop"                 `(cln/startstop 1)
    "start-stop-2"               `(cln/startstop 2)
    "start-kill"                 `(cln/startkill 1)
@@ -152,7 +153,7 @@
     :assoc-fn (fn [m k v] (assoc-in m [:ssh k] v))]
 
    ["-u" "--tarball URL" "URL for the Cockroach tarball to install. May be either HTTP, HTTPS, or a local file present on each of the DB nodes. For instance, --tarball https://foo.com/cockroach.tgz, or file:///tmp/cockroach.tgz"
-    :default "https://binaries.cockroachdb.com/cockroach-beta-20160721.linux-amd64.tgz"
+    :default "https://binaries.cockroachdb.com/cockroach-beta-20160728.linux-amd64.tgz"
     :validate [(partial re-find #"^(file|https?)://.*\.(tar)")
                "Must be a file://, http://, or https:// URL including .tar"]]])
 

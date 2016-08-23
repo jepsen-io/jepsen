@@ -155,9 +155,9 @@
           :client (clock-milli-scrambler 100)
           :clocks true}))
 
-(defn clock-scrambler-restart
-  "Randomizes the system clock of all nodes within a dt-second window.
-  Restarts the db server if it stops."
+(defn bumptime-restart
+  "On randomly selected nodes, adjust the system clock by dt seconds.  Uses
+  millisecond precision.  Restarts the db server if it stops."
   [dt]
   (reify client/Client
     (setup! [this test _]
@@ -168,9 +168,11 @@
       (assoc op :value
              (case (:f op)
                :start (on-nodes test
-                                  (let [t (+ (/ (System/currentTimeMillis) 1000)
-                                             (- (rand-int (* 2 dt)) dt))]
-                                    (nemesis/set-time! t)))
+                                (if (< (rand) 0.5)
+                                  (do (c/su (c/exec "/opt/jepsen/bumptime"
+                                                    (* 1000 dt)))
+                                      dt)
+                                  0))
                :stop (do (c/with-test-nodes test (auto/reset-clock!))
                          (c/on-nodes test (fn [test node]
                                             (try
@@ -182,8 +184,14 @@
     (teardown! [this test]
       (auto/reset-clocks! test))))
 
+(def critical-skews
+  (merge nemesis-single-gen
+         {:name "critical-skews"
+          :client (bumptime-restart 0.250)
+          :clocks true}))
+
 (def bigskews
   (merge nemesis-single-gen
          {:name "bigskews"
-          :client (clock-scrambler-restart 60)
+          :client (bumptime-restart 60)
           :clocks true}))

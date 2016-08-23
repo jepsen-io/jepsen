@@ -48,9 +48,9 @@
               (info node "Creating table")
               (c/with-txn-retry
                 (j/execute!
-                  c ["create table mono (val int, sts string, node int, tb int)"]))
+                  c ["create table mono (val int, sts string, node int, process int, tb int)"]))
               (c/with-txn-retry
-                (j/insert! c :mono {:val -1 :sts "0" :node -1 :tb -1}))))))
+                (j/insert! c :mono {:val -1 :sts "0" :node -1, :process -1, :tb -1}))))))
 
       (assoc this :conn conn :nodenum n)))
 
@@ -72,10 +72,11 @@
                                            :row-fn parse-row)
                                   (first))
                       dbtime (c/db-time c)]
-                  (j/insert! c :mono {:val   (inc curmax)
-                                      :sts   dbtime
-                                      :node  nodenum
-                                      :tb    0})
+                  (j/insert! c :mono {:val      (inc curmax)
+                                      :sts      dbtime
+                                      :node     nodenum
+                                      :process  (:process op)
+                                      :tb       0})
                   ; TODO: return new row, not previous row
                   (assoc op :type :ok, :value currow)))))
 
@@ -279,12 +280,7 @@
       {:name        "monotonic"
        :concurrency c/concurrency-factor
        :client      {:client (MonotonicClient. (atom false) nil nil)
-                     :during (->> (range)
-                                  (map (partial array-map
-                                                :type :invoke
-                                                :f :add
-                                                :value))
-                                  gen/seq
+                     :during (->> {:type :invoke, :f :add, :value nil}
                                   (gen/stagger 1))
                      :final (->> {:type :invoke, :f :read, :value nil}
                                  ; For completely inexplicable reasons a bunch
@@ -304,12 +300,7 @@
       {:name        "monotonic-multitable"
        :concurrency c/concurrency-factor
        :client      {:client (MultitableClient. (atom false) (atom 0) nil nil)
-                     :during (->> (range)
-                                  (map (partial array-map
-                                                :type :invoke
-                                                :f :add
-                                                :value))
-                                  gen/seq
+                     :during (->> {:type :invoke, :f :add, :value nil}
                                   (gen/stagger 5))
                      :final (gen/clients
                               (gen/limit 5
