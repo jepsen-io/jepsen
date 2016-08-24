@@ -278,15 +278,12 @@
   (c/basic-test
     (merge
       {:name        "monotonic"
-       :concurrency c/concurrency-factor
        :client      {:client (MonotonicClient. (atom false) nil nil)
                      :during (->> {:type :invoke, :f :add, :value nil}
                                   (gen/stagger 1))
                      :final (->> {:type :invoke, :f :read, :value nil}
-                                 ; For completely inexplicable reasons a bunch
-                                 ; of these will fail :-(
-                                 (gen/limit 5)
-                                 gen/clients)}
+                                 (gen/stagger 10)
+                                 (gen/limit 5))}
        :checker     (checker/compose
                       {:perf    (checker/perf)
                        :details (check-monotonic (:linearizable opts)
@@ -298,15 +295,12 @@
   (c/basic-test
     (merge
       {:name        "monotonic-multitable"
-       :concurrency c/concurrency-factor
        :client      {:client (MultitableClient. (atom false) (atom 0) nil nil)
                      :during (->> {:type :invoke, :f :add, :value nil}
-                                  (gen/stagger 5))
-                     :final (gen/clients
-                              (gen/limit 5
-                                         {:type :invoke
-                                          :f :read
-                                          :value nil}))}
+                                  (gen/stagger 1))
+                     :final (->> {:type :invoke, :f :read, :value nil}
+                                 (gen/stagger 10)
+                                 (gen/limit 5))}
        :checker     (checker/compose
                       {:perf     (checker/perf)
                        :details  (check-monotonic

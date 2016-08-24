@@ -127,6 +127,11 @@
    [nil "--ssh-private-key FILE" "Path to an SSH identity file"
     :assoc-fn (fn [m k v] (assoc-in m [:ssh :private-key-path] v))]
 
+   [nil "--concurrency NUMBER" "How many workers should we run?"
+    :default 30
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "Must be positive"]]
+
    ["-c" "--test-count NUMBER"
     "How many times should we repeat a test?"
     :default  1

@@ -164,7 +164,6 @@
       (merge
         {:name "sequential"
          :key-count 5
-         :concurrency 90
          :client {:client (Client. 10 (atom false) nil)
                   :during (gen/stagger 1/100 gen)
                   :final  nil}

@@ -77,7 +77,6 @@
   (c/basic-test
     (merge
       {:name        "atomic"
-       :concurrency c/concurrency-factor
        :client      {:client (AtomicClient. (atom false) nil)
                      :during (->> (independent/concurrent-generator
                                     10

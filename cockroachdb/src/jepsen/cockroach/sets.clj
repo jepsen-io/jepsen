@@ -135,7 +135,6 @@
   (c/basic-test
     (merge
       {:name        "set"
-       :concurrency c/concurrency-factor
        :client      {:client (SetsClient. (atom false) nil)
                      :during (->> (range)
                                   (map (partial array-map

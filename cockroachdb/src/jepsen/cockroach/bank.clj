@@ -139,8 +139,7 @@
   [opts]
   (c/basic-test
     (merge
-      {:concurrency c/concurrency-factor
-       :model       {:n 4 :total 40}
+      {:model       {:n 4 :total 40}
        :client      {:client (:client opts)
                      :during (->> (gen/mix [bank-read bank-diff-transfer])
                                   (gen/clients)
