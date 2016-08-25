@@ -36,7 +36,7 @@
    "sets"                 sets/test
    "sequential"           sequential/test})
 
-(def default-hosts [:n1 :n2 :n3 :n4 :n5])
+(def default-nodes [:n1 :n2 :n3 :n4 :n5])
 
 (def oses
   "Supported operating systems"
@@ -99,7 +99,9 @@
    ["-l" "--linearizable" "Whether to run cockroack in linearizable mode"
     :default false]
 
-   (repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on" default-hosts)
+   (repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on" default-nodes)
+
+   [nil "--nodes-file FILENAME" "File containing node hostnames, one per line."]
 
    (repeated-opt nil "--nemesis NAME" "Which nemeses to use"
                  [`cln/none]
@@ -193,6 +195,19 @@ Options:\n"))
           m
           replacements))
 
+(defn read-nodes-file
+  "If :nodes-file exists, reads its contents and appends them to :nodes. Drops
+  the default nodes list if it's still there."
+  [options]
+  (if-let [f (:nodes-file options)]
+    (let [nodes (:nodes options)
+          nodes (if (identical? nodes default-nodes)
+                  []
+                  nodes)
+          nodes (into nodes (str/split (slurp f) #"\s*\n\s*"))]
+      (assoc options :nodes nodes))
+    options))
+
 (defn move-logfile!
   "Moves jepsen.log to store/latest/"
   []
@@ -218,9 +233,11 @@ Options:\n"))
                   errors]} (-> args
                                (cli/parse-opts optspec)
                                validate-tarball)
-          options (rename-keys options {:node    :nodes
-                                        :nemesis :nemeses
-                                        :test    :test-fns})]
+          options (-> options
+                      (rename-keys {:node    :nodes
+                                    :nemesis :nemeses
+                                    :test    :test-fns})
+                      read-nodes-file)]
 
       ; Help?
       (when (:help options)

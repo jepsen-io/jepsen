@@ -8,7 +8,7 @@
                  [org.clojure/tools.cli "0.3.3"]
                  [org.clojure/java.jdbc "0.4.1"]
                  [org.postgresql/postgresql "9.4.1208"]]
-  :jvm-opts ["-Xmx64g"
+  :jvm-opts ["-Xmx12g"
              "-XX:+UseConcMarkSweepGC"
              "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled"
