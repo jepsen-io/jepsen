@@ -164,7 +164,7 @@
       (c/with-timeout
         (rc/with-conn [c conn]
           (doseq [x (range multitable-spread)]
-            (c/execute! c [(str "drop table if exists mono" x)]))))
+            (j/execute! c [(str "drop table if exists mono" x)]))))
       (finally
         (rc/close! conn)))))
 

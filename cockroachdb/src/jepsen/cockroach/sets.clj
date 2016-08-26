@@ -127,7 +127,7 @@
     (try
       (c/with-timeout
         (rc/with-conn [c conn]
-          (c/execute! c ["drop table set"])))
+          (j/execute! c ["drop table set"])))
       (finally (rc/close! conn)))))
 
 (defn test
