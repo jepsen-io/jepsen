@@ -293,6 +293,7 @@
   [test]
   (unilog/start-logging!
     {:level   "info"
+     :console   false
      :appenders [console-appender
                  {:appender :file
                   :encoder :pattern
@@ -304,6 +305,7 @@
   []
   (unilog/start-logging!
     {:level "info"
+     :console   false
      :appenders [console-appender]}))
 
 (defn delete-file-recursively!
