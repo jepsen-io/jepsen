@@ -117,9 +117,9 @@
           (case (:f op)
             :add (c/with-timeout
                    (do
-                     (j/insert! c :set {:val (:value op)})
+                     (c/insert! c :set {:val (:value op)})
                      (assoc op :type :ok)))
-            :read (->> (j/query c ["select val from set"])
+            :read (->> (c/query c ["select val from set"])
                        (mapv :val)
                        (assoc op :type :ok, :value)))))))
 
@@ -127,7 +127,7 @@
     (try
       (c/with-timeout
         (rc/with-conn [c conn]
-          (j/execute! c ["drop table set"])))
+          (c/execute! c ["drop table set"])))
       (finally (rc/close! conn)))))
 
 (defn test

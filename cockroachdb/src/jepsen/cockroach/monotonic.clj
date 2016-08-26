@@ -50,7 +50,7 @@
                 (j/execute!
                   c ["create table mono (val int, sts string, node int, process int, tb int)"]))
               (c/with-txn-retry
-                (j/insert! c :mono {:val -1 :sts "0" :node -1, :process -1, :tb -1}))))))
+                (c/insert! c :mono {:val -1 :sts "0" :node -1, :process -1, :tb -1}))))))
 
       (assoc this :conn conn :nodenum n)))
 
@@ -63,16 +63,16 @@
           (c/with-timeout
             (c/with-txn-retry
               (c/with-txn [c c]
-                (let [curmax (->> (j/query c
+                (let [curmax (->> (c/query c
                                            ["select max(val) as m from mono"]
                                            :row-fn :m)
                                   (first))
-                      currow (->> (j/query c ["select * from mono where val = ?"
+                      currow (->> (c/query c ["select * from mono where val = ?"
                                               curmax]
                                            :row-fn parse-row)
                                   (first))
                       dbtime (c/db-time c)]
-                  (j/insert! c :mono {:val      (inc curmax)
+                  (c/insert! c :mono {:val      (inc curmax)
                                       :sts      dbtime
                                       :node     nodenum
                                       :process  (:process op)
@@ -83,7 +83,7 @@
           :read
           (c/with-txn-retry
             (c/with-txn [c c]
-              (->> (j/query c ["select * from mono order by sts"]
+              (->> (c/query c ["select * from mono order by sts"]
                             :row-fn parse-row)
                    vec
                    (assoc op :type :ok, :value))))))))
@@ -119,7 +119,7 @@
                                       " (val int, sts string, node int,"
                                       " proc int, tb int)")]))
                 (c/with-txn-retry
-                  (j/insert! c (str "mono" x)
+                  (c/insert! c (str "mono" x)
                              {:val -1
                               :sts "0"
                               :node -1
@@ -145,14 +145,14 @@
                                     :proc (:process op)
                                     :tb   rt
                                     :node nodenum}]
-                       (j/insert! c (str "mono" rt) row)
+                       (c/insert! c (str "mono" rt) row)
                        (assoc op :type :ok :value row)))))
 
           :read (c/with-txn-retry
                   (c/with-txn [c c]
                     (->> (range multitable-spread)
                          (mapcat (fn [x]
-                                   (j/query c [(str "select * from mono" x
+                                   (c/query c [(str "select * from mono" x
                                                     " where node <> -1")]
                                             :row-fn parse-row)))
                          (sort-by :sts)
@@ -164,7 +164,7 @@
       (c/with-timeout
         (rc/with-conn [c conn]
           (doseq [x (range multitable-spread)]
-            (j/execute! c [(str "drop table if exists mono" x)]))))
+            (c/execute! c [(str "drop table if exists mono" x)]))))
       (finally
         (rc/close! conn)))))
 

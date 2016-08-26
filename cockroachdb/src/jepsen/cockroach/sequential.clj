@@ -73,7 +73,7 @@
             (let [ks (subkeys (:key-count test) (:value op))]
               (case (:f op)
                 :write (do (doseq [k ks]
-                             (j/insert! c (key->table table-count k) {:key k}))
+                             (c/insert! c (key->table table-count k) {:key k}))
                            (assoc op :type :ok))
 
                 :read ;(j/with-db-transaction [c c :isolation c/isolation-level]
@@ -81,7 +81,7 @@
                            reverse
                            (mapv (fn [k]
                                    (first
-                                     (j/query c
+                                     (c/query c
                                               [(str "select key from "
                                                     (key->table table-count k)
                                                     " where key = ?") k]

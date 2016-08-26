@@ -45,20 +45,22 @@
               (c/with-txn [c c]
                 (let [id   (key (:value op))
                       val' (val (:value op))
-                      val  (first (j/query c
+                      val  (first (c/query c
                                            ["select val from test where id = ?"
-                                            id] :row-fn :val))]
+                                            id]
+                                           {:row-fn :val
+                                            :timeout c/timeout-delay}))]
                   (case (:f op)
                     :read (assoc op :type :ok, :value (independent/tuple id val))
 
                     :write (do
                              (if (nil? val)
-                               (j/insert! c :test {:id id :val val'})
-                               (j/update! c :test {:val val'} ["id = ?" id]))
+                               (c/insert! c :test {:id id :val val'})
+                               (c/update! c :test {:val val'} ["id = ?" id]))
                              (assoc op :type :ok))
 
                     :cas (let [[expected-val new-val] val'
-                               cnt (j/update! c :test {:val new-val}
+                               cnt (c/update! c :test {:val new-val}
                                               ["id = ? and val = ?"
                                                id expected-val])]
                            (assoc op :type (if (zero? (first cnt))

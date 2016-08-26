@@ -32,7 +32,7 @@
             (dotimes [i n]
               (Thread/sleep 500)
               (info "Creating account" i)
-              (j/insert! c :accounts {:id i :balance starting-balance})))))
+              (c/insert! c :accounts {:id i :balance starting-balance})))))
 
       (assoc this :conn conn)))
 
@@ -43,20 +43,20 @@
           (c/with-txn-retry
             (c/with-txn [c c]
               (case (:f op)
-                :read (->> (j/query c ["select balance from accounts"])
+                :read (->> (c/query c ["select balance from accounts"])
                            (mapv :balance)
                            (assoc op :type :ok, :value))
 
                 :transfer
                 (let [{:keys [from to amount]} (:value op)
                       b1 (-> c
-                             (j/query
+                             (c/query
                                ["select balance from accounts where id = ?"
                                 from] :row-fn :balance)
                              first
                              (- amount))
                       b2 (-> c
-                             (j/query
+                             (c/query
                                ["select balance from accounts where id = ?" to]
                                :row-fn :balance)
                              first
@@ -69,8 +69,8 @@
                     (assoc op :type :fail, :value [:negative to b2])
 
                     true
-                    (do (j/update! c :accounts {:balance b1} ["id = ?" from])
-                        (j/update! c :accounts {:balance b2} ["id = ?" to])
+                    (do (c/update! c :accounts {:balance b1} ["id = ?" from])
+                        (c/update! c :accounts {:balance b2} ["id = ?" to])
                         (assoc op :type :ok)))))))))))
 
   (teardown! [this test]
@@ -174,7 +174,7 @@
                                   " (balance bigint not null)")])
               (Thread/sleep 500)
               (info "Populating account" i)
-              (j/insert! c (str "accounts" i) {:balance starting-balance})))))
+              (c/insert! c (str "accounts" i) {:balance starting-balance})))))
 
       (assoc this :conn conn)))
 
@@ -188,7 +188,7 @@
                 :read
                 (->> (range n)
                      (mapv (fn [x]
-                             (->> (j/query
+                             (->> (c/query
                                     c [(str "select balance from accounts" x)]
                                     :row-fn :balance)
                                   first)))
@@ -197,13 +197,13 @@
                 :transfer
                 (let [{:keys [from to amount]} (:value op)
                       b1 (-> c
-                             (j/query
+                             (c/query
                                [(str "select balance from accounts" from)]
                                :row-fn :balance)
                              first
                              (- amount))
                       b2 (-> c
-                             (j/query [(str "select balance from accounts" to)]
+                             (c/query [(str "select balance from accounts" to)]
                                       :row-fn :balance)
                              first
                              (+ amount))]
@@ -214,8 +214,8 @@
                         (assoc op :type :fail, :value [:negative to b2])
 
                         true
-                        (do (j/update! c (str "accounts" from) {:balance b1} [])
-                            (j/update! c (str "accounts" to) {:balance b2} [])
+                        (do (c/update! c (str "accounts" from) {:balance b1} [])
+                            (c/update! c (str "accounts" to) {:balance b2} [])
                             (assoc op :type :ok)))))))))))
 
   (teardown! [this test]

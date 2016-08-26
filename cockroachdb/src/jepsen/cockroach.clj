@@ -121,11 +121,14 @@
     (rc/wrapper
       {:name [:cockroach node]
        :open (fn open []
-               (let [spec (db-conn-spec node)
-                     conn (j/get-connection spec)
-                     spec' (j/add-connection spec conn)]
-                 (assert spec')
-                 spec'))
+               (util/timeout 30000
+                             (throw (RuntimeException.
+                                      (str "Connection to " node " timed out")))
+                             (let [spec (db-conn-spec node)
+                                   conn (j/get-connection spec)
+                                   spec' (j/add-connection spec conn)]
+                               (assert spec')
+                               spec')))
        :close close-conn
        :log? true})))
 
@@ -226,7 +229,7 @@
 (defmacro with-txn
   "Wrap a evaluation within a SQL transaction."
   [[c conn] & body]
-  `(j/with-db-transaction [~c ~conn :isolation isolation-level]
+  `(j/with-db-transaction [~c ~conn {:isolation isolation-level}]
      ~@body))
 
 (defn exception->op
@@ -273,6 +276,23 @@
                            false)
                          (catch RuntimeException e
                            true)))))
+
+(defn query
+  "Like jdbc query, but includes a default timeout."
+  ([conn expr]
+   (query conn expr {}))
+  ([conn expr opts]
+   (j/query conn expr (assoc opts :timeout timeout-delay))))
+
+(defn insert!
+  "Like jdbc insert!, but includes a default timeout."
+  [conn table values]
+  (j/insert! conn table values {:timeout timeout-delay}))
+
+(defn update!
+  "Like jdbc update!, but includes a default timeout."
+  [conn table values where]
+  (j/update! conn table values where {:timeout timeout-delay}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;; Common test definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
