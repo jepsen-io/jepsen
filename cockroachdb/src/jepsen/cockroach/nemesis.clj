@@ -185,7 +185,8 @@
           :client (bump-time offset)
           :clocks true}))
 
-(def small-skews    (skew "small-skews"     0.100))
-(def critical-skews (skew "critical-skews"  0.250))
-(def big-skews      (skew "big-skews"       0.5))
-(def huge-skews     (skew "huge-skews"      60))
+(def small-skews        (skew "small-skews"       0.100))
+(def subcritical-skews  (skew "subcritical-skews" 0.200))
+(def critical-skews     (skew "critical-skews"    0.250))
+(def big-skews          (skew "big-skews"         0.5))
+(def huge-skews         (skew "huge-skews"        60))

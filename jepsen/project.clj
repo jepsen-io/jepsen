@@ -3,6 +3,7 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/data.fressian "0.2.1"]
                  [org.clojure/tools.logging "0.3.1"]
+                 [org.clojure/tools.cli "0.3.5"]
                  [clj-time "0.11.0"]
                  [knossos "0.2.8"]
                  [clj-ssh "0.5.14"]
@@ -12,6 +13,9 @@
                  [hiccup "1.0.5"]
                  [org.clojars.achim/multiset "0.1.0"]
                  [byte-streams "0.2.2"]]
+  :main jepsen.cli
+;  :aot [jepsen.cli
+;        clojure.tools.logging.impl]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"
