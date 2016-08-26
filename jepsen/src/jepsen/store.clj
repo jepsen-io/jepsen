@@ -9,6 +9,7 @@
             [clj-time.local :as time.local]
             [clj-time.coerce :as time.coerce]
             [clj-time.format :as time.format]
+            [unilog.config :as unilog]
             [multiset.core :as multiset]
             [jepsen.util :as util])
   (:import (java.io File)
@@ -282,6 +283,21 @@
        dorun)
   (update-symlinks! test)
   test)
+
+(defn start-logging!
+  "Starts logging to a file in the test's directory."
+  [test]
+  (unilog/start-logging!
+    {:level   "info"
+     :console true
+     :files [(.getCanonicalPath (path! test "jepsen.log"))]}))
+
+(defn stop-logging!
+  "Resets logging to console only."
+  []
+  (unilog/start-logging!
+    {:level "info"
+     :console true}))
 
 (defn delete-file-recursively!
   [^File f]

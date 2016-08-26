@@ -106,7 +106,6 @@
                   (doseq [test-fn (:test-fns options)
                           nemesis (:nemeses options)
                           i       (range (:test-count options))]
-                    (jc/move-logfile!)
                     ; Rehydrate test and run
                     (let [test (-> options
                                    (dissoc :test-fns)
@@ -115,7 +114,6 @@
                                    log-test
                                    jepsen/run!)]
                       (when-not (:valid? (:results test))
-                        (jc/move-logfile!)
                         (System/exit 1)))))}})
 
 (defn -main

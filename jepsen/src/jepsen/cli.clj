@@ -143,17 +143,6 @@ Options:\n")
       (assoc options :nodes nodes))
     options))
 
-(defn move-logfile!
-  "Moves jepsen.log to store/latest/"
-  []
-  (let [f  (io/file "jepsen.log")
-        f2 (io/file "store/latest/jepsen.log")
-  d1 (io/file "store/latest")]
-    (when (and (.exists f) (.exists d1) (not (.exists f2)))
-      ; Can't just rename because log4j retains the filehandle
-      (io/copy f f2)
-      (spit f "" :append false))))
-
 ;; Test runner
 
 (defn run!
@@ -227,11 +216,9 @@ Options:\n")
 
         ; Run!
         (run parsed-opts)
-        (move-logfile!)
         (System/exit 0)))
 
     (catch Throwable t
-      (move-logfile!)
       (fatal t "Oh jeez, I'm sorry, Jepsen broke. Here's why:")
       (System/exit 255))))
 

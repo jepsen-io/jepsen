@@ -181,10 +181,9 @@
 (def ntpserver "ntp.ubuntu.com")
 
 (defn reset-clock!
-  "Reset clock on this host."
+  "Reset clock on this host. Logs output."
   []
-  (c/su (c/exec :ntpdate :-b ntpserver))
-  (info c/*host* "clock reset"))
+  (info c/*host* "clock reset:" (c/su (c/exec :ntpdate :-b ntpserver))))
 
 (defn reset-clocks!
   "Reset all clocks on all nodes in a test"
