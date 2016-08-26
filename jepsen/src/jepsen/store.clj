@@ -284,20 +284,27 @@
   (update-symlinks! test)
   test)
 
+(def console-appender
+  {:appender :console
+   :pattern "%p\t[%t] %c: %m%n"})
+
 (defn start-logging!
   "Starts logging to a file in the test's directory."
   [test]
   (unilog/start-logging!
     {:level   "info"
-     :console true
-     :files [(.getCanonicalPath (path! test "jepsen.log"))]}))
+     :appenders [console-appender
+                 {:appender :file
+                  :encoder :pattern
+                  :pattern "%d{ISO8601}{GMT}\t%p\t[%t] %c: %m%n"
+                  :file (.getCanonicalPath (path! test "jepsen.log"))}]}))
 
 (defn stop-logging!
   "Resets logging to console only."
   []
   (unilog/start-logging!
     {:level "info"
-     :console true}))
+     :appenders [console-appender]}))
 
 (defn delete-file-recursively!
   [^File f]
