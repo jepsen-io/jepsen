@@ -52,13 +52,13 @@
                       b1 (-> c
                              (c/query
                                ["select balance from accounts where id = ?"
-                                from] :row-fn :balance)
+                                from] {:row-fn :balance})
                              first
                              (- amount))
                       b2 (-> c
                              (c/query
                                ["select balance from accounts where id = ?" to]
-                               :row-fn :balance)
+                               {:row-fn :balance})
                              first
                              (+ amount))]
                   (cond
@@ -139,11 +139,10 @@
   [opts]
   (c/basic-test
     (merge
-      {:model       {:n 4 :total 40}
-       :client      {:client (:client opts)
+      {:client      {:client (:client opts)
                      :during (->> (gen/mix [bank-read bank-diff-transfer])
                                   (gen/clients)
-                                  (gen/stagger 1))
+                                  (gen/stagger 0))
                      :final (gen/clients (gen/once bank-read))}
        :checker     (checker/compose
                       {:perf    (checker/perf)
@@ -154,6 +153,7 @@
   [opts]
   (bank-test-base
     (merge {:name   "bank"
+            :model  {:n 20 :total 200}
             :client (BankClient. (atom false) 4 10 nil)}
            opts)))
 
@@ -190,7 +190,7 @@
                      (mapv (fn [x]
                              (->> (c/query
                                     c [(str "select balance from accounts" x)]
-                                    :row-fn :balance)
+                                    {:row-fn :balance})
                                   first)))
                      (assoc op :type :ok, :value))
 
@@ -199,12 +199,12 @@
                       b1 (-> c
                              (c/query
                                [(str "select balance from accounts" from)]
-                               :row-fn :balance)
+                               {:row-fn :balance})
                              first
                              (- amount))
                       b2 (-> c
                              (c/query [(str "select balance from accounts" to)]
-                                      :row-fn :balance)
+                                      {:row-fn :balance})
                              first
                              (+ amount))]
                   (cond (neg? b1)
@@ -231,5 +231,6 @@
   [opts]
   (bank-test-base
     (merge {:name   "bank-multitable"
-            :client (MultiBankClient. (atom false) 4 10 nil)}
+            :model  {:n 20 :total 200}
+            :client (MultiBankClient. (atom false) 20 10 nil)}
            opts)))

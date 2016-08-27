@@ -41,15 +41,16 @@
       (c/with-exception->op op
         (rc/with-conn [c conn]
           (c/with-timeout
-            (c/with-txn-retry
+            (try
               (c/with-txn [c c]
                 (let [id   (key (:value op))
                       val' (val (:value op))
-                      val  (first (c/query c
-                                           ["select val from test where id = ?"
-                                            id]
-                                           {:row-fn :val
-                                            :timeout c/timeout-delay}))]
+                      val  (-> c
+                               (c/query ["select val from test where id = ?"
+                                         id]
+                                        {:row-fn :val
+                                         :timeout c/timeout-delay})
+                               first)]
                   (case (:f op)
                     :read (assoc op :type :ok, :value (independent/tuple id val))
 
@@ -65,7 +66,12 @@
                                                id expected-val])]
                            (assoc op :type (if (zero? (first cnt))
                                              :fail
-                                             :ok))))))))))))
+                                             :ok))))))
+              (catch org.postgresql.util.PSQLException e
+                (if (re-find #"ERROR: restart transaction" (.getMessage e))
+                  ; Definitely failed
+                  (assoc op :type :fail)
+                  (throw e)))))))))
 
   (teardown! [this test]
     (try
@@ -80,14 +86,13 @@
     (merge
       {:name        "atomic"
        :client      {:client (AtomicClient. (atom false) nil)
-                     :during (->> (independent/concurrent-generator
-                                    10
-                                    (range)
-                                    (fn [k]
-                                      (->> (gen/reserve 5 (gen/mix [w cas]) r)
-                                           (gen/delay 0.5)
-                                           (gen/limit 60))))
-                                  (gen/stagger 1))}
+                     :during (independent/concurrent-generator
+                               10
+                               (range)
+                               (fn [k]
+                                 (->> (gen/reserve 5 (gen/mix [w cas]) r)
+                                      (gen/stagger 0.1)
+                                      (gen/limit 60))))}
        :model       (model/cas-register 0)
        :checker     (checker/compose
                       {:perf   (checker/perf)
