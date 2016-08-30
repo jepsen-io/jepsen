@@ -59,23 +59,6 @@
 
 ;;;;;;;;;;;;;;;;;;;; Database set-up and access functions  ;;;;;;;;;;;;;;;;;;;;;;;
 
-;; How to extract db time
-(defn db-time
-  "Retrieve the current time (precise, monotonic) from the database."
-  [c]
-  (cond (= jdbc-mode :pg-local)
-        (->> (j/query c ["select extract(microseconds from now()) as ts"]
-                      :row-fn :ts)
-             (first)
-             (str))
-
-        true
-        (->> (j/query c ["select cluster_logical_timestamp()*10000000000::decimal as ts"]
-                      :row-fn :ts)
-             (first)
-             (.toBigInteger)
-             (str))))
-
 (def ssl-settings
   (if insecure
     ""
@@ -293,6 +276,23 @@
   "Like jdbc update!, but includes a default timeout."
   [conn table values where]
   (j/update! conn table values where {:timeout timeout-delay}))
+
+(defn db-time
+  "Retrieve the current time (precise, monotonic) from the database."
+  [c]
+  (cond (= jdbc-mode :pg-local)
+        (->> (query c ["select extract(microseconds from now()) as ts"]
+                      {:row-fn :ts})
+             (first)
+             (str))
+
+        true
+        (->> (query c ["select cluster_logical_timestamp()*10000000000::decimal as ts"]
+                      {:row-fn :ts})
+             (first)
+             (.toBigInteger)
+             (str))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;; Common test definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

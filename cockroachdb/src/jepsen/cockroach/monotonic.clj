@@ -63,13 +63,14 @@
           (c/with-timeout
             (c/with-txn-retry
               (c/with-txn [c c]
-                (let [curmax (->> (c/query c
+                (let [;dbtime (c/db-time c)
+                      curmax (->> (c/query c
                                            ["select max(val) as m from mono"]
-                                           :row-fn :m)
+                                           {:row-fn :m})
                                   (first))
                       currow (->> (c/query c ["select * from mono where val = ?"
                                               curmax]
-                                           :row-fn parse-row)
+                                           {:row-fn parse-row})
                                   (first))
                       dbtime (c/db-time c)]
                   (c/insert! c :mono {:val      (inc curmax)
@@ -84,7 +85,7 @@
           (c/with-txn-retry
             (c/with-txn [c c]
               (->> (c/query c ["select * from mono order by sts"]
-                            :row-fn parse-row)
+                            {:row-fn parse-row})
                    vec
                    (assoc op :type :ok, :value))))))))
 
@@ -154,7 +155,7 @@
                          (mapcat (fn [x]
                                    (c/query c [(str "select * from mono" x
                                                     " where node <> -1")]
-                                            :row-fn parse-row)))
+                                            {:row-fn parse-row})))
                          (sort-by :sts)
                          vec
                          (assoc op :type :ok, :value))))))))
