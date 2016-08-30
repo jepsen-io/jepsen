@@ -225,9 +225,18 @@ Options:\n")
 (defn serve-cmd
   "A web server command."
   []
-  {"serve" {:opt-spec [help-opt]
-            :run (fn [_]
-                   (web/serve! {})
+  {"serve" {:opt-spec [help-opt
+                       ["-b" "--host HOST" "Hostname to bind to"
+                        :default "0.0.0.0"]
+                       ["-p" "--port NUMBER" "Port number to bind to"
+                        :default 8080
+                        :parse-fn #(Long/parseLong %)
+                        :validate [pos? "Must be positive"]]]
+            :opt-fn #(update % :options rename-keys {:host :ip})
+            :run (fn [{:keys [options]}]
+                   (web/serve! options)
+                   (info (str "Listening on http://"
+                              (:ip options) ":" (:port options) "/"))
                    (while true (Thread/sleep 1000)))}})
 
 (defn -main
