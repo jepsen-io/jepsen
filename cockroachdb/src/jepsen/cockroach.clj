@@ -144,6 +144,9 @@
 
                 (when (= node (jepsen/primary test))
                   (Thread/sleep 2000)
+                  (auto/set-replication-zone!  ".default"
+                                              {:range_min_bytes 1024
+                                               :range_max_bytes 1048576}
                   (info node "Creating database...")
                   (auto/csql! (str "create database " dbname))))
 

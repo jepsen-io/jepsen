@@ -2,6 +2,8 @@
   "Cockroach automation functions, for starting, stopping, etc."
   (:require [clojure.tools.logging :refer :all]
             [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clj-yaml.core :as yaml]
             [jepsen.util :as util]
             [jepsen [core :as jepsen]
                     [control :as c :refer [|]]]
@@ -110,6 +112,26 @@
            (if insecure [:--insecure] nil)
            [:-e ~@body]
            [:>> errlog (c/lit "2>&1")]))))
+
+(defn replication-zone
+  "Gets the replication zone on a given node. With no args, fetches the default
+  zone."
+  ([]
+   (replication-zone ".default"))
+  ([name]
+   (yaml/parse-string
+     (c/cd working-path
+           (c/exec cockroach :zone :get name (when insecure :--insecure))))))
+
+(defn set-replication-zone!
+  "Sets the replication zone on the given node. Returns the new replication
+  zone."
+  [name zone]
+  (-> (c/cd working-path
+            (c/exec cockroach :zone :set name (when insecure :--insecure)
+                    (yaml/generate-string zone)))
+      (str/replace #"UPDATE .+\n" "")
+      (yaml/parse-string)))
 
 (defn install-bumptime!
   "Install time adjusting binary"
