@@ -82,7 +82,7 @@
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
-   (jc/tarball-opt "https://binaries.cockroachdb.com/cockroach-beta-20160728.linux-amd64.tgz")])
+   (jc/tarball-opt "https://binaries.cockroachdb.com/cockroach-beta-20160829.linux-amd64.tgz")])
 
 (defn log-test
   [t]
