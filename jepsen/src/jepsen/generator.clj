@@ -16,6 +16,7 @@
             [clojure.core :as c]
             [clojure.tools.logging :refer [info]])
   (:import (java.util.concurrent.atomic AtomicBoolean)
+           (java.util.concurrent.locks LockSupport)
            (java.util.concurrent CyclicBarrier)))
 
 (defprotocol Generator
@@ -74,6 +75,17 @@
   (reify Generator
     (op [gen test process])))
 
+(defn sleep-til-nanos
+  "High-resolution sleep; takes a time in nanos, relative to System/nanotime."
+  [t]
+  (while (< (+ (System/nanoTime) 10000) t)
+    (LockSupport/parkNanos (- t (System/nanoTime)))))
+
+(defn sleep-nanos
+  "High-resolution sleep; takes a (possibly fractional) time in nanos."
+  [dt]
+  (sleep-til-nanos (+ dt (System/nanoTime))))
+
 (defn delay-fn
   "Every operation from the underlying generator takes (f) seconds longer."
   [f gen]
@@ -86,6 +98,41 @@
   "Every operation from the underlying generator takes dt seconds to return."
   [dt gen]
   (delay-fn (constantly dt) gen))
+
+(defn next-tick-nanos
+  "Given a period `dt` (in nanos), beginning at some point in time `anchor`
+  (also in nanos), finds the next tick after time `now`, such that the next
+  tick is separate from anchor by an exact multiple of dt. If now is omitted,
+  defaults to the current time."
+  ([anchor dt]
+   (next-tick-nanos anchor dt (util/linear-time-nanos)))
+  ([anchor dt now]
+   (+ now (- dt (mod (- now anchor) dt)))))
+
+(defn delay-til
+  "Operations are emitted as close as possible to multiples of dt seconds from
+  some epoch. Where `delay` introduces a fixed delay between completion and
+  invocation, delay-til attempts to schedule invocations as close as possible
+  to the same time. This is useful for triggering race conditions.
+
+  If precache? is true (the default), will pre-emptively request the next
+  operation from the underlying generator, to eliminate jitter from that
+  generator."
+  ([dt gen]
+   (delay-til dt true gen))
+  ([dt precache? gen]
+   (let [anchor (System/nanoTime)
+         dt     (util/secs->nanos dt)]
+     (if precache?
+       (reify Generator
+         (op [_ test process]
+           (let [op (op gen test process)]
+             (sleep-til-nanos (next-tick-nanos anchor dt))
+             op)))
+       (reify Generator
+         (op [_ test process]
+           (sleep-til-nanos (next-tick-nanos anchor dt))
+           (op gen test process)))))))
 
 (defn stagger
   "Introduces uniform random timing noise with a mean delay of dt seconds for
