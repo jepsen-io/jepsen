@@ -196,6 +196,19 @@
                  (throw (RuntimeException. "timeout"))
                  ~@body))
 
+(defmacro with-txn-retry-as-fail
+  "Takes an op, runs body, catches PSQL 'restart transaction' errors, and
+  converts them to :fails"
+  [op & body]
+  `(try ~@body
+       (catch org.postgresql.util.PSQLException e#
+         (if (re-find #"ERROR: restart transaction" (.getMessage e#))
+           (assoc ~op
+                  :type :fail
+                  :error (str/replace
+                           (.getMessage e#) #"ERROR: restart transaction: " ""))
+           (throw e#)))))
+
 (defmacro with-txn-retry
   "Catches PSQL 'restart transaction' errors and retries body a bunch of times,
   with exponential backoffs."

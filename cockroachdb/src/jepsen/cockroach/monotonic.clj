@@ -29,7 +29,7 @@
 ; tb is a table identifier--always zero here
 ; sts is a system timestamp--a 96 bit integer in cockroach, but represented as
 ; a string in the table and an arbitrary-precision integer in clojure
-(defrecord MonotonicClient [tbl-created? conn nodenum]
+(defrecord MonotonicClient [conn nodenum]
   client/Client
 
   (setup! [this test node]
@@ -39,63 +39,79 @@
           conn (c/client node)]
       (info "Setting up client for node " n " - " (name node))
 
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          (rc/with-conn [c conn]
-            (c/with-timeout
-              (c/with-txn-retry
-                (j/execute! c ["drop table if exists mono"]))
-              (info node "Creating table")
-              (c/with-txn-retry
-                (j/execute!
-                  c ["create table mono (val int, sts string, node int, process int, tb int)"]))
-              (c/with-txn-retry
-                (c/insert! c :mono {:val -1 :sts "0" :node -1, :process -1, :tb -1}))))))
+      (Thread/sleep 5000)
 
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
-    (c/with-exception->op op
-      (rc/with-conn [c conn]
-        (assert c)
-        (case (:f op)
-          :add
-          (c/with-timeout
+    (let [[table value] (:value op)]
+      (c/with-exception->op op
+        (rc/with-conn [c conn]
+          (case (:f op)
+            :add
+            (try
+              (c/with-timeout
+                (c/with-txn-retry-as-fail op
+                  (c/with-txn [c c]
+                    (let [;dbtime (c/db-time c)
+                          curmax (->> (c/query
+                                        c
+                                        [(str "select max(val) as m from "
+                                              table)]
+                                        {:row-fn :m})
+                                      first)
+                          currow (->> (c/query
+                                        c
+                                        [(str "select * from "
+                                              table " where val = ?")
+                                         curmax]
+                                        {:row-fn parse-row})
+                                      first)
+                          dbtime (c/db-time c)
+                          newrow {:val      (inc curmax)
+                                  :sts      dbtime
+                                  :node     nodenum
+                                  :process  (:process op)
+                                  :tb       0}]
+                      (c/insert! c table newrow)
+                      (assoc op
+                             :type :ok
+                             :value (independent/tuple table newrow))))))
+              ; Create table if missing
+              (catch org.postgresql.util.PSQLException e
+                (info "Caught psql" (.getMessage e))
+                (if (re-find #"table \".+?\" does not exist"
+                             (.getMessage e))
+                  (locking conn
+                    (info "Create table" table)
+                    (do (c/with-txn-retry
+                          (j/execute! c [(str "create table " table
+                                              " (val int,"
+                                              "  sts string,"
+                                              "  node int,"
+                                              "  process int,"
+                                              "  tb int)")]))
+                        (info "Table created" table)
+                        (c/with-txn-retry
+                          (c/insert! c table
+                                     {:val -1 :sts "0" :node -1,
+                                      :process -1, :tb -1}))
+                        (info "initial val inserted" table)
+                        (assoc op :type :fail, :error :no-table)))
+                  (throw e))))
+
+            :read
             (c/with-txn-retry
               (c/with-txn [c c]
-                (let [;dbtime (c/db-time c)
-                      curmax (->> (c/query c
-                                           ["select max(val) as m from mono"]
-                                           {:row-fn :m})
-                                  (first))
-                      currow (->> (c/query c ["select * from mono where val = ?"
-                                              curmax]
-                                           {:row-fn parse-row})
-                                  (first))
-                      dbtime (c/db-time c)]
-                  (c/insert! c :mono {:val      (inc curmax)
-                                      :sts      dbtime
-                                      :node     nodenum
-                                      :process  (:process op)
-                                      :tb       0})
-                  ; TODO: return new row, not previous row
-                  (assoc op :type :ok, :value currow)))))
+                (->> (c/query c [(str "select * from " table
+                                      " order by sts")]
+                              {:row-fn parse-row})
+                     vec
+                     (independent/tuple table)
+                     (assoc op :type :ok, :value)))))))))
 
-          :read
-          (c/with-txn-retry
-            (c/with-txn [c c]
-              (->> (c/query c ["select * from mono order by sts"]
-                            {:row-fn parse-row})
-                   vec
-                   (assoc op :type :ok, :value))))))))
-
-  (teardown! [this test]
-    (try
-      (c/with-timeout
-        (rc/with-conn [c conn]
-          (j/execute! c ["drop table if exists mono"])))
-      (finally
-        (rc/close! conn)))))
+    (teardown! [this test]
+      (rc/close! conn)))
 
 (defrecord MultitableClient [tbl-created? cnt conn nodenum]
   client/Client
@@ -279,16 +295,27 @@
   (c/basic-test
     (merge
       {:name        "monotonic"
-       :client      {:client (MonotonicClient. (atom false) nil nil)
-                     :during (->> {:type :invoke, :f :add, :value nil}
-                                  (gen/stagger 1))
-                     :final (->> {:type :invoke, :f :read, :value nil}
-                                 (gen/stagger 10)
-                                 (gen/limit 5))}
+       :client      {:client (MonotonicClient. nil nil)
+                     :during (independent/concurrent-generator
+                               (count (:nodes opts))
+                               (map (partial str "t") (range))
+                               (fn [table]
+                                 (->> {:type :invoke, :f :add, :value nil}
+                                      (gen/delay-til 0.2))))
+                     :final (independent/concurrent-generator
+                              (count (:nodes opts))
+                              (map (partial str "t")
+                                   (range (/ (:concurrency opts)
+                                             (count (:nodes opts)))))
+                              (fn [table]
+                                (->> {:type :invoke, :f :read, :value nil}
+                                     (gen/stagger 10)
+                                     (gen/limit 5))))}
        :checker     (checker/compose
                       {:perf    (checker/perf)
-                       :details (check-monotonic (:linearizable opts)
-                                                 true)})}
+                       :details (independent/checker
+                                  (check-monotonic (:linearizable opts)
+                                                   true))})}
       opts)))
 
 (defn multitable-test
@@ -298,7 +325,7 @@
       {:name        "monotonic-multitable"
        :client      {:client (MultitableClient. (atom false) (atom 0) nil nil)
                      :during (->> {:type :invoke, :f :add, :value nil}
-                                  (gen/stagger 1))
+                                  (gen/delay-til 1))
                      :final (->> {:type :invoke, :f :read, :value nil}
                                  (gen/stagger 10)
                                  (gen/limit 5))}
