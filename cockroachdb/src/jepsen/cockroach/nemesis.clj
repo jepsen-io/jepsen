@@ -169,7 +169,7 @@
                             {:type :info, :f :stop}]))
    :final  (gen/once {:type :info, :f :stop})
    :name   "strobe-skews"
-   :client (strobe-time 200 1000 10)
+   :client (strobe-time 200 10 10)
    :clocks true})
 
 (defn bump-time
