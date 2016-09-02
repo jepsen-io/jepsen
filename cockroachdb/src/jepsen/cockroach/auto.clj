@@ -7,6 +7,7 @@
             [jepsen.util :as util]
             [jepsen [core :as jepsen]
                     [control :as c :refer [|]]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian])
   (:import (java.io File)))
@@ -165,6 +166,7 @@
     (c/exec :mkdir :-p log-path)
     (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path))
   (install-bumptime!)
+  (nt/install!)
   (info node "Cockroach installed"))
 
 (defn init!

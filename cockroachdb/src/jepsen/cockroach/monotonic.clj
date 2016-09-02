@@ -26,10 +26,35 @@
   [row]
   (update row :sts bigint))
 
+(defn monotonic-create-table!
+  "Creates a table and inserts an initial record into it. Takes a connection c
+  and a table name."
+  [c table]
+  (locking monotonic-create-table!
+    (info "Create table" table)
+    (do (c/with-txn-retry
+          (j/execute! c [(str "create table " table
+                              " (val int,"
+                              "  sts string,"
+                              "  node int,"
+                              "  process int,"
+                              "  tb int)")]))
+        (info "Table created" table)
+        (c/with-txn-retry
+          (c/with-txn [c c]
+            (when-not (first
+                        (c/query c [(str "select * from "
+                                         table
+                                         " where val = ?") -1]))
+              (c/insert! c table
+                         {:val -1 :sts "0" :node -1,
+                          :process -1, :tb 0})
+              (info "initial val inserted" table)))))))
+
 ; tb is a table identifier--always zero here
 ; sts is a system timestamp--a 96 bit integer in cockroach, but represented as
 ; a string in the table and an arbitrary-precision integer in clojure
-(defrecord MonotonicClient [conn nodenum]
+(defrecord MonotonicClient [initial-tables table-created? conn nodenum]
   client/Client
 
   (setup! [this test node]
@@ -39,7 +64,11 @@
           conn (c/client node)]
       (info "Setting up client for node " n " - " (name node))
 
-      (Thread/sleep 5000)
+      (locking table-created?
+        (when (compare-and-set! table-created? false true)
+          (rc/with-conn [c conn]
+            (doseq [t initial-tables]
+              (monotonic-create-table! c t)))))
 
       (assoc this :conn conn :nodenum n)))
 
@@ -82,22 +111,8 @@
                 (info "Caught psql" (.getMessage e))
                 (if (re-find #"table \".+?\" does not exist"
                              (.getMessage e))
-                  (locking conn
-                    (info "Create table" table)
-                    (do (c/with-txn-retry
-                          (j/execute! c [(str "create table " table
-                                              " (val int,"
-                                              "  sts string,"
-                                              "  node int,"
-                                              "  process int,"
-                                              "  tb int)")]))
-                        (info "Table created" table)
-                        (c/with-txn-retry
-                          (c/insert! c table
-                                     {:val -1 :sts "0" :node -1,
-                                      :process -1, :tb -1}))
-                        (info "initial val inserted" table)
-                        (assoc op :type :fail, :error :no-table)))
+                  (do (monotonic-create-table! c table)
+                      (assoc op :type :fail, :error :no-table))
                   (throw e))))
 
             :read
@@ -292,31 +307,33 @@
 
 (defn test
   [opts]
-  (c/basic-test
-    (merge
-      {:name        "monotonic"
-       :client      {:client (MonotonicClient. nil nil)
-                     :during (independent/concurrent-generator
-                               (count (:nodes opts))
-                               (map (partial str "t") (range))
-                               (fn [table]
-                                 (->> {:type :invoke, :f :add, :value nil}
-                                      (gen/delay-til 0.2))))
-                     :final (independent/concurrent-generator
-                              (count (:nodes opts))
-                              (map (partial str "t")
-                                   (range (/ (:concurrency opts)
-                                             (count (:nodes opts)))))
-                              (fn [table]
-                                (->> {:type :invoke, :f :read, :value nil}
-                                     (gen/stagger 10)
-                                     (gen/limit 5))))}
-       :checker     (checker/compose
-                      {:perf    (checker/perf)
-                       :details (independent/checker
-                                  (check-monotonic (:linearizable opts)
-                                                   true))})}
-      opts)))
+  (let [tables (->> (/ (:concurrency opts)
+                       (count (:nodes opts)))
+                    range
+                    (map (partial str "t")))]
+    (c/basic-test
+      (merge
+        {:name        "monotonic"
+         :client      {:client (MonotonicClient. tables (atom false) nil nil)
+                       :during (independent/concurrent-generator
+                                 (count (:nodes opts))
+                                 tables
+                                 (fn [table]
+                                   (->> {:type :invoke, :f :add, :value nil}
+                                        (gen/stagger 0.4))))
+                       :final (independent/concurrent-generator
+                                (count (:nodes opts))
+                                tables
+                                (fn [table]
+                                  (->> {:type :invoke, :f :read, :value nil}
+                                       (gen/stagger 10)
+                                       (gen/limit 5))))}
+         :checker     (checker/compose
+                        {:perf    (checker/perf)
+                         :details (independent/checker
+                                    (check-monotonic (:linearizable opts)
+                                                     true))})}
+        opts))))
 
 (defn multitable-test
   [opts]

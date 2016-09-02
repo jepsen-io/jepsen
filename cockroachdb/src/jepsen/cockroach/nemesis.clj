@@ -6,6 +6,7 @@
              [nemesis :as nemesis]
              [generator :as gen]
              [util :as util]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.cockroach.auto :as auto]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]))
@@ -66,17 +67,6 @@
                                      :stop1 :stop} (:client n1)
                                     {:start2 :start,
                                      :stop2 :stop} (:client n2)})}))
-
-(defn with-nemesis
-  "Wraps a client generator in a nemesis that induces failures and eventually
-  stops."
-  [nemesis-gen client]
-  (->> client
-       (gen/nemesis
-         (gen/phases (:during nemesis-gen)
-                     (:final nemesis-gen)
-                     (gen/log "waiting for quiescence")
-                     (gen/sleep nemesis-quiescence-wait)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;; Nemesis definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -151,6 +141,36 @@
 
     (teardown! [this test]
       (client/teardown! nem test))))
+
+(defn strobe-time
+  "In response to a :start op, strobes the clock between current time and delta
+  ms ahead, flipping every period ms, for duration seconds. On stop, restarts
+  nodes."
+  [delta period duration]
+  (restarting
+    (reify client/Client
+      (setup! [this test _]
+        (auto/reset-clocks! test)
+        this)
+
+      (invoke! [this test op]
+        (assoc op :value
+               (case (:f op)
+                 :start (c/with-test-nodes test
+                          (nt/strobe-time! delta period duration))
+                 :stop nil)))
+
+      (teardown! [this test]
+        (auto/reset-clocks! test)))))
+
+(def strobe-skews
+  ; This nemesis takes time to run for start, so we don't include any sleeping.
+  {:during (gen/seq (cycle [{:type :info, :f :start}
+                            {:type :info, :f :stop}]))
+   :final  (gen/once {:type :info, :f :stop})
+   :name   "strobe-skews"
+   :client (strobe-time 200 1000 10)
+   :clocks true})
 
 (defn bump-time
   "On randomly selected nodes, adjust the system clock by dt seconds.  Uses
