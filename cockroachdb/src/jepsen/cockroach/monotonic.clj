@@ -26,35 +26,50 @@
   [row]
   (update row :sts bigint))
 
-(defn monotonic-create-table!
-  "Creates a table and inserts an initial record into it. Takes a connection c
-  and a table name."
-  [c table]
-  (locking monotonic-create-table!
-    (info "Create table" table)
-    (do (c/with-txn-retry
+(defn table-name
+  "The table name for a given independent key and number."
+  [k i]
+  (str "k" k "i" i))
+
+(defn monotonic-create-tables!
+  "Creates the tables for a given independent key. Takes a connection c, an
+  independent-key, and a table count; creates table-count tables for that key."
+  [c k table-count]
+  (locking monotonic-create-tables!
+    (doseq [i (range table-count)]
+      (let [table (table-name k i)]
+        (info "Create table" table)
+        (c/with-txn-retry
           (j/execute! c [(str "create table " table
                               " (val int,"
                               "  sts string,"
                               "  node int,"
                               "  process int,"
                               "  tb int)")]))
-        (info "Table created" table)
-        (c/with-txn-retry
-          (c/with-txn [c c]
-            (when-not (first
-                        (c/query c [(str "select * from "
-                                         table
-                                         " where val = ?") -1]))
-              (c/insert! c table
-                         {:val -1 :sts "0" :node -1,
-                          :process -1, :tb 0})
-              (info "initial val inserted" table)))))))
+        (info "Table created" table)))))
+
+(defn q-max
+  "On connection `c`, query for the maximum value of `col` in tables `tables`."
+  [c col tables]
+  (->> tables
+       shuffle ; juuust in case deterministic read orders matter
+       (map (fn [table]
+              ; SQL injections ahoy; we can't use parameters for tables :(
+              (-> (c/query c [(str "select max(" (name col) ") as m from "
+                                   table)])
+                  first
+                  :m
+                  (or 0))))
+       (reduce max)))
 
 ; tb is a table identifier--always zero here
 ; sts is a system timestamp--a 96 bit integer in cockroach, but represented as
 ; a string in the table and an arbitrary-precision integer in clojure
-(defrecord MonotonicClient [initial-tables table-created? conn nodenum]
+(defrecord MonotonicClient [independent-keys
+                            table-count
+                            table-created?
+                            conn
+                            nodenum]
   client/Client
 
   (setup! [this test node]
@@ -67,62 +82,46 @@
       (locking table-created?
         (when (compare-and-set! table-created? false true)
           (rc/with-conn [c conn]
-            (doseq [t initial-tables]
-              (monotonic-create-table! c t)))))
+            (doseq [k independent-keys]
+              (monotonic-create-tables! c k table-count)))))
 
       (assoc this :conn conn :nodenum n)))
 
   (invoke! [this test op]
-    (let [[table value] (:value op)]
+    (let [[k value] (:value op)
+          tables    (map table-name (repeat k) (range table-count))]
       (c/with-exception->op op
         (rc/with-conn [c conn]
           (case (:f op)
             :add
-            (try
-              (c/with-timeout
-                (c/with-txn-retry-as-fail op
-                  (c/with-txn [c c]
-                    (let [;dbtime (c/db-time c)
-                          curmax (->> (c/query
-                                        c
-                                        [(str "select max(val) as m from "
-                                              table)]
-                                        {:row-fn :m})
-                                      first)
-                          currow (->> (c/query
-                                        c
-                                        [(str "select * from "
-                                              table " where val = ?")
-                                         curmax]
-                                        {:row-fn parse-row})
-                                      first)
-                          dbtime (c/db-time c)
-                          newrow {:val      (inc curmax)
-                                  :sts      dbtime
-                                  :node     nodenum
-                                  :process  (:process op)
-                                  :tb       0}]
-                      (c/insert! c table newrow)
-                      (assoc op
-                             :type :ok
-                             :value (independent/tuple table newrow))))))
-              ; Create table if missing
-              (catch org.postgresql.util.PSQLException e
-                (info "Caught psql" (.getMessage e))
-                (if (re-find #"table \".+?\" does not exist"
-                             (.getMessage e))
-                  (do (monotonic-create-table! c table)
-                      (assoc op :type :fail, :error :no-table))
-                  (throw e))))
+            (c/with-timeout
+              (c/with-txn-retry-as-fail op
+                (c/with-txn [c c]
+                  (let [;dbtime (c/db-time c)
+                        cur-max   (q-max c :val tables)
+                        dbtime    (c/db-time c)
+                        table-num (rand-int table-count)
+                        row {:val      (inc cur-max)
+                             :sts      dbtime
+                             :node     nodenum
+                             :process  (:process op)
+                             :tb       table-num}]
+                    (c/insert! c (table-name k table-num) row)
+                    (assoc op
+                           :type :ok
+                           :value (independent/tuple k row))))))
 
             :read
             (c/with-txn-retry
               (c/with-txn [c c]
-                (->> (c/query c [(str "select * from " table
-                                      " order by sts")]
-                              {:row-fn parse-row})
+                (->> tables
+                     (mapcat (fn [table]
+                               (c/query c [(str "select * from " table
+                                                " order by sts")]
+                                        {:row-fn parse-row})))
+                     (sort-by :sts)
                      vec
-                     (independent/tuple table)
+                     (independent/tuple k)
                      (assoc op :type :ok, :value)))))))))
 
     (teardown! [this test]
@@ -308,24 +307,23 @@
 
 (defn test
   [opts]
-  (let [tables (->> (/ (:concurrency opts)
-                       (count (:nodes opts)))
-                    range
-                    (map (partial str "t")))]
+  (let [ks (->> (/ (:concurrency opts)
+                   (count (:nodes opts)))
+                range)]
     (c/basic-test
       (merge
         {:name        "monotonic"
-         :client      {:client (MonotonicClient. tables (atom false) nil nil)
+         :client      {:client (MonotonicClient. ks 2 (atom false) nil nil)
                        :during (independent/concurrent-generator
                                  (count (:nodes opts))
-                                 tables
-                                 (fn [table]
+                                 ks
+                                 (fn [k]
                                    (->> {:type :invoke, :f :add, :value nil}
                                         (gen/stagger 0.4))))
                        :final (independent/concurrent-generator
                                 (count (:nodes opts))
-                                tables
-                                (fn [table]
+                                ks
+                                (fn [k]
                                   (->> {:type :invoke, :f :read, :value nil}
                                        (gen/stagger 10)
                                        (gen/limit 5))))}
