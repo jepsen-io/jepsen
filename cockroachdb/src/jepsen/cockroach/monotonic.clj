@@ -169,16 +169,17 @@
           :add (locking cnt
                  (c/with-timeout
                    (c/with-txn-retry
-                     (let [rt      (rand-int multitable-spread)
-                           dbtime  (c/db-time c)
-                           v       (swap! cnt inc)
-                           row     {:val v
-                                    :sts dbtime
-                                    :proc (:process op)
-                                    :tb   rt
-                                    :node nodenum}]
-                       (c/insert! c (str "mono" rt) row)
-                       (assoc op :type :ok :value row)))))
+                     (c/with-txn [c c]
+                       (let [rt      (rand-int multitable-spread)
+                             dbtime  (c/db-time c)
+                             v       (swap! cnt inc)
+                             row     {:val v
+                                      :sts dbtime
+                                      :proc (:process op)
+                                      :tb   rt
+                                      :node nodenum}]
+                         (c/insert! c (str "mono" rt) row)
+                         (assoc op :type :ok :value row))))))
 
           :read (c/with-txn-retry
                   (c/with-txn [c c]
