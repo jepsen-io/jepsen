@@ -78,7 +78,8 @@
 (defn save-version!
   "Logs cockroach version to a local file."
   [node]
-  (c/exec cockroach :version :> verlog (c/lit "2>&1")))
+  (c/sudo cockroach-user
+          (c/exec cockroach :version :> verlog (c/lit "2>&1"))))
 
 (defn wrap-env
   [env cmd]
@@ -88,7 +89,7 @@
   "Construct the command line to start a CockroachDB node."
   [& extra-args]
   (concat
-   [:env
+   [;;:env
     ;;:COCKROACH_TIME_UNTIL_STORE_DEAD=5s
     :start-stop-daemon
     :--start :--background
@@ -128,11 +129,13 @@
   "Sets the replication zone on the given node. Returns the new replication
   zone."
   [name zone]
-  (-> (c/cd working-path
-            (c/exec cockroach :zone :set name (when insecure :--insecure)
-                    (yaml/generate-string zone)))
-      (str/replace #"UPDATE .+\n" "")
-      (yaml/parse-string)))
+  (c/sudo cockroach-user
+          (-> (c/cd working-path
+                    (c/exec cockroach :zone :set name
+                            (when insecure :--insecure)
+                            (yaml/generate-string zone)))
+              (str/replace #"UPDATE .+\n" "")
+              (yaml/parse-string))))
 
 (defn install-bumptime!
   "Install time adjusting binary"
@@ -200,7 +203,15 @@
             (info node "Cockroach already running.")
             (do (info node "Starting CockroachDB...")
                 (c/trace (c/exec (runcmd test)))
-                (info node "Cochroach started")))))
+                (info node "Cockroach started"))))
+  :started)
+
+(defn kill!
+  "Kills cockroach on node."
+  [test node]
+  (c/su (c/exec :killall :-9 :cockroach))
+  (info node "Cockroach killed.")
+  :killed)
 
 (def ntpserver "ntp.ubuntu.com")
 

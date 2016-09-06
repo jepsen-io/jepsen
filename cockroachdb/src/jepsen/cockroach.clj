@@ -143,7 +143,7 @@
                 (jepsen/synchronize test)
 
                 (when (= node (jepsen/primary test))
-                  (Thread/sleep 2000)
+                  (Thread/sleep 5000)
                   (auto/set-replication-zone!  ".default"
                                               {:range_min_bytes 1024
                                                :range_max_bytes 1048576})
@@ -157,10 +157,7 @@
         (auto/reset-clock!)
 
         (c/su
-          (info node "Stopping cockroachdb...")
-          (meh (c/exec :timeout :5s cockroach :quit
-                       (if insecure [:--insecure] [])))
-          (meh (c/exec :killall -9 :cockroach))
+          (auto/kill! test node)
 
           (info node "Erasing the store...")
           (c/exec :rm :-rf store-path)

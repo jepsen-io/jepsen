@@ -68,7 +68,7 @@
                                     {:start2 :start,
                                      :stop2 :stop} (:client n2)})}))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;; Nemesis definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;; Nemesis definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; empty nemesis
 (def none
@@ -93,22 +93,13 @@
                     (comp (partial take n) shuffle) "cockroach")
           :clocks false}))
 
-;; start/kill server
-(defn startkill-client
-  [n]
-  (nemesis/node-start-stopper (comp (partial take n) shuffle)
-                              (fn start [t n]
-                                (c/su (c/exec :killall :-9 :cockroach))
-                                [:paused :cockroach])
-                              (fn stop [t n]
-                                (c/su (c/exec (:runcmd t)))
-                                [:resumed :cockroach])))
-
 (defn startkill
   [n]
   (merge nemesis-single-gen
          {:name (str "startkill" (if (> n 1) n ""))
-          :client (startkill-client n)
+          :client (nemesis/node-start-stopper (comp (partial take n) shuffle)
+                                              auto/kill!
+                                              auto/start!)
           :clocks false}))
 
 ;; majorities ring

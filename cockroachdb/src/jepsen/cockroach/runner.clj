@@ -51,7 +51,8 @@
    "start-stop-2"               `(cln/startstop 2)
    "start-kill"                 `(cln/startkill 1)
    "start-kill-2"               `(cln/startkill 2)
-   "skews-start-kill-2"         `(cln/compose cln/small-skews (cln/startkill 2))
+   "skews-start-kill-2"         `(cln/compose cln/subcritical-skews
+                                              (cln/startkill 2))
    "majority-ring-start-kill-2" `(cln/compose cln/majring    (cln/startkill 2))
    "parts-skews"                `(cln/compose cln/parts      cln/small-skews)
    "parts-big-skews"            `(cln/compose cln/parts      cln/big-skews)
