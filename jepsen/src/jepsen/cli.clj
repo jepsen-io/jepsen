@@ -115,6 +115,7 @@ Options:\n")
 (defn validate-tarball
   "Ensures a tarball is present."
   [parsed]
+  (prn :validate-tarball parsed)
   (if (:tarball (:options parsed))
     parsed
     (update parsed :errors conj "No tarball URL provided")))
@@ -130,18 +131,25 @@ Options:\n")
           m
           replacements))
 
+(defn rename-options
+  "Like rename-keys, but takes a parsed map and updates keys in :options."
+  [parsed replacements]
+  (update parsed :options rename-keys replacements))
+
 (defn read-nodes-file
-  "If :nodes-file exists, reads its contents and appends them to :nodes. Drops
-  the default nodes list if it's still there."
-  [options]
-  (if-let [f (:nodes-file options)]
-    (let [nodes (:nodes options)
-          nodes (if (identical? nodes default-nodes)
-                  []
-                  nodes)
-          nodes (into nodes (str/split (slurp f) #"\s*\n\s*"))]
-      (assoc options :nodes nodes))
-    options))
+  "Takes a parsed map. If :nodes-file exists, reads its contents and appends
+  them to :nodes. Drops the default nodes list if it's still there."
+  [parsed]
+  (let [options (:options parsed)]
+    (assoc parsed :options
+           (if-let [f (:nodes-file options)]
+             (let [nodes (:nodes options)
+                   nodes (if (identical? nodes default-nodes)
+                           []
+                           nodes)
+                   nodes (into nodes (str/split (slurp f) #"\s*\n\s*"))]
+               (assoc options :nodes nodes))
+             options))))
 
 ;; Test runner
 
@@ -210,9 +218,9 @@ Options:\n")
           (System/exit 0))
 
         ; Bad args?
-        (when-not (empty? errors)
-          (dorun (map println errors)
-                 (System/exit 254)))
+        (when (seq errors)
+          (dorun (map println errors))
+          (System/exit 254))
 
         ; Run!
         (run parsed-opts)
