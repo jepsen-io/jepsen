@@ -182,16 +182,20 @@
           (Thread/sleep 1000)
 
           (info node "Stopping 1st CockroachDB before starting cluster")
-          (c/exec cockroach :quit (if insecure [:--insecure] []))))
+          (c/exec cockroach :quit (if insecure [:--insecure] []))
+
+          (Thread/sleep 10000)))
 
 (defn runcmd
   "The command to run cockroach for a given test"
-  [test]
+  [test joining?]
   (wrap-env [(str "COCKROACH_LINEARIZABLE="
                  (if (:linearizable test) "true" "false"))
              (str "COCKROACH_MAX_OFFSET=" "250ms")]
             (cockroach-start-cmdline
-              [(str "--join=" (name (jepsen/primary test)))])))
+              (if joining?
+                [(str "--join=" (name (jepsen/primary test)))]
+                []))))
 
 (defn start!
   "Start cockroachdb on node."
@@ -202,14 +206,28 @@
                          (catch RuntimeException e "")))
             (info node "Cockroach already running.")
             (do (info node "Starting CockroachDB...")
-                (c/trace (c/exec (runcmd test)))
+                (c/trace (c/exec (runcmd test false)))
                 (info node "Cockroach started"))))
   :started)
+
+(defn join!
+  "Like start, but for joining an existing node."
+  [test node]
+  (c/sudo cockroach-user
+          (if (not= "" (try
+                         (c/exec :pgrep :cockroach)
+                         (catch RuntimeException e "")))
+            (info node "Cockroach already running.")
+            (do (info node "Starting CockroachDB...")
+                (c/trace (c/exec (runcmd test true)))
+                (info node "Cockroach started"))))
+  :started)
+
 
 (defn kill!
   "Kills cockroach on node."
   [test node]
-  (c/su (c/exec :killall :-9 :cockroach))
+  (util/meh (c/su (c/exec :killall :-9 :cockroach)))
   (info node "Cockroach killed.")
   :killed)
 

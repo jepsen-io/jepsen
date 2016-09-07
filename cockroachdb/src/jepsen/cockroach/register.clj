@@ -39,7 +39,7 @@
   (invoke! [this test op]
     (c/with-idempotent #{:read}
       (c/with-exception->op op
-        (rc/with-conn [c conn]
+        (c/with-conn [c conn]
           (c/with-timeout
             (try
               (c/with-txn [c c]
@@ -74,11 +74,7 @@
                   (throw e)))))))))
 
   (teardown! [this test]
-    (try
-      (c/with-timeout
-        (rc/with-conn [c conn]
-          (j/execute! c ["drop table test"])))
-      (finally (rc/close! conn)))))
+    (rc/close! conn)))
 
 (defn test
   [opts]
@@ -92,7 +88,7 @@
                                (fn [k]
                                  (->> (gen/reserve 5 (gen/mix [w cas]) r)
                                       (gen/stagger 0.1)
-                                      (gen/limit 60))))}
+                                      (gen/limit 500))))}
        :model       (model/cas-register 0)
        :checker     (checker/compose
                       {:perf   (checker/perf)

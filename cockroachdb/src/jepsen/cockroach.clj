@@ -115,6 +115,18 @@
        :close close-conn
        :log? true})))
 
+(defmacro with-conn
+  "Like jepsen.reconnect/with-conn, but also asserts that the connection has
+  not been closed. If it has, throws an ex-info with :type :conn-not-ready.
+  Delays by 1 second to allow time for the DB to recover."
+  [[c client] & body]
+  `(rc/with-conn [~c ~client]
+     (when (.isClosed (j/db-find-connection ~c))
+       (Thread/sleep 1000)
+       (throw (ex-info "Connection not yet ready."
+                       {:type :conn-not-ready})))
+     ~@body))
+
 (defn db
   "Sets up and tears down CockroachDB."
   [opts]
@@ -133,17 +145,18 @@
 
         (c/sudo cockroach-user
                 (when (= node (jepsen/primary test))
-                  (auto/init! node))
+                  (auto/start! test node)
+                  (Thread/sleep 10000))
 
                 (jepsen/synchronize test)
                 (auto/packet-capture! node)
                 (auto/save-version! node)
-                (auto/start! test node)
+                (when (not= node (jepsen/primary test))
+                  (auto/join! test node))
 
                 (jepsen/synchronize test)
-
                 (when (= node (jepsen/primary test))
-                  (Thread/sleep 5000)
+                  (Thread/sleep 2000)
                   (auto/set-replication-zone!  ".default"
                                               {:range_min_bytes 1024
                                                :range_max_bytes 1048576})
@@ -244,7 +257,16 @@
         {:type :info, :error [:batch-update m']})
 
       org.postgresql.util.PSQLException
-      {:type :info, :error [:psql-exception m]}
+      (condp re-find (.getMessage e)
+        #"Connection .+? refused"
+        {:type :fail, :error :connection-refused}
+
+        {:type :info, :error [:psql-exception m]})
+
+      clojure.lang.ExceptionInfo
+      (condp = (:type (ex-data e))
+        :conn-not-ready {:type :fail, :error :conn-not-ready}
+        nil)
 
       (condp re-find m
         #"^timeout$"
