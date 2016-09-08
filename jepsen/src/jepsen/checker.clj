@@ -17,6 +17,23 @@
                      [history :as history]]
             [knossos.linear.report :as linear.report]))
 
+(def valid-priorities
+  "A map of :valid? values to their importance. Larger numbers are considered
+  more signficant and dominate when checkers are composed."
+  {true      0
+   false     1
+   :unknown  0.5})
+
+(defn merge-valid
+  "Merge n :valid values, yielding the one with the highest priority."
+  [valids]
+  (reduce (fn [v1 v2]
+            (if (< (valid-priorities v1)
+                   (valid-priorities v2))
+              v2
+              v1))
+          valids))
+
 (defprotocol Checker
   (check [checker test model history opts]
          "Verify the history is correct. Returns a map like
@@ -37,13 +54,13 @@
 (defn check-safe
   "Like check, but wraps exceptions up and returns them as a map like
 
-  {:valid? nil :error \"...\"}"
+  {:valid? :unknown :error \"...\"}"
   ([checker test model history]
    (check-safe checker test model history {}))
   ([checker test model history opts]
    (try (check checker test model history opts)
         (catch Throwable t
-          {:valid? false
+          {:valid? :unknown
            :error (with-out-str (trace/print-cause-trace t))}))))
 
 (def unbridled-optimism
@@ -266,7 +283,7 @@
                          (pmap (fn [[k checker]]
                                  [k (check checker test model history opts)]))
                          (into {}))]
-        (assoc results :valid? (every? :valid? (vals results)))))))
+        (assoc results :valid? (merge-valid (map :valid? (vals results))))))))
 
 (defn latency-graph
   "Spits out graphs of latencies."
