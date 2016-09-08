@@ -94,8 +94,8 @@
   [default]
   ["-u" "--tarball URL" "URL for the DB tarball to install. May be either HTTP, HTTPS, or a local file present on each of the DB nodes. For instance, --tarball https://foo.com/db.tgz, or file:///tmp/db.tgz"
    :default default
-   :validate [(partial re-find #"^(file|https?)://.*\.(tar)")
-              "Must be a file://, http://, or https:// URL including .tar"]])
+   :validate [(partial re-find #"^(file|https?)://.*\.(tar|tgz)")
+              "Must be a file://, http://, or https:// URL including .tar or .tgz"]])
 
 (defn test-usage
   []
@@ -115,7 +115,6 @@ Options:\n")
 (defn validate-tarball
   "Ensures a tarball is present."
   [parsed]
-  (prn :validate-tarball parsed)
   (if (:tarball (:options parsed))
     parsed
     (update parsed :errors conj "No tarball URL provided")))
