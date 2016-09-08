@@ -251,15 +251,28 @@
       {:type :fail, :error [:rollback m]}
 
       java.sql.BatchUpdateException
-      (let [m' (if (re-find #"getNextExc" m)
-                 (.getMessage (.getNextException e))
-                 m)]
-        {:type :info, :error [:batch-update m']})
+      (if (re-find #"getNextExc" m)
+        ; Wrap underlying exception error with [:batch ...]
+        (when-let [op (exception->op (.getNextException e))]
+          (update op :error (partial vector :batch)))
+        {:type :info, :error [:batch-update m]})
 
       org.postgresql.util.PSQLException
       (condp re-find (.getMessage e)
         #"Connection .+? refused"
         {:type :fail, :error :connection-refused}
+
+        #"context deadline exceeded"
+        {:type :fail, :error :context-deadline-exceeded}
+
+        #"rejecting command with timestamp in the future"
+        {:type :fail, :error :reject-command-future-timestamp}
+
+        #"encountered previous write with future timestamp"
+        {:type :fail, :error :previous-write-future-timestamp}
+
+        #"restart transaction"
+        {:type :fail, :error [:restart-transaction m]}
 
         {:type :info, :error [:psql-exception m]})
 

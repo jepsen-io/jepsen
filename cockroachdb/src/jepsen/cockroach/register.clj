@@ -86,9 +86,10 @@
                                10
                                (range)
                                (fn [k]
-                                 (->> (gen/reserve 5 (gen/mix [w cas]) r)
-                                      (gen/stagger 0.1)
-                                      (gen/limit 500))))}
+                                 (->> (gen/reserve 5 (gen/mix [w cas cas]) r)
+                                      (gen/delay 1/2)
+                                      (gen/stagger 1)
+                                      (gen/limit 200))))}
        :model       (model/cas-register 0)
        :checker     (checker/compose
                       {:perf   (checker/perf)

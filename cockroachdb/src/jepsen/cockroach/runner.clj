@@ -56,7 +56,9 @@
    "majority-ring-start-kill-2" `(cln/compose cln/majring    (cln/startkill 2))
    "parts-skews"                `(cln/compose cln/parts      cln/small-skews)
    "parts-big-skews"            `(cln/compose cln/parts      cln/big-skews)
+   "parts-strobe-skews"         `(cln/compose cln/parts      cln/strobe-skews)
    "parts-start-kill-2"         `(cln/compose cln/parts      (cln/startkill 2))
+   "start-kill-2-strobe-skews" `(cln/compose (cln/startkill 2) cln/strobe-skews)
    "majority-ring-skews"        `(cln/compose cln/majring    cln/small-skews)
    "start-stop-skews"           `(cln/compose cln/startstop  cln/small-skews)})
 
@@ -97,10 +99,10 @@
            :opt-fn (fn [parsed]
                      (-> parsed
                          jc/validate-tarball
-                         (update :options jc/rename-keys {:node    :nodes
-                                                          :nemesis :nemeses
-                                                          :test    :test-fns})
-                         (update :options jc/read-nodes-file)))
+                         (jc/rename-options {:node    :nodes
+                                             :nemesis :nemeses
+                                             :test    :test-fns})
+                         jc/read-nodes-file))
            :usage (jc/test-usage)
            :run (fn [{:keys [options]}]
                   (prn :running)
