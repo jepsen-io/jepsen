@@ -71,7 +71,8 @@
      [:td {:style (str "background: " (case (:valid? r)
                                         true            "#ADF6B0"
                                         false           "#F6AEAD"
-                                        :unknown        "#F3F6AD"))}
+                                        :unknown        "#F3F6AD"
+                                                        "#eaeaea"))}
       (:valid? r)]
      [:td [:a {:href (url t "results.edn")} "results.edn"]]
      [:td [:a {:href (url t "history.txt")} "history.txt"]]]))
