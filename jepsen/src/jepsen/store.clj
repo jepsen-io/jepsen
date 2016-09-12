@@ -24,7 +24,13 @@
 (def base-dir "store")
 
 (def write-handlers
-  (-> {org.joda.time.DateTime
+  (-> {clojure.lang.Atom
+       {"atom" (reify WriteHandler
+                 (write [_ w a]
+                   (.writeTag    w "atom" 1)
+                   (.writeObject w @a)))}
+
+       org.joda.time.DateTime
        {"date-time" (reify WriteHandler
                       (write [_ w t]
                         (.writeTag    w "date-time" 1)
@@ -65,7 +71,11 @@
       fress/inheritance-lookup))
 
 (def read-handlers
-  (-> {"date-time" (reify ReadHandler
+  (-> {"atom"      (reify ReadHandler
+                     (read [_ rdr tag component-count]
+                       (atom (.readObject rdr))))
+
+       "date-time" (reify ReadHandler
                      (read [_ rdr tag component-count]
                        (time.format/parse
                          (:basic-date-time time.local/*local-formatters*)
