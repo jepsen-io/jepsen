@@ -5,9 +5,12 @@
              [control :as c]
              [nemesis :as nemesis]
              [generator :as gen]
+             [reconnect :as rc]
              [util :as util]]
             [jepsen.nemesis.time :as nt]
+            [jepsen.cockroach.client :as cc]
             [jepsen.cockroach.auto :as auto]
+            [clojure.java.jdbc :as j]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]))
 
@@ -201,3 +204,74 @@
 (def critical-skews     (skew "critical-skews"    0.250))
 (def big-skews          (skew "big-skews"         0.5))
 (def huge-skews         (skew "huge-skews"        60))
+
+(defn split-nemesis
+  "A client that looks at the test's :keyrange and performs a split just below
+  the most recently written key."
+  ([]
+   (split-nemesis nil))
+  ([clients]
+   (reify client/Client
+     (setup! [this test _]
+       (split-nemesis (mapv cc/client (:nodes test))))
+
+     (invoke! [this test op]
+       (rc/with-conn [c (rand-nth clients)]
+         (let [keyrange @(:keyrange test)]
+           (if (empty? keyrange)
+             (assoc op :value :nothing-to-split)
+             (let [[table [lower upper]]  (rand-nth (vec keyrange))
+                   k                      (dec upper)]
+               (try (cc/split! c table k)
+                    (assoc op :value [:split table k])
+                    (catch org.postgresql.util.PSQLException e
+                      (if (re-find #"range is already split" (.getMessage e))
+                        (assoc op :value [:already-split table k])
+                        (throw e)))))))))
+
+     (teardown! [this test]
+       (mapv rc/close! clients)))))
+
+(def split
+  {:during {:type :info, :f :split}
+   :final  nil
+   :name   "splits"
+   :client (split-nemesis)
+   :clocks false})
+
+(defn compose
+  "Takes a collection of nemesis maps, each with a :name, :during and :final
+  generators, and a :client. Creates a merged nemesis map, with a generator
+  that emits a mix of operations destined for each nemesis, and a composed
+  nemesis that maps those back to their originals."
+  [nemeses]
+  (assert (distinct? (map :names nemeses)))
+  (let [; unwrap :f [name, inner] -> :f inner
+        nemesis (->> nemeses
+                     (map (fn [nem]
+                            (let [my-name (:name nem)]
+                              ; Function that selects our specific ops
+                              [(fn f-select [[name f]]
+                                 (when (= name my-name) f))
+                               nem])))
+                     (into {})
+                     nemesis/compose)
+       ; wrap :f inner -> :f [name, inner]
+       during (->> nemeses
+                   (map (fn [nemesis]
+                          (let [gen  (:during nemesis)
+                                name (:name nemesis)]
+                            (reify gen/Generator
+                              (op [_ test process]
+                                (update (op gen test process)
+                                        :f
+                                        (partial vector name)))))))
+                   gen/mix)
+       final (->> nemeses
+                  (map :final)
+                  (apply gen/concat))]
+    {:name   (str/join " + " (map :name nemeses))
+     :clocks (reduce #(or %1 %2) (map :clocks nemeses))
+     :client nemesis
+     :during during
+     :final  final}))

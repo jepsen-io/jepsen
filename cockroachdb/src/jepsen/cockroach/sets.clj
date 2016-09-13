@@ -1,13 +1,14 @@
 (ns jepsen.cockroach.sets
   "Set test"
   (:refer-clojure :exclude [test])
-  (:require [jepsen [cockroach :as c]
-             [client :as client]
-             [checker :as checker]
-             [generator :as gen]
-             [independent :as independent]
-             [reconnect :as rc]
-             [util :as util :refer [meh]]]
+  (:require [jepsen [cockroach :as cockroach]
+                    [client :as client]
+                    [checker :as checker]
+                    [generator :as gen]
+                    [independent :as independent]
+                    [reconnect :as rc]
+                    [util :as util :refer [meh]]]
+            [jepsen.cockroach.client :as c]
             [jepsen.cockroach.nemesis :as cln]
             [clojure.java.jdbc :as j]
             [clojure.core.reducers :as r]
@@ -132,7 +133,7 @@
 
 (defn test
   [opts]
-  (c/basic-test
+  (cockroach/basic-test
     (merge
       {:name        "set"
        :client      {:client (SetsClient. (atom false) nil)

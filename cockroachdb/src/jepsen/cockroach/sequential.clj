@@ -15,13 +15,14 @@
   Splits keys up onto different tables to make sure they fall in different
   shard ranges"
   (:refer-clojure :exclude [test])
-  (:require [jepsen [cockroach :as c]
-             [client :as client]
-             [checker :as checker]
-             [generator :as gen]
-             [independent :as independent]
-             [util :as util :refer [meh]]
-             [reconnect :as rc]]
+  (:require [jepsen [cockroach :as cockroach]
+                    [client :as client]
+                    [checker :as checker]
+                    [generator :as gen]
+                    [independent :as independent]
+                    [util :as util :refer [meh]]
+                    [reconnect :as rc]]
+            [jepsen.cockroach.client :as c]
             [jepsen.cockroach.nemesis :as cln]
             [clojure.java.jdbc :as j]
             [clojure.core.reducers :as r]
@@ -160,7 +161,7 @@
 (defn test
   [opts]
   (let [gen (gen 30)]
-    (c/basic-test
+    (cockroach/basic-test
       (merge
         {:name "sequential"
          :key-count 5

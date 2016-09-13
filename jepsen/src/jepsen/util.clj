@@ -315,28 +315,29 @@
 (defn integer-interval-set-str
   "Takes a set of integers and yields a sorted, compact string representation."
   [set]
-  (assert (not-any? nil? set))
-       (let [[runs start end]
-             (reduce (fn r [[runs start end] cur]
-                       (cond ; Start new run
-                             (nil? start) [runs cur cur]
+  (if (some nil? set)
+    (str set)
+    (let [[runs start end]
+          (reduce (fn r [[runs start end] cur]
+                    (cond ; Start new run
+                          (nil? start) [runs cur cur]
 
-                             ; Continue run
-                             (= cur (inc end)) [runs start cur]
+                          ; Continue run
+                          (= cur (inc end)) [runs start cur]
 
-                             ; Break!
-                             :else [(conj runs [start end]) cur cur]))
-                     [[] nil nil]
-                     (sort set))
-             runs (if (nil? start) runs (conj runs [start end]))]
-         (str "#{"
-              (->> runs
-                   (map (fn m [[start end]]
-                          (if (= start end)
-                            start
-                            (str start ".." end))))
-                   (str/join " "))
-              "}")))
+                          ; Break!
+                          :else [(conj runs [start end]) cur cur]))
+                  [[] nil nil]
+                  (sort set))
+          runs (if (nil? start) runs (conj runs [start end]))]
+      (str "#{"
+           (->> runs
+                (map (fn m [[start end]]
+                       (if (= start end)
+                         start
+                         (str start ".." end))))
+                (str/join " "))
+           "}"))))
 
 (defmacro meh
   "Returns, rather than throws, exceptions."

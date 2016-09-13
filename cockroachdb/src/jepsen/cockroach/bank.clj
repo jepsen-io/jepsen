@@ -1,14 +1,15 @@
 (ns jepsen.cockroach.bank
   "Simulates transfers between bank accounts"
   (:refer-clojure :exclude [test])
-  (:require [jepsen [cockroach :as c]
-             [client :as client]
-             [checker :as checker]
-             [generator :as gen]
-             [independent :as independent]
-             [reconnect :as rc]
-             [util :as util :refer [meh]]]
-            [jepsen.cockroach.nemesis :as cln]
+  (:require [jepsen [cockroach :as cockroach]
+                    [client :as client]
+                    [checker :as checker]
+                    [generator :as gen]
+                    [independent :as independent]
+                    [reconnect :as rc]
+                    [util :as util :refer [meh]]]
+            [jepsen.cockroach [client :as c]
+                              [nemesis :as cln]]
             [clojure.core.reducers :as r]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer :all]
@@ -137,7 +138,7 @@
 
 (defn bank-test-base
   [opts]
-  (c/basic-test
+  (cockroach/basic-test
     (merge
       {:client      {:client (:client opts)
                      :during (->> (gen/mix [bank-read bank-diff-transfer])

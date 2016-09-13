@@ -1,13 +1,14 @@
 (ns jepsen.cockroach.monotonic
   "Monotonic inserts over multiple tables"
   (:refer-clojure :exclude [test])
-  (:require [jepsen [cockroach :as c]
+  (:require [jepsen [cockroach :as cockroach]
                     [client :as client]
                     [checker :as checker]
                     [generator :as gen]
                     [independent :as independent]
                     [reconnect :as rc]
                     [util :as util :refer [meh]]]
+            [jepsen.cockroach.client :as c]
             [jepsen.cockroach.nemesis :as cln]
             [jepsen.cockroach.auto :as auto]
             [clojure.core.reducers :as r]
@@ -68,6 +69,7 @@
 (defrecord MonotonicClient [independent-keys
                             table-count
                             table-created?
+                            ids
                             conn
                             nodenum]
   client/Client
@@ -93,23 +95,26 @@
       (c/with-exception->op op
         (rc/with-conn [c conn]
           (case (:f op)
-            :add
-            (c/with-timeout
-              (c/with-txn-retry-as-fail op
-                (c/with-txn [c c]
-                  (let [;dbtime (c/db-time c)
-                        cur-max   (q-max c :val tables)
-                        dbtime    (c/db-time c)
-                        table-num (rand-int table-count)
-                        row {:val      (inc cur-max)
-                             :sts      dbtime
-                             :node     nodenum
-                             :process  (:process op)
-                             :tb       table-num}]
-                    (c/insert! c (table-name k table-num) row)
-                    (assoc op
-                           :type :ok
-                           :value (independent/tuple k row))))))
+            :add (c/with-txn-retry-as-fail op
+                   (let [row (c/with-timeout
+                               (c/with-txn [c c]
+                                 (let [;dbtime (c/db-time c)
+                                       cur-max   (q-max c :val tables)
+                                       dbtime    (c/db-time c)
+                                       table-num (rand-int table-count)
+                                       row {:val      (inc cur-max)
+                                            :sts      dbtime
+                                            :node     nodenum
+                                            :process  (:process op)
+                                            :tb       table-num}]
+                                   (c/insert-with-rowid!
+                                     c (table-name k table-num) row))))]
+                   (cockroach/update-keyrange! test
+                                       (table-name k (:tb row))
+                                       (:rowid row))
+                   (assoc op
+                          :type :ok
+                          :value (independent/tuple k (dissoc row :rowid)))))
 
             :read
             (c/with-txn-retry
@@ -309,11 +314,14 @@
   [opts]
   (let [ks (->> (/ (:concurrency opts)
                    (count (:nodes opts)))
-                range)]
-    (c/basic-test
+                range)
+        keyrange (atom {})]
+    (cockroach/basic-test
       (merge
         {:name        "monotonic"
-         :client      {:client (MonotonicClient. ks 2 (atom false) nil nil)
+         :keyrange    keyrange
+         :client      {:client (MonotonicClient. ks 2 (atom false)
+                                                 (atom -1) nil nil)
                        :during (independent/concurrent-generator
                                  (count (:nodes opts))
                                  ks
@@ -336,7 +344,7 @@
 
 (defn multitable-test
   [opts]
-  (c/basic-test
+  (cockroach/basic-test
     (merge
       {:name        "monotonic-multitable"
        :client      {:client (MultitableClient. (atom false) (atom 0) nil nil)

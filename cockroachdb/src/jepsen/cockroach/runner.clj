@@ -47,6 +47,7 @@
    "big-skews"                  `cln/big-skews
    "huge-skews"                 `cln/huge-skews
    "strobe-skews"               `cln/strobe-skews
+   "split"                      `cln/split
    "start-stop"                 `(cln/startstop 1)
    "start-stop-2"               `(cln/startstop 2)
    "start-kill"                 `(cln/startkill 1)
