@@ -88,6 +88,7 @@
   [node]
   (info node "copying mongod.log & stdout.log file to /root/")
   (c/su
+    (c/exec :touch "/opt/mongodb/mongod.log" "/opt/mongodb/stdout.log")
     (c/exec :cp :-f "/opt/mongodb/mongod.log" "/opt/mongodb/stdout.log" "/root/")))
 
 (defn wipe!
