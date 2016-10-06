@@ -19,6 +19,12 @@
   (as-file [p] (.toFile p))
   (as-url [p] (.toURL (.toURI p))))
 
+(defn url-encode-path-components
+  "URL encodes *individual components* of a path, leaving / as / instead of
+  encoded."
+  [x]
+  (str/replace (java.net.URLEncoder/encode x) #"%2F" "/"))
+
 (defn fast-tests
   "Abbreviated set of tests"
   []
@@ -32,7 +38,7 @@
                            (catch java.io.FileNotFoundException e
                              ; Incomplete test
                              nil)))
-                      runs)))))
+                       runs)))))
 
 (defn test-header
   []
@@ -53,13 +59,15 @@
 (defn url
   "Takes a test and filename components; returns a URL for that file."
   [t & args]
-  (str "/files/" (str/replace (.getPath (apply store/path t args))
-                              #"^store/" "")))
+  (url-encode-path-components
+    (str "/files/" (str/replace (.getPath (apply store/path t args))
+                                #"^store/" ""))))
 
 (defn file-url
   "URL for a File"
   [f]
-  (str "/files/" (->> f io/file .toPath (relative-path store/base-dir))))
+  (url-encode-path-components
+    (str "/files/" (->> f io/file .toPath (relative-path store/base-dir)))))
 
 (defn test-row
   "Turns a test map into a table row."
