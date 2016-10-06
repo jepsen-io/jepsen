@@ -61,7 +61,7 @@
     :default false]
 
    (jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
-                    [`cln/none]
+                    [`(cln/none)]
                     nemeses)
 
    (jc/repeated-opt nil "--nemesis2 NAME" "An additional nemesis to mix in"
@@ -103,10 +103,10 @@
            :run (fn [{:keys [options]}]
                   (prn :running)
                   (pprint options)
-                  (doseq [test-fn  (:test-fns options)
+                  (doseq [i        (range (:test-count options))
+                          test-fn  (:test-fns options)
                           nemesis1 (:nemeses options)
-                          nemesis2 (:nemeses2 options)
-                          i       (range (:test-count options))]
+                          nemesis2 (:nemeses2 options)]
                     ; Rehydrate test and run
                     (let [nemesis  (cln/compose [(eval nemesis1)
                                                  (eval nemesis2)])

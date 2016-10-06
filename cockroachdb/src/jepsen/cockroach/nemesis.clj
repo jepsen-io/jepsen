@@ -115,9 +115,9 @@
 ;; empty nemesis
 (defn none
   []
-  (merge nemesis-no-gen
+  (merge (nemesis-no-gen)
          {:name "blank"
-          :client (nemesis/noop)
+          :client nemesis/noop
           :clocks false}))
 
 ;; random partitions
