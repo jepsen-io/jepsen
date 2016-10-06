@@ -14,6 +14,13 @@
            (java.io File
                     RandomAccessFile)))
 
+(defn name+
+  "Tries name, falls back to pr-str."
+  [x]
+  (if (instance? clojure.lang.Named x)
+    (name x))
+    (pr-str x))
+
 (defn real-pmap
   "Like pmap, but launches futures instead of using a bounded threadpool."
   [f coll]
@@ -311,6 +318,18 @@
   "Maps values in a map."
   [f m]
   (map-kv (fn [[k v]] [k (f v)]) m))
+
+(defn poly-compare
+  "Comparator function for sorting heterogenous collections."
+  [a b]
+  (try (compare a b)
+       (catch java.lang.ClassCastException e
+         (compare (str (class a)) (str (class b))))))
+
+(defn polysort
+  "Sort, but on heterogenous collections."
+  [coll]
+  (sort poly-compare coll))
 
 (defn integer-interval-set-str
   "Takes a set of integers and yields a sorted, compact string representation."
