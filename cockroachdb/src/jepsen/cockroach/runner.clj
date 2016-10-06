@@ -38,30 +38,20 @@
 
 (def nemeses
   "Supported nemeses"
-  {"none"                       `cln/none
-   "parts"                      `cln/parts
-   "majority-ring"              `cln/majring
-   "small-skews"                `cln/small-skews
-   "subcritical-skews"          `cln/subcritical-skews
-   "critical-skews"             `cln/critical-skews
-   "big-skews"                  `cln/big-skews
-   "huge-skews"                 `cln/huge-skews
-   "strobe-skews"               `cln/strobe-skews
-   "split"                      `cln/split
+  {"none"                       `(cln/none)
+   "parts"                      `(cln/parts)
+   "majority-ring"              `(cln/majring)
+   "small-skews"                `(cln/small-skews)
+   "subcritical-skews"          `(cln/subcritical-skews)
+   "critical-skews"             `(cln/critical-skews)
+   "big-skews"                  `(cln/big-skews)
+   "huge-skews"                 `(cln/huge-skews)
+   "strobe-skews"               `(cln/strobe-skews)
+   "split"                      `(cln/split)
    "start-stop"                 `(cln/startstop 1)
    "start-stop-2"               `(cln/startstop 2)
    "start-kill"                 `(cln/startkill 1)
-   "start-kill-2"               `(cln/startkill 2)
-   "skews-start-kill-2"         `(cln/compose cln/subcritical-skews
-                                              (cln/startkill 2))
-   "majority-ring-start-kill-2" `(cln/compose cln/majring    (cln/startkill 2))
-   "parts-skews"                `(cln/compose cln/parts      cln/small-skews)
-   "parts-big-skews"            `(cln/compose cln/parts      cln/big-skews)
-   "parts-strobe-skews"         `(cln/compose cln/parts      cln/strobe-skews)
-   "parts-start-kill-2"         `(cln/compose cln/parts      (cln/startkill 2))
-   "start-kill-2-strobe-skews" `(cln/compose (cln/startkill 2) cln/strobe-skews)
-   "majority-ring-skews"        `(cln/compose cln/majring    cln/small-skews)
-   "start-stop-skews"           `(cln/compose cln/startstop  cln/small-skews)})
+   "start-kill-2"               `(cln/startkill 2)})
 
 (def opt-spec
   "Command line options for tools.cli"
@@ -72,6 +62,10 @@
 
    (jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
                     [`cln/none]
+                    nemeses)
+
+   (jc/repeated-opt nil "--nemesis2 NAME" "An additional nemesis to mix in"
+                    [nil]
                     nemeses)
 
    ["-o" "--os NAME" "debian, ubuntu, or none"
@@ -100,21 +94,27 @@
            :opt-fn (fn [parsed]
                      (-> parsed
                          jc/validate-tarball
-                         (jc/rename-options {:node    :nodes
-                                             :nemesis :nemeses
-                                             :test    :test-fns})
+                         (jc/rename-options {:node      :nodes
+                                             :nemesis   :nemeses
+                                             :nemesis2  :nemeses2
+                                             :test      :test-fns})
                          jc/read-nodes-file))
            :usage (jc/test-usage)
            :run (fn [{:keys [options]}]
                   (prn :running)
                   (pprint options)
-                  (doseq [test-fn (:test-fns options)
-                          nemesis (:nemeses options)
+                  (doseq [test-fn  (:test-fns options)
+                          nemesis1 (:nemeses options)
+                          nemesis2 (:nemeses2 options)
                           i       (range (:test-count options))]
                     ; Rehydrate test and run
-                    (let [test (-> options
-                                   (dissoc :test-fns)
-                                   (assoc :nemesis (eval nemesis))
+                    (let [nemesis  (cln/compose [(eval nemesis1)
+                                                 (eval nemesis2)])
+                          _ (pprint :nemesis)
+                          _ (pprint nemesis)
+                          test (-> options
+                                   (dissoc :test-fns :nemeses :nemeses2)
+                                   (assoc :nemesis nemesis)
                                    test-fn
                                    log-test
                                    jepsen/run!)]

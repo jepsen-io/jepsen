@@ -11,6 +11,7 @@
             [jepsen.cockroach.client :as cc]
             [jepsen.cockroach.auto :as auto]
             [clojure.java.jdbc :as j]
+            [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]))
 
@@ -28,18 +29,21 @@
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
-(def nemesis-no-gen
+(defn nemesis-no-gen
+  []
   {:during gen/void
    :final gen/void})
 
-(def nemesis-single-gen
+(defn nemesis-single-gen
+  []
   {:during (gen/seq (cycle [(gen/sleep nemesis-delay)
                             {:type :info, :f :start}
                             (gen/sleep nemesis-duration)
                             {:type :info, :f :stop}]))
    :final (gen/once {:type :info, :f :stop})})
 
-(def nemesis-double-gen
+(defn nemesis-double-gen
+  []
   {:during (gen/seq (cycle [(gen/sleep nemesis-delay)
                             {:type :info, :f :start1}
                             (gen/sleep (/ nemesis-duration 2))
@@ -58,39 +62,76 @@
                             {:type :info, :f :stop1}
                             ]))
    :final (gen/seq [{:type :info, :f :stop1}
-                    {:type :info, :f :stop2}])
-   })
+                    {:type :info, :f :stop2}])})
 
 (defn compose
-  [n1 n2]
-  (merge nemesis-double-gen
-         {:name (str (:name n1) "-" (:name n2))
-          :clocks (or (:clocks n1) (:clocks n2))
-          :client (nemesis/compose {{:start1 :start,
-                                     :stop1 :stop} (:client n1)
-                                    {:start2 :start,
-                                     :stop2 :stop} (:client n2)})}))
+  "Takes a collection of nemesis maps, each with a :name, :during and :final
+  generators, and a :client. Creates a merged nemesis map, with a generator
+  that emits a mix of operations destined for each nemesis, and a composed
+  nemesis that maps those back to their originals."
+  [nemeses]
+  (let [nemeses (remove nil? nemeses)]
+    (assert (distinct? (map :names nemeses)))
+    (let [; unwrap :f [name, inner] -> :f inner
+          nemesis (->> nemeses
+                       (map (fn [nem]
+                              (let [my-name (:name nem)]
+                                ; Function that selects our specific ops
+                                [(fn f-select [[name f]]
+                                   (when (= name my-name)
+                                     (assert (not (nil? f)))
+                                     f))
+                                 (:client nem)])))
+                       (into {})
+                       ((fn [x] (pprint [:nemesis-map x]) x))
+                       nemesis/compose)
+          ; wrap :f inner -> :f [name, inner]
+          during (->> nemeses
+                      (map (fn [nemesis]
+                             (let [gen  (:during nemesis)
+                                   name (:name nemesis)]
+                               (reify gen/Generator
+                                 (op [_ test process]
+                                   (when-let [op (gen/op gen test process)]
+                                     (update op :f (partial vector name))))))))
+                      gen/mix)
+          final (->> nemeses
+                     (map (fn [nemesis]
+                            (let [gen  (:final nemesis)
+                                  name (:name nemesis)]
+                              (reify gen/Generator
+                                (op [_ test process]
+                                   (when-let [op (gen/op gen test process)]
+                                     (update op :f (partial vector name))))))))
+                     (apply gen/concat))]
+      {:name   (str/join "+" (map :name nemeses))
+       :clocks (reduce #(or %1 %2) (map :clocks nemeses))
+       :client nemesis
+       :during during
+       :final  final})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Nemesis definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; empty nemesis
-(def none
+(defn none
+  []
   (merge nemesis-no-gen
          {:name "blank"
-          :client nemesis/noop
+          :client (nemesis/noop)
           :clocks false}))
 
 ;; random partitions
-(def parts
+(defn parts
+  []
   {:name "parts"
-   :generator nemesis-single-gen
+   :generator (nemesis-single-gen)
    :client (nemesis/partition-random-halves)
    :clocks false})
 
 ;; start/stop server
 (defn startstop
   [n]
-  (merge nemesis-single-gen
+  (merge (nemesis-single-gen)
          {:name (str "startstop" (if (> n 1) n ""))
           :client (nemesis/hammer-time
                     (comp (partial take n) shuffle) "cockroach")
@@ -98,7 +139,7 @@
 
 (defn startkill
   [n]
-  (merge nemesis-single-gen
+  (merge (nemesis-single-gen)
          {:name (str "startkill" (if (> n 1) n ""))
           :client (nemesis/node-start-stopper (comp (partial take n) shuffle)
                                               auto/kill!
@@ -106,8 +147,9 @@
           :clocks false}))
 
 ;; majorities ring
-(def majring
-  (merge nemesis-single-gen
+(defn majring
+  []
+  (merge (nemesis-single-gen)
          {:name "majring"
           :client (nemesis/partition-majorities-ring)
           :clocks false}))
@@ -157,7 +199,8 @@
       (teardown! [this test]
         (auto/reset-clocks! test)))))
 
-(def strobe-skews
+(defn strobe-skews
+  []
   ; This nemesis takes time to run for start, so we don't include any sleeping.
   {:during (gen/seq (cycle [{:type :info, :f :start}
                             {:type :info, :f :stop}]))
@@ -194,16 +237,16 @@
 (defn skew
   "A skew nemesis"
   [name offset]
-  (merge nemesis-single-gen
+  (merge (nemesis-single-gen)
          {:name   name
           :client (bump-time offset)
           :clocks true}))
 
-(def small-skews        (skew "small-skews"       0.100))
-(def subcritical-skews  (skew "subcritical-skews" 0.200))
-(def critical-skews     (skew "critical-skews"    0.250))
-(def big-skews          (skew "big-skews"         0.5))
-(def huge-skews         (skew "huge-skews"        60))
+(defn small-skews        [] (skew "small-skews"       0.100))
+(defn subcritical-skews  [] (skew "subcritical-skews" 0.200))
+(defn critical-skews     [] (skew "critical-skews"    0.250))
+(defn big-skews          [] (skew "big-skews"         0.5))
+(defn huge-skews         [] (skew "huge-skews"        60))
 
 (defn split-nemesis
   "A client that looks at the test's :keyrange and performs a split just below
@@ -232,46 +275,10 @@
      (teardown! [this test]
        (mapv rc/close! clients)))))
 
-(def split
+(defn split
+  []
   {:during {:type :info, :f :split}
    :final  nil
    :name   "splits"
    :client (split-nemesis)
    :clocks false})
-
-(defn compose
-  "Takes a collection of nemesis maps, each with a :name, :during and :final
-  generators, and a :client. Creates a merged nemesis map, with a generator
-  that emits a mix of operations destined for each nemesis, and a composed
-  nemesis that maps those back to their originals."
-  [nemeses]
-  (assert (distinct? (map :names nemeses)))
-  (let [; unwrap :f [name, inner] -> :f inner
-        nemesis (->> nemeses
-                     (map (fn [nem]
-                            (let [my-name (:name nem)]
-                              ; Function that selects our specific ops
-                              [(fn f-select [[name f]]
-                                 (when (= name my-name) f))
-                               nem])))
-                     (into {})
-                     nemesis/compose)
-       ; wrap :f inner -> :f [name, inner]
-       during (->> nemeses
-                   (map (fn [nemesis]
-                          (let [gen  (:during nemesis)
-                                name (:name nemesis)]
-                            (reify gen/Generator
-                              (op [_ test process]
-                                (update (op gen test process)
-                                        :f
-                                        (partial vector name)))))))
-                   gen/mix)
-       final (->> nemeses
-                  (map :final)
-                  (apply gen/concat))]
-    {:name   (str/join " + " (map :name nemeses))
-     :clocks (reduce #(or %1 %2) (map :clocks nemeses))
-     :client nemesis
-     :during during
-     :final  final}))
