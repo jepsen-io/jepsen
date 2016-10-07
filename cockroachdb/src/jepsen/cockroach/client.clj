@@ -226,8 +226,11 @@
   "Like jdbc query, but includes a default timeout."
   ([conn expr]
    (query conn expr {}))
-  ([conn expr opts]
-   (j/query conn expr (assoc opts :timeout timeout-delay))))
+  ([conn [sql & params] opts]
+   (let [s (j/prepare-statement (j/db-find-connection conn)
+                                sql
+                                {:timeout timeout-delay})]
+     (j/query conn (into [s] params) opts))))
 
 (defn insert!
   "Like jdbc insert!, but includes a default timeout."
@@ -273,4 +276,4 @@
 (defn split!
   "Split the given table at the given key."
   [conn table k]
-  (j/query conn [(str "alter table " (name table) " split at (" k ")")]))
+  (query conn [(str "alter table " (name table) " split at (" k ")")]))

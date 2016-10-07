@@ -185,16 +185,17 @@
                          (c/insert! c (str "mono" rt) row)
                          (assoc op :type :ok :value row))))))
 
-          :read (c/with-txn-retry
-                  (c/with-txn [c c]
-                    (->> (range multitable-spread)
-                         (mapcat (fn [x]
-                                   (c/query c [(str "select * from mono" x
-                                                    " where node <> -1")]
-                                            {:row-fn parse-row})))
-                         (sort-by :sts)
-                         vec
-                         (assoc op :type :ok, :value))))))))
+          :read (util/timeout 30000 (throw (RuntimeException. "timeout"))
+                  (c/with-txn-retry
+                    (c/with-txn [c c]
+                      (->> (range multitable-spread)
+                           (mapcat (fn [x]
+                                     (c/query c [(str "select * from mono" x
+                                                      " where node <> -1")]
+                                              {:row-fn parse-row})))
+                           (sort-by :sts)
+                           vec
+                           (assoc op :type :ok, :value)))))))))
 
   (teardown! [this test]
     (try
