@@ -20,6 +20,7 @@
                                                      pcaplog]]]))
 
 (def timeout-delay "Default timeout for operations in ms" 10000)
+(def max-timeout "Longest timeout, in ms" 30000)
 
 (def isolation-level "Default isolation level for txns" :serializable)
 
@@ -42,11 +43,13 @@
          "&sslrootcert=" ca-cert
          "&sslfactory=org.postgresql.ssl.jdbc4.LibPQFactory")))
 
+
 (defn db-conn-spec
   "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
   (merge {:classname    "org.postgresql.Driver"
-          :subprotocol  "postgresql"}
+          :subprotocol  "postgresql"
+          :socketTimeout (/ max-timeout 1000)}
          (case jdbc-mode
            :cdb-cluster
            {:subname     (str "//" (name node) ":" db-port "/" dbname
@@ -223,14 +226,17 @@
                            true)))))
 
 (defn query
-  "Like jdbc query, but includes a default timeout."
+  "Like jdbc query, but includes a default timeout in ms."
   ([conn expr]
    (query conn expr {}))
   ([conn [sql & params] opts]
    (let [s (j/prepare-statement (j/db-find-connection conn)
                                 sql
-                                {:timeout timeout-delay})]
-     (j/query conn (into [s] params) opts))))
+                                {:timeout (/ timeout-delay 1000)})]
+     (try
+       (j/query conn (into [s] params) opts)
+       (finally
+         (.close s))))))
 
 (defn insert!
   "Like jdbc insert!, but includes a default timeout."
