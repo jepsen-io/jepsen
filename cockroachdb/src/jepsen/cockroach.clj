@@ -67,7 +67,7 @@
                 (auto/save-version! node)
                 (when (not= node (jepsen/primary test))
                   (auto/join! test node)
-                  (Thread/sleep 10000)) ; Give it time to join
+                  (Thread/sleep 30000)) ; Give it time to join
 
                 (jepsen/synchronize test)
                 (when (= node (jepsen/primary test))

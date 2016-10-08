@@ -8,6 +8,7 @@
                     [independent :as independent]
                     [reconnect :as rc]
                     [util :as util :refer [meh]]]
+            [jepsen.checker.timeline :as timeline]
             [jepsen.cockroach [client :as c]
                               [nemesis :as cln]]
             [clojure.core.reducers :as r]
@@ -64,10 +65,10 @@
                              (+ amount))]
                   (cond
                     (neg? b1)
-                    (assoc op :type :fail, :value [:negative from b1])
+                    (assoc op :type :fail, :error [:negative from b1])
 
                     (neg? b2)
-                    (assoc op :type :fail, :value [:negative to b2])
+                    (assoc op :type :fail, :error [:negative to b2])
 
                     true
                     (do (c/update! c :accounts {:balance b1} ["id = ?" from])
@@ -147,6 +148,7 @@
                      :final (gen/clients (gen/once bank-read))}
        :checker     (checker/compose
                       {:perf    (checker/perf)
+                       :timeline (timeline/html)
                        :details (bank-checker)})}
       (dissoc opts :client))))
 
@@ -154,8 +156,8 @@
   [opts]
   (bank-test-base
     (merge {:name   "bank"
-            :model  {:n 20 :total 200}
-            :client (BankClient. (atom false) 4 10 nil)}
+            :model  {:n 5 :total 50}
+            :client (BankClient. (atom false) 5 10 nil)}
            opts)))
 
 ; One bank account per table
@@ -209,10 +211,10 @@
                              first
                              (+ amount))]
                   (cond (neg? b1)
-                        (assoc op :type :fail, :value [:negative from b1])
+                        (assoc op :type :fail, :error [:negative from b1])
 
                         (neg? b2)
-                        (assoc op :type :fail, :value [:negative to b2])
+                        (assoc op :type :fail, :error [:negative to b2])
 
                         true
                         (do (c/update! c (str "accounts" from) {:balance b1} [])
@@ -232,6 +234,6 @@
   [opts]
   (bank-test-base
     (merge {:name   "bank-multitable"
-            :model  {:n 20 :total 200}
-            :client (MultiBankClient. (atom false) 20 10 nil)}
+            :model  {:n 5 :total 50}
+            :client (MultiBankClient. (atom false) 5 10 nil)}
            opts)))
