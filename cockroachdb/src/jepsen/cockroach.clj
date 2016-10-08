@@ -66,16 +66,24 @@
                 (auto/packet-capture! node)
                 (auto/save-version! node)
                 (when (not= node (jepsen/primary test))
-                  (auto/join! test node))
+                  (auto/join! test node)
+                  (Thread/sleep 10000)) ; Give it time to join
 
                 (jepsen/synchronize test)
                 (when (= node (jepsen/primary test))
-                  (Thread/sleep 2000)
                   (auto/set-replication-zone!  ".default"
                                               {:range_min_bytes 1024
                                                :range_max_bytes 1048576})
                   (info node "Creating database...")
-                  (auto/csql! (str "create database " dbname))))
+                  (auto/csql! (str "create database " dbname)))
+
+                ; Restart cluster to work around balancing bug
+                (jepsen/synchronize test)
+                (auto/kill! test node)
+                (jepsen/synchronize test)
+                (auto/start! test node)
+                (info node "Restarted to work around balancing bug")
+                (Thread/sleep 10000)) ; Time to start up and recover
 
         (info node "Setup complete")))
 
