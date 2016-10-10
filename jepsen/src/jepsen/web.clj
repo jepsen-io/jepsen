@@ -47,7 +47,7 @@
                              ; Incomplete test
                              {:name       test-name
                               :start-time test-time
-                              :results    {:valid? :crashed}})))
+                              :results    {:valid? :incomplete}})))
                        runs)))))
 
 (defn test-header
