@@ -9,9 +9,17 @@
             [hiccup.core :as h]
             [ring.util.response :as response]
             [org.httpkit.server :as server])
-  (:import (java.io File)
+  (:import (java.io File
+                    FileInputStream
+                    PipedInputStream
+                    PipedOutputStream
+                    OutputStream)
            (java.nio CharBuffer)
-           (java.nio.file Path)))
+           (java.nio.file Path
+                          Files)
+           (java.nio.file.attribute FileTime)
+           (java.util.zip ZipEntry
+                          ZipOutputStream)))
 
 ; Path/File protocols
 (extend-protocol io/Coercions
@@ -49,7 +57,8 @@
    [:th "Time"]
    [:th "Valid?"]
    [:th "Results"]
-   [:th "History"]])
+   [:th "History"]
+   [:th "Zip"]])
 
 (defn relative-path
   "Relative path, as a Path."
@@ -62,8 +71,10 @@
   "Takes a test and filename components; returns a URL for that file."
   [t & args]
   (url-encode-path-components
-    (str "/files/" (str/replace (.getPath (apply store/path t args))
-                                #"^store/" ""))))
+    (str "/files/" (-> (apply store/path t args)
+                       .getPath
+                       (str/replace #"\Astore/" "")
+                       (str/replace #"/\Z" "")))))
 
 (defn file-url
   "URL for a File"
@@ -84,8 +95,9 @@
                                         :unknown        "#F3F6AD"
                                                         "#eaeaea"))}
       (:valid? r)]
-     [:td [:a {:href (url t "results.edn")} "results.edn"]]
-     [:td [:a {:href (url t "history.txt")} "history.txt"]]]))
+     [:td [:a {:href (url t "results.edn")}    "results.edn"]]
+     [:td [:a {:href (url t "history.txt")}    "history.txt"]]
+     [:td [:a {:href (str (url t) ".zip")} "zip"]]]))
 
 (defn home
   "Home page"
@@ -186,14 +198,66 @@
                                    (.getName f)]))
                        (map file-cell))])})
 
+(defn zip-path!
+  "Writes a path to a zipoutputstream"
+  [^ZipOutputStream zipper base ^File file]
+  (when (.isFile file)
+    (let [relpath (str (relative-path base file))
+          entry   (doto (ZipEntry. relpath)
+                    (.setCreationTime (FileTime/fromMillis
+                                        (.lastModified file))))
+          buf   (byte-array 16384)]
+      (with-open [input (FileInputStream. file)]
+        (.putNextEntry zipper entry)
+        (loop []
+          (let [read (.read input buf)]
+            (if (< 0 read)
+              (do (.write zipper buf 0 read)
+                  (recur))
+              (.closeEntry zipper)))))))
+  zipper)
+
+(defn zip
+  "Serves a directory as a zip file. Strips .zip off the extension."
+  [req ^File dir]
+  (let [f (-> dir
+              (.getCanonicalFile)
+              str
+              (str/replace #"\.zip\z" "")
+              io/file)
+        pipe-in (PipedInputStream. 16384)
+        pipe-out (PipedOutputStream. pipe-in)]
+    (future
+      (try
+        (with-open [zipper (ZipOutputStream. pipe-out)]
+          (doseq [file (file-seq f)]
+            (zip-path! zipper f file)))
+        (catch Exception e
+          (warn e "Error streaming zip for" dir))
+        (finally
+          (.close pipe-out))))
+    {:status  200
+     :headers {"Content-Type" "application/zip"}
+     :body    pipe-in}))
+
+(defn assert-file-in-scope!
+  "Throws if the given file is outside our store directory."
+  [^File f]
+  (assert (.startsWith (.toPath (.getCanonicalFile f))
+                       (.toPath (.getCanonicalFile (io/file store/base-dir))))
+          "File out of scope."))
+
+(def e404
+  {:status 404
+   :headers {"Content-Type" "text/plain"}
+   :body "404 not found"})
+
 (defn files
   "Serve requests for /files/ urls"
   [req]
   (let [pathname ((re-find #"^/files/(.+)$" (:uri req)) 1)
         f    (File. store/base-dir pathname)]
-    (assert (.startsWith (.toPath (.getCanonicalFile f))
-                         (.toPath (.getCanonicalFile (io/file store/base-dir))))
-            "File out of scope.")
+    (assert-file-in-scope! f)
     (cond
       (.isFile f)
       (response/file-response pathname
@@ -201,8 +265,14 @@
                                :index-files?     false
                                :allow-symlinks?  false})
 
+      (re-find #"\.zip\z" pathname)
+      (zip req f)
+
       (.isDirectory f)
-      (dir f))))
+      (dir f)
+
+      true
+      e404)))
 
 (defn app [req]
 ;  (info :req (with-out-str (pprint req)))
@@ -210,9 +280,7 @@
     (condp re-find (:uri req)
       #"^/$"     (home req)
       #"^/files/" (files req)
-      {:status 404
-       :headers {"Content-Type" "test/plain"}
-       :body    "sorry, sorry--sorry!"})))
+      e404)))
 
 (defn serve!
   "Starts an http server with the given httpkit options."
