@@ -15,7 +15,7 @@
                  [org.clojars.achim/multiset "0.1.0"]
                  [byte-streams "0.2.2"]]
   :main jepsen.cli
-  :aot [jepsen.cli]
+  :aot [jepsen.cli clojure.tools.logging.impl]
 ;        clojure.tools.logging.impl]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
