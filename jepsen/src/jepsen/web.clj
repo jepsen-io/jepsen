@@ -37,7 +37,9 @@
                             :results     (store/load-results test-name test-time)}
                            (catch java.io.FileNotFoundException e
                              ; Incomplete test
-                             nil)))
+                             {:name       test-name
+                              :start-time test-time
+                              :results    {:valid? :crashed}})))
                        runs)))))
 
 (defn test-header
