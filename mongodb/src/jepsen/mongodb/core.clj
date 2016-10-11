@@ -74,6 +74,7 @@
   (c/sudo username
           (cu/start-daemon! {:logfile "/opt/mongodb/stdout.log"
                              :pidfile "/opt/mongodb/pidfile"
+                             :remove-pidfile? false
                              :chdir   "/opt/mongodb"}
                             "/opt/mongodb/bin/mongod"
                             :--config "/opt/mongodb/mongod.conf")))

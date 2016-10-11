@@ -151,13 +151,14 @@
 
   :logfile
   :pidfile
+  :remove-pidfile?
   :chdir"
   [opts bin & args]
   (info "starting" (.getName (file bin)))
   (apply exec :start-stop-daemon :--start
          :--background
          :--make-pidfile
-         :--remove-pidfile
+         (when (:remove-pidfile? opts true) :--remove-pidfile)
          :--pidfile  (:pidfile opts)
          :--chdir    (:chdir opts)
          :--no-close
