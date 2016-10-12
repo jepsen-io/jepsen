@@ -153,6 +153,9 @@
                   :unzip
                   :iptables
                   :psmisc
+                  :tar
+                  :bzip2
+                  :libzip2
                   :iputils-ping
                   :rsyslog
                   :logrotate]))
