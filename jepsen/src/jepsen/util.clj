@@ -308,6 +308,136 @@
                         (map (fn [i] `(nth (.bindings ~retval) ~i)))))
           ~retval)))))
 
+(deftype Return [value])
+
+(defn letr-rewrite-return
+  "Rewrites (return x) to (Return. x) in expr. Returns a pair of [changed?
+  expr], where changed is whether the expression contained a return."
+  [expr]
+  (let [return? (atom false)
+        expr    (walk/prewalk
+                  (fn [form]
+                    (if (and (seq? form)
+                             (= 'return (first form)))
+                      (do (assert
+                            (= 2 (count form))
+                            (str (pr-str form) " should have one argument"))
+                          (reset! return? true)
+                          `(Return. ~(second form)))
+                      form))
+                  expr)]
+    [@return? expr]))
+
+(defn letr-partition-bindings
+  "Takes a vector of bindings [sym expr, sym' expr, ...]. Returns
+  binding-groups: a sequence of vectors of bindgs, where the final binding in
+  each group has an early return. The final group (possibly empty!) contains no
+  early return."
+  [bindings]
+  (->> bindings
+       (partition 2)
+       (reduce (fn [groups [sym expr]]
+                 (let [[return? expr] (letr-rewrite-return expr)
+                       groups (assoc groups
+                                     (dec (count groups))
+                                     (-> (peek groups) (conj sym) (conj expr)))]
+                   (if return?
+                     (do (assert (symbol? sym)
+                                 (str (pr-str sym " must be a symbol")))
+                         (conj groups []))
+                     groups)))
+               [[]])))
+
+(defn letr-let-if
+  "Takes a sequence of binding groups and a body expression, and emits a let
+  for the first group, an if statement checking for a return, and recurses;
+  ending with body."
+  [groups body]
+  (assert (pos? (count groups)))
+  (if (= 1 (count groups))
+    ; Final group with no returns
+    `(let ~(first groups) ~@body)
+
+    ; Group ending in a return
+    (let [bindings  (first groups)
+          final-sym (nth bindings (- (count bindings) 2))]
+      `(let ~bindings
+         (if (instance? Return ~final-sym)
+           (.value ~final-sym)
+           ~(letr-let-if (rest groups) body))))))
+
+(defmacro letr
+  "Let bindings, plus early return.
+
+  You want to do some complicated, multi-stage operation assigning lots of
+  variables--but at different points in the let binding, you need to perform
+  some conditional check to make sure you can proceed to the next step.
+  Ordinarily, you'd intersperse let and if statements, like so:
+
+      (let [res (network-call)]
+        (if-not (:ok? res)
+          :failed-network-call
+
+          (let [people (:people (:body res))]
+            (if (zero? (count people))
+              :no-people
+
+              (let [res2 (network-call-2 people)]
+                ...
+
+  This is a linear chain of operations, but we're forced to nest deeply because
+  we have no early-return construct. In ruby, we might write
+
+      res = network_call
+      return :failed_network_call if not x.ok?
+
+      people = res[:body][:people]
+      return :no-people if people.empty?
+
+      res2 = network_call_2 people
+      ...
+
+  which reads the same, but requires no nesting thanks to Ruby's early return.
+  Clojure's single-return is *usually* a boon to understandability, but deep
+  linear branching usually means something like
+
+    - Deep nesting         (readability issues)
+    - Function chaining    (lots of arguments for bound variables)
+    - Throw/catch          (awkward exception wrappers)
+    - Monadic interpreter  (slow, indirect)
+
+  This macro lets you write:
+
+      (letr [res    (network-call)
+             _      (when-not (:ok? res) (return :failed-network-call))
+             people (:people (:body res))
+             _      (when (zero? (count people)) (return :no-people))
+             res2   (network-call-2 people)]
+        ...)
+
+  letr works like let, but if (return x) is ever returned from a binding, letr
+  returns x, and does not evaluate subsequent expressions.
+
+  If something other than (return x) is returned from evaluating a binding,
+  letr binds the corresponding variable as normal. Here, we use _ to indicate
+  that we're not using the results of (when ...), but this is not mandatory.
+  You cannot use a destructuring bind for a return expression.
+
+  letr is not a *true* early return--(return x) must be a *terminal* expression
+  for it to work--like (recur). For example,
+
+      (letr [x (do (return 2) 1)]
+        x)
+
+  returns 1, not 2, because (return 2) was not the terminal expression.
+
+  return only works within letr's bindings, not its body."
+  [bindings & body]
+  (assert (vector? bindings))
+  (assert (even? (count bindings)))
+  (let [groups (letr-partition-bindings bindings)]
+    (letr-let-if (letr-partition-bindings bindings) body)))
+
 (defn map-kv
   "Takes a function (f [k v]) which returns [k v], and builds a new map by
   applying f to every pair."
