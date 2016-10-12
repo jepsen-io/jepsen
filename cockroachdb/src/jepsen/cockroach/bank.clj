@@ -25,16 +25,19 @@
         (when (compare-and-set! tbl-created? false true)
           (rc/with-conn [c conn]
             (Thread/sleep 1000)
-            (j/execute! c ["drop table if exists accounts"])
+            (c/with-txn-retry
+              (j/execute! c ["drop table if exists accounts"]))
             (Thread/sleep 1000)
             (info "Creating table")
-            (j/execute! c ["create table accounts
-                           (id      int not null primary key,
-                           balance bigint not null)"])
+            (c/with-txn-retry
+              (j/execute! c ["create table accounts
+                             (id      int not null primary key,
+                             balance bigint not null)"]))
             (dotimes [i n]
               (Thread/sleep 500)
               (info "Creating account" i)
-              (c/insert! c :accounts {:id i :balance starting-balance})))))
+              (c/with-txn-retry
+                (c/insert! c :accounts {:id i :balance starting-balance}))))))
 
       (assoc this :conn conn)))
 
@@ -170,14 +173,17 @@
           (rc/with-conn [c conn]
             (dotimes [i n]
               (Thread/sleep 500)
-              (j/execute! c [(str "drop table if exists accounts" i)])
+              (c/with-txn-retry
+                (j/execute! c [(str "drop table if exists accounts" i)]))
               (Thread/sleep 500)
               (info "Creating table " i)
-              (j/execute! c [(str "create table accounts" i
-                                  " (balance bigint not null)")])
+              (c/with-txn-retry
+                (j/execute! c [(str "create table accounts" i
+                                    " (balance bigint not null)")]))
               (Thread/sleep 500)
               (info "Populating account" i)
-              (c/insert! c (str "accounts" i) {:balance starting-balance})))))
+              (c/with-txn-retry
+                (c/insert! c (str "accounts" i) {:balance starting-balance}))))))
 
       (assoc this :conn conn)))
 

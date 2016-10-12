@@ -6,10 +6,11 @@
              [nemesis :as nemesis]
              [generator :as gen]
              [reconnect :as rc]
-             [util :as util]]
+             [util :as util :refer [letr]]]
             [jepsen.nemesis.time :as nt]
             [jepsen.cockroach.client :as cc]
             [jepsen.cockroach.auto :as auto]
+            [clojure.set :as set]
             [clojure.java.jdbc :as j]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -254,30 +255,42 @@
   ([]
    (split-nemesis nil))
   ([clients]
-   (reify client/Client
-     (setup! [this test _]
-       (split-nemesis (mapv cc/client (:nodes test))))
+   (let [already-split (atom {})] ; A map of tables to sets of keys split
+     (reify client/Client
+       (setup! [this test _]
+         (split-nemesis (mapv cc/client (:nodes test))))
 
-     (invoke! [this test op]
-       (rc/with-conn [c (rand-nth clients)]
-         (let [keyrange @(:keyrange test)]
-           (if (empty? keyrange)
-             (assoc op :value :nothing-to-split)
-             (let [[table [lower upper]]  (rand-nth (vec keyrange))
-                   k                      (dec upper)]
-               (try (cc/split! c table k)
-                    (assoc op :value [:split table k])
-                    (catch org.postgresql.util.PSQLException e
-                      (if (re-find #"range is already split" (.getMessage e))
-                        (assoc op :value [:already-split table k])
-                        (throw e)))))))))
+       (invoke! [this test op]
+         (assoc op :value
+                (rc/with-conn [c (rand-nth clients)]
+                  (letr [keyrange  (:keyrange test)
+                         keyrange  (if keyrange
+                                     @keyrange
+                                     (return :no-keyrange))
+                         _          (if (empty? keyrange)
+                                      (return :nothing-to-split))
+                         [table ks] (rand-nth (vec keyrange))
+                         already  (get @already-split table)
+                         ks       (set/difference ks already)
+                         k        (or (first ks)
+                                      (return :nothing-to-split))]
+                    (try (cc/split! c table k)
+                         (swap! already-split update table #(if %
+                                                              (sorted-set k)
+                                                              (conj % k)))
+                         [:split table k]
+                         (catch org.postgresql.util.PSQLException e
+                           (if (re-find #"range is already split"
+                                        (.getMessage e))
+                             [:already-split table k]
+                             (throw e))))))))
 
      (teardown! [this test]
-       (mapv rc/close! clients)))))
+       (mapv rc/close! clients))))))
 
 (defn split
   []
-  {:during {:type :info, :f :split}
+  {:during (gen/delay 2 {:type :info, :f :split})
    :final  nil
    :name   "splits"
    :client (split-nemesis)

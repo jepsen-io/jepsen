@@ -60,14 +60,14 @@
         (c/sudo cockroach-user
                 (when (= node (jepsen/primary test))
                   (auto/start! test node)
-                  (Thread/sleep 10000))
+                  (Thread/sleep 5000))
 
                 (jepsen/synchronize test)
                 (auto/packet-capture! node)
                 (auto/save-version! node)
                 (when (not= node (jepsen/primary test))
-                  (auto/join! test node)
-                  (Thread/sleep 30000)) ; Give it time to join
+                  (auto/start! test node)
+                  (Thread/sleep 5000)) ; Give it time to join
 
                 (jepsen/synchronize test)
                 (when (= node (jepsen/primary test))
@@ -83,7 +83,7 @@
                 (jepsen/synchronize test)
                 (auto/start! test node)
                 (info node "Restarted to work around balancing bug")
-                (Thread/sleep 10000)) ; Time to start up and recover
+                (Thread/sleep 5000)) ; Time to start up and recover
 
         (info node "Setup complete")))
 
@@ -109,23 +109,13 @@
     db/LogFiles
     (log-files [_ test node] log-files)))
 
-(defn covering-range
-  "Takes a pair of [low, high] and an element x, and expands the range to cover
-  it."
-  [[low high :as r] x]
-  (cond
-    (nil? r)   [x x]
-    (< x low)  [x high]
-    (< high x) [low x]
-    true       r))
-
 (defn update-keyrange!
   "A keyrange is used to track which keys a test is using, so we can split
   them. This function takes a test and updates its :keyrange atom to include
   the given table and key."
   [test table k]
   (if-let [r (:keyrange test)]
-    (swap! r update table covering-range k)
+    (swap! r update table (fnil conj #{}) k)
     (throw (IllegalArgumentException. "No :keyrange in test"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;; Common test definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;

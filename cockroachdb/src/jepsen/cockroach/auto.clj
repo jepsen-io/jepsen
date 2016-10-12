@@ -85,26 +85,6 @@
   [env cmd]
   ["env" env cmd])
 
-(defn cockroach-start-cmdline
-  "Construct the command line to start a CockroachDB node."
-  [& extra-args]
-  (concat
-   [;;:env
-    ;;:COCKROACH_TIME_UNTIL_STORE_DEAD=5s
-    :start-stop-daemon
-    :--start :--background
-    :--make-pidfile
-    :--remove-pidfile
-    :--pidfile pidfile
-    :--no-close
-    :--chuid cockroach-user
-    :--chdir working-path
-    :--exec (c/expand-path cockroach)
-    :--]
-   cockroach-start-arguments
-   extra-args
-   [:--logtostderr :true :>> errlog (c/lit "2>&1")]))
-
 (defmacro csql! [& body]
   "Execute SQL statements using the cockroach sql CLI."
   `(c/cd working-path
@@ -172,30 +152,40 @@
   (nt/install!)
   (info node "Cockroach installed"))
 
-(defn init!
-  "Initialize Cockroach--used on the primary node."
-  [node]
-  (c/sudo cockroach-user
-          (info node "Starting CockroachDB once to initialize cluster")
-          (c/exec (cockroach-start-cmdline nil))
-
-          (Thread/sleep 1000)
-
-          (info node "Stopping 1st CockroachDB before starting cluster")
-          (c/exec cockroach :quit (if insecure [:--insecure] []))
-
-          (Thread/sleep 10000)))
+(defn cockroach-start-cmdline
+  "Construct the command line to start a CockroachDB node."
+  [& extra-args]
+  (concat
+   [;;:env
+    ;;:COCKROACH_TIME_UNTIL_STORE_DEAD=5s
+    :start-stop-daemon
+    :--start :--background
+    :--make-pidfile
+    :--remove-pidfile
+    :--pidfile pidfile
+    :--no-close
+    :--chuid cockroach-user
+    :--chdir working-path
+    :--exec (c/expand-path cockroach)
+    :--]
+   cockroach-start-arguments
+   extra-args
+   [:--logtostderr :true :>> errlog (c/lit "2>&1")]))
 
 (defn runcmd
   "The command to run cockroach for a given test"
-  [test joining?]
-  (wrap-env [(str "COCKROACH_LINEARIZABLE="
-                 (if (:linearizable test) "true" "false"))
-             (str "COCKROACH_MAX_OFFSET=" "250ms")]
-            (cockroach-start-cmdline
-              (if joining?
-                [(str "--join=" (name (jepsen/primary test)))]
-                []))))
+  [test node joining?]
+  (let [join (if joining?
+               [(->> (:nodes test)
+                     (remove #{node})
+                     (map name)
+                     (str/join ",")
+                     (str "--join="))]
+               [])]
+    (wrap-env [(str "COCKROACH_LINEARIZABLE="
+                    (if (:linearizable test) "true" "false"))
+               (str "COCKROACH_MAX_OFFSET=" "250ms")]
+              (cockroach-start-cmdline join))))
 
 (defn start!
   "Start cockroachdb on node."
@@ -206,23 +196,10 @@
                          (catch RuntimeException e "")))
             (info node "Cockroach already running.")
             (do (info node "Starting CockroachDB...")
-                (c/trace (c/exec (runcmd test false)))
+                (c/trace (c/exec (runcmd test node
+                                         (not= node (jepsen/primary test)))))
                 (info node "Cockroach started"))))
   :started)
-
-(defn join!
-  "Like start, but for joining an existing node."
-  [test node]
-  (c/sudo cockroach-user
-          (if (not= "" (try
-                         (c/exec :pgrep :cockroach)
-                         (catch RuntimeException e "")))
-            (info node "Cockroach already running.")
-            (do (info node "Starting CockroachDB...")
-                (c/trace (c/exec (runcmd test true)))
-                (info node "Cockroach started"))))
-  :started)
-
 
 (defn kill!
   "Kills cockroach on node."

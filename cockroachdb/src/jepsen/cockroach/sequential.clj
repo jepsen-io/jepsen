@@ -61,7 +61,8 @@
               (info "Creating tables" (pr-str (table-names table-count)))
               (doseq [t (table-names table-count)]
                 (j/execute! c [(str "drop table if exists " t)])
-                (j/execute! c [(str "create table " t " (key varchar(255))")])
+                (j/execute! c [(str "create table " t
+                                    " (key varchar(255) primary key)")])
                 (info "Created table" t))))))
 
       (assoc this :client client)))
@@ -70,25 +71,28 @@
     (c/with-exception->op op
       (rc/with-conn [c client]
         (c/with-timeout
-          (c/with-txn-retry
-            (let [ks (subkeys (:key-count test) (:value op))]
-              (case (:f op)
-                :write (do (doseq [k ks]
-                             (c/insert! c (key->table table-count k) {:key k}))
-                           (assoc op :type :ok))
+          (let [ks (subkeys (:key-count test) (:value op))]
+            (case (:f op)
+              :write (do (doseq [k ks]
+                           (let [table (key->table table-count k)]
+                             (c/with-txn-retry
+                               (c/insert! c table {:key k}))
+                             (cockroach/update-keyrange! test table k)))
+                         (assoc op :type :ok))
 
-                :read ;(j/with-db-transaction [c c :isolation c/isolation-level]
-                        (->> ks
-                           reverse
-                           (mapv (fn [k]
-                                   (first
-                                     (c/query c
-                                              [(str "select key from "
-                                                    (key->table table-count k)
-                                                    " where key = ?") k]
-                                              :row-fn :key))))
-                           (vector (:value op))
-                           (assoc op :type :ok, :value)))))))))
+              :read ;(j/with-db-transaction [c c :isolation c/isolation-level]
+              (->> ks
+                   reverse
+                   (mapv (fn [k]
+                           (first
+                             (c/with-txn-retry
+                               (c/query c
+                                        [(str "select key from "
+                                              (key->table table-count k)
+                                              " where key = ?") k]
+                                        {:row-fn :key})))))
+                   (vector (:value op))
+                   (assoc op :type :ok, :value))))))))
 
   (teardown! [this test]
     (try
@@ -160,11 +164,13 @@
 
 (defn test
   [opts]
-  (let [gen (gen 30)]
+  (let [gen      (gen 10)
+        keyrange (atom {})]
     (cockroach/basic-test
       (merge
         {:name "sequential"
          :key-count 5
+         :keyrange keyrange
          :client {:client (Client. 10 (atom false) nil)
                   :during (gen/stagger 1/100 gen)
                   :final  nil}
