@@ -26,7 +26,6 @@
    "bank-multitable"      bank/multitable-test
    "register"             register/test
    "monotonic"            monotonic/test
-   "monotonic-multitable" monotonic/multitable-test
    "sets"                 sets/test
    "sequential"           sequential/test})
 

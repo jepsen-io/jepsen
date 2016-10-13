@@ -18,9 +18,6 @@
             [knossos.model :as model]
             [knossos.op :as op]))
 
-;; number of tables involved in the monotonic-multitable tests
-(def multitable-spread 2)
-
 (defn parse-row
   "Translates a DB row back into our local representation, by converting string
   timestamps to bigints."
@@ -34,15 +31,16 @@
 
 (defn monotonic-create-tables!
   "Creates the tables for a given independent key. Takes a connection c, an
-  independent-key, and a table count; creates table-count tables for that key."
-  [c k table-count]
+  independent-key, and a table count; creates table-count tables for that key.
+  If val-as-pkey? is true, assigns :value as the table's primary key."
+  [c k table-count val-as-pkey?]
   (locking monotonic-create-tables!
     (doseq [i (range table-count)]
       (let [table (table-name k i)]
         (info "Create table" table)
         (c/with-txn-retry
           (j/execute! c [(str "create table " table
-                              " (val int,"
+                              " (val int" (if val-as-pkey?  " primary key," ",")
                               "  sts string,"
                               "  node int,"
                               "  process int,"
@@ -62,6 +60,20 @@
                   :m
                   (or 0))))
        (reduce max)))
+
+(defn insert!
+  "Inserts a record and returns that record. Updates the test with that
+  record's primary key. If val-as-pkey? is true, uses the :val column.
+  Otherwises, uses cockroachdb's implicitly generated row ID."
+  [test conn table row]
+  (if (:val-as-pkey? test)
+    (do (c/insert! conn table row)
+        (cockroach/update-keyrange! test table (:val row))
+        row)
+
+    (let [row' (c/insert-with-rowid! conn table row)]
+      (cockroach/update-keyrange! test table (:rowid row'))
+      row')))
 
 ; tb is a table identifier--always zero here
 ; sts is a system timestamp--a 96 bit integer in cockroach, but represented as
@@ -85,7 +97,8 @@
         (when (compare-and-set! table-created? false true)
           (rc/with-conn [c conn]
             (doseq [k independent-keys]
-              (monotonic-create-tables! c k table-count)))))
+              (monotonic-create-tables! c k table-count
+                                        (:val-as-pkey? test))))))
 
       (assoc this :conn conn :nodenum n)))
 
@@ -96,25 +109,21 @@
         (rc/with-conn [c conn]
           (case (:f op)
             :add (c/with-txn-retry-as-fail op
-                   (let [row (c/with-timeout
-                               (c/with-txn [c c]
-                                 (let [;dbtime (c/db-time c)
-                                       cur-max   (q-max c :val tables)
-                                       dbtime    (c/db-time c)
-                                       table-num (rand-int table-count)
-                                       row {:val      (inc cur-max)
-                                            :sts      dbtime
-                                            :node     nodenum
-                                            :process  (:process op)
-                                            :tb       table-num}]
-                                   (c/insert-with-rowid!
-                                     c (table-name k table-num) row))))]
-                   (cockroach/update-keyrange! test
-                                       (table-name k (:tb row))
-                                       (:rowid row))
-                   (assoc op
-                          :type :ok
-                          :value (independent/tuple k (dissoc row :rowid)))))
+                   (c/with-timeout
+                     (c/with-txn [c c]
+                       (let [;dbtime (c/db-time c)
+                             cur-max   (q-max c :val tables)
+                             dbtime    (c/db-time c)
+                             table-num (rand-int table-count)
+                             row {:val      (inc cur-max)
+                                  :sts      dbtime
+                                  :node     nodenum
+                                  :process  (:process op)
+                                  :tb       table-num}]
+                         (insert! test c (table-name k table-num) row)
+                         (assoc op
+                                :type :ok
+                                :value (independent/tuple k row))))))
 
             :read
             (c/with-txn-retry
@@ -131,83 +140,6 @@
 
     (teardown! [this test]
       (rc/close! conn)))
-
-(defrecord MultitableClient [tbl-created? cnt conn nodenum]
-  client/Client
-  (setup! [this test node]
-    (let [n (if (= auto/jdbc-mode :cdb-cluster)
-              (.indexOf (vec (:nodes test)) node)
-              1)
-          conn (c/client node)]
-
-      (info "Setting up client " n " for " (name node))
-
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          (rc/with-conn [c conn]
-            (doseq [x (range multitable-spread)]
-              (do
-                (c/with-txn-retry
-                  (j/execute! c [(str "drop table if exists mono" x)]))
-                (info "Creating table " x)
-                (c/with-txn-retry
-                  (j/execute! c [(str "create table mono" x
-                                      " (val int, sts string, node int,"
-                                      " proc int, tb int)")]))
-                (c/with-txn-retry
-                  (c/insert! c (str "mono" x)
-                             {:val -1
-                              :sts "0"
-                              :node -1
-                              :proc -1
-                              :tb x})))))))
-
-      (assoc this :conn conn :nodenum n)))
-
-  (invoke! [this test op]
-    (c/with-exception->op op
-      (rc/with-conn [c conn]
-        (case (:f op)
-          ; This removes all concurrency from the test, which may not be what
-          ; we want.
-          :add (locking cnt
-                 (c/with-timeout
-                   (c/with-txn-retry
-                     (c/with-txn [c c]
-                       (let [rt      (rand-int multitable-spread)
-                             dbtime  (c/db-time c)
-                             v       (swap! cnt inc)
-                             row     {:val v
-                                      :sts dbtime
-                                      :proc (:process op)
-                                      :tb   rt
-                                      :node nodenum}]
-                         (let [r (c/insert-with-rowid! c (str "mono" rt) row)]
-                           (cockroach/update-keyrange!
-                             test (str "mono" rt) (:rowid r)))
-                         (assoc op :type :ok :value row))))))
-
-          :read (util/timeout 30000 (throw (RuntimeException. "timeout"))
-                  (c/with-txn-retry
-                    (c/with-txn [c c]
-                      (->> (range multitable-spread)
-                           (mapcat (fn [x]
-                                     (c/query c [(str "select * from mono" x
-                                                      " where node <> -1")]
-                                              {:row-fn parse-row})))
-                           (sort-by :sts)
-                           vec
-                           (assoc op :type :ok, :value)))))))))
-
-  (teardown! [this test]
-    (try
-      (c/with-timeout
-        (rc/with-conn [c conn]
-          (doseq [x (range multitable-spread)]
-            (j/execute! c [(str "drop table if exists mono" x)]))))
-      (finally
-        (rc/close! conn)))))
-
 
 (defn non-monotonic
   "Given a comparator (e.g. <, >=), a function f, and an ordered sequence of
@@ -257,7 +189,7 @@
                                    (r/map :value)
                                    (reduce (fn [_ x] x) nil))]
         (if-not final-read-values
-          {:valid? false
+          {:valid? :unknown
            :error  "Set was never read"}
 
           (let [off-order-stss (non-monotonic <= :sts final-read-values)
@@ -321,7 +253,10 @@
     (cockroach/basic-test
       (merge
         {:name        "monotonic"
-         :client      {:client (MonotonicClient. ks 2 (atom false)
+         :val-as-pkey? false
+         :client      {:client (MonotonicClient. ks
+                                                 2
+                                                 (atom false)
                                                  (atom -1) nil nil)
                        :during (independent/concurrent-generator
                                  (count (:nodes opts))
@@ -342,21 +277,3 @@
                                     (check-monotonic (:linearizable opts)
                                                      true))})}
         opts))))
-
-(defn multitable-test
-  [opts]
-  (cockroach/basic-test
-    (merge
-      {:name        "monotonic-multitable"
-       :client      {:client (MultitableClient. (atom false) (atom 0) nil nil)
-                     :during (->> {:type :invoke, :f :add, :value nil}
-                                  (gen/delay-til 1))
-                     :final (->> {:type :invoke, :f :read, :value nil}
-                                 (gen/stagger 10)
-                                 (gen/limit 5))}
-       :checker     (checker/compose
-                      {:perf     (checker/perf)
-                       :details  (check-monotonic
-                                   (:linearizable opts)
-                                   false)})}
-      opts)))
