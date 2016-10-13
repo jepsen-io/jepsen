@@ -76,6 +76,8 @@
                     true
                     (do (c/update! c :accounts {:balance b1} ["id = ?" from])
                         (c/update! c :accounts {:balance b2} ["id = ?" to])
+                        (cockroach/update-keyrange! test :accounts from)
+                        (cockroach/update-keyrange! test :accounts to)
                         (assoc op :type :ok)))))))))))
 
   (teardown! [this test]
@@ -205,14 +207,16 @@
 
                 :transfer
                 (let [{:keys [from to amount]} (:value op)
+                      from (str "accounts" from)
+                      to   (str "accounts" to)
                       b1 (-> c
                              (c/query
-                               [(str "select balance from accounts" from)]
+                               [(str "select balance from " from)]
                                {:row-fn :balance})
                              first
                              (- amount))
                       b2 (-> c
-                             (c/query [(str "select balance from accounts" to)]
+                             (c/query [(str "select balance from " to)]
                                       {:row-fn :balance})
                              first
                              (+ amount))]
@@ -223,8 +227,8 @@
                         (assoc op :type :fail, :error [:negative to b2])
 
                         true
-                        (do (c/update! c (str "accounts" from) {:balance b1} [])
-                            (c/update! c (str "accounts" to) {:balance b2} [])
+                        (do (c/update! c from {:balance b1} [])
+                            (c/update! c to   {:balance b2} [])
                             (assoc op :type :ok)))))))))))
 
   (teardown! [this test]
