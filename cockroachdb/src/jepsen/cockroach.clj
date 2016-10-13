@@ -65,6 +65,7 @@
                 (jepsen/synchronize test)
                 (auto/packet-capture! node)
                 (auto/save-version! node)
+
                 (when (not= node (jepsen/primary test))
                   (auto/start! test node)
                   (Thread/sleep 5000)) ; Give it time to join
@@ -80,10 +81,18 @@
                 ; Restart cluster to work around balancing bug
                 (jepsen/synchronize test)
                 (auto/kill! test node)
+
                 (jepsen/synchronize test)
-                (auto/start! test node)
-                (info node "Restarted to work around balancing bug")
-                (Thread/sleep 5000)) ; Time to start up and recover
+                (when (= node (jepsen/primary test))
+                  (auto/start! test node)
+                  (Thread/sleep 5000)
+                  (info node "Restarted to work around balancing bug"))
+
+                (jepsen/synchronize test)
+                (when (not= node (jepsen/primary test))
+                  (auto/start! test node)
+                  (Thread/sleep 5000) ; Give it time to join
+                  (info node "Restarted to work around balancing bug")))
 
         (info node "Setup complete")))
 
