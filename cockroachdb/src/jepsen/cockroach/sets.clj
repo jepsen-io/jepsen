@@ -117,8 +117,8 @@
         (c/with-txn-retry
           (case (:f op)
             :add (c/with-timeout
-                   (do
-                     (c/insert! c :set {:val (:value op)})
+                   (let [res (c/insert-with-rowid! c "set" {:val (:value op)})]
+                     (cockroach/update-keyrange! test "set" (:rowid res))
                      (assoc op :type :ok)))
             :read (->> (c/query c ["select val from set"])
                        (mapv :val)
