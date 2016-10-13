@@ -1,0 +1,20 @@
+lein do clean, run test \
+  --tarball https://aphyr.com/media/cockroach-beta-20161004.linux-amd64.tar.bz2 \
+  --username admin \
+  --nodes-file ~/nodes \
+  --test all \
+  --nemesis majority-ring \
+  --nemesis parts \
+  --nemesis subcritical-skews \
+  --nemesis strobe-skews \
+  --nemesis split \
+  --nemesis start-stop-2 \
+  --nemesis start-kill-2 \
+  --nemesis2 majority-ring \
+  --nemesis2 parts \
+  --nemesis2 subcritical-skews \
+  --nemesis2 strobe-skews \
+  --nemesis2 split \
+  --nemesis2 start-stop-2 \
+  --nemesis2 start-kill-2 \
+  --time-limit 60
