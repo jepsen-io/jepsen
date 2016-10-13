@@ -182,7 +182,9 @@
                                       :proc (:process op)
                                       :tb   rt
                                       :node nodenum}]
-                         (c/insert! c (str "mono" rt) row)
+                         (let [r (c/insert-with-rowid! c (str "mono" rt) row)]
+                           (cockroach/update-keyrange!
+                             test (str "mono" rt) (:rowid r)))
                          (assoc op :type :ok :value row))))))
 
           :read (util/timeout 30000 (throw (RuntimeException. "timeout"))
@@ -315,12 +317,10 @@
   [opts]
   (let [ks (->> (/ (:concurrency opts)
                    (count (:nodes opts)))
-                range)
-        keyrange (atom {})]
+                range)]
     (cockroach/basic-test
       (merge
         {:name        "monotonic"
-         :keyrange    keyrange
          :client      {:client (MonotonicClient. ks 2 (atom false)
                                                  (atom -1) nil nil)
                        :during (independent/concurrent-generator

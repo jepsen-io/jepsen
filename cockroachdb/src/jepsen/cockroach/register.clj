@@ -33,7 +33,8 @@
             (j/execute! c ["drop table if exists test"])
             (Thread/sleep 1000)
             (info node "Creating table")
-            (j/execute! c ["create table test (id int, val int)"]))))
+            (j/execute! c ["create table test (id int primary key, val
+                           int)"]))))
 
       (assoc this :conn conn)))
 
@@ -59,6 +60,7 @@
                              (if (nil? val)
                                (c/insert! c :test {:id id :val val'})
                                (c/update! c :test {:val val'} ["id = ?" id]))
+                             (cockroach/update-keyrange! test :test id)
                              (assoc op :type :ok))
 
                     :cas (let [[expected-val new-val] val'

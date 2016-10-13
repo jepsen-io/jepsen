@@ -275,9 +275,7 @@
                          k        (or (first ks)
                                       (return :nothing-to-split))]
                     (try (cc/split! c table k)
-                         (swap! already-split update table #(if %
-                                                              (sorted-set k)
-                                                              (conj % k)))
+                         (swap! already-split update table (fnil conj #{}) k)
                          [:split table k]
                          (catch org.postgresql.util.PSQLException e
                            (if (re-find #"range is already split"
