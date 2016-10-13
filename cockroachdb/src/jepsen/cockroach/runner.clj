@@ -41,16 +41,16 @@
   {"none"                       `(cln/none)
    "parts"                      `(cln/parts)
    "majority-ring"              `(cln/majring)
-   "small-skews"                `(cln/small-skews)
+;   "small-skews"                `(cln/small-skews)
    "subcritical-skews"          `(cln/subcritical-skews)
    "critical-skews"             `(cln/critical-skews)
    "big-skews"                  `(cln/big-skews)
    "huge-skews"                 `(cln/huge-skews)
    "strobe-skews"               `(cln/strobe-skews)
    "split"                      `(cln/split)
-   "start-stop"                 `(cln/startstop 1)
+;   "start-stop"                 `(cln/startstop 1)
    "start-stop-2"               `(cln/startstop 2)
-   "start-kill"                 `(cln/startkill 1)
+;   "start-kill"                 `(cln/startkill 1)
    "start-kill-2"               `(cln/startkill 2)})
 
 (def opt-spec
@@ -88,6 +88,24 @@
   (info "Testing\n" (with-out-str (pprint t)))
   t)
 
+(defn nemesis-product
+  "The cartesian product of collections of symbols to nemesis functions c1 and
+  c2, restricted to remove:
+
+    - Duplicate orders (a,b) (b,a)
+    - Pairs of clock-skew nemeses
+    - Identical nemeses"
+  [c1 c2]
+  (->> (for [n1 c1, n2 c2] [n1 n2])
+       (reduce (fn [[pairs seen] [n1 n2 :as pair]]
+                 (if (or (= n1 n2)
+                         (and (:clocks (eval n1)) (:clocks (eval n2)))
+                         (seen #{n1 n2}))
+                   [pairs seen]
+                   [(conj pairs pair) (conj seen #{n1 n2})]))
+               [[] #{}])
+       first))
+
 (defn test-cmd
   []
   {"test" {:opt-spec (into jc/test-opt-spec opt-spec)
@@ -101,17 +119,13 @@
                          jc/read-nodes-file))
            :usage (jc/test-usage)
            :run (fn [{:keys [options]}]
-                  (prn :running)
                   (pprint options)
                   (doseq [i        (range (:test-count options))
                           test-fn  (:test-fns options)
-                          nemesis1 (:nemeses options)
-                          nemesis2 (:nemeses2 options)]
+                          [n1 n2]  (nemesis-product (:nemeses options)
+                                                    (:nemeses2 options))]
                     ; Rehydrate test and run
-                    (let [nemesis  (cln/compose [(eval nemesis1)
-                                                 (eval nemesis2)])
-                          _ (pprint :nemesis)
-                          _ (pprint nemesis)
+                    (let [nemesis  (cln/compose [(eval n1) (eval n2)])
                           test (-> options
                                    (dissoc :test-fns :nemeses :nemeses2)
                                    (assoc :nemesis nemesis)
