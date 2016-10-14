@@ -49,6 +49,8 @@
   [node]
   (merge {:classname    "org.postgresql.Driver"
           :subprotocol  "postgresql"
+          :loginTimeout  (/ max-timeout 1000)
+          :connectTimeout (/ max-timeout 1000)
           :socketTimeout (/ max-timeout 1000)}
          (case jdbc-mode
            :cdb-cluster
@@ -81,11 +83,13 @@
     (rc/wrapper
       {:name [:cockroach node]
        :open (fn open []
-               (util/timeout 30000
+               (util/timeout max-timeout
                              (throw (RuntimeException.
                                       (str "Connection to " node " timed out")))
                              (let [spec (db-conn-spec node)
                                    conn (j/get-connection spec)
+                                   _ (info :conn (-> conn
+                                                     .getQueryExecutor))
                                    spec' (j/add-connection spec conn)]
                                (assert spec')
                                spec')))

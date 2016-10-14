@@ -7,7 +7,7 @@
                  [jepsen "0.1.3-SNAPSHOT"]
                  [org.clojure/java.jdbc "0.6.1"]
                  [circleci/clj-yaml "0.5.5"]
-                 [org.postgresql/postgresql "9.4.1208"]]
+                 [org.postgresql/postgresql "9.4.1211"]]
   :jvm-opts ["-Xmx12g"
              "-XX:+UseConcMarkSweepGC"
              "-XX:+UseParNewGC"

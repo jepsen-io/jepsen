@@ -17,4 +17,4 @@ lein do clean, run test \
   --nemesis2 split \
   --nemesis2 start-stop-2 \
   --nemesis2 start-kill-2 \
-  --time-limit 60
+  --time-limit 180
