@@ -185,7 +185,7 @@
   "Block until we can connect to the given node. Returns a connection to the
   node."
   [node]
-  (timeout (* 100 1000)
+  (timeout (* 300 1000)
            (throw (ex-info "Timed out trying to connect to MongoDB"
                            {:node node}))
            (loop []
