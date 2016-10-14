@@ -88,8 +88,6 @@
                                       (str "Connection to " node " timed out")))
                              (let [spec (db-conn-spec node)
                                    conn (j/get-connection spec)
-                                   _ (info :conn (-> conn
-                                                     .getQueryExecutor))
                                    spec' (j/add-connection spec conn)]
                                (assert spec')
                                spec')))

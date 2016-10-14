@@ -13,7 +13,8 @@
             [jepsen.core :as jepsen]
             [jepsen.web :as web]
             [jepsen.cockroach :as cockroach]
-            [jepsen.cockroach [bank :as bank]
+            [jepsen.cockroach [adya :as adya]
+                              [bank :as bank]
                               [register :as register]
                               [monotonic :as monotonic]
                               [nemesis :as cln]
@@ -27,7 +28,8 @@
    "register"             register/test
    "monotonic"            monotonic/test
    "sets"                 sets/test
-   "sequential"           sequential/test})
+   "sequential"           sequential/test
+   "g2"                   adya/g2-test})
 
 (def oses
   "Supported operating systems"
