@@ -95,7 +95,7 @@
       (when-not (empty? missing)
         (c/su
           (info "Installing" missing)
-          (apply c/exec :apt-get :install :-y missing))))))
+          (apply c/exec :apt-get :install :-y :--force-yes missing))))))
 
 (defn add-key!
   "Receives an apt key from the given keyserver."
