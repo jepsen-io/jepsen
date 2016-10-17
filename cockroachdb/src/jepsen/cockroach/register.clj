@@ -83,7 +83,7 @@
   [opts]
   (cockroach/basic-test
     (merge
-      {:name        "atomic"
+      {:name        "register"
        :client      {:client (AtomicClient. (atom false) nil)
                      :during (independent/concurrent-generator
                                10
