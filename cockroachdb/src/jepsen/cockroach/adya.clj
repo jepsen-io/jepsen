@@ -7,7 +7,8 @@
              [generator :as gen]
              [independent :as independent]
              [util :as util :refer [meh letr]]
-             [reconnect :as rc]]
+             [reconnect :as rc]
+             [adya :as adya]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.cockroach.client :as c]
             [jepsen.cockroach.nemesis :as cln]
@@ -78,54 +79,14 @@
   (teardown! [this test]
     (rc/close! client)))
 
-(defn g2-gen
-  "On independent keys, first prepare, then parallel insert."
-  []
-  (let [ids (atom 0)]
-    (independent/concurrent-generator
-      2
-      (range)
-      (fn [k]
-        (gen/seq
-          [(fn [_  _]
-             {:type :invoke :f :insert :value [nil (swap! ids inc)]})
-           (fn [_  _]
-             {:type :invoke :f :insert :value [(swap! ids inc) nil]})])))))
-
-(defn g2-checker
-  []
-  (reify checker/Checker
-    (check [this test model history opts]
-      ; There should be at most one successful insert for any given key
-      (let [keys (reduce (fn [m op]
-                           (if (= :insert (:f op))
-                             (let [k (key (:value op))]
-                               (if (= :ok (:type op))
-                                 (update m k (fnil inc 0))
-                                 (update m k #(or % 0))))
-                             m))
-                         {}
-                         history)
-            insert-count (->> keys
-                              (filter (fn [[k cnt]] (pos? cnt)))
-                              count)
-            illegal (->> keys
-                         (keep (fn [[k cnt :as pair]]
-                                   (when (< 1 cnt) pair)))
-                         (into (sorted-set)))]
-        {:valid?       (empty? illegal)
-         :insert-count insert-count
-         :key-count    (count keys)
-         :illegal      illegal}))))
-
 (defn g2-test
   [opts]
   (cockroach/basic-test
     (merge
      {:name "g2"
       :client {:client (G2Client. (atom false) nil)
-               :during (g2-gen)}
+               :during (adya/g2-gen)}
       :checker (checker/compose {:timeline (timeline/html)
                                  :perf     (checker/perf)
-                                 :g2       (g2-checker)})}
+                                 :g2       (adya/g2-checker)})}
      opts)))
