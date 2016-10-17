@@ -42,8 +42,8 @@
 
   (invoke! [this test op]
     (c/with-exception->op op
-      (c/with-timeout
-        (rc/with-conn [c client]
+      (rc/with-conn [c client]
+        (c/with-timeout
           (let [[k [a-id b-id]] (:value op)]
             (case (:f op)
               :insert
