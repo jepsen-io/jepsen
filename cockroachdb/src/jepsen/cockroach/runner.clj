@@ -15,6 +15,7 @@
             [jepsen.cockroach :as cockroach]
             [jepsen.cockroach [adya :as adya]
                               [bank :as bank]
+                              [comments :as comments]
                               [register :as register]
                               [monotonic :as monotonic]
                               [nemesis :as cln]
@@ -25,6 +26,7 @@
   "A map of test names to test constructors."
   {"bank"                 bank/test
    "bank-multitable"      bank/multitable-test
+   "comments"             comments/test
    "register"             register/test
    "monotonic"            monotonic/test
    "sets"                 sets/test
