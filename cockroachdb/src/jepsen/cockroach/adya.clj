@@ -51,10 +51,13 @@
               (c/with-txn [c c]
                 (when a-id (cockroach/update-keyrange! test "a" a-id))
                 (when b-id (cockroach/update-keyrange! test "b" b-id))
-                (letr [as (c/query c ["select * from a where
-                                      key = ? and value % 3 = 0" k])
-                       bs (c/query c ["select * from b where
-                                      key = ? and value % 3 = 0" k])
+                (letr [order (< (rand) 0.5)
+                       as (c/query c [(str "select * from " (if order "a" "b")
+                                           " where key = ? and value % 3 = 0")
+                                      k])
+                       bs (c/query c [(str "select * from " (if order "b" "a")
+                                           " where key = ? and value % 3 = 0")
+                                      k])
                        _  (when (or (seq as) (seq bs))
                             ; Ah, the other txn has already committed
                             (return (assoc op :type :fail :error :too-late)))
