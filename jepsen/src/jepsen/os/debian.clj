@@ -157,6 +157,7 @@
                   :bzip2
                   :libzip2
                   :iputils-ping
+                  :iproute
                   :rsyslog
                   :logrotate]))
 

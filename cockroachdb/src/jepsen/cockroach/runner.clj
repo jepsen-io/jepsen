@@ -50,6 +50,7 @@
    "big-skews"                  `(cln/big-skews)
    "huge-skews"                 `(cln/huge-skews)
    "strobe-skews"               `(cln/strobe-skews)
+   "slow"                       `(cln/slow 250)
    "split"                      `(cln/split)
 ;   "start-stop"                 `(cln/startstop 1)
    "start-stop-2"               `(cln/startstop 2)

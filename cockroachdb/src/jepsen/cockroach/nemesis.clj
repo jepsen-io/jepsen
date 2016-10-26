@@ -4,6 +4,7 @@
              [client :as client]
              [control :as c]
              [nemesis :as nemesis]
+             [net :as net]
              [generator :as gen]
              [reconnect :as rc]
              [util :as util :refer [letr]]]
@@ -21,12 +22,6 @@
 
 ;; duration of an interruption
 (def nemesis-duration 5) ; seconds
-
-;; duration to let nemeses settle at the end
-(def nemesis-quiescence-wait 3) ; seconds
-
-;; Location of the custom utility compiled from scripts/adjtime.c
-(def adjtime "/home/ubuntu/adjtime")
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
@@ -155,6 +150,31 @@
           :client (nemesis/partition-majorities-ring)
           :clocks false}))
 
+(defn slowing
+  "Wraps a nemesis. Before underlying nemesis starts, slows the network by dt
+  s. When underlying nemesis resolves, restores network speeds."
+  [nem dt]
+  (reify client/Client
+    (setup! [this test node]
+      (net/fast! (:net test) test)
+      (client/setup! nem test node)
+      this)
+
+    (invoke! [this test op]
+      (case (:f op)
+        :start (do (net/slow! (:net test) test {:mean (* dt 1000) :variance 1})
+                   (client/invoke! nem test op))
+
+        :stop (try (client/invoke! nem test op)
+                   (finally
+                     (net/fast! (:net test) test)))
+
+        (client/invoke! nem test op)))
+
+    (teardown! [this test]
+      (net/fast! (:net test) test)
+      (client/teardown! nem test))))
+
 (defn restarting
   "Wraps a nemesis. After underlying nemesis has completed :stop, restarts
   nodes."
@@ -246,8 +266,10 @@
 (defn small-skews        [] (skew "small-skews"       0.100))
 (defn subcritical-skews  [] (skew "subcritical-skews" 0.200))
 (defn critical-skews     [] (skew "critical-skews"    0.250))
-(defn big-skews          [] (skew "big-skews"         0.5))
-(defn huge-skews         [] (skew "huge-skews"        60))
+(defn big-skews          [] (-> (skew "big-skews" 0.5)
+                                (update :client slowing 0.5)))
+(defn huge-skews         [] (-> (skew "huge-skews" 5)
+                                (update :client slowing 5)))
 
 (defn split-nemesis
   "A client that looks at the test's :keyrange and performs a split just below
