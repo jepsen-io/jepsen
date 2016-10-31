@@ -166,6 +166,42 @@ fail, the operation is known to have failed; and unknown otherwise
 At the end, the checker validates that the sum of the remaining
 balances of all accounts is the same as the initial sum.
 
+## Test details: sequential
+
+Cockroach does not offer strict serializability. However, as a consequence of
+its implementation of hybrid logical clocks, all transactions *on a particular
+node* should observe a strong real-time order. So long as CockroachDB clients
+are sticky (e.g. bound to the same server), we expect those clients should
+observe [sequential
+consistency](https://en.wikipedia.org/wiki/Sequential_consistency) as well: the
+effective order of transactions should be consistent with the order on every
+client.
+
+To verify this, we have a single client perform [a sequence of independent
+transactions](https://github.com/jepsen-io/jepsen/blob/4d402bae4a216632a897be8f0795a6eff0462837/cockroachdb/src/jepsen/cockroach/sequential.clj#L76-L95),
+inserting k<sub>1</sub>, k<sub>2</sub>, ..., k<sub>n</sub> into different
+tables. Concurrently, a different client attempts to read each of
+k<sub>n</sub>, ..., k<sub>2</sub>, k<sub>1</sub> in turn. Because all inserts
+occur from the same process, they must also be visible to any single process in
+that order. This implies that once a process observes k<sub>n</sub>, any
+subsequent read must see k<sub>n-1</sub>, and by induction, all smaller keys.
+
+## Test details: G2
+
+Transactions select a predicate over two tables, then insert to one or the
+other if no rows are present. Serializability implies that at most one
+transaction may commit per predicate.
+
+## Test details: comments
+
+This test demonstrates a known strict serializability violation in Cockroach
+and is intended to fail. It performs a sequence of concurrent inserts to a
+table, and selects all rows from that table periodically. We look for cases
+where one record was inserted strictly before another (e.g. they are not
+concurrent), and the latter value is visible to a read without the former.
+
+
+
 How to run the Jepsen tests for CockroachDB
 -------------------------------------------
 
