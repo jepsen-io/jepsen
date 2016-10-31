@@ -51,7 +51,7 @@
                               (r/map :value)
                               (reduce (fn [_ x] x) nil))]
         (if-not final-read-l
-          {:valid? false
+          {:valid? :unknown
            :error  "Set was never read"}
 
           (let [final-read  (set final-read-l)

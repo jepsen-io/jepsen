@@ -72,7 +72,7 @@
 
                 (jepsen/synchronize test)
                 (when (= node (jepsen/primary test))
-                  (auto/set-replication-zone!  ".default"
+                  (auto/set-replication-zone! ".default"
                                               {:range_min_bytes 1024
                                                :range_max_bytes 1048576})
                   (info node "Creating database...")

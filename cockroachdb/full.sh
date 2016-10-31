@@ -1,8 +1,8 @@
 lein do clean, run test \
-  --tarball https://aphyr.com/media/cockroach-beta-20161004.linux-amd64.tar.bz2 \
+  --tarball http://aphyr.com/media/cockroach-2016-10-26.tar.bz2 \
   --username admin \
   --nodes-file ~/nodes \
-  --test all \
+  --test sets \
   --nemesis majority-ring \
   --nemesis parts \
   --nemesis subcritical-skews \
@@ -17,4 +17,5 @@ lein do clean, run test \
   --nemesis2 split \
   --nemesis2 start-stop-2 \
   --nemesis2 start-kill-2 \
-  --time-limit 180
+  --time-limit 180 \
+  --test-count 10

@@ -111,9 +111,11 @@
   [name zone]
   (c/sudo cockroach-user
           (-> (c/cd working-path
-                    (c/exec cockroach :zone :set name
+                    (c/exec :echo (yaml/generate-string zone) |
+                            cockroach :zone :set
                             (when insecure :--insecure)
-                            (yaml/generate-string zone)))
+                            :--file=-
+                            name))
               (str/replace #"UPDATE .+\n" "")
               (yaml/parse-string))))
 
