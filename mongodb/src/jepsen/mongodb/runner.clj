@@ -9,26 +9,12 @@
             [jepsen.mongodb [core :as m]
                             [mongo :as client]
                             [document-cas :as dc]]
-            [jepsen.core :as jepsen]))
+            [jepsen [cli :as jc]
+                    [core :as jepsen]]))
 
-(defn one-of
-  "Takes a collection and returns a string like \"Must be one of ...\" and a
-  list of names. For maps, uses keys."
-  [coll]
-  (str "Must be one of "
-       (pr-str (sort (map name (if (map? coll) (keys coll) coll))))))
-
-(def optspec
+(def opt-spec
   "Command line option specification for tools.cli."
-  [["-h" "--help" "Print out this message and exit"]
-
-   ["-t" "--time-limit SECONDS"
-    "Excluding setup and teardown, how long should tests run for, in seconds?"
-    :default  150
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "Must be positive"]]
-
-   [nil "--key-time-limit SECONDS"
+  [[nil "--key-time-limit SECONDS"
     "How long should we test an individual key for, in seconds?"
     :default  30
     :parse-fn #(Long/parseLong %)
@@ -37,12 +23,12 @@
    ["-w" "--write-concern LEVEL" "Write concern level"
     :default  :majority
     :parse-fn keyword
-    :validate [client/write-concerns (one-of client/write-concerns)]]
+    :validate [client/write-concerns (jc/one-of client/write-concerns)]]
 
    ["-r" "--read-concern LEVEL" "Read concern level"
     :default  :majority
     :parse-fn keyword
-    :validate [client/read-concerns (one-of client/read-concerns)]]
+    :validate [client/read-concerns (jc/one-of client/read-concerns)]]
 
    [nil "--no-reads" "Disable reads, to test write safety only"]
 
@@ -63,40 +49,20 @@
                "Must be a file://, http://, or https:// URL ending in .tar.gz or .tgz"]]
   ])
 
-(def usage
-  "Usage: java -jar jepsen.mongodb.jar [OPTIONS ...]
+(defn test-cmd
+  []
+  {"test" {:opt-spec (into jc/test-opt-spec opt-spec)
+           :usage    jc/test-usage
+           :run      (fn [{:keys [options]}]
+                       (info "Test options:\n" (with-out-str (pprint options)))
 
-Runs a Jepsen test and exits with a status code:
-
-  0     All tests passed
-  1     Some test failed
-  254   Invalid arguments
-  255   Internal Jepsen error
-
-Options:\n")
+                       ; Run test
+                       (let [t (jepsen/run! (dc/test options))]
+                         (when-not (:valid? (:results test))
+                           (System/exit 1))))}})
 
 (defn -main
   [& args]
-  (try
-    (let [{:keys [options arguments summary errors]}
-          (cli/parse-opts args optspec)]
-      ; Bad args?
-      (when-not (empty? errors)
-        (dorun (map println errors))
-        (System/exit 254))
-
-      ; Help?
-      (when (:help options)
-        (println usage)
-        (println summary)
-        (System/exit 0))
-
-      (info "Test options:\n" (with-out-str (pprint options)))
-
-      ; Run test
-      (let [t (jepsen/run! (dc/test options))]
-        (System/exit (if (:valid? (:results t)) 0 1))))
-
-    (catch Throwable t
-      (fatal t "Oh jeez, I'm sorry, Jepsen broke. Here's why:")
-      (System/exit 255))))
+  (jc/run! (merge (jc/serve-cmd)
+                  (test-cmd))
+           args))
