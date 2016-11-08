@@ -1,21 +1,9 @@
 lein do clean, run test \
-  --tarball http://aphyr.com/media/cockroach-2016-10-26.tar.bz2 \
+  --tarball http://aphyr.com/media/cockroach-2016-10-27.tar.bz2 \
   --username admin \
   --nodes-file ~/nodes \
   --test sets \
   --nemesis majority-ring \
-  --nemesis parts \
-  --nemesis subcritical-skews \
-  --nemesis strobe-skews \
-  --nemesis split \
-  --nemesis start-stop-2 \
-  --nemesis start-kill-2 \
-  --nemesis2 majority-ring \
-  --nemesis2 parts \
   --nemesis2 subcritical-skews \
-  --nemesis2 strobe-skews \
-  --nemesis2 split \
-  --nemesis2 start-stop-2 \
-  --nemesis2 start-kill-2 \
   --time-limit 180 \
   --test-count 10
