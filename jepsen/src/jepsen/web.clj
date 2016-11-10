@@ -58,6 +58,7 @@
    [:th "Valid?"]
    [:th "Results"]
    [:th "History"]
+   [:th "Log"]
    [:th "Zip"]])
 
 (defn relative-path
@@ -97,6 +98,7 @@
       (:valid? r)]
      [:td [:a {:href (url t "results.edn")}    "results.edn"]]
      [:td [:a {:href (url t "history.txt")}    "history.txt"]]
+     [:td [:a {:href (url t "history.txt")}    "jepsen.log"]]
      [:td [:a {:href (str (url t) ".zip")} "zip"]]]))
 
 (defn home
