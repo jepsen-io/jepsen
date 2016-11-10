@@ -26,7 +26,7 @@
     :validate [client/write-concerns (jc/one-of client/write-concerns)]]
 
    ["-r" "--read-concern LEVEL" "Read concern level"
-    :default  :majority
+    :default  :linearizable
     :parse-fn keyword
     :validate [client/read-concerns (jc/one-of client/read-concerns)]]
 
@@ -44,7 +44,7 @@
     :validate [(complement neg?) "Must be non-negative"]]
 
    [nil "--tarball URL" "URL for the Mongo tarball to install. May be either HTTP, HTTPS, or a local file. For instance, --tarball https://foo.com/mongo.tgz, or file:///tmp/mongo.tgz"
-    :default  "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-debian71-3.3.1.tgz"
+    :default  "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-debian81-3.4.0-rc2.tgz"
     :validate [(partial re-find #"^(file|https?)://.*\.(tar\.gz|tgz)")
                "Must be a file://, http://, or https:// URL ending in .tar.gz or .tgz"]]
   ])
@@ -52,14 +52,16 @@
 (defn test-cmd
   []
   {"test" {:opt-spec (into jc/test-opt-spec opt-spec)
+           :opt-fn   #(-> % (jc/rename-options {:node :nodes}))
            :usage    jc/test-usage
            :run      (fn [{:keys [options]}]
                        (info "Test options:\n" (with-out-str (pprint options)))
 
                        ; Run test
-                       (let [t (jepsen/run! (dc/test options))]
-                         (when-not (:valid? (:results test))
-                           (System/exit 1))))}})
+                       (doseq [i (range (:test-count options))]
+                         (let [test (jepsen/run! (dc/test options))]
+                           (when-not (:valid? (:results test))
+                             (System/exit 1)))))}})
 
 (defn -main
   [& args]

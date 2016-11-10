@@ -62,7 +62,7 @@
 
 (defn configure!
   "Deploy configuration files to the node."
-  [node test]
+  [test node]
   (c/exec :echo (-> "mongod.conf" io/resource slurp
                     (str/replace #"%STORAGE_ENGINE%" (:storage-engine test))
                     (str/replace #"%PROTOCOL_VERSION%" (:protocol-version test)))
@@ -70,19 +70,21 @@
 
 (defn start!
   "Starts Mongod"
-  [node]
+  [test node]
   (c/sudo username
           (cu/start-daemon! {:logfile "/opt/mongodb/stdout.log"
                              :pidfile "/opt/mongodb/pidfile"
                              :remove-pidfile? false
                              :chdir   "/opt/mongodb"}
                             "/opt/mongodb/bin/mongod"
-                            :--config "/opt/mongodb/mongod.conf")))
+                            :--config "/opt/mongodb/mongod.conf"))
+  :started)
 
 (defn stop!
   "Stops Mongod"
-  [node]
-  (cu/stop-daemon! "mongod" "/opt/mongodb/pidfile"))
+  [test node]
+  (cu/stop-daemon! "mongod" "/opt/mongodb/pidfile")
+  :stopped)
 
 (defn savelog!
   "Saves Mongod log"
@@ -94,8 +96,8 @@
 
 (defn wipe!
   "Shuts down MongoDB and wipes data."
-  [node]
-  (stop! node)
+  [test node]
+  (stop! test node)
   (savelog! node)
   (info node "deleting data files")
   (c/su
@@ -249,7 +251,7 @@
 (defn join!
   "Join nodes into a replica set. Blocks until any primary is visible to all
   nodes which isn't really what we want but oh well."
-  [node test]
+  [test node]
   ; Gotta have all nodes online for this. Delightfully, Mongo won't actually
   ; bind to the port until well *after* the init script startup process
   ; returns. This would be fine, except that  if a node isn't ready to join,
@@ -302,14 +304,13 @@
                     (throw (RuntimeException.
                              (str "Mongo setup on " node "timed out!")))
                     (debian/install [:libc++1 :libsnmp30])
-                    (doto node
-                      (install! url)
-                      (configure! test)
-                      (start!)
-                      (join! test))))
+                    (install! node url)
+                    (configure! test node)
+                    (start! test node)
+                    (join! test node)))
 
     (teardown! [_ test node]
-      (wipe! node))
+      (wipe! test node))
 
     db/LogFiles
     (log-files [_ test node]
@@ -344,9 +345,23 @@
   (->> gen
        (gen/stagger 1)
        (gen/nemesis
-         (gen/seq (cycle [(gen/sleep 30)
+         (gen/seq (cycle [(gen/sleep 20)
                           {:type :info :f :stop}
                           {:type :info :f :start}])))))
+
+(defn random-nonempty-subset
+  [nodes]
+  (take (inc (rand-int (count nodes))) (shuffle nodes)))
+
+(defn kill-nem
+  "A nemesis that kills/restarts Mongo on randomly selected nodes."
+  []
+  (nemesis/node-start-stopper random-nonempty-subset start!  stop!))
+
+(defn pause-nem
+  "A nemesis that pauses Mongo on randomly selected nodes."
+  []
+  (nemesis/hammer-time random-nonempty-subset "mongod"))
 
 (defn test-
   "Constructs a test with the given name prefixed by 'mongodb ', merging any
@@ -364,5 +379,5 @@
            :os              debian/os
            :db              (db (:tarball opts))
            :checker         (checker/perf)
-           :nemesis         (nemesis/partition-random-halves))
+           :nemesis         (pause-nem))
     opts))

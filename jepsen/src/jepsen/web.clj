@@ -98,7 +98,7 @@
       (:valid? r)]
      [:td [:a {:href (url t "results.edn")}    "results.edn"]]
      [:td [:a {:href (url t "history.txt")}    "history.txt"]]
-     [:td [:a {:href (url t "history.txt")}    "jepsen.log"]]
+     [:td [:a {:href (url t "jepsen.log")}     "jepsen.log"]]
      [:td [:a {:href (str (url t) ".zip")} "zip"]]]))
 
 (defn home

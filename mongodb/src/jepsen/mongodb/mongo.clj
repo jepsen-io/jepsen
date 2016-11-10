@@ -59,9 +59,10 @@
 
 (def read-concerns
   "A map of read concern keywords to java driver constants."
-  {:majority ReadConcern/MAJORITY
-   :local    ReadConcern/LOCAL
-   :default  ReadConcern/DEFAULT})
+  {:linearizable  ReadConcern/LINEARIZABLE
+   :majority      ReadConcern/MAJORITY
+   :local         ReadConcern/LOCAL
+   :default       ReadConcern/DEFAULT})
 
 (def write-concerns
   "A map of write concern keywords to java driver constants."
