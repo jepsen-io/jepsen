@@ -14,6 +14,12 @@
            (java.io File
                     RandomAccessFile)))
 
+(defn random-nonempty-subset
+  "A randomly selected, randomly ordered, non-empty subset of the given
+  collection."
+  [nodes]
+  (take (inc (rand-int (count nodes))) (shuffle nodes)))
+
 (defn name+
   "Tries name, falls back to pr-str."
   [x]

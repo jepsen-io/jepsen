@@ -150,6 +150,7 @@
                   :vim
                   :man-db
                   :faketime
+                  :ntpdate
                   :unzip
                   :iptables
                   :psmisc
