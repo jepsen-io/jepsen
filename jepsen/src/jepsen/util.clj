@@ -14,6 +14,19 @@
            (java.io File
                     RandomAccessFile)))
 
+(defn exception?
+  "Is x an Exception?"
+  [x]
+  (instance? Exception x))
+
+(defn fcatch
+  "Takes a function and returns a version of it which returns, rather than
+  throws, exceptions."
+  [f]
+  (fn wrapper [& args]
+    (try (apply f args)
+         (catch Exception e e))))
+
 (defn random-nonempty-subset
   "A randomly selected, randomly ordered, non-empty subset of the given
   collection."

@@ -19,6 +19,7 @@
             [clojure.pprint :refer [pprint]]
             [knossos.core :as knossos]
             [jepsen.util :as util :refer [with-thread-name
+                                          fcatch
                                           real-pmap
                                           relative-time-nanos]]
             [jepsen.os :as os]
@@ -47,14 +48,6 @@
   "Given a test, returns the primary node."
   [test]
   (first (:nodes test)))
-
-(defn fcatch
-  "Takes a function and returns a version of it which returns, rather than
-  throws, exceptions."
-  [f]
-  (fn wrapper [& args]
-    (try (apply f args)
-         (catch Exception e e))))
 
 (defmacro with-resources
   "Takes a four-part binding vector: a symbol to bind resources to, a function

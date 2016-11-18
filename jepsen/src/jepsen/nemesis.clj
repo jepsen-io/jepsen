@@ -33,8 +33,9 @@
 
 (defn split-one
   "Split one node off from the rest"
-  [coll]
-  (let [loner (rand-nth coll)]
+  ([coll]
+   (split-one (rand-nth coll) coll))
+  ([loner coll]
     [[loner] (remove (fn [x] (= x loner)) coll)]))
 
 (defn complete-grudge
