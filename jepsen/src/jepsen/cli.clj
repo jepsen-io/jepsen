@@ -246,6 +246,48 @@ Options:\n")
                               (:ip options) ":" (:port options) "/"))
                    (while true (Thread/sleep 1000)))}})
 
+(defn single-test-opt-fn
+  "An opt fn for running single tests. Remaps :node to :nodes, validates any tarball arguments, and reads :nodes-file into
+  :nodes."
+  [parsed]
+  (-> parsed
+      (rename-options {:node :nodes})
+      validate-tarball
+      read-nodes-file))
+
+(defn single-test-cmd
+  "A command which runs a single test with standard built-ins. Options:
+
+  {:opt-spec A vector of additional options for tools.cli. Appended to
+             `test-opt-spec`. Optional.
+   :opt-fn   A function which transforms parsed options. Composed after
+             `test-opt-fn`. Optional.
+   :tarball If present, adds a --tarball option to this command, defaulting to
+            whatever URL is given here.
+   :usage   Defaults to `jc/test-usage`. Optional.
+   :test-fn A function that receives the option map and constructs a test.}"
+  [opts]
+  (let [opt-spec (into test-opt-spec (:opt-spec opts))
+        opt-spec (if-let [default-tarball (:tarball opts)]
+                   (conj opt-spec
+                         [nil "--tarball URL" "URL for the DB tarball to install. May be either HTTP, HTTPS, or a local file on each DB node. For instance, --tarball https://foo.com/bar.tgz, or file:///tmp/bar.tgz"
+                          :default default-tarball
+                          :validate [(partial re-find #"^(file|https?)://.*\.(tar\.gz|tgz)")
+                                     "Must be a file://, http://, or https:// URL ending in .tar.gz or .tgz"]])
+                   opt-spec)]
+  {"test" {:opt-spec opt-spec
+           :opt-fn   (if-let [f (:opt-fn opts)]
+                       (comp f single-test-opt-fn)
+                       single-test-opt-fn)
+           :usage    (:usage opts test-usage)
+           :run      (fn [{:keys [options]}]
+                       (info "Test options:\n"
+                             (with-out-str (pprint options)))
+                       (doseq [i (range (:test-count options))]
+                         (let [test (jepsen/run! ((:test-fn opts) options))]
+                           (when-not (:valid? (:results test))
+                             (System/exit 1)))))}}))
+
 (defn -main
   [& args]
   (run! (serve-cmd)
