@@ -130,8 +130,9 @@
   converts them to :fails"
   [op & body]
   `(try ~@body
-       (catch org.postgresql.util.PSQLException e#
-         (if (re-find #"ERROR: restart transaction" (.getMessage e#))
+       (catch java.sql.SQLException e#
+         (if (re-find #"ERROR: restart transaction"
+                      (str (exception->op e#)))
            (assoc ~op
                   :type :fail
                   :error (str/replace
@@ -145,10 +146,10 @@
   `(util/with-retry [attempts# 30
                      backoff# 20]
      ~@body
-     (catch org.postgresql.util.PSQLException e#
+     (catch java.sql.SQLException  e#
        (if (and (pos? attempts#)
                 (re-find #"ERROR: restart transaction"
-                         (.getMessage e#)))
+                         (str (exception->op e#))))
          (do (Thread/sleep backoff#)
              (~'retry (dec attempts#)
                       (* backoff# (+ 4 (* 0.5 (- (rand) 0.5))))))
@@ -159,6 +160,24 @@
   [[c conn] & body]
   `(j/with-db-transaction [~c ~conn {:isolation isolation-level}]
      ~@body))
+
+(defmacro with-restart
+  "Wrap an evaluation within a CockroachDB retry block."
+  [c & body]
+  `(util/with-retry [attempts# 10
+                     backoff# 20]
+     (j/execute! ~c ["savepoint cockroach_restart"])
+     ~@body
+     (catch java.sql.SQLException  e#
+       (if (and (pos? attempts#)
+                (re-find #"ERROR: restart transaction"
+                         (str (exception->op e#))))
+         (do (j/execute! ~c ["rollback to savepoint cockroach_restart"])
+             (Thread/sleep backoff#)
+             (info "txn-restart" attempts#)
+             (~'retry (dec attempts#)
+              (* backoff# (+ 4 (* 0.5 (- (rand) 0.5))))))
+         (throw e#)))))
 
 (defn exception->op
   "Takes an exception and maps it to a partial op, like {:type :info, :error
