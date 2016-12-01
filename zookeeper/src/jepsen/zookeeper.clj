@@ -1,9 +1,11 @@
 (ns jepsen.zookeeper
+  (:gen-class)
   (:require [avout.core         :as avout]
             [clojure.tools.logging :refer :all]
             [clojure.java.io    :as io]
             [clojure.string     :as str]
             [jepsen [db         :as db]
+                    [cli        :as cli]
                     [checker    :as checker]
                     [client     :as client]
                     [control    :as c]
@@ -102,22 +104,34 @@
       (.close conn))))
 
 (defn zk-test
-  [version]
-  (assoc tests/noop-test
-         :name    "zookeeper"
-         :os      debian/os
-         :db      (db version)
-         :client  (client nil nil)
-         :nemesis (nemesis/partition-random-halves)
-         :generator (->> (gen/mix [r w cas])
-                         (gen/stagger 1)
-                         (gen/nemesis
-                           (gen/seq (cycle [(gen/sleep 5)
-                                            {:type :info, :f :start}
-                                            (gen/sleep 5)
-                                            {:type :info, :f :stop}])))
-                         (gen/time-limit 60))
-         :model   (model/cas-register 0)
-         :checker (checker/compose
-                    {:perf   (checker/perf)
-                     :linear checker/linearizable})))
+  "Given an options map from the command-line runner (e.g. :nodes, :ssh,
+  :concurrency, ...), constructs a test map."
+  [opts]
+  (info "Creating test" opts)
+  (merge tests/noop-test
+         opts
+         {:name    "zookeeper"
+          :os      debian/os
+          :db      (db "3.4.5+dfsg-2")
+          :client  (client nil nil)
+          :nemesis (nemesis/partition-random-halves)
+          :generator (->> (gen/mix [r w cas])
+                          (gen/stagger 1)
+                          (gen/nemesis
+                            (gen/seq (cycle [(gen/sleep 5)
+                                             {:type :info, :f :start}
+                                             (gen/sleep 5)
+                                             {:type :info, :f :stop}])))
+                          (gen/time-limit 60))
+          :model   (model/cas-register 0)
+          :checker (checker/compose
+                     {:perf   (checker/perf)
+                      :linear checker/linearizable})}))
+
+(defn -main
+  "Handles command line arguments. Can either run a test, or a web server for
+  browsing results."
+  [& args]
+  (cli/run! (merge (cli/single-test-cmd {:test-fn zk-test})
+                   (cli/serve-cmd))
+           args))

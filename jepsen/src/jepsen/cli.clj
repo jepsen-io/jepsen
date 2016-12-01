@@ -58,16 +58,16 @@
 
    [nil "--nodes-file FILENAME" "File containing node hostnames, one per line."]
 
+   [nil "--username USER" "Username for logins"
+    :default "root"]
+
    [nil "--password PASS" "Password for sudo access"
-    :default "root"
-    :assoc-fn (fn [m k v] (assoc-in m [:ssh k] v))]
+    :default "root"]
 
    [nil "--strict-host-key-checking" "Whether to check host keys"
-    :default false
-    :assoc-fn (fn [m k v] (assoc-in m [:ssh k] v))]
+    :default false]
 
-   [nil "--ssh-private-key FILE" "Path to an SSH identity file"
-    :assoc-fn (fn [m k v] (assoc-in m [:ssh :private-key-path] v))]
+   [nil "--ssh-private-key FILE" "Path to an SSH identity file"]
 
    [nil "--concurrency NUMBER" "How many workers should we run?"
     :default 30
@@ -84,11 +84,7 @@
     "Excluding setup and teardown, how long should a test run for, in seconds?"
     :default  60
     :parse-fn #(Long/parseLong %)
-    :validate [pos? "Must be positive"]]
-
-   [nil "--username USER" "Username for logins"
-    :default "root"
-    :assoc-fn (fn [m k v] (assoc-in m [:ssh k] v))]])
+    :validate [pos? "Must be positive"]]])
 
 (defn tarball-opt
   [default]
@@ -134,6 +130,24 @@ Options:\n")
   "Like rename-keys, but takes a parsed map and updates keys in :options."
   [parsed replacements]
   (update parsed :options rename-keys replacements))
+
+(defn rename-ssh-options
+  "Takes a parsed map and moves SSH options to a map under :ssh."
+  [parsed]
+  (let [{:keys [username
+                password
+                strict-host-key-checking
+                ssh-private-key]} (:options parsed)]
+    (assoc parsed :options
+           (-> (:options parsed)
+               (assoc :ssh {:username                  username
+                            :password                  password
+                            :strict-host-key-checking  strict-host-key-checking
+                            :private-key-path          ssh-private-key})
+               (dissoc :username
+                       :password
+                       :strict-host-key-checking
+                       :private-key-path)))))
 
 (defn read-nodes-file
   "Takes a parsed map. If :nodes-file exists, reads its contents and appends
@@ -247,12 +261,12 @@ Options:\n")
                    (while true (Thread/sleep 1000)))}})
 
 (defn single-test-opt-fn
-  "An opt fn for running single tests. Remaps :node to :nodes, validates any tarball arguments, and reads :nodes-file into
-  :nodes."
+  "An opt fn for running single tests. Remaps ssh keys, remaps :node to :nodes,
+  and reads :nodes-file into :nodes."
   [parsed]
   (-> parsed
       (rename-options {:node :nodes})
-      validate-tarball
+      rename-ssh-options
       read-nodes-file))
 
 (defn single-test-cmd
@@ -274,11 +288,14 @@ Options:\n")
                           :default default-tarball
                           :validate [(partial re-find #"^(file|https?)://.*\.(tar\.gz|tgz)")
                                      "Must be a file://, http://, or https:// URL ending in .tar.gz or .tgz"]])
-                   opt-spec)]
+                   opt-spec)
+        opt-fn  (if (:tarball opts)
+                  (comp single-test-opt-fn validate-tarball)
+                  single-test-opt-fn)]
   {"test" {:opt-spec opt-spec
            :opt-fn   (if-let [f (:opt-fn opts)]
-                       (comp f single-test-opt-fn)
-                       single-test-opt-fn)
+                       (comp f opt-fn)
+                       opt-fn)
            :usage    (:usage opts test-usage)
            :run      (fn [{:keys [options]}]
                        (info "Test options:\n"

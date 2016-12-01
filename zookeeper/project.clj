@@ -3,6 +3,7 @@
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.7.0"]
-                 [jepsen "0.0.9"]
+  :main jepsen.zookeeper
+  :dependencies [[org.clojure/clojure "1.8.0"]
+                 [jepsen "0.1.4-SNAPSHOT"]
                  [avout "0.5.4"]])
