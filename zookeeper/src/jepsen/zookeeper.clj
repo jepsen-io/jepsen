@@ -122,7 +122,7 @@
                                              {:type :info, :f :start}
                                              (gen/sleep 5)
                                              {:type :info, :f :stop}])))
-                          (gen/time-limit 60))
+                          (gen/time-limit 15))
           :model   (model/cas-register 0)
           :checker (checker/compose
                      {:perf   (checker/perf)

@@ -69,10 +69,10 @@
 
    [nil "--ssh-private-key FILE" "Path to an SSH identity file"]
 
-   [nil "--concurrency NUMBER" "How many workers should we run?"
-    :default 30
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "Must be positive"]]
+   [nil "--concurrency NUMBER" "How many workers should we run? Must be an integer, optionally followed by n (e.g. 3n) to multiply by the number of nodes."
+    :default  "1n"
+    :validate [(partial re-find #"^\d+n?$")
+               "Must be an integer, optionally followed by n."]]
 
    [nil "--test-count NUMBER"
     "How many times should we repeat a test?"
@@ -109,11 +109,28 @@ Options:\n")
 ;; Validation and option processing
 
 (defn validate-tarball
-  "Ensures a tarball is present."
+  "Takes a parsed map and ensures a tarball is present."
   [parsed]
   (if (:tarball (:options parsed))
     parsed
     (update parsed :errors conj "No tarball URL provided")))
+
+(defn parse-concurrency
+  "Takes a parsed map. Parses :concurrency; if it is a string ending with n,
+  e.g 3n, sets it to 3 * the number of :nodes. Otherwise, parses as a plain
+  integer."
+  [parsed]
+  (let [c (:concurrency (:options parsed))]
+    (let [[match integer unit] (re-find #"(\d+)(n?)" c)]
+      (when-not match
+        (throw (IllegalArgumentException.
+                 (str "--concurrency " c
+                      " should be an integer optionally followed by n"))))
+      (let [unit (if (= "n" unit)
+                   (count (:nodes (:options parsed)))
+                   1)]
+        (assoc-in parsed [:options :concurrency]
+                  (* unit (Long/parseLong integer)))))))
 
 (defn rename-keys
   "Given a map m, and a map of keys to replacement keys, yields m with keys
@@ -163,6 +180,16 @@ Options:\n")
                    nodes (into nodes (str/split (slurp f) #"\s*\n\s*"))]
                (assoc options :nodes nodes))
              options))))
+
+(defn test-opt-fn
+  "An opt fn for running simple tests. Remaps ssh keys, remaps :node to :nodes,
+  reads :nodes-file into :nodes, and parses :concurrency."
+  [parsed]
+  (-> parsed
+      (rename-options {:node :nodes})
+      rename-ssh-options
+      read-nodes-file
+      parse-concurrency))
 
 ;; Test runner
 
@@ -260,15 +287,6 @@ Options:\n")
                               (:ip options) ":" (:port options) "/"))
                    (while true (Thread/sleep 1000)))}})
 
-(defn single-test-opt-fn
-  "An opt fn for running single tests. Remaps ssh keys, remaps :node to :nodes,
-  and reads :nodes-file into :nodes."
-  [parsed]
-  (-> parsed
-      (rename-options {:node :nodes})
-      rename-ssh-options
-      read-nodes-file))
-
 (defn single-test-cmd
   "A command which runs a single test with standard built-ins. Options:
 
@@ -290,8 +308,8 @@ Options:\n")
                                      "Must be a file://, http://, or https:// URL ending in .tar.gz or .tgz"]])
                    opt-spec)
         opt-fn  (if (:tarball opts)
-                  (comp single-test-opt-fn validate-tarball)
-                  single-test-opt-fn)]
+                  (comp test-opt-fn validate-tarball)
+                  test-opt-fn)]
   {"test" {:opt-spec opt-spec
            :opt-fn   (if-let [f (:opt-fn opts)]
                        (comp f opt-fn)
