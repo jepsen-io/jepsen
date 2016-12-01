@@ -5,5 +5,5 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main jepsen.zookeeper
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [jepsen "0.1.4-SNAPSHOT"]
+                 [jepsen "0.1.4"]
                  [avout "0.5.4"]])
