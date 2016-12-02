@@ -7,19 +7,21 @@ that model. We'll require `knossos.model` and `jepsen.checker`:
 
 ```clj
 (ns jepsen.zookeeper
-  (:require [avout.core         :as avout]
+  (:gen-class)
+  (:require [avout.core :as avout]
             [clojure.tools.logging :refer :all]
-            [clojure.java.io    :as io]
-            [clojure.string     :as str]
-            [jepsen [db         :as db]
-                    [checker    :as checker]
-                    [client     :as client]
-                    [control    :as c]
-                    [generator  :as gen]
-                    [tests      :as tests]
-                    [util       :refer [timeout]]]
-            [jepsen.os.debian   :as debian]
-            [knossos.model      :as model]))
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [jepsen [checker :as checker]
+                    [cli :as cli]
+                    [client :as client]
+                    [control :as c]
+                    [db :as db]
+                    [generator :as gen]
+                    [tests :as tests]
+                    [util :as util :refer [timeout]]]
+            [jepsen.os.debian :as debian]
+            [knossos.model :as model]))
 ```
 
 In our Zookeeper example, we're modeling a single register with reads, writes,
@@ -51,7 +53,7 @@ behave.
 Running the test, we can confirm the checker's results:
 
 ```bash
-$ lein test
+$ lein run test
 ...
 INFO  jepsen.util - 0 :invoke :read nil
 INFO  jepsen.util - 0 :ok :read 2
@@ -81,7 +83,7 @@ installed, Jepsen can emit throughput and latency graphs for us.
 ```
 
 ```bash
-$ lein test
+$ lein run test
 ...
 $ open store/latest/latency-raw.png
 ```

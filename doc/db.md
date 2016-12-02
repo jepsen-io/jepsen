@@ -13,9 +13,11 @@ like `info`, `warn`, etc.
 
 ```clj
 (ns jepsen.zookeeper
+  (:gen-class)
   (:require [clojure.tools.logging :refer :all]
-            [jepsen [db    :as db]
+            [jepsen [cli :as cli]
                     [control :as c]
+                    [db :as db]
                     [tests :as tests]]
             [jepsen.os.debian :as debian]))
 ```
@@ -44,31 +46,35 @@ here, which simply log an informational message.
 
 Now, we'll extend the default `noop-test` by adding an `:os`, which tells
 Jepsen how to handle operating system setup, and a `:db`, which we can
-construct using the `db` function we just wrote:
+construct using the `db` function we just wrote. We'll test Zookeeper version
+`3.4.5+dfsg-2`.
 
 ```clj
 (defn zk-test
-  [version]
-  (assoc tests/noop-test
-         :os debian/os
-         :db (db version)))
+  "Given an options map from the command-line runner (e.g. :nodes, :ssh,
+  :concurrency, ...), constructs a test map."
+  [opts]
+  (merge tests/noop-test
+         {:name "zookeeper"
+          :os debian/os
+          :db (db "3.4.5+dfsg-2")}))
 ```
 
 `noop-test`, like all Jepsen tests, is a map with keys like `:os`, `:name`,
-`:db`, etc. See [jepsen.core](../../master/jepsen/src/jepsen/core.clj) for an overview of
-test structure, and `jepsen.core/run` for the full definition of a test.
+`:db`, etc. See [jepsen.core](../../master/jepsen/src/jepsen/core.clj) for an
+overview of test structure, and `jepsen.core/run` for the full definition of a
+test.
 
 Right now `noop-test` has stub implementations for those keys. But we can
-use `assoc` to build a copy of the `noop-test` map with *new* values for those
+use `merge` to build a copy of the `noop-test` map with *new* values for some
 keys.
 
 If we run this test, we'll see Jepsen using our code to set up debian,
 tear down zookeeper, install ZK, then start its workers.
 
 ```bash
-aphyr@waterhouse ~/j/jepsen.zookeeper (master)> lein test
-
-lein test jepsen.zookeeper-test
+$ lein run test
+...
 INFO  jepsen.os.debian - :n1 setting up debian
 INFO  jepsen.os.debian - :n5 setting up debian
 INFO  jepsen.os.debian - :n2 setting up debian
@@ -84,24 +90,14 @@ INFO  jepsen.zookeeper - :n3 installing ZK 3.4.5+dfsg-2
 INFO  jepsen.zookeeper - :n1 installing ZK 3.4.5+dfsg-2
 INFO  jepsen.zookeeper - :n5 installing ZK 3.4.5+dfsg-2
 INFO  jepsen.zookeeper - :n4 installing ZK 3.4.5+dfsg-2
-INFO  jepsen.core - nemesis done
-INFO  jepsen.core - Worker 1 starting
 ...
-INFO  jepsen.core - Everything looks good! ヽ(‘ー`)ノ
-
-{:valid? true, :configs ({:model {}, :pending []}), :final-paths ()}
-
-
-Ran 1 tests containing 1 assertions.
-0 failures, 0 errors.
 ```
 
-See how the version string `"3.4.5+dfsg-2"` was passed from
-`zookeeper_test.clj` to `zk-test`, and in turn passed to `db`, where it was
-*captured* by the `reify` object? This is how we *parameterize* Jepsen tests,
-so the same code can test multiple versions or options. Note also that the
-object `reify` returns closes over its lexical scope, *remembering* the value
-of `version`.
+See how the version string `"3.4.5+dfsg-2"` was passed from `zk-test` to `db`,
+where it was *captured* by the `reify` object? This is how we *parameterize*
+Jepsen tests, so the same code can test multiple versions or options. Note also
+that the object `reify` returns closes over its lexical scope, *remembering*
+the value of `version`.
 
 ## Installing the DB
 
@@ -130,7 +126,7 @@ code they enclose, but down the call stack to any functions called.
       (info node "tearing down ZK"))))
 ```
 
-Running `lein test` will go and install zookeeper itself. Note that Jepsen runs
+Now `lein run test` will go and install zookeeper itself. Note that Jepsen runs
 `setup` and `teardown` concurrently across all nodes.
 
 ## Configuration files
@@ -194,7 +190,7 @@ Let's confirm that the node IDs we're generating look sane:
 ```
 
 ```bash
-aphyr@waterhouse ~/j/jepsen.zookeeper (master)> lein test
+$ lein run test
 ...
 INFO  jepsen.zookeeper - :n4 id is 3
 INFO  jepsen.zookeeper - :n1 id is 0
@@ -232,7 +228,7 @@ unescaped literal string, if need be. `:>` and `:>>` perform shell redirection
 as you'd expect.
 
 ```bash
-$ lein test
+$ lein run test
 ...
 $ ssh n1 cat /etc/zookeeper/conf/myid
 0
@@ -299,7 +295,28 @@ Now we can combine the local `zoo.cfg` file with the dynamically generated
 server fragment, and write that to the node's config file:
 
 ```clj
-$ lein test
+(defn db
+  "Zookeeper DB for a particular version."
+  [version]
+  (reify db/DB
+    (setup! [_ test node]
+      (c/su
+        (info node "installing ZK" version)
+        (debian/install {:zookeeper version
+                         :zookeeper-bin version
+                         :zookeeperd version})
+
+        (c/exec :echo (zk-node-id test node) :> "/etc/zookeeper/conf/myid")
+
+        (c/exec :echo (str (slurp (io/resource "zoo.cfg"))
+                           "\n"
+                           (zoo-cfg-servers test))
+                :> "/etc/zookeeper/conf/zoo.cfg")))
+    ...))
+```
+
+```clj
+$ lein run test
 ...
 $ ssh n1 cat "/etc/zookeeper/conf/zoo.cfg"
 # http://hadoop.apache.org/zookeeper/docs/current/zookeeperAdmin.html
@@ -379,7 +396,7 @@ Jepsen performs a DB teardown at the start of the test, before setup. Then it
 tears the DB down again at the conclusion of the test.
 
 ```bash
-$ lein test
+$ lein run test
 ...
 INFO  jepsen.zookeeper - :n5 tearing down ZK
 INFO  jepsen.zookeeper - :n4 tearing down ZK
@@ -423,20 +440,37 @@ myid
 
 It'd be nice if we could see the DB logs for a given test as well. For this,
 Jepsen provides an optional `db/LogFiles` protocol, specifying log paths to
-download at the end of a test.
+download at the end of a test. Because Zookeeper takes a few seconds to open
+its log file and actually start writing some data, we'll insert a sleep
+statement into the DB's `setup!` function--that way it'll have a chance to
+write something we can see.
 
 ```clj
 (defn db
   "Zookeeper DB for a particular version."
   [version]
   (reify db/DB
-    (setup! [_ test node] ...)
+    (setup! [_ test node]
+      (c/su
+        ...
+        (Thread/sleep 5000)
+        (info node "ZK ready")))
 
     (teardown! [_ test node] ...)
 
     db/LogFiles
     (log-files [_ test node]
       ["/var/log/zookeeper/zookeeper.log"])))
+```
+
+Now, when we run a test, we'll find a copy of the log for each node in `store/latest/<node-name>/.
+
+```bash
+$ cat store/latest/n1/zookeeper.log
+2016-12-02 12:00:29,208 - INFO  [main:QuorumPeerConfig@101] - Reading configuration from: /etc/zookeeper/conf/zoo.cfg
+2016-12-02 12:00:29,314 - INFO  [main:QuorumPeerConfig@334] - Defaulting to majority quorums
+2016-12-02 12:00:29,320 - INFO  [main:DatadirCleanupManager@78] - autopurge.snapRetainCount set to 3
+...
 ```
 
 With the database ready, it's time to [write a client](client.md).

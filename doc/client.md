@@ -25,15 +25,18 @@ implementation of Jepsen's Client protocol...
 
 ```clj
 (ns jepsen.zookeeper
+  (:gen-class)
   (:require [avout.core :as avout]
             [clojure.tools.logging :refer :all]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [jepsen [db    :as db]
-                    [client  :as client]
+            [jepsen [cli :as cli]
+                    [client :as client]
                     [control :as c]
+                    [db :as db]
                     [tests :as tests]]
             [jepsen.os.debian :as debian]))
+...
 
 (defn client
   "A client for a single compare-and-set register"
@@ -72,7 +75,7 @@ so:
 (def conn (avout/connect "some-host"))
 ```
 
-And using that connetion, Avout models a linearizable register like this:
+And using that connetion, Avout models an atomic register like this:
 
 ```clj
 ; Construct a register at the path "/jepsen" with initial value 0.
@@ -116,19 +119,14 @@ will be filled in when Jepsen calls `setup!`.
 Running `lein test`, we can see the ZK connections opening and closing:
 
 ```bash
-$ lein test
-INFO  org.apache.zookeeper.ZooKeeper - Client environment:zookeeper.version=3.4.0-1202560, built on 11/16/2011 07:18 GMT
+$ lein run test
 ...
-INFO  org.apache.zookeeper.ZooKeeper - Initiating client connection, connectString=n5 sessionTimeout=5000 watcher=zookeeper.internal$make_watcher$reify__7183@719567fd
-INFO  org.apache.zookeeper.ZooKeeper - Initiating client connection, connectString=n1 sessionTimeout=5000 watcher=zookeeper.internal$make_watcher$reify__7183@63a650df
-INFO  org.apache.zookeeper.ZooKeeper - Initiating client connection, connectString=n3 sessionTimeout=5000 watcher=zookeeper.internal$make_watcher$reify__7183@78007b36
-INFO  org.apache.zookeeper.ZooKeeper - Initiating client connection, connectString=n2 sessionTimeout=5000 watcher=zookeeper.internal$make_watcher$reify__7183@1e5a45c3
-INFO  org.apache.zookeeper.ZooKeeper - Initiating client connection, connectString=n4 sessionTimeout=5000 watcher=zookeeper.internal$make_watcher$reify__7183@21701c04
-INFO  org.apache.zookeeper.ClientCnxn - Opening socket connection to server /192.168.122.13:2181
-INFO  org.apache.zookeeper.ClientCnxn - Opening socket connection to server /192.168.122.11:2181
-INFO  org.apache.zookeeper.ClientCnxn - Opening socket connection to server /192.168.122.14:2181
-INFO  org.apache.zookeeper.ClientCnxn - Opening socket connection to server /192.168.122.12:2181
-INFO  org.apache.zookeeper.ClientCnxn - Opening socket connection to server /192.168.122.15:2181
+INFO [2016-12-02 14:27:23,351] clojure-agent-send-off-pool-0-SendThread() - org.apache.zookeeper.ClientCnxn Opening socket connection to server /192.168.122.15:2181
+INFO [2016-12-02 14:27:23,351] clojure-agent-send-off-pool-2-SendThread() - org.apache.zookeeper.ClientCnxn Opening socket connection to server /192.168.122.12:2181
+INFO [2016-12-02 14:27:23,351] clojure-agent-send-off-pool-3-SendThread() - org.apache.zookeeper.ClientCnxn Opening socket connection to server /192.168.122.14:2181
+INFO [2016-12-02 14:27:23,351] clojure-agent-send-off-pool-1-SendThread() - org.apache.zookeeper.ClientCnxn Opening socket connection to server /192.168.122.11:2181
+INFO [2016-12-02 14:27:23,351] clojure-agent-send-off-pool-4-SendThread() - org.apache.zookeeper.ClientCnxn Opening socket connection to server /192.168.122.13:2181
+...
 ```
 
 Now we have to actually *do* something with the client. Let's start with fifteen
@@ -136,16 +134,18 @@ seconds of reads, randomly staggered about a second apart. We'll pull in `jepsen
 
 ```clj
 (ns jepsen.zookeeper
+  (:gen-class)
   (:require [avout.core :as avout]
             [clojure.tools.logging :refer :all]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [jepsen [db    :as db]
-                    [client  :as client]
+            [jepsen [cli :as cli]
+                    [client :as client]
                     [control :as c]
+                    [db :as db]
                     [generator :as gen]
                     [tests :as tests]
-                    [util :refer [timeout]]]
+                    [util :as util :refer [timeout]]]
             [jepsen.os.debian :as debian]))
 ```
 
@@ -167,11 +167,11 @@ duties), and stop after 15 seconds.
                          (gen/time-limit 15))))
 ```
 
-This fails, because we haven't told the client *how* to intepret these
-operations yet.
+This throws a bunch of errors, because we haven't told the client *how* to
+intepret these operations yet.
 
 ```bash
-$ lein test
+$ lein run test
 ...
 WARN  jepsen.core - Process 24 indeterminate
 java.lang.AssertionError: Assert failed: (= (:process op) (:process completion))
@@ -196,7 +196,7 @@ value. We dispatch based on the `:f` field of the operation, and when it's a
 a value obtained by reading the register `a`.
 
 ```bash
-$ lein test
+$ lein run test
 ...
 INFO  jepsen.util - 2 :invoke :read nil
 INFO  jepsen.util - 2 :ok :read 0
@@ -239,7 +239,7 @@ automatically convert it to an `:info` crash.
 We'll confirm writes work by watching the test:
 
 ```bash
-$ lein test
+$ lein run test
 ...
 INFO  jepsen.util - 1 :ok :read 1
 INFO  jepsen.util - 1 :invoke :read nil
@@ -315,7 +315,7 @@ branch of the swap function, we use `reset!` to set the atom to either `:ok` or
 `type`'s current value.
 
 ```bash
-$ lein test
+$ lein run test
 INFO  jepsen.util - 2 :invoke :write  2
 INFO  jepsen.util - 2 :ok :write  2
 INFO  jepsen.util - 0 :invoke :cas  [2 3]
@@ -325,8 +325,7 @@ INFO  jepsen.util - 1 :fail :cas  [1 2]
 ```
 
 We expect some CaS ops to fail because their predicate value doesn't match the
-current value, but a few (~1/5, since there are 5 possible values) should
-succeed.
+current value, but a few (~1/5, since there are 5 possible values for the register at any given point) should succeed.
 
 With our client performing operations, it's time to analyze results using a
 [checker](checker.md).

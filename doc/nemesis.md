@@ -6,20 +6,22 @@ provides several built-in failure modes.
 
 ```clj
 (ns jepsen.zookeeper
-  (:require [avout.core         :as avout]
+  (:gen-class)
+  (:require [avout.core :as avout]
             [clojure.tools.logging :refer :all]
-            [clojure.java.io    :as io]
-            [clojure.string     :as str]
-            [jepsen [db         :as db]
-                    [checker    :as checker]
-                    [client     :as client]
-                    [control    :as c]
-                    [generator  :as gen]
-                    [nemesis    :as nemesis]
-                    [tests      :as tests]
-                    [util       :refer [timeout]]]
-            [jepsen.os.debian   :as debian]
-            [knossos.model      :as model]))
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [jepsen [checker :as checker]
+                    [cli :as cli]
+                    [client :as client]
+                    [control :as c]
+                    [db :as db]
+                    [generator :as gen]
+                    [nemesis :as nemesis]
+                    [tests :as tests]
+                    [util :as util :refer [timeout]]]
+            [jepsen.os.debian :as debian]
+            [knossos.model :as model]))
 ```
 
 We'll pick a simple nemesis to start, and add it to the `:nemesis` key for the
@@ -86,28 +88,17 @@ If you run this test several times, you might notice an interesting result.
 Sometimes--but not often--the test fails.
 
 ```clj
-$ lein test
-  ...
-     :model {:msg "can't read 1 from register 3"}}]),
-  ...
-  :op
-  {:type :ok,
-   :f :read,
-   :value 1,
-   :process 1,
-   :time 11443123716,
-   :index 64}}
+$ lein run test --test-count 10
 ...
-FAIL in (zk-test) (zookeeper_test.clj:7)
-expected: (:valid? (:results (jepsen/run! (zk/zk-test "3.4.5+dfsg-2"))))
-  actual: false
+    :model {:msg "can't read 3 from register 4"}}]),
+...
+Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
 ```
 
 Knossos ran out of options: it thought the only legal value for the register
-was `3`, but a process successfully read `1`. This happened on line 64 of the
-history. When a linearizability failure occurs, Knossos will emit an SVG
-diagram showing the problem--and we can read the history to see the op in more
-detail.
+was `4`, but a process successfully read `3`. When a linearizability failure
+occurs, Knossos will emit an SVG diagram showing the problem--and we can read
+the history to see the op in more detail.
 
 ```clj
 $ open store/latest/linear.svg

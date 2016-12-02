@@ -1,5 +1,5 @@
 (defproject jepsen.zookeeper "0.1.0-SNAPSHOT"
-  :description "FIXME: write description"
+  :description "A Jepsen test for Zookeeper"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
