@@ -31,7 +31,7 @@ that from the project's dependencies.
                  [avout "0.5.4" :exclusions [org.slf4j/slf4j-log4j12]]])
 ```
 
-Let's try running this program with `lein run`.
+Let's try running this program with `lein run` (after running `lein deps` to get dependencies - just the first time).
 
 ```bash
 $ lein run
