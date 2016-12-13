@@ -115,12 +115,11 @@
   {"test" {:opt-spec (into jc/test-opt-spec opt-spec)
            :opt-fn (fn [parsed]
                      (-> parsed
+                         jc/test-opt-fn
                          jc/validate-tarball
-                         (jc/rename-options {:node      :nodes
-                                             :nemesis   :nemeses
+                         (jc/rename-options {:nemesis   :nemeses
                                              :nemesis2  :nemeses2
-                                             :test      :test-fns})
-                         jc/read-nodes-file))
+                                             :test      :test-fns})))
            :usage (jc/test-usage)
            :run (fn [{:keys [options]}]
                   (pprint options)
