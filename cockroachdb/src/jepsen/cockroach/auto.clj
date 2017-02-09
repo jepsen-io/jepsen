@@ -172,7 +172,7 @@
     :--]
    cockroach-start-arguments
    extra-args
-   [:--logtostderr :true :>> errlog (c/lit "2>&1")]))
+   [:--logtostderr :>> errlog (c/lit "2>&1")]))
 
 (defn runcmd
   "The command to run cockroach for a given test"
