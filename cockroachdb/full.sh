@@ -1,5 +1,5 @@
 lein do clean, run test \
-  --tarball http://aphyr.com/media/cockroach-2016-10-27.tar.bz2 \
+  --tarball http://aphyr.com/media/cockroach-2017-03-30.tar.bz2 \
   --username admin \
   --nodes-file ~/nodes \
   --test sets \
