@@ -1,217 +1,186 @@
 (ns jepsen.etcd
-  (:require [clojure.tools.logging    :refer [debug info warn]]
-            [clojure.java.io          :as io]
-            [clojure.string           :as str]
-            [jepsen.core              :as core]
-            [jepsen.util              :refer [meh timeout]]
-            [jepsen.codec             :as codec]
-            [jepsen.core              :as core]
-            [jepsen.control           :as c]
-            [jepsen.control.net       :as net]
-            [jepsen.control.util      :as cu]
-            [jepsen.client            :as client]
-            [jepsen.db                :as db]
-            [jepsen.generator         :as gen]
-            [jepsen.os.debian         :as debian]
-            [knossos.core             :as knossos]
-            [cheshire.core            :as json]
-            [slingshot.slingshot      :refer [try+]]
-            [verschlimmbesserung.core :as v]))
+  (:gen-class)
+  (:require [clojure.tools.logging :refer :all]
+            [clojure.string :as str]
+            [verschlimmbesserung.core :as v]
+            [slingshot.slingshot :refer [try+]]
+            [knossos.model :as model]
+            [jepsen [checker :as checker]
+                    [cli :as cli]
+                    [client :as client]
+                    [control :as c]
+                    [db :as db]
+                    [generator :as gen]
+                    [independent :as independent]
+                    [nemesis :as nemesis]
+                    [tests :as tests]
+                    [util :as util :refer [timeout]]]
+            [jepsen.checker.timeline :as timeline]
+            [jepsen.control.util :as cu]
+            [jepsen.os.debian :as debian]))
 
-(def binary "/opt/etcd/bin/etcd")
-(def pidfile "/var/run/etcd.pid")
-(def data-dir "/var/lib/etcd")
-(def log-file "/var/log/etcd.log")
+(def dir     "/opt/etcd")
+(def binary  "etcd")
+(def logfile (str dir "/etcd.log"))
+(def pidfile (str dir "/etcd.pid"))
 
-(defn peer-addr [node]
-  (str (name node) ":2380"))
+(defn node-url
+  "An HTTP url for connecting to a node on a particular port."
+  [node port]
+  (str "http://" (name node) ":" port))
 
-(defn addr [node]
-  (str (name node) ":2380"))
+(defn peer-url
+  "The HTTP url for other peers to talk to a node."
+  [node]
+  (node-url node 2380))
 
-(defn cluster-url [node]
-  (str "http://" (name node) ":2380"))
+(defn client-url
+  "The HTTP url clients use to talk to a node."
+  [node]
+  (node-url node 2379))
 
-(defn listen-client-url [node]
-  (str "http://" (name node) ":2379"))
-
-(defn cluster-info [node]
-  (str (name node) "=http://" (name node) ":2380"))
-
-(defn peers
-  "The command-line peer list for an etcd cluster."
+(defn initial-cluster
+  "Constructs an initial cluster string for a test, like
+  \"foo=foo:2380,bar=bar:2380,...\""
   [test]
-  (->> test
-       :nodes
-       (map cluster-info)
+  (->> (:nodes test)
+       (map (fn [node]
+              (str (name node) "=" (peer-url node))))
        (str/join ",")))
 
-(defn running?
-  "Is etcd running?"
-  []
-  (try
-    (c/exec :start-stop-daemon :--status
-            :--pidfile pidfile
-            :--exec binary)
-    true
-    (catch RuntimeException _ false)))
+(defn db
+  "Etcd DB for a particular version."
+  [version]
+  (reify db/DB
+    (setup! [_ test node]
+      (info node "installing etcd" version)
+      (let [url (str "https://storage.googleapis.com/etcd/" version
+                     "/etcd-" version "-linux-amd64.tar.gz")]
+        (cu/install-tarball! c/*host* url dir))
 
-(defn start-etcd!
-  [test node]
-  (info node "starting etcd")
-  (c/exec :start-stop-daemon :--start
-          :--background
-          :--make-pidfile
-          :--pidfile        pidfile
-          :--chdir          "/opt/etcd"
-          :--exec           binary
-          :--no-close
-          :--
-          :-data-dir        data-dir
-          :-name            (name node)
-          :-advertise-client-urls (cluster-url node)
-          :-listen-peer-urls (cluster-url node)
-          :-listen-client-urls (listen-client-url node)
-          :-initial-advertise-peer-urls (cluster-url node)
-          :-initial-cluster-state "new"
-          :-initial-cluster (peers test)
-          :>>               log-file
-          (c/lit "2>&1")))
+      (cu/start-daemon!
+        {:logfile logfile
+         :pidfile pidfile
+         :chdir   dir}
+        binary
+        :--name                         (name node)
+        :--listen-peer-urls             (peer-url   node)
+        :--listen-client-urls           (client-url node)
+        :--advertise-client-urls        (client-url node)
+        :--initial-cluster-state        :new
+        :--initial-advertise-peer-urls  (peer-url node)
+        :--initial-cluster              (initial-cluster test))
 
-(defn db []
-  (let [running (atom nil)] ; A map of nodes to whether they're running
-    (reify db/DB
-      (setup! [this test node]
-        ; You'll need debian testing for this
-        (debian/install [:git-core])
+        (Thread/sleep 10000))
 
-        ; Install golang 1.6.3
-        (c/su
-          (c/cd "/opt"
-                (when-not (cu/exists? "go")
-                  (info node "installing golang 1.6.3")
-                  (c/exec :wget :-c "https://storage.googleapis.com/golang/go1.6.3.linux-amd64.tar.gz")
-                  (c/exec :tar :xzf "go1.6.3.linux-amd64.tar.gz")
-                  (c/exec :rm :-f "go1.6.3.linux-amd64.tar.gz"))))
-        
-        (c/su
-          (c/cd "/opt"
-                (when-not (cu/exists? "etcd")
-                  (info node "cloning etcd")
-                  (c/exec :git :clone "https://github.com/coreos/etcd")))
+    (teardown! [_ test node]
+      (info node "tearing down etcd")
+      (cu/stop-daemon! binary pidfile)
+      (c/su
+        (c/exec :rm :-rf dir)))
 
-          (c/cd "/opt/etcd"
-                (when-not (cu/exists? "bin/etcd")
-                  (info node "building etcd")
-                  (c/exec :env (c/lit "GOROOT=/opt/go") (c/lit "PATH=$PATH:/opt/go/bin")
-                          (c/lit "./build"))))
+    db/LogFiles
+    (log-files [_ test node]
+      [logfile])))
 
-          ; There's a race condition in cluster join we gotta work around by
-          ; restarting the process until it doesn't crash; see
-          ; https://github.com/coreos/etcd/issues/716"
+(defn parse-long
+  "Parses a string to a Long. Passes through `nil`."
+  [s]
+  (when s (Long/parseLong s)))
 
-          ; Initially, every node is not running.
-          (core/synchronize test)
-          (reset! running (->> test :nodes (map #(vector % false)) (into {})))
+(defn client
+  "A client for a single compare-and-set register"
+  [conn]
+  (reify client/Client
+    (setup! [_ test node]
+      (client (v/connect (client-url node)
+                         {:timeout 5000})))
 
-          ; All nodes synchronize at each startup attempt.
-          (while (do (core/synchronize test)
-                     (when (= node (core/primary test))
-                       (info "Running nodes:" @running))
-                     (not-every? @running (:nodes test)))
+    (invoke! [this test op]
+      (let [[k v] (:value op)
+            crash (if (= :read (:f op)) :fail :info)]
+        (try+
+          (case (:f op)
+            :read (let [value (-> conn
+                                  (v/get k {:quorum? true})
+                                  parse-long)]
+                    (assoc op :type :ok, :value (independent/tuple k value)))
 
-            ; Nuke local node; we've got to start fresh if we got ourselves
-            ; wedged last time.
-            (db/teardown! this test node)
-            (core/synchronize test)
+            :write (do (v/reset! conn k v)
+                       (assoc op :type, :ok))
 
-            ; Launch primary first
-            (when (= node (core/primary test))
-              (start-etcd! test node)
-              (Thread/sleep 1000))
+            :cas (let [[value value'] v]
+                   (assoc op :type (if (v/cas! conn k value value'
+                                               {:prev-exist? true})
+                                     :ok
+                                     :fail))))
 
-            ; Launch secondaries in any order after the primary...
-            (core/synchronize test)
+          (catch java.net.SocketTimeoutException e
+            (assoc op :type crash, :error :timeout))
 
-            ; ... but with some time between each to avoid triggering the join
-            ; race condition
-            (when-not (= node (core/primary test))
-              (locking running
-                (Thread/sleep 100)
-                (start-etcd! test node)))
+          (catch [:errorCode 100] e
+            (assoc op :type :fail, :error :not-found))
 
-            ; Good news is these puppies crash quick, so we don't have to
-            ; wait long to see whether they made it.
-            (Thread/sleep 2000)
-            (swap! running assoc node (running?)))
+          (catch [:body "command failed to be committed due to node failure\n"] e
+            (assoc op :type crash :error :node-failure))
 
-          ; And spin some more until Raft is ready
-          (let [c (v/connect (str "http://" (name node) ":2379"))]
-            (while (try+ (v/reset! c :test "ok") false
-                         (catch [:status 500] e true)
-                         (catch [:status 307] e true))
-              (Thread/sleep 100)))
+          (catch [:status 307] e
+            (assoc op :type crash :error :redirect-loop))
 
-          (info node "etcd ready")))
+          (catch (and (instance? clojure.lang.ExceptionInfo %)) e
+            (assoc op :type crash :error e))
 
-      (teardown! [_ test node]
-        (c/su
-          (meh (c/exec :killall :-9 :etcd))
-          (c/exec :rm :-rf pidfile data-dir log-file))
-        (info node "etcd nuked")))))
+          (catch (and (:errorCode %) (:message %)) e
+            (assoc op :type crash :error e)))))
 
-(defrecord CASClient [k client]
-  client/Client
-  (setup! [this test node]
-    (let [client (v/connect (str "http://" (name node) ":2379"))]
-      (v/reset! client k (json/generate-string nil))
-      (assoc this :client client)))
+    (teardown! [_ test]
+      ; If our connection were stateful, we'd close it here.
+      ; Verschlimmbesserung doesn't hold a connection open, so we don't need to
+      ; close it.
+      )))
 
-  (invoke! [this test op]
-    ; Reads are idempotent; if they fail we can always assume they didn't
-    ; happen in the history, and reduce the number of hung processes, which
-    ; makes the knossos search more efficient
-    (let [fail (if (= :read (:f op))
-                 :fail
-                 :info)]
-      (try+
-        (case (:f op)
-          :read  (let [value (-> client
-                                 (v/get k {;:consistent? true})
-                                           :quorum? true})
-                                 (json/parse-string true))]
-                   (assoc op :type :ok :value value))
 
-          :write (do (->> (:value op)
-                          json/generate-string
-                          (v/reset! client k))
-                     (assoc op :type :ok))
+(defn r   [_ _] {:type :invoke, :f :read, :value nil})
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-          :cas   (let [[value value'] (:value op)
-                       ok?            (v/cas! client k
-                                              (json/generate-string value)
-                                              (json/generate-string value'))]
-                   (assoc op :type (if ok? :ok :fail))))
+(defn etcd-test
+  "Given an options map from the command-line runner (e.g. :nodes, :ssh,
+  :concurrency, ...), constructs a test map."
+  [opts]
+  (info :opts opts)
+  (merge tests/noop-test
+         {:name "etcd"
+          :os debian/os
+          :db (db "v3.1.5")
+          :client (client nil)
+          :nemesis (nemesis/partition-random-halves)
+          :model  (model/cas-register)
+          :checker (checker/compose
+                     {:perf     (checker/perf)
+                      :indep (independent/checker
+                               (checker/compose
+                                 {:timeline (timeline/html)
+                                  :linear   checker/linearizable}))})
+          :generator (->> (independent/concurrent-generator
+                            10
+                            (range)
+                            (fn [k]
+                              (->> (gen/mix [r w cas])
+                                   (gen/stagger 1/10)
+                                   (gen/limit 100))))
+                          (gen/nemesis
+                            (gen/seq (cycle [(gen/sleep 5)
+                                             {:type :info, :f :start}
+                                             (gen/sleep 5)
+                                             {:type :info, :f :stop}])))
+                          (gen/time-limit (:time-limit opts)))}
+         opts))
 
-        ; A few common ways etcd can fail
-        (catch java.net.SocketTimeoutException e
-          (assoc op :type fail :error :timed-out))
-
-        (catch [:body "command failed to be committed due to node failure\n"] e
-          (assoc op :type fail :error :node-failure))
-
-        (catch [:status 307] e
-          (assoc op :type fail :error :redirect-loop))
-
-        (catch (and (instance? clojure.lang.ExceptionInfo %)) e
-          (assoc op :type fail :error e))
-
-        (catch (and (:errorCode %) (:message %)) e
-          (assoc op :type fail :error e)))))
-
-  (teardown! [_ test]))
-
-(defn cas-client
-  "A compare and set register built around a single etcd node."
-  []
-  (CASClient. "jepsen" nil))
+(defn -main
+  "Handles command line arguments. Can either run a test, or a web server for
+  browsing results."
+  [& args]
+  (cli/run! (merge (cli/single-test-cmd {:test-fn etcd-test})
+                   (cli/serve-cmd))
+            args))
