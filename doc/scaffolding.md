@@ -1,11 +1,11 @@
 # Test scaffolding
 
-Let's say we want to write a test for Zookeeper: a distributed consensus
+Let's say we want to write a test for etcd: a distributed consensus
 system. We'll begin by creating a new Leiningen project in any directory.
 
 ```bash
 $ lein new jepsen.etcdemo
-Generating a project called jepsen.zookeeper based on the 'default' template.
+Generating a project called jepsen.etcdemo based on the 'default' template.
 The default template is intended for library projects, not applications.
 To see other templates (app, plugin, etc), try `lein help new`.
 $ cd jepsen.etcdemo
@@ -15,9 +15,7 @@ We'll need a few Clojure libraries for this test. Open `project.clj`, which
 specifies the project's dependencies and other metadata. We'll add a `:main`
 namespace, which is how we'll run the test from the command line. In addition
 to depending on the Clojure language itself, we'll pull in the Jepsen library
-(at version 0.1.4), and Avout: a library for working with Zookeeper. Avout has
-its own copy of the slf4j logging library that Jepsen uses, so we'll exclude
-that from the project's dependencies.
+(at version 0.1.4), and Verschlimmbesserung: a library for talking to etcd.
 
 ```clj
 (defproject jepsen.etcdemo "0.1.0-SNAPSHOT"
@@ -26,7 +24,8 @@ that from the project's dependencies.
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main jepsen.etcdemo
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [jepsen "0.1.4"]])
+                 [jepsen "0.1.4"]
+                 [verschlimmbesserung "0.1.3"]])
 ```
 
 Let's try running this program with `lein run`.
@@ -207,7 +206,7 @@ Jepsen also comes with a built-in web browser for browsing these results. Let's 
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
   [& args]
-  (cli/run! (merge (cli/single-test-cmd {:test-fn zk-test})
+  (cli/run! (merge (cli/single-test-cmd {:test-fn etcd-test})
                    (cli/serve-cmd))
             args))
 ```
@@ -223,7 +222,7 @@ our test results. Of course, the serve command comes with its own options and
 help message:
 
 ```bash
-aphyr@waterhouse ~/jepsen.zookeeper [130]> lein run serve --help
+$ lein run serve --help
 Usage: lein run -- serve [OPTIONS ...]
 
   -h, --help                  Print out this message and exit

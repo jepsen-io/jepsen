@@ -20,7 +20,7 @@ value in for the completion op.
 
 ## Connecting to the database
 
-Now we need to take these operations and *apply* them to zookeeper. We'll use
+Now we need to take these operations and *apply* them to etcd. We'll use
 the [Verschlimmbessergung](https://github.com/aphyr/verschlimmbesserung)
 library to talk to etcd. We'll start by requireing Verschlimmbesserung, and
 writing an empty implementation of Jepsen's Client protocol:
