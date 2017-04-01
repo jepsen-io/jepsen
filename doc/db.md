@@ -139,7 +139,7 @@ will re-use the cached tarball on disk.
 ## Starting the DB
 
 
-Per the [clustering instructions](https://coreos.com/etcd/docs/latest/v2/clustering.html), we'll need to generate a string like "ETCD_INITIAL_CLUSTER="infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380,infra2=http://10.0.1.12:2380", so that our nodes know which nodes are a part of the cluster. Let's write a few small functions to build those strings:
+Per the [clustering instructions](https://coreos.com/etcd/docs/latest/v2/clustering.html), we'll need to generate a string like `"ETCD_INITIAL_CLUSTER="infra0=http://10.0.1.10:2380,infra1=http://10.0.1.11:2380,infra2=http://10.0.1.12:2380"`, so that our nodes know which nodes are a part of the cluster. Let's write a few small functions to build those strings:
 
 ```clj
 (defn node-url

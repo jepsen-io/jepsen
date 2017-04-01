@@ -37,8 +37,8 @@ Jepsen doesn't know what `:f :read` or `:f :cas` mean. As far as it's
 concerned, they're arbitrary values. However, our *client* understands how to
 interpret those operations, when it dispatches based on `(case (:f op) :read
 ...)`. Now we need a *model* of the system which understands those same
-operations. Knossos defines a Model data type, which takes a model and an
-operation to apply, and returns a new model resulting from that operation.
+operations. Knossos defines a Model data type for us, which takes a model and an
+operation to apply, and returns a new model resulting from that operation. Here's what that looks like:
 
 ```clj
 (definterface+ Model
@@ -52,7 +52,6 @@ operation to apply, and returns a new model resulting from that operation.
         Models should be a pure, deterministic function of their state and an
         operation's :f and :value."))
 ```
-
 
 It turns out that the Knossos checker defines some common models for things
 like locks and registers. Here's one from
@@ -75,9 +74,11 @@ like locks and registers. Here's one from
                (inconsistent (str "can't read " (:value op)
                                   " from register " value))))))
 ```
+We don't need to write these in our tests. I just want you to know how they
+work.
 
-This defines a new data type called `CASRegister`, which has a single,
-immutable field, called `value`. It satisfies the `Model` interface we
+This defrecord defines a new data type called `CASRegister`, which has a
+single, immutable field, called `value`. It satisfies the `Model` interface we
 discussed earlier, and its `step` function takes a current register `r`, and an
 operation `op`. When we want to write a new value, we simply return a new
 `CASRegister` with that value assigned. To compare-and-set from one value to
