@@ -123,13 +123,17 @@ install it to `/opt/etcd`.
   (reify db/DB
     (setup! [_ test node]
       (info node "installing etcd" version)
-      (let [url (str "https://storage.googleapis.com/etcd/" version
-                     "/etcd-" version "-linux-amd64.tar.gz")]
-        (cu/install-tarball! c/*host* url dir)))
+      (c/su
+       (let [url (str "https://storage.googleapis.com/etcd/" version
+                  "/etcd-" version "-linux-amd64.tar.gz")]
+        (cu/install-tarball! c/*host* url dir))))
 
     (teardown! [_ test node]
       (info node "tearing down etcd"))))
 ```
+We're using `jepsen.control/su` to become root (via sudo) while we remove the
+etcd directory. `jepsen.control` provides a comprehensive DSL for executing
+arbitrary shell commands on remote nodes.
 
 Now `lein run test` will go and install etcd itself. Note that Jepsen runs
 `setup` and `teardown` concurrently across all nodes. This might take a little
@@ -202,24 +206,25 @@ initial cluster state.
 ```clj
     (setup! [_ test node]
       (info node "installing etcd" version)
-      (let [url (str "https://storage.googleapis.com/etcd/" version
-                     "/etcd-" version "-linux-amd64.tar.gz")]
-        (cu/install-tarball! c/*host* url dir))
+      (c/su
+        (let [url (str "https://storage.googleapis.com/etcd/" version
+                       "/etcd-" version "-linux-amd64.tar.gz")]
+          (cu/install-tarball! c/*host* url dir))
 
-      (cu/start-daemon!
-        {:logfile logfile
-         :pidfile pidfile
-         :chdir   dir}
-        binary
-        :--name                         (name node)
-        :--listen-peer-urls             (peer-url   node)
-        :--listen-client-urls           (client-url node)
-        :--advertise-client-urls        (client-url node)
-        :--initial-cluster-state        :new
-        :--initial-advertise-peer-urls  (peer-url node)
-        :--initial-cluster              (initial-cluster test))
+        (cu/start-daemon!
+          {:logfile logfile
+           :pidfile pidfile
+           :chdir   dir}
+          binary
+          :--name                         (name node)
+          :--listen-peer-urls             (peer-url   node)
+          :--listen-client-urls           (client-url node)
+          :--advertise-client-urls        (client-url node)
+          :--initial-cluster-state        :new
+          :--initial-advertise-peer-urls  (peer-url node)
+          :--initial-cluster              (initial-cluster test))
 
-        (Thread/sleep 10000))
+          (Thread/sleep 10000)))
 ```
 
 We'll sleep for a little bit after starting the cluster, so it has a chance to boot up and perform its initial handshakes.
@@ -240,8 +245,7 @@ accidentally read data from our current run.
         (c/exec :rm :-rf dir)))))
 ```
 
-We're using `jepsen.control/su` to become root (via sudo) while we remove the
-etcd directory. Then we use `jepsen.control/exec` to run a shell command: rm
+We use `jepsen.control/exec` to run a shell command: rm
 -rf. Jepsen automatically binds `exec` to operate on the `node` being set up
 during `db/setup!`, but we can connect to arbitrary nodes if we need to. Note
 that `exec` can take any mixture of strings, numbers, keywords--it'll convert
