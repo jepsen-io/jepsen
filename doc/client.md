@@ -229,11 +229,11 @@ automatically convert it to an `:info` crash.
 
 ```clj
     (invoke! [this test op]
-      (timeout 5000 (assoc op :type :info, :error :timeout)
+      (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (assoc op :type :ok, :value (v/get conn "r"))
                  :write (do (v/reset! conn "r" (:value op))
-                            (assoc op :type, :ok, :value)))))
+                            (assoc op :type, :ok))))
 ```
 
 We'll confirm writes work by watching the test:
