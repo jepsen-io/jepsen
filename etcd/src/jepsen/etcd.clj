@@ -70,9 +70,10 @@
           :--advertise-client-urls        (client-url node)
           :--initial-cluster-state        :new
           :--initial-advertise-peer-urls  (peer-url node)
-          :--initial-cluster              (initial-cluster test))
+          :--initial-cluster              (initial-cluster test)
+          :--log-output                   :stdout)
 
-        (Thread/sleep 10000)))
+        (Thread/sleep 5000)))
 
     (teardown! [_ test node]
       (info node "tearing down etcd")
