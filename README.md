@@ -57,7 +57,11 @@ test and know exactly what it's doing.
 You can run your DB nodes as separate physical machines, VMs, LXC instances, or
 via Docker.
 
-- You can launch a complete Jepsen cluster from the [AWS Marketplace](https://aws.amazon.com/marketplace/pp/B01LZ7Y7U0?qid=1486758124485&sr=0-1&ref_=srh_res_product_title).
+- You can launch a complete Jepsen cluster from the [AWS
+  Marketplace](https://aws.amazon.com/marketplace/pp/B01LZ7Y7U0?qid=1486758124485&sr=0-1&ref_=srh_res_product_title).
+  Choose "5+1 node cluster" to get an entire cluster as a Cloudformation stack,
+  with SSH keys and firewall rules preconfigured. Choose "Single AMI" if you'd
+  just like a single node.
 
 - See [lxc.md](doc/lxc.md) for some of my notes on setting up LXC instances.
 
