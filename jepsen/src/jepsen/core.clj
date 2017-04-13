@@ -165,11 +165,11 @@
                     (util/log-op completion)
 
                     ; Sanity checks
-                    (let [t (:type op)]
+                    (let [t (:type completion)]
                       (assert (or (= t :ok)
                                   (= t :fail)
                                   (= t :info))
-                              (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received " (pr-str op) " instead")))
+                              (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received " (pr-str completion) " instead")))
                     (assert (= (:process op) (:process completion)))
                     (assert (= (:f op)       (:f completion)))
 
