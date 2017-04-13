@@ -11,6 +11,7 @@
             [clojure.tools.logging :refer [warn info debug]]))
 
 ; STATE STATE STATE STATE
+(def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
 (def ^:dynamic *host*     "Current hostname"                nil)
 (def ^:dynamic *session*  "Current clj-ssh session wrapper" nil)
 (def ^:dynamic *trace*    "Shall we trace commands?"        false)
@@ -250,10 +251,14 @@
   "Wraps clj-ssh-session in a wrapper for reconnection."
   [host]
   (rc/open!
-    (rc/wrapper {:open    #(clj-ssh-session host)
+    (rc/wrapper {:open    (if *dummy*
+                            (fn [] [:dummy host])
+                            (fn [] (clj-ssh-session host)))
                  :name    [:control host]
-                 :close   ssh/disconnect
-                 :log?    true}))) 
+                 :close   (if *dummy*
+                            identity
+                            ssh/disconnect)
+                 :log?    true})))
 
 (defn disconnect
   "Close a session"
@@ -263,14 +268,16 @@
 (defmacro with-ssh
   "Takes a map of SSH configuration and evaluates body in that scope. Options:
 
+  :dummy?
   :username
   :password
   :private-key-path
   :strict-host-key-checking"
   [ssh & body]
-  `(binding [*username*         (get ~ssh :username *username*)
-             *password*         (get ~ssh :password *password*)
-             *port*             (get ~ssh :port *port*)
+  `(binding [*dummy*            (get ~ssh :dummy?           *dummy*)
+             *username*         (get ~ssh :username         *username*)
+             *password*         (get ~ssh :password         *password*)
+             *port*             (get ~ssh :port             *port*)
              *private-key-path* (get ~ssh :private-key-path *private-key-path*)
              *strict-host-key-checking* (get ~ssh :strict-host-key-checking
                                              *strict-host-key-checking*)]
