@@ -4,7 +4,7 @@
 (refer to https://wiki.debian.org/LXC)
 
 ```sh
-aptitude install lxc bridge-utils libvirt-bin debootstrap dnsmasq
+aptitude install lxc bridge-utils ebtables libvirt-bin debootstrap dnsmasq
 ```
 
 Add this line to /etc/fstab:
@@ -156,9 +156,10 @@ Enable password-based login for root (used by jsch):
 ```sh
 sed  -i 's,^PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config
 systemctl restart sshd
+apt install sudo
 ```
 
-[Remove systemd](http://without-systemd.org/wiki/index.php/How_to_remove_systemd_from_a_Debian_jessie/sid_installation).
+[Remove systemd](http://without-systemd.org/wiki/index.php/How_to_remove_systemd_from_a_Debian_jessie/sid_installation). After you install sysvinit-core and sysvinit-utils, you may have to restart the container with /lib/sysvinit/init argument to lxc-start before apt will allow you to remove systemd.
 
 Detach from the container with Control+a q, and repeat for the remaining nodes.
 
