@@ -33,7 +33,7 @@ java.net.SocketTimeoutException: Read timed out
   ...
 ```
 
-... and that process' operation is converted to an :info message, because we
+... and that process' operation is converted to an `:info` message, because we
 can't tell if it succeeded or failed. However, *idempotent* operations, like
 reads, leave the state of the system unchanged. It doesn't *matter* whether
 they succeed or fail, because the effects are equivalent. We can therefore
@@ -62,7 +62,7 @@ safely convert crashed reads to failed reads, and improve checker performance.
 
 Better yet--we can get rid of all the exception stacktrace noise in the logs if
 we catch socket timeouts on all three paths at once. We'll handle not-found
-errors there too, even though they only happen on :cas ops--it keeps the code a
+errors there too, even though they only happen on `:cas` ops--it keeps the code a
 little cleaner.
 
 ```clj
@@ -132,8 +132,8 @@ single-key test into one which operates on multiple keys. The
             [jepsen.os.debian :as debian]))
 ```
 
-We have a generator that emits operations on a single key, like {:type :invoke,
-:f :write, :value 3}. We want to lift that to an operation that writes
+We have a generator that emits operations on a single key, like `{:type :invoke,
+:f :write, :value 3}`. We want to lift that to an operation that writes
 *multiple* keys. Instead of `:value v`, we want `:value [key v]`.
 
 ```clj

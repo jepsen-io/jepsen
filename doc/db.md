@@ -7,7 +7,7 @@ in a CI system, parameterize database configuration, run multiple tests
 back-to-back with a clean slate, and so on.
 
 In `src/jepsen/etcdemo.clj`, we'll require the `jepsen.db`, `jepsen.control`,
-jepsen.control.util`, and `jepsen.os.debian` namespaces, aliasing each to a
+`jepsen.control.util`, and `jepsen.os.debian` namespaces, aliasing each to a
 short name. `clojure.string` will help us build configuration strings for etcd.
 We'll also pull in every function from `clojure.tools.logging`, giving us log
 functions like `info`, `warn`, etc.
@@ -245,8 +245,8 @@ accidentally read data from our current run.
         (c/exec :rm :-rf dir)))))
 ```
 
-We use `jepsen.control/exec` to run a shell command: rm
--rf. Jepsen automatically binds `exec` to operate on the `node` being set up
+We use `jepsen.control/exec` to run a shell command: `rm -rf`. 
+Jepsen automatically binds `exec` to operate on the `node` being set up
 during `db/setup!`, but we can connect to arbitrary nodes if we need to. Note
 that `exec` can take any mixture of strings, numbers, keywords--it'll convert
 them to strings and perform appropriate shell escaping. You can use
