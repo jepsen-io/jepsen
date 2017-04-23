@@ -170,7 +170,7 @@ keys.
             :read (let [value (-> conn
                                   (v/get k {:quorum? true})
                                   parse-long)]
-                    (assoc op :type :ok, :value value))
+                    (assoc op :type :ok, :value (independent/tuple k value)))
 
             :write (do (v/reset! conn k v)
                        (assoc op :type, :ok))
