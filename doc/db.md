@@ -216,6 +216,7 @@ initial cluster state.
            :pidfile pidfile
            :chdir   dir}
           binary
+          :--log-output                   :stderr
           :--name                         (name node)
           :--listen-peer-urls             (peer-url   node)
           :--listen-client-urls           (client-url node)
