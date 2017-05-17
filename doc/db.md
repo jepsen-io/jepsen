@@ -192,7 +192,7 @@ where to store a pidfile.
 
 ```clj
 (def dir     "/opt/etcd")
-(def binary  "etcd")
+(def binary  (str dir "etcd"))
 (def logfile (str dir "/etcd.log"))
 (def pidfile (str dir "/etcd.pid"))
 ```
