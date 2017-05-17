@@ -54,9 +54,18 @@ processes, and generally break things, so you shouldn't, you know, point jepsen
 at your prod machines unless you like to live dangerously, or you wrote the
 test and know exactly what it's doing.
 
-See [lxc.md](doc/lxc.md) for some of my notes on setting up LXC instances.
+You can run your DB nodes as separate physical machines, VMs, LXC instances, or
+via Docker.
 
-You can also use [Docker Compose](docker/README.md) for setting up Docker instances.
+- You can launch a complete Jepsen cluster from the [AWS
+  Marketplace](https://aws.amazon.com/marketplace/pp/B01LZ7Y7U0?qid=1486758124485&sr=0-1&ref_=srh_res_product_title).
+  Choose "5+1 node cluster" to get an entire cluster as a Cloudformation stack,
+  with SSH keys and firewall rules preconfigured. Choose "Single AMI" if you'd
+  just like a single node.
+
+- See [lxc.md](doc/lxc.md) for some of my notes on setting up LXC instances.
+
+- You can also use [Docker Compose](docker/README.md) for setting up Docker instances.
 
 ## Running a test
 

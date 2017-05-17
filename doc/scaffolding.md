@@ -28,7 +28,7 @@ to depending on the Clojure language itself, we'll pull in the Jepsen library
                  [verschlimmbesserung "0.1.3"]])
 ```
 
-Let's try running this program with `lein run`.
+Let's try running this program with `lein run` (after running `lein deps` to get dependencies - just the first time).
 
 ```bash
 $ lein run

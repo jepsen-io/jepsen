@@ -229,7 +229,6 @@ automatically convert it to an `:info` crash.
 
 ```clj
     (invoke! [this test op]
-      (assoc op :type :info, :error :timeout)
                (case (:f op)
                  :read (assoc op :type :ok, :value (v/get conn "r"))
                  :write (do (v/reset! conn "r" (:value op))
@@ -268,7 +267,7 @@ integers and null, we can get away with using Java's built-in
 ```
 
 Note that we only call parseLong when our string is truthy--using `(when s
-...)`. If `when` doesn't match, it'll return nil, which lets us pass through
+...)`. If `when` doesn't match, it'll return `nil`, which lets us pass through
 `nil` values transparently.
 
 ```bash
@@ -284,7 +283,7 @@ Seems reasonable! Only one type of operation left to implement: compare-and-set.
 
 ## Compare and set
 
-we'll finish the client by adding compare-and-set to the mix:
+We'll finish the client by adding compare-and-set to the mix:
 
 ```clj
       (gen/mix [r w cas])
@@ -294,7 +293,7 @@ Handling CaS is a little trickier. Verschlimmbesserung gives us a `cas!`
 function, which takes a connection, key, old value, and new value. `cas!` sets
 the key to the new value if and only if the old value matches what's currently
 there, and returns a detailed response map. If the CaS fails, it returns false.
-We can use that to determine the `:type` of the cas operation.
+We can use that to determine the `:type` of the CaS operation.
 
 ```clj
     (invoke! [this test op]
@@ -326,7 +325,7 @@ clojure.lang.ExceptionInfo: throw+: {:errorCode 100, :message "Key not found", :
 ```
 
 A slight hiccup: if we try to CaS the key before it's written,
-verschlimmbesserung will throw an exception complaining (quite sensibly!) that
+Verschlimmbesserung will throw an exception complaining (quite sensibly!) that
 we can't alter something that doesn't exist. This won't cause our test to
 return false positives--Jepsen will interpret the exception as an indeterminate
 `:info` result, and allow that it might or might not have taken place. However,

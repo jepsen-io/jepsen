@@ -144,7 +144,7 @@ Everything looks good! ヽ(‘ー`)ノ
 ```
 
 The last operation in this history was a write of `1`, and sure enough, the
-checker's final valu eis also `1`. This history was linearizable.
+checker's final value is also `1`. This history was linearizable.
 
 ## Multiple checkers
 
@@ -166,7 +166,7 @@ $ lein run test
 $ open store/latest/latency-raw.png
 ```
 
-We can also generate HTML visualizations of the history. Let's add the `jepsen.checker.tiemline` namespace:
+We can also generate HTML visualizations of the history. Let's add the `jepsen.checker.timeline` namespace:
 
 ```clj
 (ns jepsen.etcdemo
