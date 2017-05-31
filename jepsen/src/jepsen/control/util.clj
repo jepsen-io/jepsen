@@ -149,21 +149,26 @@
   "Starts a daemon process, logging stdout and stderr to the given file.
   Invokes `bin` with `args`. Options are:
 
+  :background?
+  :chdir
   :logfile
+  :make-pidfile?
+  :match-executable?
+  :match-process-name?
   :pidfile
-  :remove-pidfile?
-  :chdir"
+  :process-name"
   [opts bin & args]
   (info "starting" (.getName (file bin)))
   (apply exec :start-stop-daemon :--start
-         :--background
-         :--make-pidfile
-         (when (:remove-pidfile? opts true) :--remove-pidfile)
+         (when (:background? opts true) [:--background :--no-close])
+         (when (:make-pidfile? opts true) :--make-pidfile)
+         (when (:match-executable? opts true) [:--exec bin])
+         (when (:match-process-name? opts false)
+           [:--name (:process-name opts (.getName (file bin)))])
          :--pidfile  (:pidfile opts)
          :--chdir    (:chdir opts)
-         :--no-close
          :--oknodo
-         :--exec     bin
+         :--startas  bin
          :--
          (concat args [:>> (:logfile opts) (lit "2>&1")])))
 
