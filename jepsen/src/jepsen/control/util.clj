@@ -3,7 +3,7 @@
   (:require [jepsen.control :refer :all]
             [jepsen.util :refer [meh]]
             [clojure.java.io :refer [file]]
-            [clojure.tools.logging :refer [info]]
+            [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]))
 
 (def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
@@ -69,7 +69,7 @@
              url))
      filename)))
 
-(defn install-tarball!
+(defn install-archive!
   "Gets the given tarball URL, caching it in /tmp/jepsen/, and extracts its
   sole top-level directory to the given dest directory. Deletes
   current contents of dest. Supports both zip files and tarballs, compressed or
@@ -82,7 +82,7 @@
   multiple files, those files are moved to dest, so my.file becomes
   dest/my.file."
   ([url dest]
-   (install-tarball! url dest false))
+   (install-archive! url dest false))
   ([url dest force?]
    (let [local-file (nth (re-find #"file://(.+)" url) 1)
          file       (or local-file
@@ -99,14 +99,14 @@
 
      (try
        (cd tmpdir
-           ; Extract tarball to tmpdir
+           ; Extract archive to tmpdir
            (if (re-find #".*\.zip$" file)
              (exec :unzip file)
              (exec :tar :xf file))
 
-           ; Get tarball root paths
+           ; Get archive root paths
            (let [roots (ls)]
-             (assert (pos? (count roots)) "Tarball contained no files")
+             (assert (pos? (count roots)) "Archive contained no files")
 
              (if (= 1 (count roots))
                ; Move root's contents to dest
@@ -121,12 +121,12 @@
            (if local-file
              ; Nothing we can do to recover here
              (throw (RuntimeException.
-                      (str "Local tarball " local-file " on node "
+                      (str "Local archive " local-file " on node "
                            *host*
                            " is corrupt: unexpected EOF.")))
-             (do (info "Retrying corrupt tarball download")
+             (do (info "Retrying corrupt archive download")
                  (exec :rm :-rf file)
-                 (install-tarball! url dest)))
+                 (install-archive! url dest force?)))
 
            ; Throw by default
            (throw e)))
@@ -136,6 +136,12 @@
          (exec :rm :-rf tmpdir))))
    dest))
 
+(defn install-tarball!
+  ([node url dest]
+   (install-tarball! node url dest false))
+  ([node url dest force?]
+   (warn "DEPRECATED: jepsen.control.util/install-tarball! is now named jepsen.control.util/install-archive!, and the `node` argument is no longer required.")
+   (install-archive! url dest force?)))
 
 (defn ensure-user!
   "Make sure a user exists."
