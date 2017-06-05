@@ -72,7 +72,15 @@
 (defn install-tarball!
   "Gets the given tarball URL, caching it in /tmp/jepsen/, and extracts its
   sole top-level directory to the given dest directory. Deletes
-  current contents of dest. Returns dest."
+  current contents of dest. Supports both zip files and tarballs, compressed or
+  raw. Returns dest.
+
+  Standard practice for release tarballs is to include a single directory,
+  often named something like foolib-1.2.3-amd64, with files inside it. If only
+  a single directory is present, its *contents* will be moved to dest, so
+  foolib-1.2.3-amd64/my.file becomes dest/my.file. If the tarball includes
+  multiple files, those files are moved to dest, so my.file becomes
+  dest/my.file."
   ([url dest]
    (install-tarball! url dest false))
   ([url dest force?]
@@ -83,22 +91,30 @@
                                 (expand-path (wget! url force?)))))
          tmpdir     (tmp-dir!)
          dest       (expand-path dest)]
-     ; Clean up old dest
+
+     ; Clean up old dest and make sure parent directory is ready
      (exec :rm :-rf dest)
+     (let [parent (exec :dirname dest)]
+       (exec :mkdir :-p parent))
+
      (try
        (cd tmpdir
            ; Extract tarball to tmpdir
-           (exec :tar :xf file)
+           (if (re-find #".*\.zip$" file)
+             (exec :unzip file)
+             (exec :tar :xf file))
 
            ; Get tarball root paths
            (let [roots (ls)]
              (assert (pos? (count roots)) "Tarball contained no files")
-             (assert (= 1  (count roots))
-                     (str "Tarball contained multiple top-level files: "
-                          (pr-str roots)))
 
-             ; Move root to dest
-             (exec :mv (first roots) dest)))
+             (if (= 1 (count roots))
+               ; Move root's contents to dest
+               (exec :mv (first roots) dest)
+
+               ; Move all roots to dest
+               (exec :mv tmpdir dest))))
+
        (catch RuntimeException e
          (condp re-find (.getMessage e)
            #"tar: Unexpected EOF"
@@ -114,6 +130,7 @@
 
            ; Throw by default
            (throw e)))
+
        (finally
          ; Clean up tmpdir
          (exec :rm :-rf tmpdir))))
