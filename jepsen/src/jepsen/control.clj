@@ -8,6 +8,7 @@
                                              with-thread-name]]
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
+            [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [warn info debug]]))
 
 ; STATE STATE STATE STATE
@@ -22,7 +23,21 @@
 (def ^:dynamic *port*     "SSH listening port"              22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
-(def ^:dynamic *retries*  "How many times to retry conns" 5)
+(def ^:dynamic *retries*  "How many times to retry conns"   5)
+
+(defn debug-data
+  "Construct a map of SSH data for debugging purposes."
+  []
+  {:dummy                    *dummy*
+   :host                     *host*
+   :session                  *session*
+   :dir                      *dir*
+   :sudo                     *sudo*
+   :username                 *username*
+   :password                 *password*
+   :port                     *port*
+   :private-key-path         *private-key-path*
+   :strict-host-key-checking *strict-host-key-checking*})
 
 (defrecord Literal [string])
 
@@ -127,6 +142,11 @@
   errors."
   [action]
   (with-retry [tries *retries*]
+    (when (nil? *session*)
+      (throw (RuntimeException.
+              (str "Unable to perform an SSH action because no SSH session for this host is available. SSH configuration is:\n\n"
+                   (with-out-str (pprint (debug-data)))))))
+
     (rc/with-conn [s *session*]
       (assoc (ssh/ssh s action)
              :host   *host*
