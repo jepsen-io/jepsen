@@ -73,9 +73,9 @@
   "Gets the given tarball URL, caching it in /tmp/jepsen/, and extracts its
   sole top-level directory to the given dest directory. Deletes
   current contents of dest. Returns dest."
-  ([node url dest]
-   (install-tarball! node url dest false))
-  ([node url dest force?]
+  ([url dest]
+   (install-tarball! url dest false))
+  ([url dest force?]
    (let [local-file (nth (re-find #"file://(.+)" url) 1)
          file       (or local-file
                         (do (exec :mkdir :-p tmp-dir-base)
@@ -105,11 +105,12 @@
            (if local-file
              ; Nothing we can do to recover here
              (throw (RuntimeException.
-                      (str "Local tarball " local-file " on node " (name node)
+                      (str "Local tarball " local-file " on node "
+                           *host*
                            " is corrupt: unexpected EOF.")))
              (do (info "Retrying corrupt tarball download")
                  (exec :rm :-rf file)
-                 (install-tarball! node url dest)))
+                 (install-tarball! url dest)))
 
            ; Throw by default
            (throw e)))
