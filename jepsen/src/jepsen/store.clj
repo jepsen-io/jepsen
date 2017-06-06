@@ -152,9 +152,15 @@
   [test]
   (path! test "test.fressian"))
 
-(def nonserializable-keys
-  "What keys in a test can't be serialized to disk?"
-  [:db :os :net :client :checker :nemesis :generator :model])
+(def default-nonserializable-keys
+  "What keys in a test can't be serialized to disk, by default?"
+  #{:db :os :net :client :checker :nemesis :generator :model})
+
+(defn nonserializable-keys
+  "What keys in a test can't be serialized to disk? The union of default
+  nonserializable keys, plus any in :nonserializable-keys."
+  [test]
+  (into default-nonserializable-keys (:nonserializable-keys test)))
 
 (defn load
   "Loads a specific test by name and time."
@@ -264,7 +270,7 @@
 (defn write-fressian!
   "Write the entire test as a .fressian file"
   [test]
-  (let [test (apply dissoc test nonserializable-keys)]
+  (let [test (apply dissoc test (nonserializable-keys test))]
     (with-open [file   (io/output-stream (fressian-file! test))]
       (let [out (fress/create-writer file :handlers write-handlers)]
         (fress/write-object out test)))))

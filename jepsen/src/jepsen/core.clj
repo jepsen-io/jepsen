@@ -346,6 +346,8 @@
   :checker    Verifies that the history is valid
   :log-files  A list of paths to logfiles/dirs which should be captured at
               the end of the test.
+  :nonserializable-keys   A collection of top-level keys in the test which
+                          shouldn't be serialized to disk.
 
   Tests proceed like so:
 
