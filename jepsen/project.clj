@@ -6,7 +6,7 @@
                  [spootnik/unilog "0.7.13"]
                  [org.clojure/tools.cli "0.3.5"]
                  [clj-time "0.11.0"]
-                 [knossos "0.2.8" :exclusions [org.slf4j/slf4j-log4j12]]
+                 [knossos "0.2.9-SNAPSHOT" :exclusions [org.slf4j/slf4j-log4j12]]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.1"]
                  [http-kit "2.1.18"]
