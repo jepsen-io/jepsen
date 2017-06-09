@@ -26,8 +26,8 @@
                       padding:  2px; }\n"
        ".op.invoke  { background: #eeeeee; }\n"
        ".op.ok      { background: #6DB6FE; }\n"
-       ".op.fail    { background: #FFAA26; }\n"
-       ".op.info    { background: #FEB5DA; }\n"))
+       ".op.info    { background: #FFAA26; }\n"
+       ".op.fail    { background: #FEB5DA; }\n"))
 
 (defn pairs
   "Pairs up ops from each process in a history. Yields a lazy sequence of [info]
