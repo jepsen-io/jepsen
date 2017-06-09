@@ -141,6 +141,13 @@
                   ; So, we're running groups of n threads, which means we have:
                   group-size  n
                   group-count (quot thread-count group-size)]
+              (assert (<= group-size thread-count)
+                      (str "With " thread-count " worker threads, this"
+                           " jepsen.concurrent/concurrent-generator cannot"
+                           " run a key with " group-size " threads concurrently."
+                           " Consider raising your test's :concurrency to at least "
+                           group-size "."))
+
               (assert (= thread-count (* group-size group-count))
                       (str "This jepsen.independent/concurrent-generator has "
                            thread-count
