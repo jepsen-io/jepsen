@@ -63,13 +63,15 @@
           {:valid? :unknown
            :error (with-out-str (trace/print-cause-trace t))}))))
 
-(def unbridled-optimism
+(defn unbridled-optimism
   "Everything is awesoooommmmme!"
+  []
   (reify Checker
     (check [this test model history opts] {:valid? true})))
 
-(def linearizable
+(defn linearizable
   "Validates linearizability with Knossos."
+  []
   (reify Checker
     (check [this test model history opts]
       (let [a (linear/analysis model history)]
@@ -84,12 +86,13 @@
                :final-paths (take 10 (:final-paths a))
                :configs     (take 10 (:configs a)))))))
 
-(def queue
+(defn queue
   "Every dequeue must come from somewhere. Validates queue operations by
   assuming every non-failing enqueue succeeded, and only OK dequeues succeeded,
   then reducing the model with that history. Every subhistory of every queue
   should obey this property. Should probably be used with an unordered queue
   model, because we don't look for alternate orderings. O(n)."
+  []
   (reify Checker
     (check [this test model history opts]
       (let [final (->> history
@@ -105,10 +108,11 @@
           {:valid?      true
            :final-queue final})))))
 
-(def set
+(defn set
   "Given a set of :add operations followed by a final :read, verifies that
   every successfully added element is present in the read, and that the read
   contains only elements for which an add was attempted."
+  []
   (reify Checker
     (check [this test model history opts]
       (let [attempts (->> history
@@ -160,10 +164,11 @@
            1
            (/ a b)))
 
-(def total-queue
+(defn total-queue
   "What goes in *must* come out. Verifies that every successful enqueue has a
   successful dequeue. Queues only obey this property if the history includes
   draining them completely. O(n)."
+  []
   (reify Checker
     (check [this test model history opts]
       (let [attempts (->> history
@@ -217,7 +222,7 @@
          :lost-frac       (util/fraction (count lost)       (count attempts))
          :recovered-frac  (util/fraction (count recovered)  (count attempts))}))))
 
-(def counter
+(defn counter
   "A counter starts at zero; add operations should increment it by that much,
   and reads should return the present value. This checker validates that at
   each read, the value is at greater than the sum of all :ok increments, and
@@ -235,6 +240,7 @@
    :max-absolute-error  The [lower read upper] where read falls furthest outside
    :max-relative-error  Same, but with error computed as a fraction of the mean}
   "
+  []
   (reify Checker
     (check [this test model history opts]
       (loop [history            (seq (history/complete history))
