@@ -209,10 +209,10 @@
   "A generator which emits a start after a t1 second delay, and then a stop
   after a t2 second delay."
   [t1 t2]
-  (seq [(sleep t1)
-        {:type :info :f :start}
-        (sleep t2)
-        {:type :info :f :stop}]))
+  (seq (cycle [(sleep t1)
+               {:type :info :f :start}
+               (sleep t2)
+               {:type :info :f :stop}])))
 
 (defn mix
   "A random mixture of operations. Takes a collection of generators and chooses
