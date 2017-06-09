@@ -24,10 +24,10 @@
   (str ".ops        { position: absolute; }\n"
        ".op         { position: absolute;
                       padding:  2px; }\n"
-       ".op.invoke  { background: #C1DEFF; }\n"
-       ".op.ok      { background: #B7FFB7; }\n"
-       ".op.fail    { background: #FFD4D5; }\n"
-       ".op.info    { background: #FEFFC1; }\n"))
+       ".op.invoke  { background: #eeeeee; }\n"
+       ".op.ok      { background: #6DB6FE; }\n"
+       ".op.fail    { background: #FFAA26; }\n"
+       ".op.info    { background: #FEB5DA; }\n"))
 
 (defn pairs
   "Pairs up ops from each process in a history. Yields a lazy sequence of [info]

@@ -193,10 +193,13 @@
          (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
               (mapcat (fn [latency]
                         (let [f (rand-nth [:write :read])
+                              proc (rand-int 100)
                               time (* 1e9 (rand-int 100))
-                              type (rand-nth [:ok :fail :info])]
-                          [{:type :invoke, :f f, :time time}
-                           {:type type,    :f f, :time (+ time latency)}])))
+                              type (rand-nth [:ok :ok :ok :ok :ok
+                                              :fail :info :info])]
+                          [{:process proc, :type :invoke, :f f, :time time}
+                           {:process proc, :type type,    :f f, :time 
+                            (+ time latency)}])))
               (take 10000)
               vec)
          {}))

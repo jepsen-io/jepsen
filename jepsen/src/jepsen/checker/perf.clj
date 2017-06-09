@@ -4,6 +4,7 @@
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
+            [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util]
             [jepsen.store :as store]
             [multiset.core :as multiset]
@@ -161,9 +162,9 @@
 
 (def type->color
   "Takes a type of operation (e.g. :ok) and returns a gnuplot color."
-  {:ok   3
-   :fail 1
-   :info 4})
+  {:ok   ['rgb "#81BFFC"]
+   :info ['rgb "#FFA400"]
+   :fail ['rgb "#FF1E90"]})
 
 (defn nemesis-intervals
   "Given a history, constructs a sequence of [start-time, stop-time] intervals
@@ -313,6 +314,7 @@
         fs->points  (fs->points fs)
         output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
                                                     "rate.png"))]
+    (info :datasets datasets)
     (g/raw-plot!
       (concat (rate-preamble test output-path)
               (nemesis-regions history)
