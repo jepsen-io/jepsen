@@ -314,7 +314,6 @@
         fs->points  (fs->points fs)
         output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
                                                     "rate.png"))]
-    (info :datasets datasets)
     (g/raw-plot!
       (concat (rate-preamble test output-path)
               (nemesis-regions history)
