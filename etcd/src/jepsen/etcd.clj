@@ -163,7 +163,7 @@
                       :indep (independent/checker
                                (checker/compose
                                  {:timeline (timeline/html)
-                                  :linear   checker/linearizable}))})
+                                  :linear   (checker/linearizable)}))})
           :generator (->> (independent/concurrent-generator
                             10
                             (range)
