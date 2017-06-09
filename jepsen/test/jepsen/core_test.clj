@@ -1,6 +1,5 @@
 (ns jepsen.core-test
   (:use jepsen.core
-        jepsen.control.net
         clojure.test
         clojure.pprint
         clojure.tools.logging)
@@ -77,12 +76,12 @@
                                slurp
                                str/trim)))))
     (is (= @os-startups @os-teardowns @db-startups @db-teardowns
-           {:n1 (:n1 hosts-map)
-            :n2 (:n2 hosts-map)
-            :n3 (:n3 hosts-map)
-            :n4 (:n4 hosts-map)
-            :n5 (:n5 hosts-map)}))
-    (is (= @db-primaries [(:n1 hosts-map)]))))
+           {"n1" "n1"
+            "n2" "n2"
+            "n3" "n3"
+            "n4" "n4"
+            "n5" "n5"}))
+    (is (= @db-primaries ["n1"]))))
 
 (deftest worker-recovery-test
   ; Workers should only consume n ops even when failing.
@@ -95,7 +94,7 @@
                              (swap! invocations inc)
                              (assert false))
                            (teardown! [c _]))
-                 :checker  checker/unbridled-optimism
+                 :checker  (checker/unbridled-optimism)
                  :generator (->> (gen/queue)
                                  (gen/limit n)
                                  (gen/nemesis gen/void))))

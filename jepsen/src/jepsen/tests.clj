@@ -22,7 +22,7 @@
    :nemesis   nemesis/noop
    :generator gen/void
    :model     model/noop
-   :checker   checker/unbridled-optimism})
+   :checker   (checker/unbridled-optimism)})
 
 (defn atom-db
   "Wraps an atom as a database."

@@ -9,32 +9,32 @@
 
 (deftest queue-test
   (testing "empty"
-    (is (:valid? (check queue nil nil [] {}))))
+    (is (:valid? (check (queue) nil nil [] {}))))
 
   (testing "Possible enqueue but no dequeue"
-    (is (:valid? (check queue nil (model/unordered-queue)
+    (is (:valid? (check (queue) nil (model/unordered-queue)
                         [(invoke-op 1 :enqueue 1)] {}))))
 
   (testing "Definite enqueue but no dequeue"
-    (is (:valid? (check queue nil (model/unordered-queue)
+    (is (:valid? (check (queue) nil (model/unordered-queue)
                         [(ok-op 1 :enqueue 1)] {}))))
 
   (testing "concurrent enqueue/dequeue"
-    (is (:valid? (check queue nil (model/unordered-queue)
+    (is (:valid? (check (queue) nil (model/unordered-queue)
                         [(invoke-op 2 :dequeue nil)
                          (invoke-op 1 :enqueue 1)
                          (ok-op     2 :dequeue 1)] {}))))
 
   (testing "dequeue but no enqueue"
-    (is (not (:valid? (check queue nil (model/unordered-queue)
+    (is (not (:valid? (check (queue) nil (model/unordered-queue)
                              [(ok-op 1 :dequeue 1)] {}))))))
 
 (deftest total-queue-test
   (testing "empty"
-    (is (:valid? (check total-queue nil nil [] {}))))
+    (is (:valid? (check (total-queue) nil nil [] {}))))
 
   (testing "sane"
-    (is (= (check total-queue nil nil
+    (is (= (check (total-queue) nil nil
                   [(invoke-op 1 :enqueue 1)
                    (invoke-op 2 :enqueue 2)
                    (ok-op     2 :enqueue 2)
@@ -55,7 +55,7 @@
             :recovered-frac   1/2})))
 
   (testing "pathological"
-    (is (= (check total-queue nil nil
+    (is (= (check (total-queue) nil nil
                   [(invoke-op 1 :enqueue :hung)
                    (invoke-op 2 :enqueue :enqueued)
                    (ok-op     2 :enqueue :enqueued)
@@ -82,13 +82,13 @@
 
 (deftest counter-test
   (testing "empty"
-    (is (= (check counter nil nil [] {})
+    (is (= (check (counter) nil nil [] {})
            {:valid? true
             :reads  []
             :errors []})))
 
   (testing "initial read"
-    (is (= (check counter nil nil
+    (is (= (check (counter) nil nil
                   [(invoke-op 0 :read nil)
                    (ok-op     0 :read 0)]
                   {})
@@ -97,7 +97,7 @@
             :errors []})))
 
   (testing "initial invalid read"
-    (is (= (check counter nil nil
+    (is (= (check (counter) nil nil
                   [(invoke-op 0 :read nil)
                    (ok-op     0 :read 1)]
                   {})
@@ -106,7 +106,7 @@
             :errors [[0 1 0]]})))
 
   (testing "interleaved concurrent reads and writes"
-    (is (= (check counter nil nil
+    (is (= (check (counter) nil nil
                   [(invoke-op 0 :read nil)
                    (invoke-op 1 :add 1)
                    (invoke-op 2 :read nil)
@@ -131,7 +131,7 @@
             :errors [[0 100 15]]})))
 
   (testing "rolling reads and writes"
-    (is (= (check counter nil nil
+    (is (= (check (counter) nil nil
                   [(invoke-op 0 :read nil)
                    (invoke-op 1 :add  1)
                    (ok-op     0 :read 0)
@@ -147,7 +147,7 @@
             :errors [[1 5 3]]}))))
 
 (deftest compose-test
-  (is (= (check (compose {:a unbridled-optimism :b unbridled-optimism})
+  (is (= (check (compose {:a (unbridled-optimism) :b (unbridled-optimism)})
                 nil nil nil {})
          {:a {:valid? true}
           :b {:valid? true}

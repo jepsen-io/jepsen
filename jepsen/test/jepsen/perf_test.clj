@@ -131,7 +131,7 @@
                  {:process 1, :type :fail, :f :cas, :value [2 2]}
                  {:process 2, :type :fail, :f :cas, :value [4 3]}]]
     (time
-      (is (:valid? (checker/check checker/linearizable
+      (is (:valid? (checker/check (checker/linearizable)
                                   {}
                                   (model/->CASRegister 0)
                                   history

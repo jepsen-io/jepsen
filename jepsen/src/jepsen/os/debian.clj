@@ -6,7 +6,7 @@
             [jepsen.os :as os]
             [jepsen.control :as c :refer [|]]
             [jepsen.control.util :as cu]
-            [jepsen.control.net :as net]
+            [jepsen.net :as net]
             [clojure.string :as str]))
 
 (defn setup-hostfile!
@@ -162,6 +162,6 @@
                   :rsyslog
                   :logrotate]))
 
-      (meh (net/heal)))
+      (meh (net/heal! (:net test) test)))
 
     (teardown! [_ test node])))
