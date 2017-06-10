@@ -11,6 +11,7 @@
             [clojure.tools.logging :refer [debug info warn]]
             [knossos.history :as history])
   (:import (java.util.concurrent.locks LockSupport)
+           (java.util.concurrent ExecutionException)
            (java.io File
                     RandomAccessFile)))
 
@@ -262,27 +263,16 @@
   (info (with-out-str (pprint x)))
   x)
 
-(defmacro unwrap-exception
-  "Catches exceptions from body and re-throws their causes. Useful when you
-  don't want the wrapper from, say, a future's exception handler."
-  [& body]
-  `(try ~@body
-        (catch Throwable t#
-          (throw (.getCause t#)))))
-
 (defmacro timeout
   "Times out body after n millis, returning timeout-val."
   [millis timeout-val & body]
-  `(let [thread# (promise)
-         worker# (future
-                   (deliver thread# (Thread/currentThread))
-                   ~@body)
-         retval# (unwrap-exception
-                   (deref worker# ~millis ::timeout))]
+  `(let [worker# (future ~@body)
+         retval# (try
+                   (deref worker# ~millis ::timeout)
+                   (catch ExecutionException ee#
+                     (throw (.getCause ee#))))]
      (if (= retval# ::timeout)
-       (do ; Can never remember which does which
-           (.interrupt @thread#)
-           (future-cancel worker#)
+       (do (future-cancel worker#)
            ~timeout-val)
        retval#)))
 
