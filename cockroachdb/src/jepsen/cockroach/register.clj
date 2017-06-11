@@ -28,7 +28,7 @@
       ;; Everyone's gotta block until we've made the table.
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (rc/with-conn [c conn]
+          (c/with-conn [c conn]
             (Thread/sleep 1000)
             (j/execute! c ["drop table if exists test"])
             (Thread/sleep 1000)

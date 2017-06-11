@@ -23,7 +23,7 @@
     (let [conn (c/client node)]
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (rc/with-conn [c conn]
+          (c/with-conn [c conn]
             (Thread/sleep 1000)
             (c/with-txn-retry
               (j/execute! c ["drop table if exists accounts"]))
@@ -43,7 +43,7 @@
 
   (invoke! [this test op]
     (c/with-exception->op op
-      (rc/with-conn [c conn]
+      (c/with-conn [c conn]
         (c/with-timeout
           (c/with-txn-retry
             (c/with-txn [c c]
@@ -83,7 +83,7 @@
   (teardown! [this test]
     (try
       (c/with-timeout
-        (rc/with-conn [c conn]
+        (c/with-conn [c conn]
           (j/execute! c ["drop table if exists accounts"])))
       (finally
         (rc/close! conn)))))
@@ -172,7 +172,7 @@
     (let [conn (c/client node)]
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (rc/with-conn [c conn]
+          (c/with-conn [c conn]
             (dotimes [i n]
               (Thread/sleep 500)
               (c/with-txn-retry
@@ -191,7 +191,7 @@
 
   (invoke! [this test op]
     (c/with-exception->op op
-      (rc/with-conn [c conn]
+      (c/with-conn [c conn]
         (c/with-timeout
           (c/with-txn-retry
             (c/with-txn [c c]
@@ -233,7 +233,7 @@
 
   (teardown! [this test]
     (try
-      (rc/with-conn [c conn]
+      (c/with-conn [c conn]
         (c/with-timeout
           (dotimes [i n]
             (j/execute! c [(str "drop table if exists accounts" i)]))))

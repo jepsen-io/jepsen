@@ -56,7 +56,7 @@
     (let [client (c/client node)]
       (locking table-created?
         (when (compare-and-set! table-created? false true)
-          (rc/with-conn [c client]
+          (c/with-conn [c client]
             (c/with-timeout
               (info "Creating tables" (pr-str (table-names table-count)))
               (doseq [t (table-names table-count)]
@@ -69,7 +69,7 @@
 
   (invoke! [this test op]
     (c/with-exception->op op
-      (rc/with-conn [c client]
+      (c/with-conn [c client]
         (c/with-timeout
           (let [ks (subkeys (:key-count test) (:value op))]
             (case (:f op)
@@ -96,7 +96,7 @@
 
   (teardown! [this test]
     (try
-      (rc/with-conn [c client]
+      (c/with-conn [c client]
         (c/with-timeout
           (doseq [t (table-names table-count)]
             (j/execute! c [(str "drop table " t)]))))
