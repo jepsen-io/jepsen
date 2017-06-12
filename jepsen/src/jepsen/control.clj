@@ -352,11 +352,3 @@
   `(on-nodes ~test
              (fn [test# node#]
                ~@body)))
-
-(defn go
-  [host]
-  (on host
-      (trace
-        (cd "/"
-            (sudo "root"
-                  (println (exec "whoami")))))))
