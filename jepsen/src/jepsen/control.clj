@@ -336,14 +336,21 @@
 
 (defn on-nodes
   "Given a test, evaluates (f test node) in parallel on each node, with that
-  node's SSH connection bound."
-  [test f]
-  (->> (:sessions test)
-       (real-pmap (bound-fn [[node session]]
-                    (with-thread-name (str "jepsen node " (name node))
-                      (with-session node session
-                        [node (f test node)]))))
-       (into {})))
+  node's SSH connection bound. If `nodes` is provided, evaluates only on those
+  nodes in particular."
+  ([test f]
+   (on-nodes test (:nodes test) f))
+  ([test nodes f]
+   (->> nodes
+        (map (fn [node]
+               (let [session (get (:sessions test) node)]
+                 (assert session (str "No session for node" (pr-str node)))
+                 [node session])))
+        (real-pmap (bound-fn [[node session]]
+                     (with-thread-name (str "jepsen node " (name node))
+                       (with-session node session
+                         [node (f test node)]))))
+        (into {}))))
 
 (defmacro with-test-nodes
   "Given a test, evaluates body in parallel on each node, with that node's SSH
