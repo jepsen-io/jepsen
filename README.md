@@ -96,6 +96,8 @@ reimplement Jepsen's ideas in a language you *do* know. Either way's fine!
 For a complete guide to writing a test, start with
 [scaffolding](doc/scaffolding.md).
 
+To see past tests and their results see https://jepsen.io/analyses.
+
 ## FAQ
 
 ### JSCH auth errors
