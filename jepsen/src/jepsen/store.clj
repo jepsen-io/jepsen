@@ -263,9 +263,10 @@
     (pprint (:results test))))
 
 (defn write-history!
-  "Writes out a history.txt file."
+  "Writes out history.txt and history.edn files."
   [test]
-  (util/pwrite-history! (path! test "history.txt") (:history test)))
+  (util/pwrite-history! (path! test "history.txt") (:history test))
+  (util/pwrite-history! (path! test "history.edn") prn (:history test)))
 
 (defn write-fressian!
   "Write the entire test as a .fressian file"

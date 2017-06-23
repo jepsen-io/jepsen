@@ -273,8 +273,8 @@
 
                                    ; Write history
                                    (store/with-out-file test [subdir
-                                                              "history.txt"]
-                                     (util/print-history h))
+                                                              "history.edn"]
+                                     (util/print-history prn h))
 
                                    ; Return results as a map
                                    [k results])))

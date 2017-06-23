@@ -130,37 +130,43 @@
 
 (defn print-history
   "Prints a history to the console."
-  [history]
-  (doseq [op history]
-    (prn-op op)))
+  ([history]
+    (print-history prn-op history))
+  ([printer history]
+   (doseq [op history]
+     (printer op))))
 
 (defn write-history!
   "Writes a history to a file."
-  [f history]
-  (with-open [w (io/writer f)]
-    (binding [*out* w]
-      (print-history history))))
+  ([f history]
+   (write-history! f prn-op history))
+  ([f printer history]
+   (with-open [w (io/writer f)]
+     (binding [*out* w]
+       (print-history printer history)))))
 
 (defn pwrite-history!
   "Writes history, taking advantage of more cores."
-  [f history]
-  (if (or (< (count history) 16384) (not (vector? history)))
-    ; Plain old write
-    (write-history! f history)
-    ; Parallel variant
-    (let [chunks (chunk-vec (Math/ceil (/ (count history) (processors)))
-                            history)
-          files  (repeatedly (count chunks)
-                             #(File/createTempFile "jepsen-history" ".part"))]
-      (try
-        (->> chunks
-             (map (fn [file chunk] (future (write-history! file chunk) file))
-                  files)
-             doall
-             (map deref)
-             (concat-files! f))
-       (finally
-         (doseq [f files] (.delete ^File f)))))))
+  ([f history]
+    (pwrite-history! f prn-op history))
+  ([f printer history]
+   (if (or (< (count history) 16384) (not (vector? history)))
+     ; Plain old write
+     (write-history! f history)
+     ; Parallel variant
+     (let [chunks (chunk-vec (Math/ceil (/ (count history) (processors)))
+                             history)
+           files  (repeatedly (count chunks)
+                              #(File/createTempFile "jepsen-history" ".part"))]
+       (try
+         (->> chunks
+              (map (fn [file chunk] (future (write-history! file printer chunk) file))
+                   files)
+              doall
+              (map deref)
+              (concat-files! f))
+         (finally
+           (doseq [f files] (.delete ^File f))))))))
 
 (defn log-op
   "Logs an operation and returns it."
