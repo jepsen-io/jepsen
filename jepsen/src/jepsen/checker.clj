@@ -13,7 +13,9 @@
             [gnuplot.core :as g]
             [knossos [model :as model]
                      [op :as op]
+                     [competition :as competition]
                      [linear :as linear]
+                     [wgl :as wgl]
                      [history :as history]]
             [knossos.linear.report :as linear.report]))
 
@@ -70,21 +72,29 @@
     (check [this test model history opts] {:valid? true})))
 
 (defn linearizable
-  "Validates linearizability with Knossos."
-  []
-  (reify Checker
-    (check [this test model history opts]
-      (let [a (linear/analysis model history)]
-        (when-not (:valid? a)
-          (meh
-            ; Renderer can't handle really broad concurrencies yet
-            (linear.report/render-analysis!
-              history a (.getCanonicalPath (store/path! test (:subdirectory opts)
-                                                      "linear.svg")))))
-        ; Writing these can take *hours* so we truncate
-        (assoc a
-               :final-paths (take 10 (:final-paths a))
-               :configs     (take 10 (:configs a)))))))
+  "Validates linearizability with Knossos. Defaults to the competition checker,
+  but can be controlled by passing either :linear or :wgl."
+  ([]
+   (linearizable :competition))
+  ([algorithm]
+   (reify Checker
+     (check [this test model history opts]
+       (let [a ((case algorithm
+                  :competition  competition/analysis
+                  :linear       linear/analysis
+                  :wgl          wgl/analysis)
+                model history)]
+         (when-not (:valid? a)
+           (meh
+             ; Renderer can't handle really broad concurrencies yet
+             (linear.report/render-analysis!
+               history a (.getCanonicalPath
+                           (store/path! test (:subdirectory opts)
+                                        "linear.svg")))))
+         ; Writing these can take *hours* so we truncate
+         (assoc a
+                :final-paths (take 10 (:final-paths a))
+                :configs     (take 10 (:configs a))))))))
 
 (defn queue
   "Every dequeue must come from somewhere. Validates queue operations by
