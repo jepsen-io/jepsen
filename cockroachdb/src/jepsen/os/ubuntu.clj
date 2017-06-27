@@ -7,7 +7,7 @@
 	    [jepsen.os.debian :as debian]
             [jepsen.control :as c]
             [jepsen.control.util :as cu]
-            [jepsen.control.net :as net]
+            [jepsen.net :as net]
             [clojure.string :as str]))
 
 (def os
@@ -35,6 +35,6 @@
                   :logrotate])
 	(c/su (c/exec :service :ntp :stop)))
 
-      (meh (net/heal)))
+      (meh (net/heal! (:net test) test)))
 
     (teardown! [_ test node])))
