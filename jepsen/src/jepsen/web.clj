@@ -47,6 +47,11 @@
                              ; Incomplete test
                              {:name       test-name
                               :start-time test-time
+                              :results    {:valid? :incomplete}})
+                           (catch java.lang.RuntimeException e
+                             ; Um???
+                             {:name       test-name
+                              :start-time test-time
                               :results    {:valid? :incomplete}})))
                        runs)))))
 
