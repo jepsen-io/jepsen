@@ -104,7 +104,7 @@
         (try+
           (case (:f op)
             :read (let [value (-> conn
-                                  (v/get k {:quorum? true})
+                                  (v/get k {:quorum? false})
                                   parse-long)]
                     (assoc op :type :ok, :value (independent/tuple k value)))
 
@@ -169,8 +169,8 @@
                             (range)
                             (fn [k]
                               (->> (gen/mix [r w cas])
-                                   (gen/stagger 1/10)
-                                   (gen/limit 100))))
+                                   (gen/stagger 1/30)
+                                   (gen/limit 300))))
                           (gen/nemesis
                             (gen/seq (cycle [(gen/sleep 5)
                                              {:type :info, :f :start}
