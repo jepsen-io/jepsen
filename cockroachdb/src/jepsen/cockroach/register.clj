@@ -99,5 +99,5 @@
                        :details (independent/checker
                                   (checker/compose
                                     {:timeline     (timeline/html)
-                                     :linearizable checker/linearizable}))})}
+                                     :linearizable (checker/linearizable)}))})}
       opts)))
