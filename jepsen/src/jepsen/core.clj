@@ -377,6 +377,7 @@
      the history
     - This generates the final report"
   [test]
+  (info "Running test:\n" (with-out-str (pprint test)))
   (try
     (log-results
       (with-thread-name "jepsen test runner"
