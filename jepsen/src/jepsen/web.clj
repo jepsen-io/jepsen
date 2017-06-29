@@ -21,6 +21,17 @@
            (java.util.zip ZipEntry
                           ZipOutputStream)))
 
+(def colors
+  {:ok   "#6DB6FE"
+   :info "#FFAA26"
+   :fail "#FEB5DA"
+   nil   "#eaeaea"})
+
+(def valid-color
+  (comp colors {true     :ok
+                :unknown :info
+                false    :fail}))
+
 ; Path/File protocols
 (extend-protocol io/Coercions
   Path
@@ -95,11 +106,7 @@
     [:tr
      [:td [:a {:href (url t "")} (:name t)]]
      [:td [:a {:href (url t "")} (:start-time t)]]
-     [:td {:style (str "background: " (case (:valid? r)
-                                        true            "#ADF6B0"
-                                        false           "#F6AEAD"
-                                        :unknown        "#F3F6AD"
-                                                        "#eaeaea"))}
+     [:td {:style (str "background: " (valid-color (:valid? r)))}
       (:valid? r)]
      [:td [:a {:href (url t "results.edn")}    "results.edn"]]
      [:td [:a {:href (url t "history.txt")}    "history.txt"]]
@@ -123,16 +130,24 @@
 (defn dir-cell
   "Renders a File (a directory) for a directory view."
   [^File f]
+  (let [results-file  (io/file f "results.edn")
+        valid?        (try (with-open [r (java.io.PushbackReader.
+                                           (io/reader results-file))]
+                             (:valid? (clojure.edn/read r)))
+                           (catch java.io.FileNotFoundException e
+                             nil)
+                           (catch RuntimeException e
+                             :unknown))]
   [:a {:href (file-url f)
        :style "text-decoration: none;
               color: #000;"}
-   [:div {:style "display: inline-block;
-                 margin: 10px;
-                 padding: 10px;
-                 background: #F4E7B7;
-                 overflow: hidden;
-                 width: 280px;"}
-    (.getName f)]])
+   [:div {:style (str "background: " (valid-color valid?) ";\n"
+                      "display: inline-block;
+                      margin: 10px;
+                      padding: 10px;
+                      overflow: hidden;
+                      width: 280px;")}
+    (.getName f)]]))
 
 (defn file-cell
   "Renders a File for a directory view."
