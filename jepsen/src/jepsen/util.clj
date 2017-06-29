@@ -152,7 +152,7 @@
   ([f printer history]
    (if (or (< (count history) 16384) (not (vector? history)))
      ; Plain old write
-     (write-history! f history)
+     (write-history! f printer history)
      ; Parallel variant
      (let [chunks (chunk-vec (Math/ceil (/ (count history) (processors)))
                              history)
