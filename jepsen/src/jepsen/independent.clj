@@ -7,7 +7,7 @@
   registers."
   (:require [jepsen.util :as util :refer [map-kv]]
             [jepsen.store :as store]
-            [jepsen.checker :refer [check Checker]]
+            [jepsen.checker :refer [merge-valid check-safe Checker]]
             [jepsen.generator :as gen :refer [Generator]]
             [clojure.tools.logging :refer :all]
             [clojure.core.reducers :as r]
@@ -264,8 +264,9 @@
                                  (let [h (subhistory k history)
                                        subdir (concat (:subdirectory opts)
                                                       [dir k])
-                                       results (check checker test model h
-                                                      {:subdirectory subdir})]
+                                       results (check-safe
+                                                 checker test model h
+                                                 {:subdirectory subdir})]
                                    ; Write analysis
                                    (store/with-out-file test [subdir
                                                               "results.edn"]
@@ -286,6 +287,6 @@
                                       (conj! failures k)))
                                   (transient []))
                           persistent!)]
-        {:valid? (empty? failures)
+        {:valid?  (merge-valid (map :valid? (vals results)))
          :results results
          :failures failures}))))

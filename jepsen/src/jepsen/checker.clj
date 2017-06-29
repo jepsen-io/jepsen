@@ -30,10 +30,16 @@
   "Merge n :valid values, yielding the one with the highest priority."
   [valids]
   (reduce (fn [v1 v2]
-            (if (< (valid-priorities v1)
-                   (valid-priorities v2))
-              v2
-              v1))
+            (let [p1 (or (valid-priorities v1)
+                         (throw (IllegalArgumentException.
+                                  (str (pr-str v1)
+                                      " is not a known valid? value"))))
+                  p2 (or (valid-priorities v2)
+                         (throw (IllegalArgumentException.
+                                  (str (pr-str v2)
+                                       " is not a known valid? value"))))]
+              (if (< p1 p2) v2 v1)))
+          true
           valids))
 
 (defprotocol Checker
@@ -297,7 +303,7 @@
     (check [this test model history opts]
       (let [results (->> checker-map
                          (pmap (fn [[k checker]]
-                                 [k (check checker test model history opts)]))
+                                 [k (check-safe checker test model history opts)]))
                          (into {}))]
         (assoc results :valid? (merge-valid (map :valid? (vals results))))))))
 
