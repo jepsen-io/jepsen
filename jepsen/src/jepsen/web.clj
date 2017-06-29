@@ -168,6 +168,14 @@
 
    [:a {:href (file-url f)} (.getName f)]])
 
+(defn dir-sort
+  "Sort a collection of Files. If everything's an integer, sort numerically,
+  else alphanumerically."
+  [files]
+  (if (every? (fn [^File f] (re-find #"^\d+$" (.getName f))) files)
+    (sort-by #(Long/parseLong (.getName %)) files)
+    (sort files)))
+
 (defn dir
   "Serves a directory."
   [^File dir]
@@ -193,7 +201,7 @@
                   (->> dir
                        .listFiles
                        (filter (fn [^File f] (.isDirectory f)))
-                       sort
+                       dir-sort
                        (map dir-cell))]
                  [:div
                   (->> dir
