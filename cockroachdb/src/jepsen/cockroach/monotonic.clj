@@ -95,7 +95,7 @@
 
       (locking table-created?
         (when (compare-and-set! table-created? false true)
-          (rc/with-conn [c conn]
+          (c/with-conn [c conn]
             (doseq [k independent-keys]
               (monotonic-create-tables! c k table-count
                                         (:val-as-pkey? test))))))
@@ -106,7 +106,7 @@
     (let [[k value] (:value op)
           tables    (map table-name (repeat k) (range table-count))]
       (c/with-exception->op op
-        (rc/with-conn [c conn]
+        (c/with-conn [c conn]
           (case (:f op)
             :add (c/with-txn-retry-as-fail op
                    (c/with-timeout

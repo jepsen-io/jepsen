@@ -240,7 +240,7 @@
   [client]
   (util/timeout 60000 (throw (RuntimeException. "Timed out waiting for conn"))
                 (while (try
-                         (rc/with-conn [c client]
+                         (with-conn [c client]
                            (j/query c ["select 1"])
                            false)
                          (catch RuntimeException e
