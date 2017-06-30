@@ -109,3 +109,25 @@
                   _ (when (= a 3) (return :3))]
              4)
            :2))))
+
+(deftest timeout-test
+  ; Fast operations pass through the inner result or exception.
+  (is ::success (timeout 1000 ::timed-out
+                         ::success))
+  (is (thrown? ArithmeticException
+               (timeout 1000 ::timed-out
+                        (/ 1 0))))
+  ; Slow operations are interrupted and return timeout value.
+  (is ::timed-out (timeout 10 ::timed-out
+                           (Thread/sleep 1000)))
+  ; This is a more complicated version of the previous test that
+  ; verifies that the function is interrupted when a timeout occurs.
+  (let* [p (promise)
+         ret (timeout 10 ::timed-out
+                      (try
+                        (Thread/sleep 1000)
+                        (deliver p ::finished)
+                        (catch InterruptedException e
+                          (deliver p ::exception))))]
+    (is ::timed-out ret)
+    (is ::exception (deref p 10 ::timed-out))))

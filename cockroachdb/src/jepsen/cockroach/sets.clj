@@ -102,7 +102,7 @@
 
       (locking tbl-created?
         (when (compare-and-set! tbl-created? false true)
-          (rc/with-conn [c conn]
+          (c/with-conn [c conn]
             (Thread/sleep 1000)
             (j/execute! c ["drop table if exists set"])
             (Thread/sleep 1000)
@@ -113,7 +113,7 @@
 
   (invoke! [this test op]
     (c/with-exception->op op
-      (rc/with-conn [c conn]
+      (c/with-conn [c conn]
         (c/with-txn-retry
           (case (:f op)
             :add (c/with-timeout
@@ -127,7 +127,7 @@
   (teardown! [this test]
     (try
       (c/with-timeout
-        (rc/with-conn [c conn]
+        (c/with-conn [c conn]
           (j/execute! c ["drop table set"])))
       (finally (rc/close! conn)))))
 

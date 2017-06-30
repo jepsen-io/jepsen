@@ -284,7 +284,7 @@
 
        (invoke! [this test op]
          (assoc op :value
-                (rc/with-conn [c (rand-nth clients)]
+                (cc/with-conn [c (rand-nth clients)]
                   (letr [keyrange  (:keyrange test)
                          keyrange  (if keyrange
                                      @keyrange

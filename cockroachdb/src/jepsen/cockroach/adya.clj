@@ -27,7 +27,7 @@
     (let [client (c/client node)]
       (locking table-created?
         (when (compare-and-set! table-created? false true)
-          (rc/with-conn [c client]
+          (c/with-conn [c client]
             (c/with-timeout
               (c/with-txn-retry
                 (j/execute! c "create table a (
@@ -43,7 +43,7 @@
 
   (invoke! [this test op]
     (c/with-exception->op op
-      (rc/with-conn [c client]
+      (c/with-conn [c client]
         (c/with-timeout
           (let [[k [a-id b-id]] (:value op)]
             (case (:f op)
