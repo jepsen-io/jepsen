@@ -377,7 +377,6 @@
      the history
     - This generates the final report"
   [test]
-  (info "Running test:\n" (with-out-str (pprint test)))
   (try
     (log-results
       (with-thread-name "jepsen test runner"
@@ -397,6 +396,7 @@
                           ; Currently running histories
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
+              _    (info "Running test:\n" (with-out-str (pprint test)))
               test (control/with-ssh (:ssh test)
                      (with-resources [sessions
                                       (bound-fn* control/session)
