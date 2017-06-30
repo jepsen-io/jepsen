@@ -115,7 +115,8 @@
          (partition m 1)        ; construct majorities
          (take n)               ; one per node
          (map (fn [majority]    ; invert into connections to *drop*
-                [(first majority) (set/difference U (set majority))]))
+                [(nth majority (Math/floor (/ (count majority) 2)))
+                 (set/difference U (set majority))]))
          (into {}))))
 
 (defn partition-majorities-ring
