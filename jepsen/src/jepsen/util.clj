@@ -624,3 +624,55 @@
                              (count (longest-common-prefix cs))
                              (map (comp dec count) cs)))
        cs))
+
+(definterface ILazyAtom
+  (init []))
+
+(defn lazy-atom
+  "An atom with lazy state initialization. Calls (f) on first use to provide
+  the initial value of the atom. Only supports swap/reset/deref. Reset bypasses
+  lazy initialization. If f throws, behavior is undefined (read: proper
+  fucked)."
+  [f]
+  (let [state ^clojure.lang.Atom (atom ::fresh)]
+    (reify
+      ILazyAtom
+      (init [_]
+        (let [s @state]
+          (if-not (identical? s ::fresh)
+            ; Regular old value
+            s
+
+            ; Someone must initialize. Everyone form an orderly queue.
+            (do (locking state
+                  (if (identical? @state ::fresh)
+                    ; We're the first.
+                    (reset! state (f))))
+
+                ; OK, definitely initialized now.
+                @state))))
+
+      clojure.lang.IAtom
+      (swap [this f]
+        (.init this)
+        (.swap state f))
+      (swap [this f a]
+        (.init this)
+        (.swap state f a))
+      (swap [this f a b]
+        (.init this)
+        (.swap state f a b))
+      (swap [this f a b more]
+        (.init this)
+        (.swap state f a b more))
+
+      (compareAndSet [this v v']
+        (.init this)
+        (.compareAndSet state v v'))
+
+      (reset [this v]
+        (.reset state v))
+
+      clojure.lang.IDeref
+      (deref [this]
+        (.init this)))))

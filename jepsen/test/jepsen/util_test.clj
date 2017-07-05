@@ -131,3 +131,23 @@
                           (deliver p ::exception))))]
     (is ::timed-out ret)
     (is ::exception (deref p 10 ::timed-out))))
+
+(deftest lazy-atom-test
+  (testing "reads"
+    (let [calls (atom 0)
+          a (lazy-atom (fn [] (swap! calls inc) 0))]
+      (is (= 0 @calls))
+      (is (= 0 @a))
+      (is (= 1 @calls))
+      (is (= 0 @a))
+      (is (= 1 @calls))))
+
+  (testing "increments"
+    (let [calls (atom 0)
+          a     (lazy-atom (fn [] (Thread/sleep 10) (swap! calls inc) 0))
+          f1    (future (swap! a inc))
+          f2    (future (swap! a inc))]
+      @f1
+      @f2
+      (is (= 1 @calls))
+      (is (= 2 @a)))))
