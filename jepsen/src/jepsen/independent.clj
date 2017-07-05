@@ -158,17 +158,19 @@
                            " threads apiece. Consider raising or lowering the"
                            " test's :concurrency to a multiple of " group-size
                            "."))
-              (compare-and-set!
-                state nil
-                {:keys        (drop group-count keys)
-                 :active      (->> (concat (map (juxt identity fgen) keys)
-                                           (repeat nil))
-                                   (take group-count)
-                                   vec)
-                 :group-size    group-size
-                 :group-threads (->> threads
-                                     (partition group-size)
-                                     (mapv vec))})
+              (locking state
+                (when (nil? @state)
+                  (compare-and-set!
+                    state nil
+                    {:keys        (drop group-count keys)
+                     :active      (->> (concat (map (juxt identity fgen) keys)
+                                               (repeat nil))
+                                       (take group-count)
+                                       vec)
+                     :group-size    group-size
+                     :group-threads (->> threads
+                                         (partition group-size)
+                                         (mapv vec))})))
               ;(info "Initial state is" (with-out-str (clojure.pprint/pprint @state)))
               (recur test process))
 
@@ -197,22 +199,23 @@
                 (assoc op :value (tuple k (:value op)))
 
                 ; No ops left. New key and generator time!
-                (do (swap!
-                      state
-                      (fn [s]
-                        ; Make sure we don't race with another thread to
-                        ; choose a new key
-                        (if (identical? pair (nth (:active s) group))
-                          (if-let [keys (seq (:keys s))]
-                            ; We have more keys
-                            (let [k (first keys)
-                                  g (fgen k)]
-                              (assoc s
-                                     :active (assoc (:active s) group [k g])
-                                     :keys (next (:keys s))))
-                                (assoc-in s [:active group] nil))
-                          ; Looks like someone else beat us
-                          s)))
+                (do (locking state
+                      (swap!
+                        state
+                        (fn [s]
+                          ; Make sure we don't race with another thread to
+                          ; choose a new key
+                          (if (identical? pair (nth (:active s) group))
+                            (if-let [keys (seq (:keys s))]
+                              ; We have more keys
+                              (let [k (first keys)
+                                    g (fgen k)]
+                                (assoc s
+                                       :active (assoc (:active s) group [k g])
+                                       :keys (next (:keys s))))
+                              (assoc-in s [:active group] nil))
+                            ; Looks like someone else beat us (shouldn't happen)
+                            s))))
                     (recur test process)))))))))))
 
 (defn history-keys
