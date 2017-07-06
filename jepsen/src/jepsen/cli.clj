@@ -86,12 +86,17 @@
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]])
 
-(defn tarball-opt
-  [default]
-  ["-u" "--tarball URL" "URL for the DB tarball to install. May be either HTTP, HTTPS, or a local file present on each of the DB nodes. For instance, --tarball https://foo.com/db.tgz, or file:///tmp/db.tgz"
-   :default default
-   :validate [(partial re-find #"^(file|https?)://.*\.(tar|tgz)")
-              "Must be a file://, http://, or https:// URL including .tar or .tgz"]])
+(defn package-opt
+  ([default]
+   (package-opt "package-url" default))
+  ([option-name default]
+   [nil (str "--" option-name " URL")
+    "URL for the DB package (a zip file or tarball) to install. May be either HTTP, HTTPS, or a local file present on each of the DB nodes. For instance, --tarball https://foo.com/db.tgz, or file:///tmp/db.zip"
+    :default default
+    :validate [(partial re-find #"^(file|https?)://.*\.(tar|tgz|zip)")
+               "Must be a file://, http://, or https:// URL including .tar, .tgz, or .zip"]]))
+
+(def tarball-opt package-opt)
 
 (defn test-usage
   []
