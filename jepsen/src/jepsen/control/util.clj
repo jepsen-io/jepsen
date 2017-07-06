@@ -104,6 +104,10 @@
              (exec :unzip file)
              (exec :tar :xf file))
 
+           ; Force ownership
+           (when (= "root" *sudo*)
+             (exec :chown :-R "root:root" "."))
+
            ; Get archive root paths
            (let [roots (ls)]
              (assert (pos? (count roots)) "Archive contained no files")
