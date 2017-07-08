@@ -239,3 +239,31 @@
                        (fn stop [t n]
                          (c/su (c/exec :killall :-s "CONT" process))
                          [:resumed process]))))
+
+(defn truncate-file
+  "A nemesis which responds to
+
+  {:f         :truncate
+   :value     {\"some-node\" {:file \"/path/to/file\"
+                              :drop 64}}}
+
+  where the value is a map of nodes to {:file, :drop} maps, on those nodes,
+  drops the last :drop bytes from the given file."
+  []
+  (reify client/Client
+    (setup! [this test _] this)
+
+    (invoke! [this test op]
+      (assert (= (:f op) :truncate))
+      (let [plan (:value op)]
+        (c/on-nodes test
+                    (keys plan)
+                    (fn [node]
+                      (let [{:keys [file drop]} (plan node)]
+                        (assert (string? file))
+                        (assert (integer? drop))
+                        (c/su
+                          (c/exec :truncate :-c :-s (str "-" drop) file))))))
+      op)
+
+    (teardown! [this test])))
