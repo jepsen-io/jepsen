@@ -1,21 +1,14 @@
-Jepsen testing for CockroachDB
-==============================
+# Jepsen tests for CockroachDB
 
-CockroachDB__ is a new distributed database engine developed at
-`Cockroach Labs`__.
+[CockroachDB](https://github.com/cockroachdb/cockroach) is a new distributed
+database engine developed at [Cockroach Labs](http://www.cockroachlabs.com/).
 
-.. __: https://github.com/cockroachdb/cockroach
-.. __: http://www.cockroachlabs.com/
+[Jepsen](https://github.com/aphyr/jepsen) is a testing framework for networked
+databases, developed by Kyle 'Aphyr' Kingsbury to exercise and
+[validate](https://jepsen.io) the claims to consistency made by database
+developers or their documentation.
 
-Jepsen__ is a testing framework for networked databases, developed by
-Kyle 'Aphyr' Kingsbury to `exercise and validate the claims to
-consistency made by database developers or their documentation`__.
-
-.. __: https://github.com/aphyr/jepsen
-.. __: https://aphyr.com/tags/jepsen
-
-What is being tested?
----------------------
+## What is being tested?
 
 The tests run concurrent operations to some shared data from different
 nodes in a CockroachDB cluster and checks that the operations preserve
