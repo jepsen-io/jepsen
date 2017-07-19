@@ -21,8 +21,8 @@
 (def pdpidfile (str tidb-dir "/jepsen-pd.pid"))
 (def kvlogfile (str tidb-dir "/jepsen-kv.log"))
 (def kvpidfile (str tidb-dir "/jepsen-kv.pid"))
-(def dblogfile (str tidb-dir "/jepsen-dbs.log"))
-(def dbpidfile (str tidb-dir "/jepsen-dbs.pid"))
+(def dblogfile (str tidb-dir "/jepsen-db.log"))
+(def dbpidfile (str tidb-dir "/jepsen-db.pid"))
 
 (def client-port 2379)
 (def peer-port   2380)
