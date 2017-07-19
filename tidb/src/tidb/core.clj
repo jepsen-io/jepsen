@@ -23,6 +23,7 @@
 (def kvpidfile (str tidb-dir "/jepsen-kv.pid"))
 (def dblogfile (str tidb-dir "/jepsen-db.log"))
 (def dbpidfile (str tidb-dir "/jepsen-db.pid"))
+(def pdconfigfile "pd.conf")
 
 (def client-port 2379)
 (def peer-port   2380)
@@ -84,13 +85,14 @@
         ;                 --data-dir=pd1 \
         ;                 --client-urls="http://n1:2379" \
         ;                 --peer-urls="http://n1:2380" \
-                        ; --initial-cluster="pd1=http://n1:2380, \
-                                           ; pd2=http://n2:2380, \
-                                           ; pd3=http://n3:2380" \
-                                           ; pd4=http://n4:2380" \
-                                           ; pd5=http://n5:2380" \
+        ;                 --initial-cluster="pd1=http://n1:2380, \
+        ;                                    pd2=http://n2:2380, \
+        ;                                    pd3=http://n3:2380" \
+        ;                                    pd4=http://n4:2380" \
+        ;                                    pd5=http://n5:2380" \
         ;                 --log-file=pd.log
         (info node "starting pd-server")
+        (spit pdconfigfile "# The number of replicas for each region.\nmax-replicas=5")
         (cu/start-daemon!
           {:logfile pdlogfile
            :pidfile pdpidfile
@@ -103,12 +105,15 @@
           :--peer-urls       (peer-url node)
           :--initial-cluster (initial-cluster test)
           :--log-file        (str "pd.log")
+          :--config-file     pdconfigfile
         )
 
+        (Thread/sleep 3000)
+
         ; ./bin/tikv-server --pd="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379" \
-                          ; --addr="n1:20160" \
-                          ; --data-dir=tikv1 \
-                          ; --log-file=tikv.log
+        ;                   --addr="n1:20160" \
+        ;                   --data-dir=tikv1 \
+        ;                   --log-file=tikv.log
         (info node "starting tikv-server")
         (cu/start-daemon!
           {:logfile kvlogfile
@@ -122,9 +127,11 @@
           :--log-file  (str "tikv.log")
         )
 
+        (Thread/sleep 30000)
+
         ; ./bin/tidb-server --store=tikv \
-                          ; --path="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379" \
-                          ; --log-file=tidb.log
+        ; --path="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379" \
+        ; --log-file=tidb.log
         (info node "starting tidb-server")
         (cu/start-daemon!
           {:logfile dblogfile
