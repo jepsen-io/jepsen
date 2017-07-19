@@ -92,7 +92,7 @@
         ;                                    pd5=http://n5:2380" \
         ;                 --log-file=pd.log
         (info node "starting pd-server")
-        (spit pdconfigfile "# The number of replicas for each region.\nmax-replicas=5")
+        (spit pdconfigfile "[replication]\nmax-replicas=5")
         (cu/start-daemon!
           {:logfile pdlogfile
            :pidfile pdpidfile
