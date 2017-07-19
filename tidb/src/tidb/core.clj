@@ -3,7 +3,9 @@
   (:require [clojure.tools.logging :refer :all]
   	        [clojure.string :as str]
             [jepsen
+              [tests :as tests]
               [control :as c]
+              [cli :as cli]
               [db :as db]
             ]
             [jepsen.control.util :as cu]
@@ -12,6 +14,9 @@
 
 (def tidb-url "http://download.pingcap.org/tidb-latest-linux-amd64.tar.gz")
 (def tidb-dir "/opt/tidb")
+(def tipd "./bin/pd-server")
+(def tikv "./bin/tikv-server")
+(def tidb "./bin/tidb-server")
 (def pdlogfile (str tidb-dir "/jepsen-pd.log"))
 (def pdpidfile (str tidb-dir "/jepsen-pd.pid"))
 (def kvlogfile (str tidb-dir "/jepsen-kv.log"))
@@ -71,65 +76,76 @@
   [opts]
   (reify db/DB
     (setup! [_ test node]
-      (info node c/*host*)
       (c/su
-        (cu/install-tarball! c/*host* tidb-url tidb-dir)
-      )
+        (info node "installing TiDB")
+        (cu/install-tarball! node tidb-url tidb-dir)
 
-      ; ./bin/pd-server --name=pd1 \
-      ;                 --data-dir=pd1 \
-      ;                 --client-urls="http://192.168.199.113:2379" \
-      ;                 --peer-urls="http://192.168.199.113:2380" \
-                      ; --initial-cluster="pd1=http://192.168.199.113:2380, \
-                                         ; pd2=http://192.168.199.114:2380, \
-                                         ; pd3=http://192.168.199.115:2380" \
-      ;                 --log-file=pd.log
-      (cu/start-demon!
-        {:logfile pdlogfile
-         :pidfile pdpidfile
-         :chdir   tidb-dir
-        }
-        "./bin/pd-server"
-        :--name            (get-in tidb-map [node :pd])
-        :--data-dir        (get-in tidb-map [node :pd])
-        :--peer-urls       (peer-url node)
-        :--client-urls     (client-url node)
-        :--initial-cluster (initial-cluster test)
-        :--log-file        (str "pd.log")
-      )
+        ; ./bin/pd-server --name=pd1 \
+        ;                 --data-dir=pd1 \
+        ;                 --client-urls="http://n1:2379" \
+        ;                 --peer-urls="http://n1:2380" \
+                        ; --initial-cluster="pd1=http://n1:2380, \
+                                           ; pd2=http://n2:2380, \
+                                           ; pd3=http://n3:2380" \
+                                           ; pd4=http://n4:2380" \
+                                           ; pd5=http://n5:2380" \
+        ;                 --log-file=pd.log
+        (info node "starting pd-server")
+        (cu/start-daemon!
+          {:logfile pdlogfile
+           :pidfile pdpidfile
+           :chdir   tidb-dir
+          }
+          tipd
+          :--name            (get-in tidb-map [node :pd])
+          :--data-dir        (get-in tidb-map [node :pd])
+          :--client-urls     (client-url node)
+          :--peer-urls       (peer-url node)
+          :--initial-cluster (initial-cluster test)
+          :--log-file        (str "pd.log")
+        )
 
-      ; ./bin/tikv-server --pd="192.168.199.113:2379,192.168.199.114:2379,192.168.199.115:2379" \
-                        ; --addr="192.168.199.116:20160" \
-                        ; --data-dir=tikv1 \
-                        ; --log-file=tikv.log
-      (cu/start-demon!
-        {:logfile kvlogfile
-         :pidfile kvpidfile
-         :chdir   tidb-dir
-        }
-        "./bin/tikv-server"
-        :--pd        (pd-cluster test)
-        :--addr      (str (name node) ":" "20160")
-        :--data-dir  (get-in tidb-map [node :kv])
-        :--log-file  (str "tikv.log")
-      )
+        ; ./bin/tikv-server --pd="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379" \
+                          ; --addr="n1:20160" \
+                          ; --data-dir=tikv1 \
+                          ; --log-file=tikv.log
+        (info node "starting tikv-server")
+        (cu/start-daemon!
+          {:logfile kvlogfile
+           :pidfile kvpidfile
+           :chdir   tidb-dir
+          }
+          tikv
+          :--pd        (pd-cluster test)
+          :--addr      (str (name node) ":" "20160")
+          :--data-dir  (get-in tidb-map [node :kv])
+          :--log-file  (str "tikv.log")
+        )
 
-      ; ./bin/tidb-server --store=tikv \
-                        ; --path="192.168.199.113:2379,192.168.199.114:2379,192.168.199.115:2379" \
-                        ; --log-file=tidb.log
-      (cu/start-demon!
-        {:logfile dblogfile
-         :pidfile dbpidfile
-         :chdir   tidb-dir
-        }
-        "./bin/tidb-server"
-        :--store     (str "tikv")
-        :--path      (pd-cluster test)
-        :--log-file  (str "tidb.log")
+        ; ./bin/tidb-server --store=tikv \
+                          ; --path="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379" \
+                          ; --log-file=tidb.log
+        (info node "starting tidb-server")
+        (cu/start-daemon!
+          {:logfile dblogfile
+           :pidfile dbpidfile
+           :chdir   tidb-dir
+          }
+          tidb
+          :--store     (str "tikv")
+          :--path      (pd-cluster test)
+          :--log-file  (str "tidb.log")
+        )
+
+        (Thread/sleep 5000)
       )
     )
     (teardown! [_ test node]
       (info node "tearing down TiDB")
+      (cu/stop-daemon! tidb dbpidfile)
+      (cu/stop-daemon! tikv kvpidfile)
+      (cu/stop-daemon! tipd pdpidfile)
+      (c/su (c/exec :rm :-rf tidb-dir))
     )
   )
 )
@@ -137,9 +153,8 @@
 (defn tidb-test
   [opts]
     (merge tests/noop-test
-      {
-      :name "TiDB"
-      :db (db)
+      {:name "TiDB"
+       :db (db opts)
       }
       opts
     )
