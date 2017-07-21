@@ -67,7 +67,7 @@
   )                                        
 )                                          
 
-(defn pd-cluster                           
+(defn pd-endpoints                           
   "Constructs an initial pd cluster string for a test, like \"foo:2379,bar:2379,...\""                                                                                       
   [test]                                   
   (->> (:nodes test)                       
@@ -138,7 +138,7 @@
            :chdir   tidb-dir
           }
           tikv
-          :--pd             (pd-cluster test)
+          :--pd             (pd-endpoints test)
           :--addr           (str "0.0.0.0:20160")
           :--advertise-addr (str (name node) ":" "20160")
           :--data-dir       (get-in tidb-map [node :kv])
@@ -158,7 +158,7 @@
           }
           tidb
           :--store     (str "tikv")
-          :--path      (pd-cluster test)
+          :--path      (pd-endpoints test)
           :--log-file  (str "tidb.log")
         )
 
