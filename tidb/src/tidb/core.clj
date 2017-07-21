@@ -12,6 +12,7 @@
   [opts]
     (merge tests/noop-test
       {:name "TiDB"
+       :os debian/os
        :db (db/db opts)
       }
       opts
