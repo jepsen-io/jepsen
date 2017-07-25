@@ -246,7 +246,7 @@
                   (doseq [history @histories]
                     (swap! history conj (assoc op
                                                :time  (relative-time-nanos)
-                                               :value (str "crashed: " t))))
+                                               :error (str "crashed: " t))))
                   (warn t "Nemesis crashed evaluating" op)))
 
               (recur))))
