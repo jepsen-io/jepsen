@@ -160,7 +160,7 @@
         (jepsen/synchronize test)
 
         (sql! "create database if not exists jepsen;")
-        (sql! (str "GRANT ALL PRIVILEGES ON jepsen.* TO \'jepsen\'@\'%\' IDENTIFIED BY \'jepsen\';"))
+        (sql! (str "GRANT ALL PRIVILEGES ON jepsen.* TO 'jepsen'@'%' IDENTIFIED BY 'jepsen';")))
       )
     )
     (teardown! [_ test node]
