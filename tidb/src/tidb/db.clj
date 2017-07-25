@@ -168,8 +168,6 @@
       (cu/stop-daemon! tidbbin dbpidfile)
       (cu/stop-daemon! tikvbin kvpidfile)
       (cu/stop-daemon! tipdbin pdpidfile)
-      (cu/grepkill! "mysqld")
-      (cu/grepkill! "mysqld_safe")
       ;(c/su (c/exec :rm :-rf tidb-dir))
     )
 
