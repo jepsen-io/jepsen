@@ -1,4 +1,4 @@
-(defproject tidb "0.1.0-SNAPSHOT"
+(defproject tidb "latest"
   :description "Jepsen testing for TiDB"
   :url "http://pingcap.com"
   :license {:name "Eclipse Public License"
@@ -6,5 +6,7 @@
   :main tidb.core
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [jepsen "0.1.5"]
+                 [org.clojure/java.jdbc "0.6.1"]
+                 [mysql/mysql-connector-java "5.1.20"]
                 ]
 )

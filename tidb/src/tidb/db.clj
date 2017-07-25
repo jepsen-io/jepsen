@@ -3,11 +3,11 @@
             [clojure.string :as str]
             [jepsen
               [core :as jepsen]
-              [tests :as tests]
               [control :as c]
               [db :as db]
             ]
             [jepsen.control.util :as cu]
+            [tidb.util :refer :all]
   )
 )
 
@@ -32,11 +32,11 @@
 (def peer-port   2380)
 
 (def tidb-map
-  {"n1" {:pd "pd1" :kv "tikv1"}
-   "n2" {:pd "pd2" :kv "tikv2"}
-   "n3" {:pd "pd3" :kv "tikv3"}
-   "n4" {:pd "pd4" :kv "tikv4"}
-   "n5" {:pd "pd5" :kv "tikv5"}
+  {:n1 {:pd "pd1" :kv "tikv1"}
+   :n2 {:pd "pd2" :kv "tikv2"}
+   :n3 {:pd "pd3" :kv "tikv3"}
+   :n4 {:pd "pd4" :kv "tikv4"}
+   :n5 {:pd "pd5" :kv "tikv5"}
   }
 )
 
@@ -46,52 +46,46 @@
   (str "http://" (name node) ":" port)
 )
 
-(defn client-url                           
-  "The HTTP url clients use to talk to a node."                                       
-  [node]                                   
-  (node-url node client-port)              
-)                                          
+(defn client-url
+  "The HTTP url clients use to talk to a node."
+  [node]
+  (node-url node client-port)
+)
 
-(defn peer-url                             
-  "The HTTP url for other peers to talk to a node."                                   
-  [node]                                   
-  (node-url node peer-port)                
-)                                          
+(defn peer-url
+  "The HTTP url for other peers to talk to a node."
+  [node]
+  (node-url node peer-port)
+)
 
-(defn initial-cluster                      
-  "Constructs an initial cluster string for a test, like \"foo=foo:2380,bar=bar:2380,...\""                                                                                  
-  [test]                                   
-  (->> (:nodes test)                       
-       (map (fn [node] (str (get-in tidb-map [node :pd]) "=" (peer-url node))))       
-       (str/join ",")                      
-  )                                        
-)                                          
+(defn initial-cluster
+  "Constructs an initial cluster string for a test, like \"foo=foo:2380,bar=bar:2380,...\""
+  [test]
+  (->> (:nodes test)
+       (map (fn [node] (str (get-in tidb-map [node :pd]) "=" (peer-url node))))
+       (str/join ",")
+  )
+)
 
-(defn pd-endpoints                           
-  "Constructs an initial pd cluster string for a test, like \"foo:2379,bar:2379,...\""                                                                                       
-  [test]                                   
-  (->> (:nodes test)                       
-       (map (fn [node] (str (name node) ":" client-port)))                            
-       (str/join ",")                      
-  )                                        
-)                                          
+(defn pd-endpoints
+  "Constructs an initial pd cluster string for a test, like \"foo:2379,bar:2379,...\""
+  [test]
+  (->> (:nodes test)
+       (map (fn [node] (str (name node) ":" client-port)))
+       (str/join ",")
+  )
+)
 
-(defn sql!                                 
-  "Execute a mysql string from the command line."                                     
-  [node s]                                 
-  (c/exec :mysql :-h c/*host* :-P "4000" :-u "root" :-e s)                            
-)                                          
+(defn db
+  "TiDB"
+  [opts]
+  (reify db/DB
+    (setup! [_ test node]
+      (c/su
+        (info node "installing TiDB")
+        (cu/install-tarball! node tidb-url tidb-dir)
 
-(defn db                                   
-  "TiDB"                                   
-  [opts]                                   
-  (reify db/DB                             
-    (setup! [_ test node]                  
-      (c/su                                
-        (info node "installing TiDB")      
-        (cu/install-tarball! node tidb-url tidb-dir)                                  
-
-        ; ./bin/pd-server --name=pd1 
+        ; ./bin/pd-server --name=pd1
         ;                 --data-dir=pd1
         ;                 --client-urls="http://0.0.0.0:2379"
         ;                 --peer-urls="http://0.0.0.0:2380"
@@ -165,7 +159,8 @@
         (Thread/sleep 5000)
         (jepsen/synchronize test)
 
-        (c/exec :echo (sql! node "show databases;") :> (str (name node) ".sql"))
+        (sql! "create database if not exists jepsen;")
+        (sql! (str "GRANT ALL PRIVILEGES ON jepsen.* TO \'jepsen\'@\'%\' IDENTIFIED BY \'jepsen\';"))
       )
     )
     (teardown! [_ test node]
@@ -173,6 +168,8 @@
       (cu/stop-daemon! tidbbin dbpidfile)
       (cu/stop-daemon! tikvbin kvpidfile)
       (cu/stop-daemon! tipdbin pdpidfile)
+      (cu/grepkill! "mysqld")
+      (cu/grepkill! "mysqld_safe")
       ;(c/su (c/exec :rm :-rf tidb-dir))
     )
 
@@ -180,4 +177,3 @@
     (log-files [_ test node] [log-file])
   )
 )
-
