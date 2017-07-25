@@ -13,7 +13,8 @@
                  [ring "1.6.0-beta5"]
                  [hiccup "1.0.5"]
                  [org.clojars.achim/multiset "0.1.0"]
-                 [byte-streams "0.2.2"]]
+                 [byte-streams "0.2.2"]
+                 [dom-top "1.0.1"]]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]]
   :aot [jepsen.cli clojure.tools.logging.impl]
