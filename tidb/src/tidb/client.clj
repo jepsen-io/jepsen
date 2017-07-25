@@ -14,9 +14,9 @@
   [node]
   {:classname   "org.mysql.jdbc.Driver"
    :subprotocol "mysql"
-   :subname     (str "//" (name node) ":4000/jepsen")
-   :user        "jepsen"
-   :password    "jepsen"
+   :subname     (str "//" (name node) ":4000/test")
+   :user        "root"
+   :password    "root"
   }
 )
 
@@ -95,7 +95,7 @@
     (with-txn op [c (first (:nodes test))]
       (try
         (case (:f op)
-          :read (->> (j/query c [(str "select * from accounts" lock-type)])
+          :read (->> (j/query c [(str "select * from accounts")])
                      (mapv :balance)
                      (assoc op :type :ok, :value))
           :transfer
