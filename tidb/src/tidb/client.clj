@@ -12,16 +12,16 @@
 (defn conn-spec
   "jdbc connection spec for a node."
   [node]
-  {:classname   "org.mysql.jdbc.Driver"
-   :subprotocol "mysql"
+  {:classname   "org.mariadb.jdbc.Driver"
+   :subprotocol "mariadb"
    :subname     (str "//" (name node) ":4000/test")
    :user        "root"
-   :password    "root"
+   :password    ""
   }
 )
 
 (def rollback-msg
-  "mysql drivers have a few exception classes that use this message"
+  "mariadb drivers have a few exception classes that use this message"
   "Deadlock found when trying to get lock; try restarting transaction")
 
 (defmacro capture-txn-abort

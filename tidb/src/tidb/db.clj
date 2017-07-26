@@ -158,8 +158,6 @@
 
         (Thread/sleep 5000)
         (jepsen/synchronize test)
-
-        (sql! "create database if not exists test;")
       )
     )
     (teardown! [_ test node]

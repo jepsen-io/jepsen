@@ -27,7 +27,7 @@
                   (->> (gen/mix [client/bank-read client/bank-diff-transfer])
                        (gen/clients)
                        (gen/stagger 1/10)
-                       (gen/time-limit 15))
+                       (gen/time-limit 60))
                   (gen/log "waiting for quiescence")
                   (gen/sleep 10)
                   (gen/clients (gen/once client/bank-read)))
