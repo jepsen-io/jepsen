@@ -95,7 +95,7 @@
     (with-txn op [c (first (:nodes test))]
       (try
         (case (:f op)
-          :read (->> (j/query c [(str "select * from accounts")])
+          :read (->> (j/query c [(str "select * from accounts" lock-type)])
                      (mapv :balance)
                      (assoc op :type :ok, :value))
           :transfer
