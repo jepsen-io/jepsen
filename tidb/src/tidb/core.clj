@@ -4,6 +4,7 @@
               [tests :as tests]
               [generator :as gen]
               [cli :as cli]
+              [checker :as checker]
             ]
             [jepsen.os.debian :as debian]
             [tidb.db :as db]
@@ -27,10 +28,14 @@
                   (->> (gen/mix [client/bank-read client/bank-diff-transfer])
                        (gen/clients)
                        (gen/stagger 1/10)
-                       (gen/time-limit 60))
+                       (gen/time-limit 15))
                   (gen/log "waiting for quiescence")
                   (gen/sleep 10)
                   (gen/clients (gen/once client/bank-read)))
+     :checker (checker/compose
+                {:perf (checker/perf)
+                 :bank (client/bank-checker)})
+
     }
   )
 )

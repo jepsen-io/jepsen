@@ -4,7 +4,10 @@
               [client :as client]
               [generator :as gen]
               [util :refer [timeout]]
+              [checker :as checker]
             ]
+            [knossos.op :as op]
+            [clojure.core.reducers :as r]
             [clojure.java.jdbc :as j]
   )
 )
@@ -95,7 +98,7 @@
     (with-txn op [c (first (:nodes test))]
       (try
         (case (:f op)
-          :read (->> (j/query c [(str "select * from accounts" lock-type)])
+          :read (->> (j/query c [(str "select * from accounts")])
                      (mapv :balance)
                      (assoc op :type :ok, :value))
           :transfer
@@ -154,3 +157,29 @@
   (gen/filter (fn [op] (not= (-> op :value :from)
                              (-> op :value :to)))
               bank-transfer))
+
+(defn bank-checker
+  "Balances must all be non-negative and sum to the model's total."
+  []
+  (reify checker/Checker
+    (check [this test model history opts]
+      (let [bad-reads (->> history
+                           (r/filter op/ok?)
+                           (r/filter #(= :read (:f %)))
+                           (r/map (fn [op]
+                                  (let [balances (:value op)]
+                                    (cond (not= (:n model) (count balances))
+                                          {:type :wrong-n
+                                           :expected (:n model)
+                                           :found    (count balances)
+                                           :op       op}
+                                         (not= (:total model)
+                                               (reduce + balances))
+                                         {:type :wrong-total
+                                          :expected (:total model)
+                                          :found    (reduce + balances)
+                                          :op       op}))))
+                           (r/filter identity)
+                           (into []))]
+        {:valid? (empty? bad-reads)
+         :bad-reads bad-reads}))))

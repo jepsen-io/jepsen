@@ -97,9 +97,6 @@
         ;                                    pd4=http://n4:2380" \
         ;                                    pd5=http://n5:2380" \
         ;                 --log-file=pd.log
-        (info node "installing mysql-client")
-        (c/exec :apt-get :install :-y "mysql-client")
-
         (c/exec :echo "[replication]\nmax-replicas=5" :> pdconfigfile)
         (cu/start-daemon!
           {:logfile pdlogfile
