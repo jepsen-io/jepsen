@@ -115,15 +115,15 @@
           :--config                pdconfigfile
         )
 
-        (Thread/sleep 10000)
         (jepsen/synchronize test)
+        (Thread/sleep 10000)
 
         ; ./bin/tikv-server --pd="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379"
         ;                   --addr="0.0.0.0:20160"
         ;                   --advertise-addr="n1:20160"
         ;                   --data-dir=tikv1
         ;                   --log-file=tikv.log
-        (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"10s\"" :> tikvconfigfile)
+        (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"" :> tikvconfigfile)
         (cu/start-daemon!
           {:logfile kvlogfile
            :pidfile kvpidfile
@@ -138,8 +138,8 @@
           :--config         tikvconfigfile
         )
 
-        (Thread/sleep 60000)
         (jepsen/synchronize test)
+        (Thread/sleep 60000)
 
         ; ./bin/tidb-server --store=tikv
         ;                   --path="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379"
@@ -155,8 +155,8 @@
           :--log-file  (str "tidb.log")
         )
 
-        (Thread/sleep 5000)
         (jepsen/synchronize test)
+        (Thread/sleep 10000)
       )
     )
     (teardown! [_ test node]
