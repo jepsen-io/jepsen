@@ -1,5 +1,6 @@
 (ns tidb.client
-  (:require [clojure.string :as str]
+  (:require [clojure.tools.logging :refer :all]
+            [clojure.string :as str]
             [jepsen
               [util :refer [timeout]]
             ]
@@ -34,7 +35,10 @@
           (if (= (.getMessage e#) rollback-msg)
             ::abort
             (throw e#)))
-        ))
+        (catch java.sql.SQLException e#
+          (if (re-find #"can not retry select for update statement" (.getMessage e#))
+            ::abort
+            (throw e#)))))
 
 (defmacro with-txn-retries
   "Retries body on rollbacks."
