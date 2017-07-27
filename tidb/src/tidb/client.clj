@@ -38,7 +38,8 @@
         (catch java.sql.BatchUpdateException e#
           (if (= (.getMessage e#) rollback-msg)
             ::abort
-            (throw e#)))))
+            (throw e#)))
+        ))
 
 (defmacro with-txn-retries
   "Retries body on rollbacks."
@@ -58,7 +59,7 @@
        res#)))
 
 (defmacro with-error-handling
-  "Common error handling for Galera errors"
+  "Common error handling for errors"
   [op & body]
   `(try ~@body
         (catch java.sql.SQLNonTransientConnectionException e#
@@ -74,8 +75,7 @@
   `(timeout 5000 (assoc ~op :type :info, :value :timed-out)
            (with-error-handling ~op
              (with-txn-retries
-               (j/with-db-transaction [~c (conn-spec ~node)
-                                       :isolation :serializable]
+               (j/with-db-transaction [~c (conn-spec ~node) :isolation :serializable]
                  (j/execute! ~c ["start transaction with consistent snapshot"])
                  ~@body)))))
 

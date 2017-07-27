@@ -7,16 +7,15 @@
               [db :as db]
             ]
             [jepsen.control.util :as cu]
-            [tidb.util :refer :all]
   )
 )
 
 (def tidb-url "http://download.pingcap.org/tidb-latest-linux-amd64.tar.gz")
 (def tidb-dir "/opt/tidb")
-(def tipd "./bin/pd-server")
+(def pd "./bin/pd-server")
 (def tikv "./bin/tikv-server")
 (def tidb "./bin/tidb-server")
-(def tipdbin "pd-server")
+(def pdbin "pd-server")
 (def tikvbin "tikv-server")
 (def tidbbin "tidb-server")
 (def pdlogfile (str tidb-dir "/jepsen-pd.log"))
@@ -26,6 +25,7 @@
 (def dblogfile (str tidb-dir "/jepsen-db.log"))
 (def dbpidfile (str tidb-dir "/jepsen-db.pid"))
 (def pdconfigfile (str tidb-dir "/pd.conf"))
+(def tikvconfigfile (str tidb-dir "/tikv.conf"))
 (def log-file "test.log")
 
 (def client-port 2379)
@@ -103,7 +103,7 @@
            :pidfile pdpidfile
            :chdir   tidb-dir
           }
-          tipd
+          pd
           :--name                  (get-in tidb-map [node :pd])
           :--data-dir              (get-in tidb-map [node :pd])
           :--client-urls           (str "http://0.0.0.0:" client-port)
@@ -123,6 +123,7 @@
         ;                   --advertise-addr="n1:20160"
         ;                   --data-dir=tikv1
         ;                   --log-file=tikv.log
+        (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"10s\"" :> tikvconfigfile)
         (cu/start-daemon!
           {:logfile kvlogfile
            :pidfile kvpidfile
@@ -134,9 +135,10 @@
           :--advertise-addr (str (name node) ":" "20160")
           :--data-dir       (get-in tidb-map [node :kv])
           :--log-file       (str "tikv.log")
+          :--config         tikvconfigfile
         )
 
-        (Thread/sleep 30000)
+        (Thread/sleep 60000)
         (jepsen/synchronize test)
 
         ; ./bin/tidb-server --store=tikv
@@ -161,7 +163,7 @@
       (info node "tearing down TiDB")
       (cu/stop-daemon! tidbbin dbpidfile)
       (cu/stop-daemon! tikvbin kvpidfile)
-      (cu/stop-daemon! tipdbin pdpidfile)
+      (cu/stop-daemon! pdbin   pdpidfile)
       ;(c/su (c/exec :rm :-rf tidb-dir))
     )
 
