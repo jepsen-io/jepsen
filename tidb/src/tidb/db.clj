@@ -7,16 +7,15 @@
               [db :as db]
             ]
             [jepsen.control.util :as cu]
-            [tidb.util :refer :all]
   )
 )
 
 (def tidb-url "http://download.pingcap.org/tidb-latest-linux-amd64.tar.gz")
 (def tidb-dir "/opt/tidb")
-(def tipd "./bin/pd-server")
+(def pd "./bin/pd-server")
 (def tikv "./bin/tikv-server")
 (def tidb "./bin/tidb-server")
-(def tipdbin "pd-server")
+(def pdbin "pd-server")
 (def tikvbin "tikv-server")
 (def tidbbin "tidb-server")
 (def pdlogfile (str tidb-dir "/jepsen-pd.log"))
@@ -26,6 +25,7 @@
 (def dblogfile (str tidb-dir "/jepsen-db.log"))
 (def dbpidfile (str tidb-dir "/jepsen-db.pid"))
 (def pdconfigfile (str tidb-dir "/pd.conf"))
+(def tikvconfigfile (str tidb-dir "/tikv.conf"))
 (def log-file "test.log")
 
 (def client-port 2379)
@@ -97,16 +97,13 @@
         ;                                    pd4=http://n4:2380" \
         ;                                    pd5=http://n5:2380" \
         ;                 --log-file=pd.log
-        (info node "installing mysql-client")
-        (c/exec :apt-get :install :-y "mysql-client")
-
         (c/exec :echo "[replication]\nmax-replicas=5" :> pdconfigfile)
         (cu/start-daemon!
           {:logfile pdlogfile
            :pidfile pdpidfile
            :chdir   tidb-dir
           }
-          tipd
+          pd
           :--name                  (get-in tidb-map [node :pd])
           :--data-dir              (get-in tidb-map [node :pd])
           :--client-urls           (str "http://0.0.0.0:" client-port)
@@ -118,14 +115,15 @@
           :--config                pdconfigfile
         )
 
-        (Thread/sleep 10000)
         (jepsen/synchronize test)
+        (Thread/sleep 10000)
 
         ; ./bin/tikv-server --pd="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379"
         ;                   --addr="0.0.0.0:20160"
         ;                   --advertise-addr="n1:20160"
         ;                   --data-dir=tikv1
         ;                   --log-file=tikv.log
+        (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"" :> tikvconfigfile)
         (cu/start-daemon!
           {:logfile kvlogfile
            :pidfile kvpidfile
@@ -137,10 +135,11 @@
           :--advertise-addr (str (name node) ":" "20160")
           :--data-dir       (get-in tidb-map [node :kv])
           :--log-file       (str "tikv.log")
+          :--config         tikvconfigfile
         )
 
-        (Thread/sleep 30000)
         (jepsen/synchronize test)
+        (Thread/sleep 60000)
 
         ; ./bin/tidb-server --store=tikv
         ;                   --path="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379"
@@ -156,18 +155,15 @@
           :--log-file  (str "tidb.log")
         )
 
-        (Thread/sleep 5000)
         (jepsen/synchronize test)
-
-        (sql! "create database if not exists jepsen;")
-        (sql! (str "GRANT ALL PRIVILEGES ON jepsen.* TO 'jepsen'@'%' IDENTIFIED BY 'jepsen';")))
+        (Thread/sleep 10000)
       )
     )
     (teardown! [_ test node]
       (info node "tearing down TiDB")
       (cu/stop-daemon! tidbbin dbpidfile)
       (cu/stop-daemon! tikvbin kvpidfile)
-      (cu/stop-daemon! tipdbin pdpidfile)
+      (cu/stop-daemon! pdbin   pdpidfile)
       ;(c/su (c/exec :rm :-rf tidb-dir))
     )
 
