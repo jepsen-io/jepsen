@@ -9,4 +9,5 @@
                  [org.clojure/java.jdbc "0.4.1"]
                  [org.mariadb.jdbc/mariadb-java-client "1.2.0"]
                 ]
+  :aot [tidb.core clojure.tools.logging.impl]
 )

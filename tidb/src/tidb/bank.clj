@@ -1,17 +1,15 @@
 (ns tidb.bank
   (:require [clojure.string :as str]
-            [jepsen.os.debian :as debian]
             [jepsen
               [client :as client]
-              [tests :as tests]
               [generator :as gen]
               [checker :as checker]
             ]
             [knossos.op :as op]
             [clojure.core.reducers :as r]
             [clojure.java.jdbc :as j]
-            [tidb.client :refer :all]
-            [tidb.db :as db]
+            [tidb.sql :refer :all]
+            [tidb.basic :as basic]
   )
 )
 
@@ -20,7 +18,7 @@
   (setup! [this test node]
     (j/with-db-connection [c (conn-spec (first (:nodes test)))]
       (j/execute! c ["create table if not exists accounts
-                     (id      int not null primary key,
+                     (id     int not null primary key,
                      balance bigint not null)"])
       (dotimes [i n]
         (try
@@ -120,30 +118,24 @@
         {:valid? (empty? bad-reads)
          :bad-reads bad-reads}))))
 
-(def n 2)
-(def initial-balance 10)
-
-(defn bank-test
+(defn bank-test-base
   [opts]
-  (merge tests/noop-test
-    {:os debian/os
-     :name "TiDB-Bank"
-     :concurrency 20
-     :model  {:n n :total (* n initial-balance)}
-     :db (db/db opts)
-     :client (bank-client n initial-balance " FOR UPDATE" false)
-     :generator (gen/phases
-                  (->> (gen/mix [bank-read bank-diff-transfer])
-                       (gen/clients)
-                       (gen/stagger 1/10)
-                       (gen/time-limit 15))
-                  (gen/log "waiting for quiescence")
-                  (gen/sleep 10)
-                  (gen/clients (gen/once bank-read)))
-     :checker (checker/compose
-                {:perf (checker/perf)
-                 :bank (bank-checker)})
+  (basic/basic-test
+    (merge
+      {:client      {:client (:client opts)
+                     :during (->> (gen/mix [bank-read bank-diff-transfer])
+                                  (gen/clients)
+                                  (gen/stagger 0))
+                     :final (gen/clients (gen/once bank-read))}
+       :checker     (checker/compose
+                      {:perf    (checker/perf)
+                       :details (bank-checker)})}
+      (dissoc opts :client))))
 
-    }
-  )
-)
+(defn test
+  [opts]
+  (bank-test-base
+    (merge {:name   "bank"
+            :model  {:n 5 :total 50}
+            :client (bank-client 5 10 " FOR UPDATE" false)}
+           opts)))
