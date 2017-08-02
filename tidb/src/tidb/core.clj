@@ -12,6 +12,7 @@
             [tidb.nemesis :as nemesis]
             [tidb.bank :as bank]
             [tidb.sets :as sets]
+            [tidb.register :as register]
   )
 )
 
@@ -19,6 +20,7 @@
   "A map of test names to test constructors."
   {"bank" bank/test
    "sets" sets/test
+   "register" register/test
   }
 )
 

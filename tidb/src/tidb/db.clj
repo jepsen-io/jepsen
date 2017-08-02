@@ -77,7 +77,7 @@
   )
 )
 
-(defn start!
+(defn quickstart!
   [test node]
   (cu/start-daemon!
     {:logfile pdlogfile
