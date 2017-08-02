@@ -187,6 +187,9 @@
   :process-name"
   [opts bin & args]
   (info "starting" (.getName (file bin)))
+  (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
+        "Jepsen starting" bin
+        :>> (:logfile opts))
   (apply exec :start-stop-daemon :--start
          (when (:background? opts true) [:--background :--no-close])
          (when (:make-pidfile? opts true) :--make-pidfile)
