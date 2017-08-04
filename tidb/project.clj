@@ -1,6 +1,6 @@
 (defproject tidb "latest"
   :description "Jepsen testing for TiDB"
-  :url "http://pingcap.com"
+  :url "https://pingcap.com/index"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main tidb.core

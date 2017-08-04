@@ -1,4 +1,5 @@
 (ns tidb.sets
+  (:refer-clojure :exclude [test])
   (:require
     [jepsen
       [client :as client]

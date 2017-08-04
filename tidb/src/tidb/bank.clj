@@ -1,4 +1,5 @@
 (ns tidb.bank
+  (:refer-clojure :exclude [test])
   (:require [clojure.string :as str]
             [jepsen
               [client :as client]

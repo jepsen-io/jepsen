@@ -216,6 +216,7 @@
     (teardown! [_ test node]
       (info node "tearing down TiDB")
       (stop! test node)
+      (c/exec :rm :-rf tidb-dir)
     )
 
     db/LogFiles
