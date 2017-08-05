@@ -186,9 +186,9 @@
   :pidfile
   :process-name"
   [opts bin & args]
-  (info "starting" (.getName (file bin)))
+  (info "starting" (.getName (file (name bin))))
   (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
-        "Jepsen starting" bin
+        "Jepsen starting" bin (str/join " " args)
         :>> (:logfile opts))
   (apply exec :start-stop-daemon :--start
          (when (:background? opts true) [:--background :--no-close])
@@ -207,8 +207,8 @@
   "Kills a daemon process by pidfile, or, if given a command name, kills all
   processes with that command name, and cleans up pidfile."
   ([pidfile]
-   (info "Stopping" pidfile)
    (when (exists? pidfile)
+     (info "Stopping" pidfile)
      (let [pid (Long/parseLong (exec :cat pidfile))]
        (meh (exec :kill :-9 pid))
        (meh (exec :rm :-rf pidfile)))))
