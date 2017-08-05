@@ -21,7 +21,8 @@
             [jepsen.control.util :as cu]
             [jepsen.control.net :as cn]
             [jepsen.os.debian :as debian])
-  (:import (com.hazelcast.client.config ClientConfig)
+  (:import (java.util.concurrent TimeUnit)
+           (com.hazelcast.client.config ClientConfig)
            (com.hazelcast.client HazelcastClient)
            (com.hazelcast.core HazelcastInstance)
            (com.hazelcast.core IMap)
@@ -124,16 +125,17 @@
         _ (.setProperty config "hazelcast.max.no.master.confirmation.seconds" "10")
         _ (.setProperty config "hazelcast.operation.call.timeout.millis" "5000")
 
-        net    (.getNetworkConfig config)
-        ; Don't retry operations when network fails (!?)
-        _      (.setRedoOperation net false)
-        ; Timeouts
-        _      (.setConnectionTimeout net 5000)
-        ; Initial connection limits
-        ; _      (.setConnectionAttemptPeriod 1000)
-        ; _      (.setConnectionAttemptLimit 5)
-        ; Don't use a local cache of the partition map
-        _      (.setSmartRouting net false)
+        net    (doto (.getNetworkConfig config)
+                 ; Don't retry operations when network fails (!?)
+                 (.setRedoOperation false)
+                 ; Timeouts
+                 (.setConnectionTimeout 5000)
+                 ; Initial connection limits
+                 (.setConnectionAttemptPeriod 1000)
+                 ; Try reconnecting indefinitely
+                 (.setConnectionAttemptLimit 0)
+                 ; Don't use a local cache of the partition map
+                 (.setSmartRouting false))
         _      (info :net net)
         ; Only talk to our node (the client's smart and will try to talk to
         ; everyone, but we're trying to simulate clients in different network
@@ -182,28 +184,129 @@
     (teardown! [this test]
       (.terminate conn))))
 
+(def queue-poll-timeout
+  "How long to wait for items to become available in the queue, in ms"
+  1)
+
+(defn queue-client
+  "Uses :enqueue and :dequeue events to interact with a Hazelcast queue. Takes
+  a state atom which is used to coordinate the drain process between generator
+  and queue. While this atom is `nil`, operations proceed as normal. The
+  generator should set the atom to `:draining` once before beginning the drain
+  process, and the client will update it to `:empty` once the queue is fully
+  drained."
+  ([state]
+   (queue-client state nil nil))
+  ([state conn queue]
+   (reify client/Client
+     (setup! [_ test node]
+       (let [conn (connect node)]
+         (queue-client state conn (.getQueue conn "jepsen.queue"))))
+
+     (invoke! [this test op]
+       (case (:f op)
+         :enqueue (do (.put queue (:value op))
+                      (assoc op :type :ok))
+         :dequeue (if-let [v (.poll queue
+                                 queue-poll-timeout TimeUnit/MILLISECONDS)]
+                    (assoc op :type :ok, :value v)
+                    (assoc op :type :fail, :error :empty))
+         :drain   (loop [values []]
+                    (if-let [v (.poll queue
+                                      queue-poll-timeout TimeUnit/MILLISECONDS)]
+                      (recur (conj values v))
+                      (assoc op :type :ok, :value values)))))
+
+     (teardown! [this test]
+       (.terminate conn)))))
+
+(defn queue-gen
+  "A generator for queue operations. Emits enqueues of sequential integers."
+  [state]
+  (let [next-element (atom -1)]
+    (->> (gen/mix [(fn enqueue-gen [_ _]
+                     {:type  :invoke
+                      :f     :enqueue
+                      :value (swap! next-element inc)})
+                   {:type :invoke, :f :dequeue}])
+         (gen/stagger 5))))
+
+(defn queue-final-gen
+  "A generator for draining the queue. Transitions to state :draining, and
+  emits dequeues until the control atom is set to :empty."
+  [state]
+  (->> {:type :invoke, :f :drain}
+       gen/once
+       gen/each))
+
+(defn queue-client-and-gens
+  "Constructs a queue client and generator for the given test. Returns {:client
+  ..., :generator ...}."
+  [test]
+  (let [state (atom nil)]
+    {:client          (queue-client state)
+     :generator       (queue-gen state)
+     :final-generator (queue-final-gen state)}))
+
+(defn workload
+  "Given a test map, computes
+
+      {:generator         a generator of client ops
+       :final-generator   a generator to run after the cluster recovers
+       :client            a client to execute those ops
+       :checker           a checker
+       :model             for the checker}"
+  [test]
+  (case (:workload test)
+    :queue            (assoc (queue-client-and-gens test)
+                             :checker (checker/total-queue))
+    :atomic-long-ids  {:client (atomic-long-id-client nil nil)
+                       :generator (->> {:type :invoke, :f :generate}
+                                       (gen/stagger 1))
+                       :checker  (checker/unique-ids)}
+    :id-gen-ids       {:client    (id-gen-id-client nil nil)
+                       :generator {:type :invoke, :f :generate}
+                       :checker   (checker/unique-ids)}))
+
 (defn hazelcast-test
   "Constructs a Jepsen test map from CLI options"
   [opts]
-  (merge tests/noop-test
-         opts
-         {:name   "hazelcast"
-          :os     debian/os
-          :db     (db)
-          :client (id-gen-id-client nil nil)
-          :nemesis (nemesis/partition-majorities-ring)
-          :generator (->> {:type :invoke, :f :generate}
-;                          (gen/stagger 1)
-                          (gen/nemesis (gen/start-stop 5 15))
-                          (gen/time-limit 300))
-          :checker (checker/compose
-                     {:perf     (checker/perf)
-                      :timeline (timeline/html)
-                      :id       (checker/unique-ids)})}))
+  (let [{:keys [generator
+                final-generator
+                client
+                checker
+                model]} (workload opts)]
+    (merge tests/noop-test
+           opts
+           {:name   "hazelcast"
+            :os     debian/os
+            :db     (db)
+            :client  client
+            :nemesis (nemesis/partition-majorities-ring)
+            :generator (gen/phases (->> generator
+                                        (gen/nemesis (gen/start-stop 5 15))
+                                        (gen/time-limit (:time-limit opts)))
+                                   (gen/log "Healing cluster")
+                                   (gen/nemesis
+                                     (gen/once {:type :info, :f :stop}))
+                                   (gen/log "Waiting for quiescence")
+                                   (gen/sleep 30)
+                                   (gen/clients final-generator))
+            :checker (checker/compose
+                       {:perf     (checker/perf)
+                        :timeline (timeline/html)
+                        :workload checker})
+            :model   model})))
+
+(def opt-spec
+  "Additional command line options"
+  [[nil "--workload WORKLOAD" "Test workload to run, e.g. atomic-long-ids."
+    :parse-fn keyword]])
 
 (defn -main
-  "Command line runner"
+  "Command line runner."
   [& args]
-  (cli/run! (merge (cli/single-test-cmd {:test-fn hazelcast-test})
+  (cli/run! (merge (cli/single-test-cmd {:test-fn   hazelcast-test
+                                         :opt-spec  opt-spec})
                    (cli/serve-cmd))
             args))
