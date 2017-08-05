@@ -173,6 +173,40 @@
              :lost-frac       (util/fraction (count lost) (count attempts))
              :recovered-frac  (util/fraction (count recovered) (count attempts))}))))))
 
+(defn expand-queue-drain-ops
+  "Takes a history. Looks for :drain operations with their value being a
+  collection of queue elements, and expands them to a sequence of :dequeue
+  invoke/complete pairs."
+  [history]
+  (reduce (fn [h' op]
+            (cond ; Anything other than a drain op passes through
+                  (not= :drain (:f op)) (conj h' op)
+
+                  ; Skip drain invocations and failures
+                  (op/invoke? op) h'
+                  (op/fail? op)   h'
+
+                  ; For successful drains, expand
+                  (op/ok? op)
+                  (into h' (mapcat (fn [element]
+                                     [(assoc op
+                                             :type  :invoke
+                                             :f     :dequeue
+                                             :value nil)
+                                      (assoc op
+                                             :type  :ok
+                                             :f     :dequeue
+                                             :value element)])
+                                   (:value op)))
+
+                  ; Anything else (e.g. crashed drains) is illegal
+                  true
+                  (throw (IllegalStateException.
+                           (str "Not sure how to handle a crashed drain operation: "
+                                (pr-str op))))))
+          []
+          history))
+
 (defn total-queue
   "What goes in *must* come out. Verifies that every successful enqueue has a
   successful dequeue. Queues only obey this property if the history includes
@@ -180,7 +214,8 @@
   []
   (reify Checker
     (check [this test model history opts]
-      (let [attempts (->> history
+      (let [history  (expand-queue-drain-ops history)
+            attempts (->> history
                           (r/filter op/invoke?)
                           (r/filter #(= :enqueue (:f %)))
                           (r/map :value)
