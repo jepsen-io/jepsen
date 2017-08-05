@@ -240,7 +240,8 @@
        :attempted-count     Number of attempted ID generation calls
        :acknowledged-count  Number of IDs actually returned successfully
        :duplicated-count    Number of IDs which were not distinct
-       :duplicated          Map of IDs to the number of times they appeared
+       :duplicated          A map of some duplicate IDs to the number of times
+                            they appeared--not complete for perf reasons :D
        :range               [lowest-id highest-id]}"
   []
   (reify Checker
@@ -270,7 +271,11 @@
          :attempted-count     attempted-count
          :acknowledged-count  (count acks)
          :duplicated-count    (count dups)
-         :duplicated          dups
+         :duplicated          (->> dups
+                                   (sort-by val)
+                                   (reverse)
+                                   (take 48)
+                                   (into (sorted-map)))
          :range               range}))))
 
 
