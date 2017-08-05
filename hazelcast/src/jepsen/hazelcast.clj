@@ -157,11 +157,27 @@
     (setup! [_ test node]
       (let [conn (connect node)]
         (atomic-long-id-client conn
-                               (.getAtomicLong conn "jepsen"))))
+                               (.getAtomicLong conn "jepsen.atomic-long"))))
 
     (invoke! [this test op]
       (assert (= (:f op) :generate))
       (assoc op :type :ok, :value (.incrementAndGet atomic-long)))
+
+    (teardown! [this test]
+      (.terminate conn))))
+
+(defn id-gen-id-client
+  "Generates unique IDs using an IdGenerator"
+  [conn id-gen]
+  (reify client/Client
+    (setup! [_ test node]
+      (let [conn (connect node)]
+        (id-gen-id-client conn
+                          (.getIdGenerator conn "jepsen.id-gen"))))
+
+    (invoke! [this test op]
+      (assert (= (:f op) :generate))
+      (assoc op :type :ok, :value (.newId id-gen)))
 
     (teardown! [this test]
       (.terminate conn))))
@@ -174,12 +190,12 @@
          {:name   "hazelcast"
           :os     debian/os
           :db     (db)
-          :client (atomic-long-id-client nil nil)
+          :client (id-gen-id-client nil nil)
           :nemesis (nemesis/partition-majorities-ring)
           :generator (->> {:type :invoke, :f :generate}
-                          (gen/stagger 1)
+;                          (gen/stagger 1)
                           (gen/nemesis (gen/start-stop 5 15))
-                          (gen/time-limit 120))
+                          (gen/time-limit 300))
           :checker (checker/compose
                      {:perf     (checker/perf)
                       :timeline (timeline/html)
