@@ -464,6 +464,11 @@
   [f m]
   (map-kv (fn [[k v]] [k (f v)]) m))
 
+(defn compare<
+  "Like <, but works on any comparable objects, not just numbers."
+  [a b]
+  (neg? (compare a b)))
+
 (defn poly-compare
   "Comparator function for sorting heterogenous collections."
   [a b]

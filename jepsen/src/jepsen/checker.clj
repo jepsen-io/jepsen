@@ -6,7 +6,7 @@
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
-            [jepsen.util :as util :refer [meh]]
+            [jepsen.util :as util :refer [meh fraction]]
             [jepsen.store :as store]
             [jepsen.checker.perf :as perf]
             [multiset.core :as multiset]
@@ -173,13 +173,6 @@
              :lost-frac       (util/fraction (count lost) (count attempts))
              :recovered-frac  (util/fraction (count recovered) (count attempts))}))))))
 
-(defn fraction
-  "a/b, but if b is zero, returns unity."
-  [a b]
-  (if (zero? b)
-           1
-           (/ a b)))
-
 (defn total-queue
   "What goes in *must* come out. Verifies that every successful enqueue has a
   successful dequeue. Queues only obey this property if the history includes
@@ -237,6 +230,49 @@
          :duplicated-frac (util/fraction (count duplicated) (count attempts))
          :lost-frac       (util/fraction (count lost)       (count attempts))
          :recovered-frac  (util/fraction (count recovered)  (count attempts))}))))
+
+(defn unique-ids
+  "Checks that a unique id generator actually emits unique IDs. Expects a
+  history with :f :generate invocations matched by :ok responses with distinct
+  IDs for their :values. IDs should be comparable. Returns
+
+      {:valid?              Were all IDs unique?
+       :attempted-count     Number of attempted ID generation calls
+       :acknowledged-count  Number of IDs actually returned successfully
+       :duplicated-count    Number of IDs which were not distinct
+       :duplicated          Map of IDs to the number of times they appeared
+       :range               [lowest-id highest-id]}"
+  []
+  (reify Checker
+    (check [this test model history opts]
+      (let [attempted-count (->> history
+                                 (filter op/invoke?)
+                                 (filter #(= :generate (:f %)))
+                                 count)
+            acks     (->> history
+                          (filter op/ok?)
+                          (filter #(= :generate (:f %)))
+                          (map :value))
+            dups     (->> acks
+                          (reduce (fn [counts id]
+                               (assoc counts id
+                                      (inc (get counts id 0))))
+                             {})
+                          (filter #(< 1 (val %)))
+                          (into (sorted-map)))
+            range    (reduce (fn [[lowest highest :as pair] id]
+                               (cond (util/compare< id lowest)  [id highest]
+                                     (util/compare< highest id) [lowest id]
+                                     true           pair))
+                             [(first acks) (first acks)]
+                             acks)]
+        {:valid?              (empty? dups)
+         :attempted-count     attempted-count
+         :acknowledged-count  (count acks)
+         :duplicated-count    (count dups)
+         :duplicated          dups
+         :range               range}))))
+
 
 (defn counter
   "A counter starts at zero; add operations should increment it by that much,
