@@ -243,7 +243,7 @@
    (reify client/Client
      (setup! [_ test node]
        (let [conn (connect node)]
-         (lock-client conn (.getLock "jepsen.lock"))))
+         (lock-client conn (.getLock conn "jepsen.lock"))))
 
      (invoke! [this test op]
        (case (:f op)
@@ -266,6 +266,15 @@
        :model             for the checker}"
   [test]
   (case (:workload test)
+    :lock             {:client    (lock-client)
+                       :generator (->> [{:type :invoke, :f :acquire}
+                                        {:type :invoke, :f :release}]
+                                       cycle
+                                       gen/seq
+                                       (gen/stagger 1)
+                                       gen/each)
+                       :checker   (checker/linearizable)
+                       :model     (model/mutex)}
     :queue            (assoc (queue-client-and-gens test)
                              :checker (checker/total-queue))
     :atomic-long-ids  {:client (atomic-long-id-client nil nil)
@@ -284,27 +293,31 @@
                 client
                 checker
                 model]} (workload opts)]
+    generator (->> generator
+                   (gen/nemesis (gen/start-stop 5 15))
+                   (gen/time-limit (:time-limit opts)))
+    generator (if-not final-generator
+                generator
+                (gen/phases generator
+                            (gen/log "Healing cluster")
+                            (gen/nemesis
+                              (gen/once {:type :info, :f :stop}))
+                            (gen/log "Waiting for quiescence")
+                            (gen/sleep 150)
+                            (gen/clients final-generator)))
     (merge tests/noop-test
            opts
-           {:name   "hazelcast"
-            :os     debian/os
-            :db     (db)
-            :client  client
-            :nemesis (nemesis/partition-majorities-ring)
-            :generator (gen/phases (->> generator
-                                        (gen/nemesis (gen/start-stop 5 15))
-                                        (gen/time-limit (:time-limit opts)))
-                                   (gen/log "Healing cluster")
-                                   (gen/nemesis
-                                     (gen/once {:type :info, :f :stop}))
-                                   (gen/log "Waiting for quiescence")
-                                   (gen/sleep 150)
-                                   (gen/clients final-generator))
-            :checker (checker/compose
-                       {:perf     (checker/perf)
-                        :timeline (timeline/html)
-                        :workload checker})
-            :model   model})))
+           {:name       (str "hazelcast " (name (:workload opts)))
+            :os         debian/os
+            :db         (db)
+            :client     client
+            :nemesis    (nemesis/partition-majorities-ring)
+            :generator  generator
+            :checker    (checker/compose
+                          {:perf     (checker/perf)
+                           :timeline (timeline/html)
+                           :workload checker})
+            :model      model})))
 
 (def opt-spec
   "Additional command line options"
