@@ -6,6 +6,7 @@
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
+            [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util :refer [meh fraction]]
             [jepsen.store :as store]
             [jepsen.checker.perf :as perf]
@@ -67,7 +68,8 @@
    (check-safe checker test model history {}))
   ([checker test model history opts]
    (try (check checker test model history opts)
-        (catch Throwable t
+        (catch Exception t
+          (warn t "Error while checking history:")
           {:valid? :unknown
            :error (with-out-str (trace/print-cause-trace t))}))))
 
@@ -91,12 +93,14 @@
                   :wgl          wgl/analysis)
                 model history)]
          (when-not (:valid? a)
-           (meh
+           (try
              ; Renderer can't handle really broad concurrencies yet
              (linear.report/render-analysis!
                history a (.getCanonicalPath
                            (store/path! test (:subdirectory opts)
-                                        "linear.svg")))))
+                                        "linear.svg")))
+             (catch Exception e
+               (warn e "Error rendering linearizability analysis"))))
          ; Writing these can take *hours* so we truncate
          (assoc a
                 :final-paths (take 10 (:final-paths a))
