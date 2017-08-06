@@ -50,10 +50,20 @@
                                           2))))))
         _ (.addQuorumConfig config quorum)
 
-        mapconfig (doto (MapConfig.)
-                    (.setName "jepsen.*")
+
+        ; Queues
+        queue-config (doto (.getQueueConfig config "jepsen.queue")
+                       (.setName "jepsen.queue")
+                       (.setBackupCount 2)
+                       (.setQuorumName "majority"))
+        _ (.addQueueConfig config queue-config)
+
+
+        ; Maps
+        map-config (doto (MapConfig.)
+                    (.setName "jepsen.map")
                     (.setQuorumName "majority"))
-        _ (.addMapConfig config mapconfig)
+        _ (.addMapConfig config map-config)
 
         ; Launch
         hc      (Hazelcast/newHazelcastInstance config)]

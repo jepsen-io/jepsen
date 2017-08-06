@@ -189,19 +189,15 @@
   1)
 
 (defn queue-client
-  "Uses :enqueue and :dequeue events to interact with a Hazelcast queue. Takes
-  a state atom which is used to coordinate the drain process between generator
-  and queue. While this atom is `nil`, operations proceed as normal. The
-  generator should set the atom to `:draining` once before beginning the drain
-  process, and the client will update it to `:empty` once the queue is fully
-  drained."
-  ([state]
-   (queue-client state nil nil))
-  ([state conn queue]
+  "Uses :enqueue, :dequeue, and :drain events to interact with a Hazelcast
+  queue."
+  ([]
+   (queue-client nil nil))
+  ([conn queue]
    (reify client/Client
      (setup! [_ test node]
        (let [conn (connect node)]
-         (queue-client state conn (.getQueue conn "jepsen.queue"))))
+         (queue-client conn (.getQueue conn "jepsen.queue"))))
 
      (invoke! [this test op]
        (case (:f op)
@@ -222,31 +218,43 @@
 
 (defn queue-gen
   "A generator for queue operations. Emits enqueues of sequential integers."
-  [state]
+  []
   (let [next-element (atom -1)]
     (->> (gen/mix [(fn enqueue-gen [_ _]
                      {:type  :invoke
                       :f     :enqueue
                       :value (swap! next-element inc)})
                    {:type :invoke, :f :dequeue}])
-         (gen/stagger 5))))
-
-(defn queue-final-gen
-  "A generator for draining the queue. Transitions to state :draining, and
-  emits dequeues until the control atom is set to :empty."
-  [state]
-  (->> {:type :invoke, :f :drain}
-       gen/once
-       gen/each))
+         (gen/stagger 1))))
 
 (defn queue-client-and-gens
   "Constructs a queue client and generator for the given test. Returns {:client
   ..., :generator ...}."
   [test]
-  (let [state (atom nil)]
-    {:client          (queue-client state)
-     :generator       (queue-gen state)
-     :final-generator (queue-final-gen state)}))
+  {:client          (queue-client)
+   :generator       (queue-gen)
+   :final-generator (->> {:type :invoke, :f :drain}
+                         gen/once
+                         gen/each)})
+
+(defn lock-client
+  ([] (lock-client nil nil))
+  ([conn lock]
+   (reify client/Client
+     (setup! [_ test node]
+       (let [conn (connect node)]
+         (lock-client conn (.getLock "jepsen.lock"))))
+
+     (invoke! [this test op]
+       (case (:f op)
+         :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
+                    (assoc op :type :ok)
+                    (assoc op :type :fail))
+         :release (do (.unlock lock)
+                      (assoc op :type :ok))))
+
+     (teardown! [this test]
+       (.terminate conn)))))
 
 (defn workload
   "Given a test map, computes
@@ -290,7 +298,7 @@
                                    (gen/nemesis
                                      (gen/once {:type :info, :f :stop}))
                                    (gen/log "Waiting for quiescence")
-                                   (gen/sleep 30)
+                                   (gen/sleep 150)
                                    (gen/clients final-generator))
             :checker (checker/compose
                        {:perf     (checker/perf)
