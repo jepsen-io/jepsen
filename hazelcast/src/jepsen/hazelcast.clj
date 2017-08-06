@@ -246,12 +246,28 @@
          (lock-client conn (.getLock conn "jepsen.lock"))))
 
      (invoke! [this test op]
-       (case (:f op)
-         :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
-                    (assoc op :type :ok)
-                    (assoc op :type :fail))
-         :release (do (.unlock lock)
-                      (assoc op :type :ok))))
+       (try
+         (case (:f op)
+           :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
+                      (assoc op :type :ok)
+                      (assoc op :type :fail))
+           :release (do (.unlock lock)
+                        (assoc op :type :ok)))
+        (catch com.hazelcast.quorum.QuorumException e
+         (assoc op :type :fail, :error :quorum))
+        (catch java.lang.IllegalMonitorStateException e
+          (if (re-find #"Current thread is not owner of the lock!"
+                       (.getMessage e))
+            (assoc op :type :fail, :error :not-lock-owner)
+            (throw e)))
+        (catch java.io.IOException e
+          (condp re-find (.getMessage e)
+            ; This indicates that the Hazelcast client doesn't have a remote
+            ; peer available, and that the message was never sent.
+            #"Packet is not send to owner address"
+            (assoc op :type :fail, :error :client-down)
+
+            (throw e)))))
 
      (teardown! [this test]
        (.terminate conn)))))
@@ -271,7 +287,6 @@
                                         {:type :invoke, :f :release}]
                                        cycle
                                        gen/seq
-                                       (gen/stagger 1)
                                        gen/each)
                        :checker   (checker/linearizable)
                        :model     (model/mutex)}
@@ -292,19 +307,19 @@
                 final-generator
                 client
                 checker
-                model]} (workload opts)]
-    generator (->> generator
-                   (gen/nemesis (gen/start-stop 5 15))
-                   (gen/time-limit (:time-limit opts)))
-    generator (if-not final-generator
-                generator
-                (gen/phases generator
-                            (gen/log "Healing cluster")
-                            (gen/nemesis
-                              (gen/once {:type :info, :f :stop}))
-                            (gen/log "Waiting for quiescence")
-                            (gen/sleep 150)
-                            (gen/clients final-generator)))
+                model]} (workload opts)
+        generator (->> generator
+                       (gen/nemesis (gen/start-stop 30 15))
+                       (gen/time-limit (:time-limit opts)))
+        generator (if-not final-generator
+                    generator
+                    (gen/phases generator
+                                (gen/log "Healing cluster")
+                                (gen/nemesis
+                                  (gen/once {:type :info, :f :stop}))
+                                (gen/log "Waiting for quiescence")
+                                (gen/sleep 150)
+                                (gen/clients final-generator)))]
     (merge tests/noop-test
            opts
            {:name       (str "hazelcast " (name (:workload opts)))

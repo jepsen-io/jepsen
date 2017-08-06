@@ -6,6 +6,7 @@
             [clojure.string :as str])
   (:import (com.hazelcast.core Hazelcast)
            (com.hazelcast.config Config
+                                 LockConfig
                                  MapConfig
                                  QuorumConfig)))
 
@@ -50,6 +51,12 @@
                                           2))))))
         _ (.addQuorumConfig config quorum)
 
+
+        ; Locks
+        lock-config (doto (LockConfig.)
+                      (.setName "jepsen.lock")
+                      (.setQuorumName "majority"))
+        _ (.addLockConfig config lock-config)
 
         ; Queues
         queue-config (doto (.getQueueConfig config "jepsen.queue")
