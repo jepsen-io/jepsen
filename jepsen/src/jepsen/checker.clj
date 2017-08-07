@@ -99,7 +99,7 @@
                history a (.getCanonicalPath
                            (store/path! test (:subdirectory opts)
                                         "linear.svg")))
-             (catch Exception e
+             (catch Throwable e
                (warn e "Error rendering linearizability analysis"))))
          ; Writing these can take *hours* so we truncate
          (assoc a

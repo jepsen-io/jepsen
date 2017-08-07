@@ -254,13 +254,16 @@
            :release (do (.unlock lock)
                         (assoc op :type :ok)))
         (catch com.hazelcast.quorum.QuorumException e
-         (assoc op :type :fail, :error :quorum))
+          (Thread/sleep 1000)
+          (assoc op :type :fail, :error :quorum))
         (catch java.lang.IllegalMonitorStateException e
+          (Thread/sleep 1000)
           (if (re-find #"Current thread is not owner of the lock!"
                        (.getMessage e))
             (assoc op :type :fail, :error :not-lock-owner)
             (throw e)))
         (catch java.io.IOException e
+          (Thread/sleep 1000)
           (condp re-find (.getMessage e)
             ; This indicates that the Hazelcast client doesn't have a remote
             ; peer available, and that the message was never sent.
