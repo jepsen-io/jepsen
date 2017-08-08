@@ -69,7 +69,9 @@
         ; Maps
         map-config (doto (MapConfig.)
                     (.setName "jepsen.map")
-                    (.setQuorumName "majority"))
+                    ; (.setQuorumName "majority")
+                    (.setMergePolicy
+                      "jepsen.hazelcast_server.SetUnionMergePolicy"))
         _ (.addMapConfig config map-config)
 
         ; Launch

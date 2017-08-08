@@ -275,6 +275,41 @@
      (teardown! [this test]
        (.terminate conn)))))
 
+(defn crdt-map-client
+  ([] (crdt-map-client nil nil))
+  ([conn m]
+   (reify client/Client
+     (setup! [_ test node]
+       (let [conn (connect node)]
+         (crdt-map-client conn (.getMap conn "jepsen.map"))))
+
+     (invoke! [this test op]
+       (case (:f op)
+         ; Note that Hazelcast serialization doesn't seem to know how to
+         ; replace types like HashSet, so we're storing our sets as sorted long
+         ; arrays instead.
+         :add (if-let [v (.get m "hi")]
+                ; We have a current set.
+                (let [s  (into (sorted-set) v)
+                      s' (conj s (:value op))
+                      v' (long-array s')]
+                  (if (.replace m "hi" v v')
+                    (assoc op :type :ok)
+                    (assoc op :type :fail, :error :cas-failed)))
+
+                ; We're starting fresh.
+                (let [v' (long-array (sorted-set (:value op)))]
+                  ; Note that replace and putIfAbsent have opposite senses for
+                  ; their return values.
+                  (if (.putIfAbsent m "hi" v')
+                    (assoc op :type :fail, :error :cas-failed)
+                    (assoc op :type :ok))))
+
+         :read (assoc op :type :ok, :value (into (sorted-set) (.get m "hi")))))
+
+     (teardown! [this test]
+       (.terminate conn)))))
+
 (defn workload
   "Given a test map, computes
 
@@ -285,6 +320,17 @@
        :model             for the checker}"
   [test]
   (case (:workload test)
+    :crdt-map         {:client    (crdt-map-client)
+                       :generator (->> (range)
+                                       (map (fn [x] {:type  :invoke
+                                                     :f     :add
+                                                     :value x}))
+                                       gen/seq
+                                       (gen/stagger 1))
+                       :final-generator (->> {:type :invoke, :f :read}
+                                             gen/once
+                                             gen/each)
+                       :checker   (checker/set)}
     :lock             {:client    (lock-client)
                        :generator (->> [{:type :invoke, :f :acquire}
                                         {:type :invoke, :f :release}]
@@ -321,7 +367,7 @@
                                 (gen/nemesis
                                   (gen/once {:type :info, :f :stop}))
                                 (gen/log "Waiting for quiescence")
-                                (gen/sleep 150)
+                                (gen/sleep 500)
                                 (gen/clients final-generator)))]
     (merge tests/noop-test
            opts
