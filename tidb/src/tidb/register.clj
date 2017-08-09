@@ -33,10 +33,7 @@
       (try
         (let [id   (key (:value op))
               val' (val (:value op))
-              val  (-> c
-                       (j/query [(str "select * from test where id = ?") id]
-                                :row-fn :val)
-                       first)]
+              val  (-> c (j/query [(str "select * from test where id = ? FOR UPDATE") id] :row-fn :val) first)]
           (case (:f op)
             :read (assoc op :type :ok, :value (independent/tuple id val))
 
@@ -47,9 +44,7 @@
                      (assoc op :type :ok))
 
             :cas (let [[expected-val new-val] val'
-                       cnt (j/update! c :test {:val new-val}
-                                      ["id = ? and val = ?"
-                                       id expected-val])]
+                       cnt (j/update! c :test {:val new-val} ["id = ? and val = ?" id expected-val])]
                    (assoc op :type (if (zero? (first cnt))
                                      :fail
                                      :ok))))))))

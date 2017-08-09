@@ -65,7 +65,7 @@
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
-    (jc/tarball-opt "")
+    (jc/tarball-opt "http://download.pingcap.org/tidb-latest-linux-amd64.tar.gz")
   ]
 )
 
