@@ -208,7 +208,7 @@
         )
 
         (jepsen/synchronize test)
-        (Thread/sleep 20000)
+        (Thread/sleep 30000)
       )
     )
     (teardown! [_ test node]

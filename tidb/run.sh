@@ -3,25 +3,21 @@
 # for bank and sets test, we run 300 seconds
 # for register test, we run
 #   1. 300 with no nemesis
-#   2. 180 with parts & majority-ring nemesis
-#   3.  60 for start-stop-2 nemesis
-#   4.  15 for start-kill-2 nemesis
+#   2.  60 for start-stop-2 & parts & majority-ring nemesis
+#   3.  15 for start-kill-2 nemesis
 #   the number varies because it will run out of memory when checking linearizability
 
 get_time() {
     if [ $1 = "register" ]
     then
-        if [ $2 = "start-stop-2" ]
-        then
-            return 60
-        elif [ $2 = "start-kill-2" ]
+        if [ $2 = "start-kill-2" ]
         then
             return 15
         elif [ $2 = "none" ]
         then
             return 300
         else
-            return 120
+            return 60
         fi
     else
         return 300
