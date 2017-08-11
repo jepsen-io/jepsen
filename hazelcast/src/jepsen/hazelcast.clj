@@ -347,7 +347,8 @@
                        :checker  (checker/unique-ids)}
     :id-gen-ids       {:client    (id-gen-id-client nil nil)
                        :generator {:type :invoke, :f :generate}
-                       :checker   (checker/unique-ids)}))
+                       :checker   (checker/unique-ids)}
+    (throw (IllegalArgumentException. "Empty/illegal '--workload' argument"))))
 
 (defn hazelcast-test
   "Constructs a Jepsen test map from CLI options"
