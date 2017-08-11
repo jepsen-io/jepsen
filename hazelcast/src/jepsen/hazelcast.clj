@@ -35,7 +35,9 @@
 (def local-server-jar
   "Relative to server fat jar"
   (str local-server-dir
-       "/target/jepsen.hazelcast-server-0.1.0-SNAPSHOT-standalone.jar"))
+       "/target/jepsen.hazelcast-server-"
+       (System/getProperty "projectname.version")
+       "-standalone.jar"))
 
 (def dir
   "Remote path for hazelcast stuff"
