@@ -137,7 +137,7 @@
         (cu/install-tarball! node (:tarball test) tidb-dir)
 
         (c/exec :echo "[replication]\nmax-replicas=5" :> pdconfigfile)
-        (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"" :> tikvconfigfile)
+        (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"\nraft_store_max_leader_lease=\"900ms\"\nraft_base_tick_interval=\"100ms\"\nraft_heartbeat_ticks=3\nraft_election_timeout_ticks=10" :> tikvconfigfile)
 
         ; ./bin/pd-server --name=pd1
         ;                 --data-dir=pd1
@@ -208,7 +208,7 @@
         )
 
         (jepsen/synchronize test)
-        (Thread/sleep 30000)
+        (Thread/sleep 60000)
       )
     )
     (teardown! [_ test node]
