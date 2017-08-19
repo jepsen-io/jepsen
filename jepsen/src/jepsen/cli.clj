@@ -204,6 +204,7 @@ Options:\n")
   the following keys:
 
   :opt-spec       - The option parsing spec to use.
+  :opts-required  - A set of option which must be provided to run a command.
   :opt-fn         - A function to transform the tools.cli options map, e.g.
                     {:options ..., :arguments ..., :summary ...}. Default:
                     identity
@@ -217,7 +218,7 @@ Options:\n")
   For a subcommand, if help or --help is given, prints out a help string with
   usage for the given subcommand and exits with status 0.
 
-  If invalid arguments are given, prints those errors to the console, and exits
+  If invalid arguments are given or a required argument is not provided, prints those errors to the console, and exits
   with status 254.
 
   Finally, if everything looks good, calls the given subcommand's `run`
@@ -236,7 +237,7 @@ Options:\n")
       (println (str/join ", " (sort (keys subcommands))))
       (System/exit 254))
 
-    (let [{:keys [opt-spec opt-fn usage run]} (get subcommands command)
+    (let [{:keys [opt-spec opts-required opt-fn usage run]} (get subcommands command)
           opt-fn (or opt-fn identity)
           usage  (or usage (str "Usage: lein run -- " command
                                 " [OPTIONS ...]"))
@@ -265,6 +266,12 @@ Options:\n")
         ; Bad args?
         (when (seq errors)
           (dorun (map println errors))
+          (System/exit 254))
+
+        ; Missing required args?
+        (when (not-every? options opts-required)
+          (println (str "Missing one or more required argument(s). Required arguments are \""
+                        (str/join ", " (map name opts-required)) \"". Type cmd --help for more details."))
           (System/exit 254))
 
         ; Run!
@@ -297,6 +304,7 @@ Options:\n")
 
   {:opt-spec A vector of additional options for tools.cli. Appended to
              `test-opt-spec`. Optional.
+   :opts-required A set of options which must be provided to run this command. Optional.
    :opt-fn   A function which transforms parsed options. Composed after
              `test-opt-fn`. Optional.
    :tarball If present, adds a --tarball option to this command, defaulting to
@@ -316,6 +324,7 @@ Options:\n")
                   (comp test-opt-fn validate-tarball)
                   test-opt-fn)]
   {"test" {:opt-spec opt-spec
+           :opts-required (:opts-required opts)
            :opt-fn   (if-let [f (:opt-fn opts)]
                        (comp f opt-fn)
                        opt-fn)
