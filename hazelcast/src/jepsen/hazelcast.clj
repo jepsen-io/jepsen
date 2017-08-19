@@ -35,9 +35,7 @@
 (def local-server-jar
   "Relative to server fat jar"
   (str local-server-dir
-       "/target/jepsen.hazelcast-server-"
-       (System/getProperty "projectname.version")
-       "-standalone.jar"))
+       "/target/hazelcast-server.jar"))
 
 (def dir
   "Remote path for hazelcast stuff"
@@ -312,6 +310,38 @@
      (teardown! [this test]
        (.terminate conn)))))
 
+(defn tests
+  "Map of available tests"
+  [test]
+  {:crdt-map         {:client    (crdt-map-client)
+                      :generator (->> (range)
+                                      (map (fn [x] {:type  :invoke
+                                                    :f     :add
+                                                    :value x}))
+                                      gen/seq
+                                      (gen/stagger 1))
+                      :final-generator (->> {:type :invoke, :f :read}
+                                            gen/once
+                                            gen/each)
+                      :checker   (checker/set)}
+   :lock             {:client    (lock-client)
+                      :generator (->> [{:type :invoke, :f :acquire}
+                                       {:type :invoke, :f :release}]
+                                      cycle
+                                      gen/seq
+                                      gen/each)
+                      :checker   (checker/linearizable)
+                      :model     (model/mutex)}
+   :queue            (assoc (queue-client-and-gens test)
+                            :checker (checker/total-queue))
+   :atomic-long-ids  {:client (atomic-long-id-client nil nil)
+                      :generator (->> {:type :invoke, :f :generate}
+                                      (gen/stagger 1))
+                      :checker  (checker/unique-ids)}
+   :id-gen-ids       {:client    (id-gen-id-client nil nil)
+                      :generator {:type :invoke, :f :generate}
+                      :checker   (checker/unique-ids)}})
+
 (defn workload
   "Given a test map, computes
 
@@ -321,36 +351,8 @@
        :checker           a checker
        :model             for the checker}"
   [test]
-  (case (:workload test)
-    :crdt-map         {:client    (crdt-map-client)
-                       :generator (->> (range)
-                                       (map (fn [x] {:type  :invoke
-                                                     :f     :add
-                                                     :value x}))
-                                       gen/seq
-                                       (gen/stagger 1))
-                       :final-generator (->> {:type :invoke, :f :read}
-                                             gen/once
-                                             gen/each)
-                       :checker   (checker/set)}
-    :lock             {:client    (lock-client)
-                       :generator (->> [{:type :invoke, :f :acquire}
-                                        {:type :invoke, :f :release}]
-                                       cycle
-                                       gen/seq
-                                       gen/each)
-                       :checker   (checker/linearizable)
-                       :model     (model/mutex)}
-    :queue            (assoc (queue-client-and-gens test)
-                             :checker (checker/total-queue))
-    :atomic-long-ids  {:client (atomic-long-id-client nil nil)
-                       :generator (->> {:type :invoke, :f :generate}
-                                       (gen/stagger 1))
-                       :checker  (checker/unique-ids)}
-    :id-gen-ids       {:client    (id-gen-id-client nil nil)
-                       :generator {:type :invoke, :f :generate}
-                       :checker   (checker/unique-ids)}
-    (throw (IllegalArgumentException. "Empty/illegal '--workload' argument"))))
+  (get (tests test) (:workload test))
+  )
 
 (defn hazelcast-test
   "Constructs a Jepsen test map from CLI options"
@@ -386,15 +388,24 @@
                            :workload checker})
             :model      model})))
 
+(defn test-names
+  "Comma separated list of available test"
+  []
+  (str/join ", "(map name (keys (tests nil)))))
+
+
 (def opt-spec
   "Additional command line options"
-  [[nil "--workload WORKLOAD" "Test workload to run, e.g. atomic-long-ids."
-    :parse-fn keyword]])
+  [[nil "--workload WORKLOAD" (str "Test workload to run, possible options are " (test-names) "Required.")
+    :parse-fn keyword
+    :validate [(fn valid [workload] (contains? (tests nil) workload))
+               (str "possible '--workload' arguments are " (test-names))]]])
 
 (defn -main
   "Command line runner."
   [& args]
   (cli/run! (merge (cli/single-test-cmd {:test-fn   hazelcast-test
-                                         :opt-spec  opt-spec})
+                                         :opt-spec  opt-spec
+                                         :opts-required #{:workload}})
                    (cli/serve-cmd))
             args))
