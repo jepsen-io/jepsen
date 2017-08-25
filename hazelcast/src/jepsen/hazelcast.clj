@@ -230,9 +230,9 @@
          (gen/stagger 1))))
 
 (defn queue-client-and-gens
-  "Constructs a queue client and generator for the given test. Returns {:client
+  "Constructs a queue client and generator. Returns {:client
   ..., :generator ...}."
-  [test]
+  []
   {:client          (queue-client)
    :generator       (queue-gen)
    :final-generator (->> {:type :invoke, :f :drain}
@@ -312,45 +312,47 @@
      (teardown! [this test]
        (.terminate conn)))))
 
-(defn workload
-  "Given a test map, computes
+(defn workloads
+  "The workloads we can run. Each workload is a map like
 
       {:generator         a generator of client ops
        :final-generator   a generator to run after the cluster recovers
        :client            a client to execute those ops
        :checker           a checker
-       :model             for the checker}"
-  [test]
-  (case (:workload test)
-    :crdt-map         {:client    (crdt-map-client)
-                       :generator (->> (range)
-                                       (map (fn [x] {:type  :invoke
-                                                     :f     :add
-                                                     :value x}))
-                                       gen/seq
-                                       (gen/stagger 1))
-                       :final-generator (->> {:type :invoke, :f :read}
-                                             gen/once
-                                             gen/each)
-                       :checker   (checker/set)}
-    :lock             {:client    (lock-client)
-                       :generator (->> [{:type :invoke, :f :acquire}
-                                        {:type :invoke, :f :release}]
-                                       cycle
-                                       gen/seq
-                                       gen/each)
-                       :checker   (checker/linearizable)
-                       :model     (model/mutex)}
-    :queue            (assoc (queue-client-and-gens test)
-                             :checker (checker/total-queue))
-    :atomic-long-ids  {:client (atomic-long-id-client nil nil)
-                       :generator (->> {:type :invoke, :f :generate}
-                                       (gen/stagger 1))
-                       :checker  (checker/unique-ids)}
-    :id-gen-ids       {:client    (id-gen-id-client nil nil)
-                       :generator {:type :invoke, :f :generate}
-                       :checker   (checker/unique-ids)}
-    (throw (IllegalArgumentException. "Empty/illegal '--workload' argument"))))
+       :model             for the checker}
+
+  Note that workloads are *stateful*, since they include generators; that's why
+  this is a function, instead of a constant--we may need a fresh workload if we
+  run more than one test."
+  []
+  {:crdt-map         {:client    (crdt-map-client)
+                      :generator (->> (range)
+                                      (map (fn [x] {:type  :invoke
+                                                    :f     :add
+                                                    :value x}))
+                                      gen/seq
+                                      (gen/stagger 1))
+                      :final-generator (->> {:type :invoke, :f :read}
+                                            gen/once
+                                            gen/each)
+                      :checker   (checker/set)}
+   :lock             {:client    (lock-client)
+                      :generator (->> [{:type :invoke, :f :acquire}
+                                       {:type :invoke, :f :release}]
+                                      cycle
+                                      gen/seq
+                                      gen/each)
+                      :checker   (checker/linearizable)
+                      :model     (model/mutex)}
+   :queue            (assoc (queue-client-and-gens)
+                            :checker (checker/total-queue))
+   :atomic-long-ids  {:client (atomic-long-id-client nil nil)
+                      :generator (->> {:type :invoke, :f :generate}
+                                      (gen/stagger 1))
+                      :checker  (checker/unique-ids)}
+   :id-gen-ids       {:client    (id-gen-id-client nil nil)
+                      :generator {:type :invoke, :f :generate}
+                      :checker   (checker/unique-ids)}})
 
 (defn hazelcast-test
   "Constructs a Jepsen test map from CLI options"
@@ -359,7 +361,7 @@
                 final-generator
                 client
                 checker
-                model]} (workload opts)
+                model]} (get (workloads) (:workload opts))
         generator (->> generator
                        (gen/nemesis (gen/start-stop 30 15))
                        (gen/time-limit (:time-limit opts)))
@@ -389,7 +391,9 @@
 (def opt-spec
   "Additional command line options"
   [[nil "--workload WORKLOAD" "Test workload to run, e.g. atomic-long-ids."
-    :parse-fn keyword]])
+    :parse-fn keyword
+    :missing  (str "--workload " (cli/one-of (workloads)))
+    :validate [(workloads) (cli/one-of (workloads))]]])
 
 (defn -main
   "Command line runner."
