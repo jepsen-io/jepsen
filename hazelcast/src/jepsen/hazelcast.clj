@@ -35,7 +35,9 @@
 (def local-server-jar
   "Relative to server fat jar"
   (str local-server-dir
-       "/target/jepsen.hazelcast-server-0.1.0-SNAPSHOT-standalone.jar"))
+       "/target/jepsen.hazelcast-server-"
+       (System/getProperty "projectname.version")
+       "-standalone.jar"))
 
 (def dir
   "Remote path for hazelcast stuff"
@@ -347,7 +349,8 @@
                        :checker  (checker/unique-ids)}
     :id-gen-ids       {:client    (id-gen-id-client nil nil)
                        :generator {:type :invoke, :f :generate}
-                       :checker   (checker/unique-ids)}))
+                       :checker   (checker/unique-ids)}
+    (throw (IllegalArgumentException. "Empty/illegal '--workload' argument"))))
 
 (defn hazelcast-test
   "Constructs a Jepsen test map from CLI options"
