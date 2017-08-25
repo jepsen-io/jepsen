@@ -310,8 +310,8 @@
      (teardown! [this test]
        (.terminate conn)))))
 
-(defn tests
-  "Map of available tests"
+(defn workloads
+  "Map of available workloads"
   [test]
   {:crdt-map         {:client    (crdt-map-client)
                       :generator (->> (range)
@@ -351,7 +351,7 @@
        :checker           a checker
        :model             for the checker}"
   [test]
-  (get (tests test) (:workload test))
+  (get (workloads test) (:workload test))
   )
 
 (defn hazelcast-test
@@ -388,18 +388,18 @@
                            :workload checker})
             :model      model})))
 
-(defn test-names
+(defn workload-names
   "Comma separated list of available test"
   []
-  (str/join ", "(map name (keys (tests nil)))))
+  (str/join ", " (map name (keys (workloads nil)))))
 
 
 (def opt-spec
   "Additional command line options"
-  [[nil "--workload WORKLOAD" (str "Test workload to run, possible options are " (test-names) "Required.")
+  [[nil "--workload WORKLOAD" (str "Test workload to run, possible options are " (workload-names) "Required.")
     :parse-fn keyword
-    :validate [(fn valid [workload] (contains? (tests nil) workload))
-               (str "possible '--workload' arguments are " (test-names))]]])
+    :validate [(fn valid [workload] (contains? (workloads nil) workload))
+               (str "possible '--workload' arguments are " (workload-names))]]])
 
 (defn -main
   "Command line runner."
