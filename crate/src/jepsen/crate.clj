@@ -3,6 +3,7 @@
                     [db           :as db]
                     [control      :as c :refer [|]]
                     [checker      :as checker]
+                    [cli          :as cli]
                     [client       :as client]
                     [generator    :as gen]
                     [independent  :as independent]
@@ -347,3 +348,10 @@
                                              {:type :info, :f :stop}])))
                           (gen/time-limit 360))}
          opts))
+
+(defn -main [& args]
+  "Handles command line arguments. Can either run a test, or a web service 
+  browsing results."
+  (cli/run! (merge (cli/single-test-cmd {:test-fn an-test})
+                   (cli/serve-cmd))
+            args))
