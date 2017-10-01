@@ -16,6 +16,7 @@
                     [independent :as independent]
                     [nemesis :as nemesis]
                     [tests :as tests]
+                    [reconnect :as rc]
                     [util :as util :refer [timeout]]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util :as cu]
@@ -167,6 +168,26 @@
     (teardown! [this test]
       (.terminate conn))))
 
+(defn atomic-ref-id-client
+  "Generates unique IDs using an AtomicReference"
+  [conn atomic-ref]
+  (reify client/Client
+    (setup! [_ test node]
+      (let [conn (connect node)]
+        (atomic-ref-id-client conn
+                              (.getAtomicReference conn "jepsen.atomic-ref"))))
+
+    (invoke! [this test op]
+      (assert (= (:f op) :generate))
+      (let [v (.get atomic-ref)
+            v' (inc (or v 0))]
+        (if (.compareAndSet atomic-ref v v')
+          (assoc op :type :ok, :value v')
+          (assoc op :type :fail, :error :cas-failed))))
+
+    (teardown! [this test]
+      (.terminate conn))))
+
 (defn id-gen-id-client
   "Generates unique IDs using an IdGenerator"
   [conn id-gen]
@@ -238,20 +259,25 @@
 
 (defn lock-client
   ([] (lock-client nil nil))
-  ([conn lock]
+  ([conn lock-name]
    (reify client/Client
      (setup! [_ test node]
-       (let [conn (connect node)]
-         (lock-client conn (.getLock conn "jepsen.lock"))))
+       (let [conn (rc/open! (rc/wrapper {:name  "hazelcast"
+                                         :open  #(connect node)
+                                         :close #(.terminate %)
+                                         :log?  true}))]
+         (lock-client conn "jepsen.lock")))
 
      (invoke! [this test op]
        (try
-         (case (:f op)
-           :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
-                      (assoc op :type :ok)
-                      (assoc op :type :fail))
-           :release (do (.unlock lock)
-                        (assoc op :type :ok)))
+         (rc/with-conn [c conn]
+           (let [lock (.getLock c lock-name)]
+             (case (:f op)
+               :acquire (if (.tryLock lock 5000 TimeUnit/MILLISECONDS)
+                          (assoc op :type :ok)
+                          (assoc op :type :fail))
+               :release (do (.unlock lock)
+                            (assoc op :type :ok)))))
         (catch com.hazelcast.quorum.QuorumException e
           (Thread/sleep 1000)
           (assoc op :type :fail, :error :quorum))
@@ -343,6 +369,10 @@
                       :model     (model/mutex)}
    :queue            (assoc (queue-client-and-gens)
                             :checker (checker/total-queue))
+   :atomic-ref-ids   {:client (atomic-ref-id-client nil nil)
+                      :generator (->> {:type :invoke, :f :generate}
+                                      (gen/stagger 1))
+                      :checker  (checker/unique-ids)}
    :atomic-long-ids  {:client (atomic-long-id-client nil nil)
                       :generator (->> {:type :invoke, :f :generate}
                                       (gen/stagger 1))
