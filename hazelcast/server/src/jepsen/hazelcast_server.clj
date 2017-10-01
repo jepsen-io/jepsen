@@ -66,12 +66,17 @@
         _ (.addQueueConfig config queue-config)
 
 
-        ; Maps
-        map-config (doto (MapConfig.)
-                    (.setName "jepsen.map")
-                    ; (.setQuorumName "majority")
+        ; Maps with CRDTs
+        crdt-map-config (doto (MapConfig.)
+                    (.setName "jepsen.crdt-map")
                     (.setMergePolicy
                       "jepsen.hazelcast_server.SetUnionMergePolicy"))
+        _ (.addMapConfig config crdt-map-config)
+
+        ; Maps without CRDTs
+        map-config (doto (MapConfig.)
+                     (.setName "jepsen.map")
+                     (.setQuorumName "majority"))
         _ (.addMapConfig config map-config)
 
         ; Launch

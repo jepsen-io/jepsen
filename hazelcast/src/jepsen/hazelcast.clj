@@ -300,13 +300,23 @@
      (teardown! [this test]
        (.terminate conn)))))
 
-(defn crdt-map-client
-  ([] (crdt-map-client nil nil))
-  ([conn m]
+(def map-name "jepsen.map")
+(def crdt-map-name "jepsen.crdt-map")
+
+(defn map-client
+  "Options:
+
+    :crdt? - If true, use CRDTs for merging divergent maps."
+  ([opts] (map-client nil nil opts))
+  ([conn m opts]
    (reify client/Client
      (setup! [_ test node]
        (let [conn (connect node)]
-         (crdt-map-client conn (.getMap conn "jepsen.map"))))
+         (map-client conn
+                     (.getMap conn (if (:crdt? opts)
+                                     crdt-map-name
+                                     map-name))
+                     opts)))
 
      (invoke! [this test op]
        (case (:f op)
@@ -335,6 +345,22 @@
      (teardown! [this test]
        (.terminate conn)))))
 
+(defn map-workload
+  "A workload for map tests, with the given client options."
+  [client-opts]
+  {:client    (map-client client-opts)
+   :generator (->> (range)
+                   (map (fn [x] {:type  :invoke
+                                 :f     :add
+                                 :value x}))
+                   gen/seq
+                   (gen/stagger 1/10))
+   :final-generator (->> {:type :invoke, :f :read}
+                         gen/once
+                         gen/each)
+   :checker   (checker/set)})
+
+
 (defn workloads
   "The workloads we can run. Each workload is a map like
 
@@ -348,17 +374,8 @@
   this is a function, instead of a constant--we may need a fresh workload if we
   run more than one test."
   []
-  {:crdt-map         {:client    (crdt-map-client)
-                      :generator (->> (range)
-                                      (map (fn [x] {:type  :invoke
-                                                    :f     :add
-                                                    :value x}))
-                                      gen/seq
-                                      (gen/stagger 1))
-                      :final-generator (->> {:type :invoke, :f :read}
-                                            gen/once
-                                            gen/each)
-                      :checker   (checker/set)}
+  {:crdt-map         (map-workload {:crdt? true})
+   :map              (map-workload {:crdt? false})
    :lock             {:client    (lock-client)
                       :generator (->> [{:type :invoke, :f :acquire}
                                        {:type :invoke, :f :release}]
