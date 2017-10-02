@@ -25,6 +25,10 @@ for f in $@; do
 	'--init-only' )
 	    INIT_ONLY=1
 	    ;;
+	'--daemon' )
+		INFO "DAEMON"
+	    RUN_AS_DAEMON=1
+	    ;;
 	*)
 	    ERROR "unknown option $1"
 	    exit 1
@@ -66,7 +70,7 @@ INFO "Copying .. to control/jepsen"
 (
     rm -rf ./control/jepsen
     mkdir ./control/jepsen
-    (cd ..; tar --exclude=./docker -cf - .)  | tar Cxf ./control/jepsen -
+    (cd ..; tar --exclude=./docker --exclude=./.git -cf - .)  | tar Cxf ./control/jepsen -
 )
 
 
@@ -81,5 +85,10 @@ INFO "Running \`docker-compose build\`"
 docker-compose build
 
 INFO "Running \`docker-compose up\`"
-INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
-docker-compose up
+if [ "$RUN_AS_DAEMON" ]; then
+	docker-compose up -d
+	exit 0
+else
+	INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
+	docker-compose up
+fi
