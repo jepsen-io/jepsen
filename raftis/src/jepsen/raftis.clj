@@ -14,7 +14,8 @@
                     [tests :as tests]
                     [util :as util :refer [timeout]]]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.control.util :as cu]))
+            [jepsen.control.util :as cu]
+            [jepsen.os.debian :as debian]))
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -29,8 +30,7 @@
   [conn]
   (reify client/Client
     (setup! [_ test node]
-      (def redis-conn {:pool {} :spec {:host node :port 6379 :timeout-ms 5000}})
-      (client redis-conn))
+      (client {:pool {} :spec {:host (name node) :port 6379 :timeout-ms 5000}}))
 
     (invoke! [this test op]
       (try
@@ -41,10 +41,10 @@
                      (assoc op :type, :ok)))
 
         (catch clojure.lang.ExceptionInfo e
-          (def err_str (str (.getMessage e)))
-          (def no_leader (re-find #"ERR write InComplete: no leader node!.*" err_str))
-          (def socket_closed (re-find #"socket closed.*" err_str))
-          (assoc op :type (if (or (or (= :read (:f op)) no_leader) socket_closed) :fail :info), :error err_str))
+          (let [err_str (str (.getMessage e))]
+            (let [no_leader (re-find #"ERR write InComplete: no leader node!.*" err_str)]
+              (let [socket_closed (re-find #"socket closed.*" err_str)]
+                (assoc op :type (if (or (= :read (:f op)) no_leader socket_closed) :fail :info), :error err_str)))))
 
         (catch java.net.SocketTimeoutException e
           (assoc op :type (if (= :read (:f op)) :fail :info), :error :timeout))
@@ -57,26 +57,48 @@
 
     (teardown! [_ test])))
 
-(def src_dir "/home/gaodunqiao/raftis")
 (def dir     "/opt/raftis")
 (def logfile (str dir "/data/LOG"))
+(def logfile1 (str dir "/raftis.log"))
+(def pidfile (str dir "/raftis.pid"))
 (def binary  "raftis")
+
+(defn initial-cluster
+  "Constructs an initial cluster string for a test, like
+    \"192.168.1.2:8901,192.168.1.3:8901,...\""
+  [test]
+  (->> (:nodes test)
+       (map (fn [node]
+              (str (name node) ":8901")))
+       (str/join ",")))
 
 (defn db
   "Raftis DB for a particular version."
   [version]
   (reify db/DB
     (setup! [_ test node]
-      (info node "installing raftis" version)
       (c/su
-        (c/exec :start_raftis)
+        (info node "installing raftis" version)
+        (let [url (str "https://github.com/Qihoo360/floyd/releases/download/"
+                       version "/raftis-" version ".tar.gz")]
+          (cu/install-tarball! c/*host* url dir))
+        (cu/start-daemon!
+          {:logfile logfile1
+           :pidfile pidfile
+           :chdir dir}
+          binary
+          (initial-cluster test)
+          node
+          "8901"
+          "data"
+          "6379")
         (Thread/sleep 10000)))
 
     (teardown! [_ test node]
       (info node "tearing down raftis")
       (c/su
-        (c/exec :stop_raftis)
-        (c/exec :clean_raftis)))
+        (cu/stop-daemon! binary pidfile)
+        (c/exec :rm :-rf dir)))
 
     db/LogFiles
     (log-files [_ test node]
@@ -88,7 +110,8 @@
   [opts]
   (merge tests/noop-test
          {:name "raftis"
-          :db (db "v2.0.2")
+          :os debian/os
+          :db (db "v2.0.4")
           :client (client nil)
           :nemesis (nemesis/partition-random-halves)
           :model (model/register 0)
