@@ -1,4 +1,4 @@
-# Nemeses
+# Nemesis
 
 The nemesis is a special client, not bound to any particular node, which
 introduces failures across the cluster. We'll require `jepsen.nemesis`, which
