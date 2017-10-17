@@ -22,6 +22,7 @@
   (:import (clojure.lang ExceptionInfo)
            (com.aerospike.client AerospikeClient
                                  AerospikeException
+                                 AerospikeException$Connection
                                  AerospikeException$Timeout
                                  Bin
                                  Info
@@ -33,15 +34,100 @@
                                         GenerationPolicy
                                         WritePolicy)))
 
-(defn nodes
-  "Nodes known to a client."
-  [^AerospikeClient client]
-  (vec (.getNodes client)))
+(def local-package-dir
+  "packages/")
+
+(def remote-package-dir
+  "/tmp/packages/")
+
+;;; asinfo helpers:
+(defn kv-split
+  [kv]
+  (let [skv (str/split kv #"=" 2)]
+    [(keyword (first skv)) (util/maybe-number (fnext skv))]))
+
+(defn split-colons
+  "Splits a colon-delimited string."
+  [s]
+  (str/split s #":"))
+
+(defn split-commas
+  "Splits a comma-delimited string."
+  [s]
+  (str/split s #","))
 
 (defn split-semicolons
   "Splits a semicolon-delimited string."
   [s]
   (str/split s #";"))
+
+(defn str-list-count
+  [s]
+  (count (split-commas s)))
+
+;;; asinfo commands:
+(defn asadm-recluster!
+  []
+  ;; Sends to all clustered nodes.
+  (c/trace (c/su (c/exec :asadm :-e "asinfo -v recluster:"))))
+
+(defn asinfo-roster
+  [namespace]
+  (let [roster-raw (c/trace
+                    (c/exec :asinfo :-v (str "roster:namespace=" namespace)))
+        roster-list (split-colons roster-raw)
+        roster-kv-list (map kv-split roster-list)
+        roster-map (into {} roster-kv-list)]
+    roster-map))
+
+(defn asinfo-roster-set!
+  [namespace node-list]
+  (c/trace
+   (c/exec
+    :asinfo :-v (str "roster-set:namespace=" namespace ";nodes=" node-list))))
+
+(defn asinfo-statistics
+  []
+  (let [stats-raw (c/trace (c/exec :asinfo :-v (str "statistics")))
+        stats-list (split-semicolons stats-raw)
+        stats-kv-list (map kv-split stats-list)]
+    (into {} stats-kv-list)))
+
+;;; asinfo utilities:
+(defn poll
+  [poll-fn, check-fn]
+  (loop []
+    (let [result (poll-fn)]
+      (if (check-fn result)
+        result
+        (do (Thread/sleep 1000) (recur))))))
+
+(defn wait-for-all-nodes-observed
+  [namespace]
+  (poll (fn [] (:observed_nodes (asinfo-roster namespace)))
+        (fn [result] (= (str-list-count result) 5))))
+
+(defn wait-for-all-nodes-pending
+  [namespace]
+  (poll (fn [] (:pending_roster (asinfo-roster namespace)))
+        (fn [result] (= (str-list-count result) 5))))
+
+(defn wait-for-all-nodes-active
+  [namespace]
+  (poll (fn [] (:roster (asinfo-roster namespace)))
+        (fn [result] (= (str-list-count result) 5))))
+
+(defn wait-for-migrations
+  []
+  (poll (fn [] (asinfo-statistics))
+        (fn [stats] (and (= (:migrate_allowed stats) "true")
+                         (= (:migrate_partitions_remaining stats) 0)))))
+
+;;; Client functions:
+(defn nodes
+  "Nodes known to a client."
+  [^AerospikeClient client]
+  (vec (.getNodes client)))
 
 (defn server-info
   "Requests server info from a particular client node."
@@ -53,10 +139,7 @@
                 [k (case k
                      :features   (->> v split-semicolons (map keyword) set)
                      :statistics (->> (split-semicolons v)
-                                      (map (fn [pair]
-                                             (let [[k v] (str/split pair #"=")]
-                                               [(keyword k)
-                                                (util/maybe-number v)])))
+                                      (map kv-split)
                                       (into (sorted-map)))
                      (util/maybe-number v))])))
        (into (sorted-map))))
@@ -68,10 +151,14 @@
 (defn connect
   "Returns a client for the given node. Blocks until the client is available."
   [node]
+  (info node "Client is attempting to connect")
+
+  ;; FIXME - client no longer blocks till cluster is ready.
+
   (let [client (AerospikeClient. (name node) 3000)]
     ; Wait for connection
     (while (not (.isConnected client))
-      (Thread/sleep 10))
+      (Thread/sleep 100))
     ; Wait for workable ops
     (while (try (server-info (first (nodes client)))
                 false
@@ -81,46 +168,32 @@
     ; Wait more
     client))
 
-(defn all-node-ids
-  "Given a test, finds the sorted list of node IDs across the cluster."
-  [test]
-  (->> test
-       :nodes
-       (pmap (fn [node]
-               (with-open [c (connect node)]
-                 (vec (.getNodeNames c)))))
-       flatten
-       sort))
-
+;;; Server setup:
 (defn install!
-  "Installs aerospike on the given node."
-  [node version]
-  (when-not (= (str version "-1")
-               (debian/installed-version "aerospike-server-community"))
-               ; lol they don't package the same version of the tools
-               ; (debian/installed-version "aerospike-tools"))
-    (debian/install ["python"])
-    (c/su
-      (debian/uninstall! ["aerospike-server-community" "aerospike-tools"])
-      (info node "installing aerospike" version)
-      (c/cd "/tmp"
-            (c/exec :wget :-O "aerospike.tgz"
-                    (str "http://www.aerospike.com/download/server/" version
-                         "/artifact/debian7"))
-            (c/exec :tar :xvfz "aerospike.tgz"))
-      (c/cd (str "/tmp/aerospike-server-community-" version "-debian7")
-            (c/exec :dpkg :-i (c/lit "aerospike-server-community-*.deb"))
-            (c/exec :dpkg :-i (c/lit "aerospike-tools-*.deb")))
-
-      ; Replace /usr/bin/asd with a wrapper that skews time a bit
-      (c/exec :mv   "/usr/bin/asd" "/usr/local/bin/asd")
-      (c/exec :echo
-              "#!/bin/bash\nfaketime -m -f \"+$((RANDOM%100))s x1.${RANDOM}\" /usr/local/bin/asd" :> "/usr/bin/asd")
-      (c/exec :chmod "0755" "/usr/bin/asd"))))
+  [node]
+  (info node "Installing Aerospike packages")
+  (c/su
+   (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
+   (debian/install ["python"])
+   (c/exec :mkdir :-p remote-package-dir)
+   (doseq [local-package (for [lp (.listFiles (io/file local-package-dir))
+                               :when (.endsWith (.getName lp) ".deb")]
+                           lp)]
+     (c/trace
+      (c/upload (.getCanonicalPath (io/file local-package))
+                remote-package-dir)
+      (c/exec :dpkg :-i (str remote-package-dir (.getName local-package))))))
+  ;; Replace /usr/bin/asd with a wrapper that skews time a bit
+  (c/exec :mv "/usr/bin/asd" "/usr/local/bin/asd")
+  (c/exec :echo
+          "#!/bin/bash\nfaketime -m -f \"+$((RANDOM%20))s x1.${RANDOM}\" /usr/local/bin/asd" :> "/usr/bin/asd")
+  (c/exec :chmod "0755" "/usr/bin/asd")
+  )
 
 (defn configure!
   "Uploads configuration files to the given node."
   [node test]
+  (info node "Configuring...")
   (c/su
     ; Config file
     (c/exec :echo (-> "aerospike.conf"
@@ -131,23 +204,25 @@
                                    (net/ip (jepsen/primary test))))
             :> "/etc/aerospike/aerospike.conf")))
 
-(defn dun!
-  "DUN DUN DUUUNNNNNN"
-  [nodes]
-  (c/su (c/exec :asinfo :-v (str "dun:nodes=" (str/join "," nodes)))))
-
 (defn start!
   "Starts aerospike."
   [node test]
-  (info node "starting aerospike")
-  (c/su
-    (c/exec :service :aerospike :start)
+  (info node "Starting...")
+  (jepsen/synchronize test)
+  (c/su (c/exec :service :aerospike :start))
+  (jepsen/synchronize test) ;; Wait for all servers to start
 
-    ; Enable auto-dunning as per
-    ; http://www.aerospike.com/docs/operations/troubleshoot/cluster/
-    ; This doesn't seem to actually do anything but ???
-    (c/exec :asinfo :-v
-      "config-set:context=service;paxos-recovery-policy=auto-dun-master")))
+  (when (identical? node :n1)
+    (asinfo-roster-set! "jepsen" (wait-for-all-nodes-observed "jepsen"))
+    (wait-for-all-nodes-pending "jepsen")
+    (asadm-recluster!))
+
+  (jepsen/synchronize test)
+  (wait-for-all-nodes-active "jepsen")
+  (wait-for-migrations)
+  (jepsen/synchronize test)
+
+  (info node "start done"))
 
 (defn stop!
   "Stops aerospike."
@@ -163,29 +238,38 @@
   (stop! node)
   (info node "deleting data files")
   (c/su
-    (doseq [dir ["data" "smd" "udf"]]
-      (c/exec :truncate :--size 0 "/var/log/aerospike/aerospike.log")
-      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
+   (meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
+   (meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
+   (doseq [dir ["data" "smd" "udf"]]
+     (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
 
-(defn db [version]
+;;; Test:
+(defn db
+  []
   "Aerospike for a particular version."
   (reify db/DB
     (setup! [_ test node]
       (doto node
-        (install! version)
+        (install!)
         (configure! test)
-        (start! test)))
+        (start! test)
+        ))
 
     (teardown! [_ test node]
       (wipe! node))))
 
-
 (def ^Policy policy
   "General operation policy"
   (let [p (Policy.)]
-    (set! (.timeout p) 100000)
-    ; (set! (.consistencyLevel p) ConsistencyLevel/CONSISTENCY_ALL)
+    (set! (.socketTimeout p) 100000)
     p))
+
+;; (def ^Policy linearize-read-policy
+;;   "Policy needed for linearizability testing."
+;;   ;; FIXME - need supported client - prefer to install client from packages/.
+;;   (let [p (Policy. policy)]
+;;     (set! (.linearizeReads p) true)
+;;     p))
 
 (def ^WritePolicy write-policy
   (let [p (WritePolicy. policy)]
@@ -232,6 +316,7 @@
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
   set, and key. Returns nil if no record found."
+  ;; FIXME - use linearize-read-policy.
   [^AerospikeClient client namespace set key]
   (-> client
       (.get policy (Key. namespace set key))
@@ -274,6 +359,10 @@
        (catch AerospikeException$Timeout e#
          (assoc ~op :type error-type#, :error :timeout))
 
+       ;; Connection errors could be either successful or failing
+       (catch AerospikeException$Connection e#
+         (assoc ~op :type error-type#, :error :timeout))
+
        (catch ExceptionInfo e#
          (case (.getMessage e#)
            ; Skipping a CAS can't affect the DB state
@@ -285,6 +374,9 @@
          (case (.getResultCode e#)
            ; Generation error; CAS can't have taken place.
            3 (assoc ~op :type :fail, :error :generation-mismatch)
+           ;; Unavailable error: CAS can't have taken place.
+           11 (assoc ~op :type :fail, :error :unavailable)
+           22 (assoc ~op :type :fail, :error :forbidden)
            (throw e#))))))
 
 (defrecord CasRegisterClient [client namespace set key]
@@ -292,7 +384,6 @@
   (setup! [this test node]
     (let [client (connect node)]
       (Thread/sleep 10000)
-      (put! client namespace set key {:value nil})
       (assoc this :client client)))
 
   (invoke! [this test op]
@@ -390,7 +481,7 @@
   (merge tests/noop-test
          {:name    (str "aerospike " name)
           :os      debian/os
-          :db      (db "3.5.4")
+          :db      (db)
           :model   (model/cas-register)
           :checker (checker/compose {:linear checker/linearizable
                                      :perf (checker/perf)})
