@@ -1,4 +1,4 @@
-cat <<EOF 
+cat <<EOF
 Welcome to Jepsen on Docker
 ===========================
 
@@ -8,7 +8,7 @@ You are currently in the base dir of the git repo for Jepsen.
 If you modify the core jepsen library make sure you "lein install" it so other tests can access.
 
 To run a test:
-   cd mongodb && lein run
+   cd etcd && lein run test --concurrency 10
 EOF
 
 cd /jepsen
