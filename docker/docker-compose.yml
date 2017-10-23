@@ -6,6 +6,8 @@ services:
     build: ./control
     env_file: ./secret/control.env
     privileged: true
+    ports:
+      - "8080"
     links:
       - n1
       - n2
