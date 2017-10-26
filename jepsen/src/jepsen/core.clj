@@ -145,6 +145,9 @@
     (future
       (with-thread-name (str "jepsen worker " process)
         (info "Worker" process "starting")
+
+        ;; TODO Recur with process and client, extract try/catch result out of recur,
+        ;; and recur return tuple of [process client]
         (loop [process process]
           ; Obtain an operation to execute
           (when-let [op (generator/op gen test process)]
@@ -179,7 +182,13 @@
                     (if (or (knossos/ok? completion) (knossos/fail? completion))
                       ; The process is now free to attempt another execution.
                       process
+
                       ; Process hung; move on
+                      ;; TODO unify w/ other call
+                      ;; This is where we know we need a new client differentiated from (:client test)
+                      ;; Also close the old one
+                      ;; (client/close! client )
+                      ;; (client/open! client )
                       (+ process (:concurrency test))))
 
                   (catch Throwable t
@@ -202,6 +211,7 @@
                                                             getMessage)
                                                         (.getMessage t)))))
                     (warn t "Process" process "indeterminate")
+                    ;; TODO unify w/ above
                     (+ process (:concurrency test))))))))
         (info "Worker" process "done")))))
 
@@ -283,9 +293,10 @@
     (swap! (:active-histories test) conj history)
 
     ; Launch clients
+    ;; TODO copy open and close to the worker
     (with-resources [clients
-                     #(client/setup! (:client test) test %) ; Specialize to node
-                     #(client/teardown! % test)
+                     #(client/open-compat (:client test) test %) ; Specialize to node
+                     #(client/close-compat % test)
                      (if (empty? (:nodes test))
                        ; If you've specified an empty node set, we'll still
                        ; give you `concurrency` clients, with nil.
@@ -294,6 +305,7 @@
                             :nodes
                             cycle
                             (take (:concurrency test))))]
+      ;; FIXME perform setup here, setup/teardown prior is 
       ; Launch nemesis
       (with-nemesis test
         ; Begin workload
@@ -302,6 +314,7 @@
                             clients)]       ; Clients
 
           ; Wait for workers to complete
+          ; TODO Workers return the clients they finish with so we can tear down for them finally here
           (dorun (map deref workers)))))
 
     ; Download logs
@@ -423,7 +436,7 @@
                                    (info "Run complete, writing")
                                    (when (:name test) (store/save-1! test))
                                    test))))))))
-              _ (info "Analyzing")
+              _    (info "Analyzing")
               test (assoc test :results (checker/check-safe
                                           (:checker test)
                                           test

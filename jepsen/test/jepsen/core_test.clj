@@ -99,3 +99,67 @@
                                  (gen/limit n)
                                  (gen/nemesis gen/void))))
       (is (= n @invocations))))
+
+(defrecord RecoveryClient [process]
+  client/Client
+  (setup! [this _ _] (assoc this :process (promise)))
+  (teardown! [_ _])
+  (open! [_ _ _])
+  (close! [_ _])
+  (invoke! [this _ op]
+    (let [_ (deliver (:process this) (:process op))]
+      (condp < (rand)
+        0.75 (assoc op :type :info)
+        0.50 (assoc op :type :fail)
+        0.25 (assoc op :type :ok)
+        (throw (Exception. "Please recover, young client"))))))
+
+(deftest client-recovery-test
+  ;; Clients should be able to maintain the same process with a failing connection
+  (let [n 30
+        client (->RecoveryClient nil)
+        test (run! (assoc tst/noop-test
+                          :client    client
+                          :generator  (->> (gen/queue)
+                                           (gen/limit n)
+                                           (gen/nemesis gen/void))))
+        original-process #{@(:process client)}
+        processes (set (map :process (:history test)))]
+    (is (= original-process processes))))
+
+
+(deftest open-compat-test []
+  (testing "Calls open! when available"
+    (let [n 30
+          client (reify client/Client
+                   (open! [this test client] this)
+                   (close! [this test])
+                   (invoke! [this test op] (assoc op :type :ok)))
+          ;; TODO Run this without a test
+          test (run! (assoc tst/noop-test
+                            :client client
+                            :generator (->> (gen/cas)
+                                            (gen/limit n)
+                                            (gen/nemesis gen/void))))
+          ]
+      ))
+  (testing "Falls back to setup! when open! is not available"
+    (let [])))
+
+(deftest close-compat-test []
+  (testing "Calls close! when available"
+    (let [n 30
+          client (reify client/Client
+                   (open! [this test client] this)
+                   (close! [this test])
+                   (invoke! [this test op] (assoc op :type :ok)))
+          ;; TODO Run this in isolation
+          test (assoc tst/noop-test
+                      :client client
+                      :generator (->> (gen/cas)
+                                      (gen/limit n)
+                                      (gen/nemesis gen/void)))
+          ]
+      ))
+  (testing "Falls back to teardown! when close! is not available"
+    (let [])))
