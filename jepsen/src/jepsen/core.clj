@@ -138,82 +138,89 @@
      (finally
        (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
+;; FIXME This or something near it is broken as fuck. Passing a nil client in
+(defn recover-process-compat [process client test node]
+  (if (client/closable? client)
+    [process (client/reopen! client test node)]
+    [(+ process (:concurrency test)) client]))
+
 (defn worker
   "Spawns a future to execute a particular process in the history."
-  [test process client]
+  [test process node]
   (let [gen (:generator test)]
     (future
       (with-thread-name (str "jepsen worker " process)
-        (info "Worker" process "starting")
 
-        ;; TODO Recur with process and client, extract try/catch result out of recur,
-        ;; and recur return tuple of [process client]
-        (loop [process process]
-          ; Obtain an operation to execute
-          (when-let [op (generator/op gen test process)]
-            (assert (map? op) (str "Expected an operation map from " gen
-                                   ", but got " (pr-str op) " instead."))
-            (let [op (assoc op
-                            :process process
-                            :time    (relative-time-nanos))]
-              ; Log invocation
-              (util/log-op op)
-              (conj-op! test op)
+        (info "Worker" process "starting, with node " node)
 
-              (recur
-                (try
-                  ; Evaluate operation
-                  (let [completion (-> (client/invoke! client test op)
-                                       (assoc :time (relative-time-nanos)))]
-                    (util/log-op completion)
+        ; Differentiate our base client for this process
+        (let [client (client/open-compat (:client test) test node)]
 
-                    ; Sanity checks
-                    (let [t (:type completion)]
-                      (assert (or (= t :ok)
-                                  (= t :fail)
-                                  (= t :info))
-                              (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received " (pr-str completion) " instead")))
-                    (assert (= (:process op) (:process completion)))
-                    (assert (= (:f op)       (:f completion)))
+          (if (not client) (error "test: " test "node:" node))
 
-                    ; Log completion
-                    (conj-op! test completion)
+          (loop [[process client] [process client]]
+            ; Obtain an operation to execute
+            (when-let [op (generator/op gen test process)]
+              (assert (map? op) (str "Expected an operation map from " gen
+                                     ", but got " (pr-str op) " instead."))
+              (let [op (assoc op
+                              :process process
+                              :time    (relative-time-nanos))
 
-                    (if (or (knossos/ok? completion) (knossos/fail? completion))
-                      ; The process is now free to attempt another execution.
-                      process
+                    ; Log invocation
+                    _ (util/log-op op)
+                    _ (conj-op! test op)
 
-                      ; Process hung; move on
-                      ;; TODO unify w/ other call
-                      ;; This is where we know we need a new client differentiated from (:client test)
-                      ;; Also close the old one
-                      ;; (client/close! client )
-                      ;; (client/open! client )
-                      (+ process (:concurrency test))))
+                    process-client (try
+                                        ; Evaluate operation
+                                     (let [completion (-> (client/invoke! client test op)
+                                                          (assoc :time (relative-time-nanos)))]
+                                       (util/log-op completion)
 
-                  (catch Throwable t
-                    ; At this point all bets are off. If the client or network
-                    ; or DB crashed before doing anything; this operation won't
-                    ; be a part of the history. On the other hand, the DB may
-                    ; have applied this operation and we *don't know* about it;
-                    ; e.g.  because of timeout.
-                    ;
-                    ; This process is effectively hung; it can not initiate a
-                    ; new operation without violating the single-threaded
-                    ; process constraint. We cycle to a new process identifier,
-                    ; and leave the invocation uncompleted in the history.
-                    (conj-op! test (assoc op
-                                          :type :info
-                                          :time  (relative-time-nanos)
-                                          :error (str "indeterminate: "
-                                                      (if (.getCause t)
-                                                        (.. t getCause
-                                                            getMessage)
-                                                        (.getMessage t)))))
-                    (warn t "Process" process "indeterminate")
-                    ;; TODO unify w/ above
-                    (+ process (:concurrency test))))))))
-        (info "Worker" process "done")))))
+                                        ; Sanity checks
+                                       (let [t (:type completion)]
+                                         (assert (or (= t :ok)
+                                                     (= t :fail)
+                                                     (= t :info))
+                                                 (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received " (pr-str completion) " instead")))
+                                       (assert (= (:process op) (:process completion)))
+                                       (assert (= (:f op)       (:f completion)))
+
+                                        ; Log completion
+                                       (conj-op! test completion)
+
+                                       (if (or (knossos/ok? completion) (knossos/fail? completion))
+                                         ; The process is now free to attempt another execution.
+                                         [process client]
+                                         (recover-process-compat process client test node)))
+
+                                     (catch Throwable t
+                                        ; At this point all bets are off. If the client or network
+                                        ; or DB crashed before doing anything; this operation won't
+                                        ; be a part of the history. On the other hand, the DB may
+                                        ; have applied this operation and we *don't know* about it;
+                                        ; e.g.  because of timeout.
+                                        ;
+                                        ; This process is effectively hung; it can not initiate a
+                                        ; new operation without violating the single-threaded
+                                        ; process constraint. We cycle to a new process identifier,
+                                        ; and leave the invocation uncompleted in the history.
+                                       (conj-op! test (assoc op
+                                                             :type :info
+                                                             :time  (relative-time-nanos)
+                                                             :error (str "indeterminate: "
+                                                                         (if (.getCause t)
+                                                                           (.. t getCause
+                                                                               getMessage)
+                                                                           (.getMessage t)))))
+                                       (warn t "Process" process "indeterminate")
+                                       (recover-process-compat process client test node)))]
+
+                (recur process-client))))
+
+          ; Close the client when we're out of ops to perform
+          (client/close-compat client test)
+          (info "Worker" process "done"))))))
 
 (defn nemesis-worker
   "Starts the nemesis thread, which draws failures from the generator and
@@ -267,7 +274,7 @@
   nemesis completion, and tears down nemesis."
   [test & body]
   ; Initialize nemesis
-  `(let [nemesis# (client/setup! (:nemesis ~test) ~test nil)]
+  `(let [nemesis# (client/open-compat (:nemesis ~test) ~test nil)]
      (try
        ; Launch nemesis thread
        (let [worker# (nemesis-worker ~test nemesis#)
@@ -279,7 +286,7 @@
          result#)
        (finally
          (info "Tearing down nemesis")
-         (client/teardown! nemesis# ~test)
+         (client/close-compat nemesis# ~test)
          (info "Nemesis torn down")))))
 
 (defn run-case!
@@ -292,30 +299,22 @@
     ; Register history with test's active set.
     (swap! (:active-histories test) conj history)
 
-    ; Launch clients
-    ;; TODO copy open and close to the worker
-    (with-resources [clients
-                     #(client/open-compat (:client test) test %) ; Specialize to node
-                     #(client/close-compat % test)
-                     (if (empty? (:nodes test))
-                       ; If you've specified an empty node set, we'll still
-                       ; give you `concurrency` clients, with nil.
-                       (repeat (:concurrency test) nil)
-                       (->> test
-                            :nodes
-                            cycle
-                            (take (:concurrency test))))]
-      ;; FIXME perform setup here, setup/teardown prior is 
-      ; Launch nemesis
-      (with-nemesis test
-        ; Begin workload
-        (let [workers (mapv (partial worker test)
-                            (iterate inc 0) ; PIDs
-                            clients)]       ; Clients
-
-          ; Wait for workers to complete
-          ; TODO Workers return the clients they finish with so we can tear down for them finally here
-          (dorun (map deref workers)))))
+    ; Launch nemesis
+    (with-nemesis test
+      ; Begin workload
+      (let [client-nodes (if (empty? (:nodes test))
+                           ; If you've specified an empty node set, we'll still
+                           ; give you `concurrency` clients, with nil.
+                           (repeat (:concurrency test) nil)
+                           (->> test
+                                :nodes
+                                cycle
+                                (take (:concurrency test))))
+            workers (mapv (partial worker test)
+                          (iterate inc 0) ; PIDs
+                          client-nodes)]  ; Nodes for clients
+        ; Wait for workers to complete
+        (dorun (map deref workers))))
 
     ; Download logs
     (snarf-logs! test)
@@ -406,6 +405,15 @@
                                      (if (pos? c)
                                        (CyclicBarrier. (count (:nodes test)))
                                        ::no-barrier))
+
+                          ; Locks to ensure setup and teardown happen at most once
+                          :setup-locks (let [c (count (:nodes test))]
+                                         (if (pos? c)
+                                           (->> (repeat c (atom false))
+                                                (map vector (:nodes test))
+                                                (into {}))
+                                           ::no-setup-locks))
+
                           ; Currently running histories
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
