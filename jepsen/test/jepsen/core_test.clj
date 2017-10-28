@@ -126,7 +126,4 @@
                                              (gen/nemesis gen/void))))
           original-process #{@(:process client)}
           processes (set (map :process (:history test)))]
-      (is (= original-process processes))))
-
-  ;; FIXME Write a test for this
-  (testing "Falls back when client cannot be reopened"))
+      (is (= original-process processes)))))

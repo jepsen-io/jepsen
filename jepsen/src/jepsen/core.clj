@@ -138,11 +138,78 @@
      (finally
        (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
-;; FIXME This or something near it is broken as fuck. Passing a nil client in
-(defn recover-process-compat [process client test node]
-  (if (client/closable? client)
-    [process (client/reopen! client test node)]
-    [(+ process (:concurrency test)) client]))
+;; TODO See if this can be decomposed a bit, it has a LOT of context getting passed in
+(defn invoke-and-complete [node process client test op]
+  (try
+    ; Evaluate operation
+    (let [completion (-> (client/invoke! client test op)
+                         (assoc :time (relative-time-nanos)))]
+
+      ; Log completion
+      (util/log-op completion)
+
+      ; Validate completion
+      (let [t (:type completion)]
+        (assert (or (= t :ok)
+                    (= t :fail)
+                    (= t :info))
+                (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received " (pr-str completion) " instead")))
+      (assert (= (:process op) (:process completion)))
+      (assert (= (:f op)       (:f completion)))
+
+      ; Add completion to history
+      (conj-op! test completion)
+
+      (cond
+        ; Continue with same process id and client
+        (or (knossos/ok? completion)
+            (knossos/fail? completion))
+        [process client]
+
+        ; New process id, new client
+        ; TODO We want, same process id, new client. Might be incompatible with current knossos version?
+        (client/closable? client)
+        [(+ process (:concurrency test))
+         (client/reopen! client test node)]
+
+        ; DEPRECATED Fallback to new process id with same client
+        :else
+        [(+ process (:concurrency test))
+         client]))
+
+    (catch Throwable t
+      ; At this point all bets are off. If the client or network
+      ; or DB crashed before doing anything; this operation won't
+      ; be a part of the history. On the other hand, the DB may
+      ; have applied this operation and we *don't know* about it;
+      ; e.g.  because of timeout.
+      ;
+      ; This process is effectively hung; it can not initiate a
+      ; new operation without violating the single-threaded
+      ; process constraint. We cycle to a new process identifier,
+      ; and leave the invocation uncompleted in the history.
+      (let [op (assoc op
+                      :type :info
+                      :time  (relative-time-nanos)
+                      :error (str "indeterminate: "
+                                  (if (.getCause t)
+                                    (.. t getCause
+                                        getMessage)
+                                    (.getMessage t))))]
+        ; Add synthetic completion to history
+        (conj-op! test op))
+
+      (warn t "Invocation on process" process "indeterminate")
+
+      (if (client/closable? client)
+        ; New process id, new client
+        ; TODO We want, same process id, new client. Might be incompatible with current knossos version?
+        [(+ process (:concurrency test))
+         (client/reopen! client test node)]
+
+        ; DEPRECATED Fallback to new process id with the same client
+        [(+ process (:concurrency test))
+         client]))))
 
 (defn worker
   "Spawns a future to execute a particular process in the history."
@@ -151,11 +218,10 @@
     (future
       (with-thread-name (str "jepsen worker " process)
 
-        (info "Worker" process "starting, with node " node)
+        (info "Worker" process "starting, with node" node)
 
         ; Differentiate our base client for this process
         (let [client (client/open-compat (:client test) test node)]
-
           (if (not client) (error "test: " test "node:" node))
 
           (loop [[process client] [process client]]
@@ -165,61 +231,15 @@
                                      ", but got " (pr-str op) " instead."))
               (let [op (assoc op
                               :process process
-                              :time    (relative-time-nanos))
-
-                    ; Log invocation
-                    _ (util/log-op op)
-                    _ (conj-op! test op)
-
-                    process-client (try
-                                        ; Evaluate operation
-                                     (let [completion (-> (client/invoke! client test op)
-                                                          (assoc :time (relative-time-nanos)))]
-                                       (util/log-op completion)
-
-                                        ; Sanity checks
-                                       (let [t (:type completion)]
-                                         (assert (or (= t :ok)
-                                                     (= t :fail)
-                                                     (= t :info))
-                                                 (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received " (pr-str completion) " instead")))
-                                       (assert (= (:process op) (:process completion)))
-                                       (assert (= (:f op)       (:f completion)))
-
-                                        ; Log completion
-                                       (conj-op! test completion)
-
-                                       (if (or (knossos/ok? completion) (knossos/fail? completion))
-                                         ; The process is now free to attempt another execution.
-                                         [process client]
-                                         (recover-process-compat process client test node)))
-
-                                     (catch Throwable t
-                                        ; At this point all bets are off. If the client or network
-                                        ; or DB crashed before doing anything; this operation won't
-                                        ; be a part of the history. On the other hand, the DB may
-                                        ; have applied this operation and we *don't know* about it;
-                                        ; e.g.  because of timeout.
-                                        ;
-                                        ; This process is effectively hung; it can not initiate a
-                                        ; new operation without violating the single-threaded
-                                        ; process constraint. We cycle to a new process identifier,
-                                        ; and leave the invocation uncompleted in the history.
-                                       (conj-op! test (assoc op
-                                                             :type :info
-                                                             :time  (relative-time-nanos)
-                                                             :error (str "indeterminate: "
-                                                                         (if (.getCause t)
-                                                                           (.. t getCause
-                                                                               getMessage)
-                                                                           (.getMessage t)))))
-                                       (warn t "Process" process "indeterminate")
-                                       (recover-process-compat process client test node)))]
-
-                (recur process-client))))
+                              :time    (relative-time-nanos))]
+                ; Log invocation
+                (util/log-op op)
+                ; Add invocation to history
+                (conj-op! test op)
+                (recur (invoke-and-complete node process client test op)))))
 
           ; Close the client when we're out of ops to perform
-          (client/close-compat client test)
+          (client/close-compat client test node)
           (info "Worker" process "done"))))))
 
 (defn nemesis-worker
@@ -286,7 +306,7 @@
          result#)
        (finally
          (info "Tearing down nemesis")
-         (client/close-compat nemesis# ~test)
+         (client/close-compat nemesis# ~test nil)
          (info "Nemesis torn down")))))
 
 (defn run-case!
@@ -406,13 +426,8 @@
                                        (CyclicBarrier. (count (:nodes test)))
                                        ::no-barrier))
 
-                          ; Locks to ensure setup and teardown happen at most once
-                          :setup-locks (let [c (count (:nodes test))]
-                                         (if (pos? c)
-                                           (->> (repeat c (atom false))
-                                                (map vector (:nodes test))
-                                                (into {}))
-                                           ::no-setup-locks))
+                          ; Last one out teardown the world
+                          :lightswitch (util/->SetupLightswitch (atom 0))
 
                           ; Currently running histories
                           :active-histories (atom #{}))
