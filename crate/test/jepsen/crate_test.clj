@@ -2,7 +2,7 @@
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer [pprint]]
             [jepsen.core :as jepsen]
-            [jepsen.crate :refer :all]
+            [jepsen.crate.core :refer :all]
             [jepsen.crate.lost-updates :as lost-updates]
             [jepsen.crate.dirty-read :as dirty-read]
             [jepsen.store :as store]))
@@ -58,6 +58,7 @@
                                   #(jepsen/run!
                                      (dirty-read/test
                                        {:es-ops      es-ops
+                                        :tarball "https://cdn.crate.io/downloads/releases/nightly/crate-latest.tar.gz"
                                         :concurrency 30
                                         :time-limit 100}))))]
                 [(:name (first ts))
