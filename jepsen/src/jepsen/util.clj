@@ -681,16 +681,3 @@
       clojure.lang.IDeref
       (deref [this]
         (.init this)))))
-
-(defprotocol Lightswitch
-  "Takes a `(atom 0)` provides first lock executes, last unlock executes semantics."
-  (lock [this f] "Holds the switch, calling f if it's the first thread to do so.")
-  (unlock [this f] "Releases the lightswitch, calling f if it's the last thread to do so."))
-
-(defrecord SetupLightswitch [c]
-  Lightswitch
-  (lock [this f]
-    (if (= 1 (swap! (:c this) inc)) (f)))
-
-  (unlock [this f]
-    (if (zero? (swap! (:c this) dec)) (f))))
