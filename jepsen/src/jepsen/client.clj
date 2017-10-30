@@ -31,41 +31,39 @@
     (close!    [this test node])))
 
 (defn reopen!
+  "Takes the worker's current client, closes its connection and
+  opens a new connection with the original."
   [client test node]
   (close! client test node)
   (open! client test node))
 
-(defn open-compat
-  "Attempts to call `open!`, if `open!` does not exist, assumes legacy implementation of `setup!`."
+(defn open-compat!
+  "Attempts to call `open!` on the given client. If `open!` does not
+  exist, we assume a legacy implementation of `setup!`."
   [client test node]
   (try
-    ;; Nemeses are treated the same as clients for nodes that have already been set up.
-    (let [lightswitch (if node (:lightswitch test))
-          client (open! client test node)]
-      (util/lock lightswitch #(setup! client test))
+    (let [client (open! client test node)
+          _      (setup! client test)]
       client)
-
-    ;; TODO This has sometimes been IllegalArgumentException, maybe this is related to local compilation? TEST IT
     (catch java.lang.AbstractMethodError e
       (warn "DEPRECATED: `jepsen.client/open!` not implemented. Falling back to deprecated semantics of `jepsen.client/setup!`.")
       (setup! client test node))))
 
-;; FIXME docstring
-(defn closable? [client]
+(defn closable?
+  "Returns true if the given client implements method `close!`."
+  [client]
   (->> client
        reflect
        :members
        (map :name)
        (some #{'close_BANG_})))
 
-(defn close-compat
-  "Inspects the client for `close!` method. If `close!` not implemented, we assume a
-  legacy `teardown!` implementation that cleans the database and closes the client."
+(defn close-compat!
+  "Inspects the client for `close!` method and calls `teardown!` then `close!`.
+  If `close!` is not implemented, we assume a legacy implementation of `teardown!`."
   [client test node]
   (if (closable? client)
-    (let [lightswitch (if node (:lightswitch test))]
-      (util/unlock lightswitch #(teardown! client test))
-      (close! client test node))
-    (do
-      (warn "DEPRECATED: `jepsen.client/close!` not implemented. Falling back to deprecated semantics of `jepsen.client/teardown!`.")
+    (do (teardown! client test)
+        (close! client test node))
+    (do (warn "DEPRECATED: `jepsen.client/close!` not implemented. Falling back to deprecated semantics of `jepsen.client/teardown!`.")
         (teardown! client test))))

@@ -138,8 +138,11 @@
      (finally
        (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
-;; TODO See if this can be decomposed a bit, it has a LOT of context getting passed in
-(defn invoke-and-complete [node process client test op]
+(defn invoke-and-complete
+  "Applies the given op, returning the process and client used, or
+  a new process and client if the result of the invocation places our
+  process in an unknowable or indeterminate state."
+  [node process client test op]
   (try
     ; Evaluate operation
     (let [completion (-> (client/invoke! client test op)
@@ -161,18 +164,17 @@
       (conj-op! test completion)
 
       (cond
-        ; Continue with same process id and client
-        (or (knossos/ok? completion)
-            (knossos/fail? completion))
+        ; If we know the result, continue with same process and client
+        (or (knossos/ok? completion) (knossos/fail? completion))
         [process client]
 
-        ; New process id, new client
-        ; TODO We want, same process id, new client. Might be incompatible with current knossos version?
+        ; Otherwise, return a new context with a new process and client
         (client/closable? client)
         [(+ process (:concurrency test))
-         (client/reopen! client test node)]
+         (client/reopen! (:client test) test node)]
 
-        ; DEPRECATED Fallback to new process id with same client
+        ; DEPRECATED If we don't support creating a new client in the worker,
+        ; fallback to new process with same client
         :else
         [(+ process (:concurrency test))
          client]))
@@ -202,10 +204,9 @@
       (warn t "Invocation on process" process "indeterminate")
 
       (if (client/closable? client)
-        ; New process id, new client
-        ; TODO We want, same process id, new client. Might be incompatible with current knossos version?
+        ; New process, new client
         [(+ process (:concurrency test))
-         (client/reopen! client test node)]
+         (client/reopen! (:client test) test node)]
 
         ; DEPRECATED Fallback to new process id with the same client
         [(+ process (:concurrency test))
@@ -213,34 +214,46 @@
 
 (defn worker
   "Spawns a future to execute a particular process in the history."
-  [test process node]
+  [test setup-barrier process node]
   (let [gen (:generator test)]
     (future
       (with-thread-name (str "jepsen worker " process)
-
-        (info "Worker" process "starting, with node" node)
+        (info "Worker" process "with node" node "starting")
 
         ; Differentiate our base client for this process
-        (let [client (client/open-compat (:client test) test node)]
-          (if (not client) (error "test: " test "node:" node))
+        (let [client (client/open-compat! (:client test) test node)
+              _      (assert client (str "Expected a client, but got " (pr-str client)
+                                         " instead."))
 
-          (loop [[process client] [process client]]
-            ; Obtain an operation to execute
-            (when-let [op (generator/op gen test process)]
-              (assert (map? op) (str "Expected an operation map from " gen
-                                     ", but got " (pr-str op) " instead."))
-              (let [op (assoc op
-                              :process process
-                              :time    (relative-time-nanos))]
-                ; Log invocation
-                (util/log-op op)
-                ; Add invocation to history
-                (conj-op! test op)
-                (recur (invoke-and-complete node process client test op)))))
+              ; Wait to begin ops until all clients are set up
+              _      (.await setup-barrier)
+
+              ; Consume operations from the generator, returns most recent client when done
+              client (loop [[process client] [process client]]
+                       ; Obtain an operation to execute
+                       (if-let [op (try (generator/op gen test process)
+                                        (catch Exception e e))]
+                         (let [_ (assert (map? op) (str "Expected an operation map from " gen
+                                                        ", but got " (pr-str op) " instead."))
+                               op (assoc op
+                                         :process process
+                                         :time    (relative-time-nanos))
+                               ; Log invocation
+                               _ (util/log-op op)
+                               ; Add invocation to history
+                               _ (conj-op! test op)]
+                           ; Apply the op and log its completion in the history
+                           (recur (invoke-and-complete node process client test op)))
+
+                         ; Out of ops
+                         client))]
+
+          ; Ensure all ops are complete before any worker does teardown
+          (.await setup-barrier)
 
           ; Close the client when we're out of ops to perform
-          (client/close-compat client test node)
-          (info "Worker" process "done"))))))
+          (client/close-compat! client test node)
+          (info "Worker" process "with node" node "done"))))))
 
 (defn nemesis-worker
   "Starts the nemesis thread, which draws failures from the generator and
@@ -252,7 +265,8 @@
       (with-thread-name "jepsen nemesis"
         (info "Nemesis starting")
         (loop []
-          (when-let [op (generator/op gen test :nemesis)]
+          (when-let [op (try (generator/op gen test :nemesis)
+                             (catch Exception e e))]
             (assert (map? op) (str "Expected an operation map for nemesis from "
                                    gen
                                    ", but got " (pr-str op) " instead."))
@@ -294,7 +308,7 @@
   nemesis completion, and tears down nemesis."
   [test & body]
   ; Initialize nemesis
-  `(let [nemesis# (client/open-compat (:nemesis ~test) ~test nil)]
+  `(let [nemesis# (client/open-compat! (:nemesis ~test) ~test nil)]
      (try
        ; Launch nemesis thread
        (let [worker# (nemesis-worker ~test nemesis#)
@@ -306,7 +320,7 @@
          result#)
        (finally
          (info "Tearing down nemesis")
-         (client/close-compat nemesis# ~test nil)
+         (client/close-compat! nemesis# ~test nil)
          (info "Nemesis torn down")))))
 
 (defn run-case!
@@ -322,17 +336,18 @@
     ; Launch nemesis
     (with-nemesis test
       ; Begin workload
-      (let [client-nodes (if (empty? (:nodes test))
-                           ; If you've specified an empty node set, we'll still
-                           ; give you `concurrency` clients, with nil.
-                           (repeat (:concurrency test) nil)
-                           (->> test
-                                :nodes
-                                cycle
-                                (take (:concurrency test))))
-            workers (mapv (partial worker test)
-                          (iterate inc 0) ; PIDs
-                          client-nodes)]  ; Nodes for clients
+      (let [setup-barrier (java.util.concurrent.CyclicBarrier. (:concurrency test))
+            client-nodes  (if (empty? (:nodes test))
+                            ; If you've specified an empty node set, we'll still
+                            ; give you `concurrency` clients, with nil.
+                            (repeat (:concurrency test) nil)
+                            (->> test
+                                 :nodes
+                                 cycle
+                                 (take (:concurrency test))))
+            workers       (mapv (partial worker test setup-barrier)
+                                (iterate inc 0) ; PIDs
+                                client-nodes)]  ; Nodes for clients
         ; Wait for workers to complete
         (dorun (map deref workers))))
 
@@ -425,9 +440,6 @@
                                      (if (pos? c)
                                        (CyclicBarrier. (count (:nodes test)))
                                        ::no-barrier))
-
-                          ; Last one out teardown the world
-                          :lightswitch (util/->SetupLightswitch (atom 0))
 
                           ; Currently running histories
                           :active-histories (atom #{}))

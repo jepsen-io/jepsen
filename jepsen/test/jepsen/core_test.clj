@@ -99,31 +99,3 @@
                                  (gen/limit n)
                                  (gen/nemesis gen/void))))
       (is (= n @invocations))))
-
-(defrecord ProcessRecoveryClient [process]
-    client/Client
-    (setup! [this _ _] (assoc this :process (promise)))
-    (teardown! [_ _])
-    (open! [_ _ _])
-    (close! [_ _])
-    (invoke! [this _ op]
-      (let [_ (deliver (:process this) (:process op))]
-        (condp < (rand)
-          0.75 (assoc op :type :info)
-          0.50 (assoc op :type :fail)
-          0.25 (assoc op :type :ok)
-          (throw (Exception. "Please recover, young client"))))))
-
-(deftest process-recovery-test
-  ;; Processes should be able to reconnect with a new client on exception
-  (testing "Maintains the same process when client can be reopened"
-    (let [n 30
-          client (->ProcessRecoveryClient nil)
-          test (run! (assoc tst/noop-test
-                            :client    client
-                            :generator  (->> (gen/queue)
-                                             (gen/limit n)
-                                             (gen/nemesis gen/void))))
-          original-process #{@(:process client)}
-          processes (set (map :process (:history test)))]
-      (is (= original-process processes)))))
