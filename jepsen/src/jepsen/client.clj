@@ -8,7 +8,7 @@
   (open! [client test node]
           "Set up the client to work with a particular node. Returns a client
           which is ready to accept operations via invoke!")
-  (close! [client test node]
+  (close! [client test]
           "Close the client connection when work is completed or an invocation
            crashes the client.")
   (setup! [client test] [client test node]
@@ -28,14 +28,7 @@
     (teardown! [this test])
     (invoke!   [this test op] (assoc op :type :ok))
     (open!     [this test node] this)
-    (close!    [this test node])))
-
-(defn reopen!
-  "Takes the worker's current client, closes its connection and
-  opens a new connection with the original."
-  [client test node]
-  (close! client test node)
-  (open! client test node))
+    (close!    [this test])))
 
 (defn open-compat!
   "Attempts to call `open!` on the given client. If `open!` does not
@@ -44,10 +37,13 @@
   (try
     (let [client (open! client test node)
           _      (setup! client test)]
+      (assert client (str "Expected a client, but `open!` returned " (pr-str client) " instead."))
       client)
     (catch java.lang.AbstractMethodError e
-      (warn "DEPRECATED: `jepsen.client/open!` not implemented. Falling back to deprecated semantics of `jepsen.client/setup!`.")
-      (setup! client test node))))
+      (warn "DEPRECATED: `jepsen.client/open!` not implemented. Falling back to deprecated semantics of `jepsen.client/setup!`. You should separate your client's `setup!` function into `open!` and `setup!`. See the jepsen.client documentation for details.")
+      (let [client (setup! client test node)]
+        (assert client (str "Expected a client, but `setup!` returned " (pr-str client) " instead."))
+        client))))
 
 (defn closable?
   "Returns true if the given client implements method `close!`."
@@ -61,9 +57,9 @@
 (defn close-compat!
   "Inspects the client for `close!` method and calls `teardown!` then `close!`.
   If `close!` is not implemented, we assume a legacy implementation of `teardown!`."
-  [client test node]
+  [client test]
   (if (closable? client)
     (do (teardown! client test)
-        (close! client test node))
-    (do (warn "DEPRECATED: `jepsen.client/close!` not implemented. Falling back to deprecated semantics of `jepsen.client/teardown!`.")
+        (close! client test))
+    (do (warn "DEPRECATED: `jepsen.client/close!` not implemented. Falling back to deprecated semantics of `jepsen.client/teardown!`. You should separate your client's `teardown!` function into `close!` and `teardown!`. See the jepsen.client documentation for details.")
         (teardown! client test))))

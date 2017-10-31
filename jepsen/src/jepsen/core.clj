@@ -168,10 +168,11 @@
         (or (knossos/ok? completion) (knossos/fail? completion))
         [process client]
 
-        ; Otherwise, return a new context with a new process and client
+        ; Otherwise, return a new process and client
         (client/closable? client)
         [(+ process (:concurrency test))
-         (client/reopen! (:client test) test node)]
+         (do (client/close! client test)
+             (client/open! (:client test) test node))]
 
         ; DEPRECATED If we don't support creating a new client in the worker,
         ; fallback to new process with same client
@@ -206,7 +207,8 @@
       (if (client/closable? client)
         ; New process, new client
         [(+ process (:concurrency test))
-         (client/reopen! (:client test) test node)]
+         (do (client/close! client test)
+             (client/open! (:client test) test node))]
 
         ; DEPRECATED Fallback to new process id with the same client
         [(+ process (:concurrency test))
@@ -222,38 +224,40 @@
 
         ; Differentiate our base client for this process
         (let [client (client/open-compat! (:client test) test node)
-              _      (assert client (str "Expected a client, but got " (pr-str client)
-                                         " instead."))
-
               ; Wait to begin ops until all clients are set up
-              _      (.await setup-barrier)
+              _ (.await setup-barrier)
 
-              ; Consume operations from the generator, returns most recent client when done
-              client (loop [[process client] [process client]]
-                       ; Obtain an operation to execute
-                       (if-let [op (try (generator/op gen test process)
-                                        (catch Exception e e))]
-                         (let [_ (assert (map? op) (str "Expected an operation map from " gen
-                                                        ", but got " (pr-str op) " instead."))
-                               op (assoc op
-                                         :process process
-                                         :time    (relative-time-nanos))
-                               ; Log invocation
-                               _ (util/log-op op)
-                               ; Add invocation to history
-                               _ (conj-op! test op)]
-                           ; Apply the op and log its completion in the history
-                           (recur (invoke-and-complete node process client test op)))
+              ; Consume operations from the generator
+              client (try
+                       (loop [[process client] [process client]]
+                         ; Obtain an operation to execute
+                         (if-let [op (generator/op-and-validate gen test process)]
+                           (let [op (assoc op
+                                           :process process
+                                           :time    (relative-time-nanos))]
+                             ; Log invocation
+                             (util/log-op op)
+                             ; Add invocation to history
+                             (conj-op! test op)
+                             ; Apply the op and log its completion in the history
+                             (recur (invoke-and-complete node process client test op)))
 
-                         ; Out of ops
-                         client))]
+                           ; Out of ops, return most recent client
+                           client))
 
-          ; Ensure all ops are complete before any worker does teardown
-          (.await setup-barrier)
+                       ; Exceptions here aren't expected, clean up state then re-throw
+                       (catch Exception e
+                         (warn "Worker for" process "threw unexpectedly. Tearing down")
+                         (.await setup-barrier)
+                         (client/close-compat! client test)
+                         (warn "Teardown on" process "complete.")
+                         (throw e)))]
 
-          ; Close the client when we're out of ops to perform
-          (client/close-compat! client test node)
-          (info "Worker" process "with node" node "done"))))))
+            ; Ensure all ops are complete before any worker does teardown
+            (.await setup-barrier)
+            ; Close the client when we're out of ops to perform
+            (client/close-compat! client test)
+            (info "Worker" process "with node" node "done"))))))
 
 (defn nemesis-worker
   "Starts the nemesis thread, which draws failures from the generator and
@@ -265,11 +269,7 @@
       (with-thread-name "jepsen nemesis"
         (info "Nemesis starting")
         (loop []
-          (when-let [op (try (generator/op gen test :nemesis)
-                             (catch Exception e e))]
-            (assert (map? op) (str "Expected an operation map for nemesis from "
-                                   gen
-                                   ", but got " (pr-str op) " instead."))
+          (when-let [op (generator/op-and-validate gen test :nemesis)]
             (let [op (assoc op
                             :process :nemesis
                             :time    (relative-time-nanos))]
@@ -320,7 +320,7 @@
          result#)
        (finally
          (info "Tearing down nemesis")
-         (client/close-compat! nemesis# ~test nil)
+         (client/close-compat! nemesis# ~test)
          (info "Nemesis torn down")))))
 
 (defn run-case!

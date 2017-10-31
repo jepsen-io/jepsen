@@ -137,7 +137,7 @@
 
     ; If our connection were stateful, we'd close it here.
     ; Verschlimmbesserung doesn't hold a connection open, so we don't need to.
-    (close! [_ _ _])
+    (close! [_ _])
 
     (setup! [_ _])
     (teardown! [_ _])))
