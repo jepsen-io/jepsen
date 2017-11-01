@@ -224,40 +224,43 @@
 
         ; Differentiate our base client for this process
         (let [client (client/open-compat! (:client test) test node)
+
               ; Wait to begin ops until all clients are set up
               _ (.await setup-barrier)
 
-              ; Consume operations from the generator
-              client (try
-                       (loop [[process client] [process client]]
-                         ; Obtain an operation to execute
-                         (if-let [op (generator/op-and-validate gen test process)]
-                           (let [op (assoc op
-                                           :process process
-                                           :time    (relative-time-nanos))]
-                             ; Log invocation
-                             (util/log-op op)
-                             ; Add invocation to history
-                             (conj-op! test op)
-                             ; Apply the op and log its completion in the history
-                             (recur (invoke-and-complete node process client test op)))
+              [process client exception] (loop [[process client exception exit?] [process client nil false]]
+                                           (if exit?
+                                             ; Return our worker state at the end of the loop
+                                             [process client exception]
 
-                           ; Out of ops, return most recent client
-                           client))
+                                             ; Consume operations from the generator
+                                             (recur
+                                              (try
+                                                ; Obtain an operation to execute
+                                                (if-let [op (generator/op-and-validate gen test process)]
+                                                  (let [op (assoc op
+                                                                  :process process
+                                                                  :time    (relative-time-nanos))]
+                                                    ; Log invocation
+                                                    (util/log-op op)
+                                                    ; Add invocation to history
+                                                    (conj-op! test op)
+                                                    ; Apply the op and log its completion in the history
+                                                    (invoke-and-complete node process client test op))
+                                                  ; Out of ops
+                                                  [process client exception true])
 
-                       ; Exceptions here aren't expected, clean up state then re-throw
-                       (catch Exception e
-                         (warn "Worker for" process "threw unexpectedly. Tearing down")
-                         (.await setup-barrier)
-                         (client/close-compat! client test)
-                         (warn "Teardown on" process "complete.")
-                         (throw e)))]
+                                                ; Return any exceptions to throw later, ensuring cleanup
+                                                (catch Exception e [process client e true])))))]
 
-            ; Ensure all ops are complete before any worker does teardown
-            (.await setup-barrier)
-            ; Close the client when we're out of ops to perform
-            (client/close-compat! client test)
-            (info "Worker" process "with node" node "done"))))))
+          ; Ensure all ops are complete before any worker does teardown
+          (.await setup-barrier)
+          ; Close the client when we're out of ops to perform
+          (client/close-compat! client test)
+          (when exception
+            (warn "Worker for process" process "with node" node "threw")
+            (throw exception))
+          (info "Worker" process "with node" node "done"))))))
 
 (defn nemesis-worker
   "Starts the nemesis thread, which draws failures from the generator and
