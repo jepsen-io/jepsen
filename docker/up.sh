@@ -25,8 +25,17 @@ for f in $@; do
 	'--init-only' )
 	    INIT_ONLY=1
 	    ;;
+	'--dev' )
+      if [ ! "$JEPSEN_ROOT" ]; then
+          INFO "MISSING VAR: --dev requires JEPSEN_ROOT to be set"
+          exit 1
+      else
+          INFO "Running docker-compose with dev config"
+          DEV="-f docker-compose.dev.yml"
+      fi
+	    ;;
 	'--daemon' )
-		INFO "DAEMON"
+      INFO "Running docker-compose as daemon"
 	    RUN_AS_DAEMON=1
 	    ;;
 	*)
@@ -41,6 +50,8 @@ if [ "$HELP" ]; then
     echo "usage: $0 [OPTION]"
     echo "  --help                                                Display this message"
     echo "  --init-only                                           Initializes the secret, but does not call docker-compose"
+    echo "  --daemon                                              Runs docker-compose in the background"
+    echo "  --dev                                                 Mounts dir at host's $JEPSEN_ROOT to /jepsen on jepsen-control container, syncing files for development"
     exit 0
 fi
 
@@ -73,7 +84,6 @@ INFO "Copying .. to control/jepsen"
     (cd ..; tar --exclude=./docker --exclude=./.git -cf - .)  | tar Cxf ./control/jepsen -
 )
 
-
 if [ "$INIT_ONLY" ]; then
     exit 0
 fi
@@ -86,9 +96,10 @@ docker-compose build
 
 INFO "Running \`docker-compose up\`"
 if [ "$RUN_AS_DAEMON" ]; then
-	docker-compose up -d
+	docker-compose -f docker-compose.yml $DEV up -d
+	INFO "All containers started, run \`docker ps\` to view"
 	exit 0
 else
 	INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
-	docker-compose up
+	docker-compose -f docker-compose.yml $DEV up
 fi
