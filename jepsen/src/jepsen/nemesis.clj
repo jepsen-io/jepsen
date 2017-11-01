@@ -6,12 +6,21 @@
             [jepsen.control     :as c]
             [jepsen.net         :as net]))
 
+(defprotocol Nemesis
+  (setup! [this test] "Docstring here")
+  (invoke! [this test op] "Docstring here")
+  (teardown! [this test] "Docstring here"))
+
 (def noop
   "Does nothing."
-  (reify client/Client
-    (setup! [this test node] this)
+  (reify Nemesis
+    (setup! [this test] this)
     (invoke! [this test op] op)
     (teardown! [this test] this)))
+
+(defn setup-compat! [nemesis test])
+(defn teardown-compat! [nemesis test])
+(defn invoke-compat! [nemesis test])
 
 (defn snub-nodes!
   "Drops all packets from the given nodes."
