@@ -28,6 +28,7 @@
             [jepsen.generator :as generator]
             [jepsen.checker :as checker]
             [jepsen.client :as client]
+            [jepsen.nemesis :as nemesis]
             [jepsen.store :as store])
   (:import (java.util.concurrent CyclicBarrier)))
 
@@ -228,7 +229,7 @@
 
               (try
                 (util/log-op op)
-                (let [completion (-> (client/invoke! nemesis test op)
+                (let [completion (-> (nemesis/invoke-compat! nemesis test op)
                                      (assoc :time (relative-time-nanos)))]
                   (util/log-op completion)
 
@@ -257,7 +258,7 @@
   nemesis completion, and tears down nemesis."
   [test & body]
   ; Initialize nemesis
-  `(let [nemesis# (client/setup! (:nemesis ~test) ~test nil)]
+  `(let [nemesis# (nemesis/setup-compat! (:nemesis ~test) ~test nil)]
      (try
        ; Launch nemesis thread
        (let [worker# (nemesis-worker ~test nemesis#)
@@ -269,7 +270,7 @@
          result#)
        (finally
          (info "Tearing down nemesis")
-         (client/teardown! nemesis# ~test)
+         (nemesis/teardown-compat! nemesis# ~test)
          (info "Nemesis torn down")))))
 
 (defn run-case!
