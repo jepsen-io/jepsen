@@ -19,29 +19,29 @@ exists() {
 
 for f in $@; do
     case $f in
-	'--help' )
-	    HELP=1
-	    ;;
-	'--init-only' )
-	    INIT_ONLY=1
-	    ;;
-	'--dev' )
-      if [ ! "$JEPSEN_ROOT" ]; then
-          INFO "MISSING VAR: --dev requires JEPSEN_ROOT to be set"
-          exit 1
-      else
-          INFO "Running docker-compose with dev config"
-          DEV="-f docker-compose.dev.yml"
-      fi
-	    ;;
-	'--daemon' )
-      INFO "Running docker-compose as daemon"
-	    RUN_AS_DAEMON=1
-	    ;;
-	*)
-	    ERROR "unknown option $1"
-	    exit 1
-	    ;;
+        '--help' )
+            HELP=1
+            ;;
+        '--init-only' )
+            INIT_ONLY=1
+            ;;
+        '--dev' )
+            if [ ! "$JEPSEN_ROOT" ]; then
+                INFO "MISSING VAR: --dev requires JEPSEN_ROOT to be set"
+                exit 1
+            else
+                INFO "Running docker-compose with dev config"
+                DEV="-f docker-compose.dev.yml"
+            fi
+            ;;
+        '--daemon' )
+            INFO "Running docker-compose as daemon"
+            RUN_AS_DAEMON=1
+            ;;
+        *)
+            ERROR "unknown option $1"
+            exit 1
+            ;;
     esac
     shift
 done
@@ -96,10 +96,10 @@ docker-compose build
 
 INFO "Running \`docker-compose up\`"
 if [ "$RUN_AS_DAEMON" ]; then
-	docker-compose -f docker-compose.yml $DEV up -d
-	INFO "All containers started, run \`docker ps\` to view"
-	exit 0
+    docker-compose -f docker-compose.yml $DEV up -d
+    INFO "All containers started, run \`docker ps\` to view"
+    exit 0
 else
-	INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
-	docker-compose -f docker-compose.yml $DEV up
+    INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
+    docker-compose -f docker-compose.yml $DEV up
 fi
