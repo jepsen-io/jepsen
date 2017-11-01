@@ -250,7 +250,7 @@
                                                   ; Out of ops
                                                   [process client exception true])
 
-                                                ; Return any exceptions to throw later, ensuring cleanup
+                                                ; Ensure cleanup by immediately exiting with any exception outside of invoke
                                                 (catch Exception e [process client e true])))))]
 
           ; Ensure all ops are complete before any worker does teardown
