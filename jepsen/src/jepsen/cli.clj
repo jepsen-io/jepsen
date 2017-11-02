@@ -54,7 +54,7 @@
 
   [help-opt
 
-   (repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on" default-nodes)
+   (repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on. Flag may be submitted many times, with one node per flag." default-nodes)
 
    [nil "--nodes-file FILENAME" "File containing node hostnames, one per line."]
 

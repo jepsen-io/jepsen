@@ -18,78 +18,75 @@
                     [os           :as os]]
             [jepsen.os.debian     :as debian]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.crate         :as c]
+            [jepsen.crate.core    :as c]
             [cheshire.core        :as json]
             [clojure.string       :as str]
+            [clojure.java.jdbc    :as j]
             [clojure.java.io      :as io]
             [clojure.java.shell   :refer [sh]]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
             [knossos.op           :as op])
-  (:import (io.crate.client CrateClient)
-           (io.crate.action.sql SQLActionException
-                                SQLResponse
-                                SQLRequest)
-           (io.crate.shade.org.elasticsearch.client.transport
-             NoNodeAvailableException)))
+  (:import (io.crate.shade.org.postgresql.util PSQLException)))
 
 (defn client
   ([] (client nil))
-  ([conn]
+  ([dbspec]
    (let [initialized? (promise)]
-    (reify client/Client
-      (setup! [this test node]
-        (let [conn (c/await-client (c/connect node) test)]
-          (when (deliver initialized? true)
-            (c/sql! conn "create table sets (
-                         id        integer primary key,
-                         elements  string
-                         ) with (number_of_replicas = \"0-all\")"))
-          (client conn)))
+     (reify client/Client
+       (setup! [this test node]
+         (let [dbspec (c/get-node-db-spec node)]
+           (when (deliver initialized? true)
+             (j/execute! dbspec
+                         ["create table if not exists sets (
+                          id     integer primary key,
+                          elements  string)"])
+             (j/execute! dbspec
+                         ["alter table sets
+                          set (number_of_replicas = \"0-all\")"]))
+           (client dbspec)))
 
-      (invoke! [this test op]
-        (let [[k v] (:value op)]
-          (timeout 500 (assoc op :type :info, :error :timeout)
-            (c/with-errors op
-              (case (:f op)
-                :read (->> (c/sql! conn "select elements
-                                        from sets where id = ?" k)
-                           :rows
-                           first
-                           :elements
-                           json/parse-string
-                           set
-                           (independent/tuple k)
-                           (assoc op :type :ok, :value))
+       (invoke! [this test op]
+         (let [[k v] (:value op)]
+           (timeout 500 (assoc op :type :info, :error :timeout)
+                    (c/with-errors op
+                      (case (:f op)
+                        :read (->> (j/query dbspec ["select elements
+                                                    from sets where id = ?" k])
+                                   first
+                                   :elements
+                                   json/parse-string
+                                   set
+                                   (independent/tuple k)
+                                   (assoc op :type :ok, :value))
 
-                :add (if-let [cur (-> conn
-                                      (c/sql! "select elements, _version
-                                              from sets where id = ?"
-                                              k)
-                                      :rows
-                                      first)]
-                       (let [els' (-> (:elements cur)
-                                      json/parse-string
-                                      (conj v)
-                                      json/generate-string)
-                             _ (assert (number? (:_version cur)))
-                             res (c/sql! conn "update sets set elements = ?
-                                              where id = ? and _version = ?"
-                                         els' k (:_version cur))]
-                         (case (:row-count res)
-                           0 (assoc op :type :fail)
-                           1 (assoc op :type :ok)
-                           2 (assoc op :type :info
-                                    :error (str "Updated " (:row-count res)
-                                                " rows!?"))))
-                       (let [els' (json/generate-string [v])]
-                         (c/sql! conn "insert into sets (id, elements)
-                                      values (?, ?)"
-                                 k els')
-                         (assoc op :type :ok))))))))
+                        :add (if-let [cur (first (j/query dbspec ["select elements, _version
+                                                                  from sets where id = ?"
+                                                                  k]))
+                                      ]
+                               (let [els' (-> (:elements cur)
+                                              json/parse-string
+                                              (conj v)
+                                              json/generate-string)
+                                     _ (assert (number? (:_version cur)))
+                                     row_count (first
+                                                 (j/execute! dbspec ["update sets set elements = ?
+                                                                     where id = ? and _version = ?"
+                                                                     els' k (:_version cur)]))]
+                                 (case row_count
+                                   0 (assoc op :type :fail)
+                                   1 (assoc op :type :ok)
+                                   2 (assoc op :type :info
+                                            :error (str "Updated " row_count
+                                                        " rows!?"))))
+                               (let [els' (json/generate-string [v])]
+                                 (j/execute! dbspec ["insert into sets (id, elements)
+                                                     values (?, ?)"
+                                                     k els'])
+                                 (assoc op :type :ok))))))))
 
-      (teardown! [this test]
-        (.close conn))))))
+       (teardown! [this test]
+         )))))
 
 (defn r [] {:type :invoke, :f :read, :value nil})
 (defn w []
@@ -103,9 +100,9 @@
         quiescence-time 20
         nemesis-time    (- time-limit quiescence-time)]
     (merge tests/noop-test
-           {:name    "crate lost-updates"
+           {:name    "lost-updates"
             :os      debian/os
-            :db      (c/db)
+            :db      (c/db (:tarball opts))
             :client  (client)
             :checker (checker/compose
                        {:set  (independent/checker checker/set)

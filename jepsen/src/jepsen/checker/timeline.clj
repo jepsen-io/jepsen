@@ -72,11 +72,12 @@
 
                                true
                                (assoc s :height height)))
-           :title (str (when stop (str (long (util/nanos->ms
-                                               (- (:time stop) (:time start))))
+           :title (str (when (and (= :nemesis (:process op)) (:value start)) (str (:value start) "\n"))
+                       (when stop (str (long (util/nanos->ms
+                                              (- (:time stop) (:time start))))
                                        " ms\n"))
                        (pr-str (:error op)))}
-     (str (:process op) " " (name+ (:f op)) " " (:value start)
+     (str (:process op) " " (name+ (:f op)) " " (when (not= :nemesis (:process op)) (:value start))
           (when (not= (:value start) (:value stop))
             (str "<br />" (:value stop))))]))
 

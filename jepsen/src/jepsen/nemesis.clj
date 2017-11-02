@@ -6,12 +6,43 @@
             [jepsen.control     :as c]
             [jepsen.net         :as net]))
 
+(defprotocol Nemesis
+  (setup! [this test] "Set up the nemesis to work with the cluster. Returns the nemesis ready to be invoked")
+  (invoke! [this test op] "Apply an operation to the nemesis, which alters the cluster.")
+  (teardown! [this test] "Tear down the nemesis when work is complete"))
+
 (def noop
   "Does nothing."
-  (reify client/Client
-    (setup! [this test node] this)
+  (reify Nemesis
+    (setup! [this test] this)
     (invoke! [this test op] op)
     (teardown! [this test] this)))
+
+(defn setup-compat!
+  "Calls `jepsen.nemesis/setup!`, if possible, falling back to `jepsen.client/setup!`.
+  Warns users that nemeses implementing `jepsen.client` have been deprecated."
+  [nemesis test node]
+  (if (instance? jepsen.nemesis.Nemesis nemesis)
+    (setup! nemesis test)
+    (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, calling `jepsen.client/setup!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
+        (client/setup! nemesis test node))))
+
+(defn invoke-compat!
+  "Calls `jepsen.nemesis/invoke!`, if possible, falling back to `jepsen.client/invoke!`."
+  [nemesis test op]
+  (if (instance? jepsen.nemesis.Nemesis nemesis)
+    (invoke! nemesis test op)
+    ;; DEPRECATED
+    (client/invoke! nemesis test op)))
+
+(defn teardown-compat!
+  "Calls `jepsen.nemesis/teardown!`, if possible, falling back to `jepsen.client/teardown!`.
+  Warns users that nemeses implementing `jepsen.client` have been deprecated."
+  [nemesis test]
+  (if (instance? jepsen.nemesis.Nemesis nemesis)
+    (teardown! nemesis test)
+    (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, falling back to `jepsen.client/teardown!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
+        (client/teardown! nemesis test))))
 
 (defn snub-nodes!
   "Drops all packets from the given nodes."
@@ -69,8 +100,8 @@
   "Responds to a :start operation by cutting network links as defined by
   (grudge nodes), and responds to :stop by healing the network."
   [grudge]
-  (reify client/Client
-    (setup! [this test _]
+  (reify Nemesis
+    (setup! [this test]
       (net/heal! (:net test) test)
       this)
 
@@ -147,9 +178,9 @@
   partition-random-halves."
   [nemeses]
   (assert (map? nemeses))
-  (reify client/Client
-    (setup! [this test node]
-      (compose (util/map-vals #(client/setup! % test node) nemeses)))
+  (reify Nemesis
+    (setup! [this test]
+      (compose (util/map-vals #(setup-compat! % test nil) nemeses)))
 
     (invoke! [this test op]
       (let [f (:f op)]
@@ -159,11 +190,11 @@
                      (str "no nemesis can handle " (:f op))))
             (let [[fs nemesis] (first nemeses)]
               (if-let [f' (fs f)]
-                (assoc (client/invoke! nemesis test (assoc op :f f')) :f f)
+                (assoc (invoke-compat! nemesis test (assoc op :f f')) :f f)
                 (recur (next nemeses))))))))
 
     (teardown! [this test]
-      (util/map-vals #(client/teardown! % test) nemeses))))
+      (util/map-vals #(teardown-compat! % test) nemeses))))
 
 (defn set-time!
   "Set the local node time in POSIX seconds."
