@@ -28,59 +28,67 @@
              TransportClient
              NoNodeAvailableException)))
 
-(defn client
-  ([] (client nil (atom 0)))
-  ([dbspec limit]
-   (let [initialized? (promise)]
-     (reify client/Client
-       (setup! [this test node]
-         (let [dbspec (c/get-node-db-spec node)]
-           (when (deliver initialized? true)
-             (j/execute! dbspec ["create table dirty_read (
-                                 id integer primary key)"])
-             (j/execute! dbspec ["alter table dirty_read
-                                 set (number_of_replicas = \"0-all\")"]))
-           (client dbspec limit)))
+(defrecord DirtyReadClient [tbl-created? conn limit]
+  client/Client
 
-       (invoke! [this test op]
-         (timeout (case (:f op)
-                    :refresh 60000
-                    :strong-read 60000
-                    100)
-                  (assoc op :type :info, :error :timeout)
-                  (c/with-errors op
-                    (case (:f op)
-                      ; Read a specific ID
-                      :read (let [v (->> (j/query dbspec ["select id from dirty_read
-                                                          where id = ?"
-                                                          (:value op)])
-                                         first
-                                         :id)]
-                              (assoc op :type (if v :ok :fail)))
+  (setup! [this test node]
+    (let [conn (c/jdbc-client node)]
+      (info node "Connected")
+      ;; Everyone's gotta block until we've made the table.
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (c/with-conn [c conn]
+            (j/execute! c ["drop table if exists dirty_read"])
+            (info node "Creating table dirty_read")
+             (j/execute! c
+                         ["create table dirty_read (
+                          id     integer primary key)"])
+             (j/execute! c
+                         ["alter table dirty_read
+                          set (number_of_replicas = \"0-all\")"]))))
 
-                      ; Refresh table
-                      :refresh (do (j/execute! dbspec ["refresh table dirty_read"])
-                                   (assoc op :type :ok))
+      (assoc this :conn conn)))
 
-                      ; Perform a full read of all IDs
-                      :strong-read
-                      (do (->> (j/query dbspec
-                                        ["select id from dirty_read LIMIT ?"
-                                         (+ 100 @limit)]) ; who knows
-                               (map :id)
-                               (into (sorted-set))
-                               (assoc op :type :ok, :value)))
+  (invoke! [this test op]
+    (c/with-exception->op op
+      (c/with-conn [c conn]
+        (c/with-timeout
+          (c/with-txn [c c]
+            (assoc op :type :info, :error :timeout)
+            (c/with-errors op
+              (case (:f op)
+                ; Read a specific ID
+                :read (let [v (->> (c/query c  ["select id from dirty_read
+                                                    where id = ?"
+                                                    (:value op)])
+                                   first
+                                   :id)]
+                        (assoc op :type (if v :ok :fail)))
 
-                      ; Add an ID
-                      :write (do (swap! limit inc)
-                                 (j/execute! dbspec
-                                             ["insert into dirty_read (id) values (?)"
-                                              (:value op)])
-                                 (assoc op :type :ok))))))
+                ; Refresh table
+                :refresh (do (j/execute! c ["refresh table dirty_read"] 
+                                         {:timeout 60000})
+                             (assoc op :type :ok))
 
-       (teardown! [this test]
-         )))))
+                ; Perform a full read of all IDs
+                :strong-read
+                (do (->> (c/query c
+                                  ["select id from dirty_read LIMIT ?"
+                                   (+ 100 @limit)]) ; who knows
+                         (map :id)
+                         (into (sorted-set))
+                         (assoc op :type :ok, :value)))
 
+                ; Add an ID
+                :write (do (swap! limit inc)
+                           (j/execute! c
+                                       ["insert into dirty_read (id) values (?)"
+                                        (:value op)]
+                                       {:timeout c/timeout-delay})
+                           (assoc op :type :ok)))))))))
+
+        (teardown! [this test]
+                   ))
 
 (defn es-client
   "Elasticsearch based client. Wraps an underlying Crate client for some ops.
@@ -88,7 +96,7 @@
 
   :es-ops     Set of operation :f's to put through elasticsearch (instead of
   crate)"
-  ([opts] (es-client (:es-ops opts) (client) nil))
+  ([opts] (es-client (:es-ops opts) (DirtyReadClient. (atom false) nil (atom 0)) nil))
   ([es-ops crate ^TransportClient es]
    (assert (set? es-ops))
    (reify client/Client

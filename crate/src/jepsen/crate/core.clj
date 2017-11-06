@@ -9,11 +9,13 @@
                     [independent  :as independent]
                     [nemesis      :as nemesis]
                     [net          :as net]
+                    [store        :as store]
                     [tests        :as tests]
                     [util         :as util :refer [meh
                                                    timeout
                                                    with-retry]]
-                    [os           :as os]]
+                    [os           :as os]
+                    [reconnect :as rc]]
             [jepsen.os.debian     :as debian]
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util  :as cu]
@@ -39,6 +41,9 @@
              TransportClient)
            (org.elasticsearch.transport.client
              PreBuiltTransportClient)))
+
+(def timeout-delay "Default timeout for operations in ms" 10000)
+(def max-timeout "Longest timeout, in ms" 30000)
 
 (def user "crate")
 (def base-dir "/opt/crate")
@@ -159,6 +164,82 @@
   "Creates the db spec for the provided node"
   [node]
   (merge cratedb-spec {:host (name node)}))
+
+(defn close-conn
+  "Given a JDBC connection, closes it and returns the underlying spec."
+  [conn]
+  (when-let [c (j/db-find-connection conn)]
+    (.close c))
+  (dissoc conn :connection))
+
+(defn jdbc-client
+  "Constructs a jdbc client for a node, and opens it"
+  [node]
+  (rc/open!
+    (rc/wrapper
+      {:name [:crate node]
+       :open (fn open []
+               (util/timeout max-timeout
+                             (throw (RuntimeException.
+                                      (str "Connection to " node " timed out")))
+                             (let [spec (get-node-db-spec node)
+                                   conn (j/get-connection spec)
+                                   spec' (j/add-connection spec conn)]
+                               (assert spec')
+                               spec')))
+       :close close-conn
+       :log? true})))
+
+(defmacro with-conn
+  "Like jepsen.reconnect/with-conn, but also asserts that the connection has
+  not been closed. If it has, throws an ex-info with :type :conn-not-ready.
+  Delays by 1 second to allow time for the DB to recover."
+  [[c client] & body]
+  `(rc/with-conn [~c ~client]
+     (when (.isClosed (j/db-find-connection ~c))
+       (Thread/sleep 1000)
+       (throw (ex-info "Connection not yet ready."
+                       {:type :conn-not-ready})))
+     ~@body))
+
+(defmacro with-timeout
+  "Like util/timeout, but throws (RuntimeException. \"timeout\") for timeouts.
+  Throwing means that when we time out inside a with-conn, the connection state
+  gets reset, so we don't accidentally hand off the connection to a later
+  invocation with some incomplete transaction."
+  [& body]
+  `(util/timeout timeout-delay
+                 (throw (RuntimeException. "timeout"))
+                 ~@body))
+
+(defmacro with-txn
+  "Wrap a evaluation within a SQL transaction."
+  [[c conn] & body]
+  `(j/with-db-transaction [~c ~conn]
+     ~@body))
+
+(defmacro with-exception->op
+  "Takes an operation and a body. Evaluates body, catches exceptions, and maps
+  them to ops with :type :info and a descriptive :error."
+  [op & body]
+  `(try ~@body
+        (catch Exception e#
+          (if-let [ex-op# (exception->op e#)]
+            (merge ~op ex-op#)
+            (throw e#)))))
+
+(defn query
+  "Like jdbc query, but includes a default timeout in ms."
+  ([conn expr]
+   (query conn expr {}))
+  ([conn [sql & params] opts]
+   (let [s (j/prepare-statement (j/db-find-connection conn)
+                                sql
+                                {:timeout (/ timeout-delay 1000)})]
+     (try
+       (j/query conn (into [s] params) opts)
+       (finally
+         (.close s))))))
 
 (defn wait
   "Waits for crate to be healthy on the current node. Color is red,
@@ -294,3 +375,48 @@
 
             :else
             (throw e#)))))
+
+(defn exception->op
+  "Takes an exception and maps it to a partial op, like {:type :info, :error
+  ...}. nil if unrecognized."
+  [e]
+  (when-let [m (.getMessage e)]
+    (condp instance? e
+      java.sql.SQLTransactionRollbackException
+      {:type :fail, :error [:rollback m]}
+
+      java.sql.BatchUpdateException
+      (if (re-find #"getNextExc" m)
+        ; Wrap underlying exception error with [:batch ...]
+        (when-let [op (exception->op (.getNextException e))]
+          (update op :error (partial vector :batch)))
+        {:type :info, :error [:batch-update m]})
+
+      PSQLException
+      (condp re-find (.getMessage e)
+        #"Connection .+? refused"
+        {:type :fail, :error :connection-refused}
+
+        #"context deadline exceeded"
+        {:type :fail, :error :context-deadline-exceeded}
+
+        #"rejecting command with timestamp in the future"
+        {:type :fail, :error :reject-command-future-timestamp}
+
+        #"encountered previous write with future timestamp"
+        {:type :fail, :error :previous-write-future-timestamp}
+
+        #"restart transaction"
+        {:type :fail, :error [:restart-transaction m]}
+
+        {:type :info, :error [:psql-exception m]})
+
+      clojure.lang.ExceptionInfo
+      (condp = (:type (ex-data e))
+        :conn-not-ready {:type :fail, :error :conn-not-ready}
+        nil)
+
+      (condp re-find m
+        #"^timeout$"
+        {:type :info, :error :timeout}
+        nil))))
