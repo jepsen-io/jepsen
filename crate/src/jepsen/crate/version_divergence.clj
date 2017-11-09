@@ -11,6 +11,7 @@
                     [independent  :as independent]
                     [nemesis      :as nemesis]
                     [net          :as net]
+                    [reconnect    :as rc]
                     [tests        :as tests]
                     [util         :as util :refer [timeout]]
                     [os           :as os]]
@@ -21,61 +22,70 @@
             [jepsen.crate.core    :as c]
             [clojure.string       :as str]
             [clojure.java.jdbc    :as j]
+            [clojure.tools.logging :refer [info]]
             [knossos.op           :as op])
   (:import (io.crate.shade.org.postgresql.util PSQLException)))
 
-(defn client
-  ([] (client nil))
-  ([dbspec]
-   (let [initialized? (promise)]
-     (reify client/Client
-       (setup! [this test node]
-         (let [dbspec (c/get-node-db-spec node)]
-           (when (deliver initialized? true)
-             (j/execute! dbspec
+(defrecord VersionDivergenceClient [tbl-created? conn]
+  client/Client
+
+  (setup! [this test node]
+    (let [conn (c/jdbc-client node)]
+      (info node "Connected")
+      ;; Everyone's gotta block until we've made the table.
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          (c/with-conn [c conn]
+            (j/execute! c ["drop table if exists registers"])
+            (info node "Creating table registers")
+             (j/execute! c
                          ["create table if not exists registers (
                           id     integer primary key,
                           value  integer)"])
-             (j/execute! dbspec
+             (j/execute! c
                          ["alter table registers
-                          set (number_of_replicas = \"0-all\")"]))
-           (client dbspec)))
+                          set (number_of_replicas = \"0-all\")"]))))
 
-       (invoke! [this test op]
-         (let [[k v] (:value op)]
-           (timeout 500 (assoc op :type :fail, :error :timeout)
-                    (try
-                      (case (:f op)
-                        :read (->> (j/query dbspec ["select value, \"_version\"
-                                                    from registers where id = ?" k])
-                                   first
-                                   (independent/tuple k)
-                                   (assoc op :type :ok, :value))
+      (assoc this :conn conn)))
 
-                        :write (let [res (j/execute! dbspec
-                                                     ["insert into registers (id, value)
-                                                      values (?, ?)
-                                                      on duplicate key update
-                                                      value = VALUES(value)" k v])]
-                                 (assoc op :type :ok)))
+  (invoke! [this test op]
+    (c/with-exception->op op
+      (c/with-conn [c conn]
+        (c/with-timeout
+          (try
+            (c/with-txn [c c]
+              (let [[k v] (:value op)]
+                (case (:f op)
+                  :read (->> (c/query c ["select value, \"_version\"
+                                         from registers where id = ?" k])
+                             first
+                             (independent/tuple k)
+                             (assoc op :type :ok, :value))
+                  :write (let [res (j/execute! c 
+                                               ["insert into registers (id, value)
+                                                values (?, ?)
+                                                on duplicate key update
+                                                value = VALUES(value)" k v] 
+                                               {:timeout c/timeout-delay})]
+                           (assoc op :type :ok)))))
 
-                      (catch PSQLException e
-                        (cond
-                          (and (= 0 (.getErrorCode e))
-                               (re-find #"blocked by: \[.+no master\];" (str e)))
-                          (assoc op :type :fail, :error :no-master)
+            (catch PSQLException e
+              (cond
+                (and (= 0 (.getErrorCode e))
+                     (re-find #"blocked by: \[.+no master\];" (str e)))
+                (assoc op :type :fail, :error :no-master)
 
-                          (and (= 0 (.getErrorCode e))
-                               (re-find #"rejected execution" (str e)))
-                          (do ; Back off a bit
-                              (Thread/sleep 1000)
-                              (assoc op :type :info, :error :rejected-execution))
+                (and (= 0 (.getErrorCode e))
+                     (re-find #"rejected execution" (str e)))
+                (do ; Back off a bit
+                    (Thread/sleep 1000)
+                    (assoc op :type :info, :error :rejected-execution))
 
-                          :else
-                          (throw e)))))))
+                :else
+                (throw e))))))))
 
-       (teardown! [this test]
-         )))))
+  (teardown! [this test]
+    (rc/close! conn)))
 
 (defn multiversion-checker
   "Ensures that every _version for a read has the *same* value."
@@ -105,7 +115,7 @@
          {:name    "version-divergence"
           :os      debian/os
           :db      (c/db (:tarball opts))
-          :client  (client)
+          :client  (VersionDivergenceClient. (atom false) nil) 
           :checker (checker/compose
                      {:multi    (independent/checker (multiversion-checker))
                       :timeline (timeline/html)
