@@ -31,6 +31,12 @@
 
 - [ ] Deprecate model argument in checker; these should be arguments to checker
   constructors instead.
+- [ ] Deprecate keyword hosts; this was a silly idea and the minor improvement
+  in readability isn't really worth it.
+- [ ] Macro like (synchronize-nodes test), which enforces a synchronization
+  barrier where (count nodes threads) must come to sync on the test map.
+- [ ] jepsen.control/upload should take java.io.Files as well as strings, and
+  use .getCanonicalPath to figure out what to upload. Maybe return remote path?
 
 ## Extensions
 
