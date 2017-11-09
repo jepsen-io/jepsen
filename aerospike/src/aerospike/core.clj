@@ -12,6 +12,7 @@
                     [model     :as model]
                     [generator :as gen]
                     [nemesis   :as nemesis]
+                    [os        :as os]
                     [store     :as store]
                     [report    :as report]
                     [tests     :as tests]]
@@ -35,6 +36,7 @@
                                         WritePolicy)))
 
 (def local-package-dir
+  "Local directory for Aerospike packages."
   "packages/")
 
 (def remote-package-dir
@@ -96,29 +98,42 @@
 ;;; asinfo utilities:
 (defn poll
   [poll-fn, check-fn]
-  (loop []
+  (loop [tries 30]
+    (when (zero? tries)
+      (throw (RuntimeException. "Timed out!")))
     (let [result (poll-fn)]
       (if (check-fn result)
         result
-        (do (Thread/sleep 1000) (recur))))))
+        (do (Thread/sleep 1000)
+            (recur (dec tries)))))))
 
 (defn wait-for-all-nodes-observed
   [namespace]
+  (info "Waiting for all nodes observed")
   (poll (fn [] (:observed_nodes (asinfo-roster namespace)))
-        (fn [result] (= (str-list-count result) 5))))
+        (fn [result]
+          (info result)
+          (= (str-list-count result) 5))))
 
 (defn wait-for-all-nodes-pending
   [namespace]
+  (info "Waiting for all nodes pending")
   (poll (fn [] (:pending_roster (asinfo-roster namespace)))
-        (fn [result] (= (str-list-count result) 5))))
+        (fn [result]
+          (info result)
+          (= (str-list-count result) 5))))
 
 (defn wait-for-all-nodes-active
   [namespace]
+  (info "Waiting for all nodes active")
   (poll (fn [] (:roster (asinfo-roster namespace)))
-        (fn [result] (= (str-list-count result) 5))))
+        (fn [result]
+          (info result)
+          (= (str-list-count result) 5))))
 
 (defn wait-for-migrations
   []
+  (info "Waiting for migrations")
   (poll (fn [] (asinfo-statistics))
         (fn [stats] (and (= (:migrate_allowed stats) "true")
                          (= (:migrate_partitions_remaining stats) 0)))))
@@ -168,27 +183,52 @@
     ; Wait more
     client))
 
-;;; Server setup:
+;;; Server setup
+
+(defn local-packages
+  "An array of canonical paths for local packages, from local-package-dir.
+  Ensures that we have all required deb packages."
+  []
+  (let [files (->> (io/file local-package-dir)
+                   (.listFiles)
+                   (keep (fn [^java.io.File f]
+                           (let [name (.getName f)]
+                             (when (re-find #"\.deb$" (.getName f))
+                               [name f]))))
+                   (into (sorted-map)))]
+    (assert (some (partial re-find #"aerospike-server") (keys files))
+            (str "Expected an aerospike-server .deb in " local-package-dir))
+    (assert (some (partial re-find #"aerospike-tools") (keys files))
+            (str "Expected an aerospike-tools .deb in " local-package-dir))
+    files))
+
 (defn install!
   [node]
   (info node "Installing Aerospike packages")
   (c/su
    (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
-   (debian/install ["python"])
+   (debian/install ["python" "faketime" "psmisc"])
    (c/exec :mkdir :-p remote-package-dir)
-   (doseq [local-package (for [lp (.listFiles (io/file local-package-dir))
-                               :when (.endsWith (.getName lp) ".deb")]
-                           lp)]
+   (c/exec :chmod :a+rwx remote-package-dir)
+   (doseq [[name file] (local-packages)]
      (c/trace
-      (c/upload (.getCanonicalPath (io/file local-package))
-                remote-package-dir)
-      (c/exec :dpkg :-i (str remote-package-dir (.getName local-package))))))
-  ;; Replace /usr/bin/asd with a wrapper that skews time a bit
-  (c/exec :mv "/usr/bin/asd" "/usr/local/bin/asd")
-  (c/exec :echo
-          "#!/bin/bash\nfaketime -m -f \"+$((RANDOM%20))s x1.${RANDOM}\" /usr/local/bin/asd" :> "/usr/bin/asd")
-  (c/exec :chmod "0755" "/usr/bin/asd")
-  )
+       (c/upload (.getCanonicalPath file) remote-package-dir))
+       (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
+
+   ; sigh
+   (c/exec :systemctl :daemon-reload)
+
+   ; debian packages don't do this?
+   (c/exec :mkdir :-p "/var/log/aerospike")
+   (c/exec :chown "aerospike:aerospike" "/var/log/aerospike")
+   (c/exec :mkdir :-p "/var/run/aerospike")
+   (c/exec :chown "aerospike:aerospike" "/var/run/aerospike")
+
+   ;; Replace /usr/bin/asd with a wrapper that skews time a bit
+   (c/exec :mv "/usr/bin/asd" "/usr/local/bin/asd")
+   (c/exec :echo
+           "#!/bin/bash\nfaketime -m -f \"+$((RANDOM%20))s x1.${RANDOM}\" /usr/local/bin/asd $*" :> "/usr/bin/asd")
+   (c/exec :chmod "0755" "/usr/bin/asd")))
 
 (defn configure!
   "Uploads configuration files to the given node."
@@ -207,12 +247,13 @@
 (defn start!
   "Starts aerospike."
   [node test]
-  (info node "Starting...")
   (jepsen/synchronize test)
+  (info node "Starting...")
   (c/su (c/exec :service :aerospike :start))
+  (info node "Started")
   (jepsen/synchronize test) ;; Wait for all servers to start
 
-  (when (identical? node :n1)
+  (when (= node (jepsen/primary test))
     (asinfo-roster-set! "jepsen" (wait-for-all-nodes-observed "jepsen"))
     (wait-for-all-nodes-pending "jepsen")
     (asadm-recluster!))
@@ -480,8 +521,12 @@
   [name opts]
   (merge tests/noop-test
          {:name    (str "aerospike " name)
-          :os      debian/os
+          :os      os/noop
           :db      (db)
+          :ssh     {:username "admin"
+                    :password ""}
+          :nodes   (-> (slurp "/home/admin/nodes")
+                       (str/split #"\n"))
           :model   (model/cas-register)
           :checker (checker/compose {:linear checker/linearizable
                                      :perf (checker/perf)})

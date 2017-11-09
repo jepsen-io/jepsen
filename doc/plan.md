@@ -2,6 +2,7 @@
 
 ## Error handling
 
+- [ ] When tracing SSH commands in jepsen.control, log the node name too
 - [ ] When calling methods in jepsen.control, it'd be nice if thrown
   com.jcraft.jsch.JSchException's would also log debugging info about the node,
   username, password, etc.
