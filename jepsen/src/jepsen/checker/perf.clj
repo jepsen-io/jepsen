@@ -227,20 +227,24 @@
         fs->points  (fs->points fs)
         output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
                                                     "latency-raw.png"))]
-    (g/raw-plot!
-      (concat (latency-preamble test output-path)
-              (nemesis-regions history)
-              ; Plot ops
-              [['plot (apply g/list
-                             (for [f fs, t types]
-                               ["-"
-                                'with        'points
-                                'linetype    (type->color t)
-                                'pointtype   (fs->points f)
-                                'title       (str (util/name+ f) " "
-                                                  (name t))]))]])
-      (for [f fs, t types]
-        (map latency-point (get-in datasets [f t]))))
+    (try
+      (g/raw-plot!
+       (concat (latency-preamble test output-path)
+               (nemesis-regions history)
+               ; Plot ops
+               [['plot (apply g/list
+                              (for [f fs, t types]
+                                ["-"
+                                 'with        'points
+                                 'linetype    (type->color t)
+                                 'pointtype   (fs->points f)
+                                 'title       (str (util/name+ f) " "
+                                                   (name t))]))]])
+       (for [f fs, t types]
+         (map latency-point (get-in datasets [f t]))))
+
+      (catch java.io.IOException _
+        (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))
 
     output-path))
 
@@ -265,20 +269,24 @@
         output-path (.getCanonicalPath
                       (store/path! test (:subdirectory opts)
                                    "latency-quantiles.png"))]
-    (g/raw-plot!
-      (concat (latency-preamble test output-path)
-              (nemesis-regions history)
-              ; Plot ops
-              [['plot (apply g/list
-                             (for [f fs, q qs]
-                               ["-"
-                                'with        'linespoints
-                                'linetype    (qs->colors q)
-                                'pointtype   (fs->points f)
-                                'title       (str (util/name+ f) " "
-                                                  q)]))]])
-      (for [f fs, q qs]
-        (get-in datasets [f q])))
+    (try
+      (g/raw-plot!
+       (concat (latency-preamble test output-path)
+               (nemesis-regions history)
+                                        ; Plot ops
+               [['plot (apply g/list
+                              (for [f fs, q qs]
+                                ["-"
+                                 'with        'linespoints
+                                 'linetype    (qs->colors q)
+                                 'pointtype   (fs->points f)
+                                 'title       (str (util/name+ f) " "
+                                                   q)]))]])
+       (for [f fs, q qs]
+         (get-in datasets [f q])))
+
+      (catch java.io.IOException _
+        (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))
 
     output-path))
 
@@ -288,8 +296,6 @@
   (concat (preamble output-path)
           [[:set :title (str (:name test) " rate")]]
           '[[set ylabel "Throughput (hz)"]]))
-
-
 
 (defn rate-graph!
   "Writes a plot of operation rate by their completion times."
@@ -307,26 +313,30 @@
                                                  (:type op)
                                                  (bucket-time dt
                                                               (util/nanos->secs
-                                                                (:time op)))]
+                                                               (:time op)))]
                                               #(+ td (or % 0))))
                                  {}))
         fs          (util/polysort (keys datasets))
         fs->points  (fs->points fs)
         output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
                                                     "rate.png"))]
-    (g/raw-plot!
-      (concat (rate-preamble test output-path)
-              (nemesis-regions history)
-              ; Plot ops
-              [['plot (apply g/list
-                             (for [f fs, t types]
-                               ["-"
-                                'with         'linespoints
-                                'linetype     (type->color t)
-                                'pointtype    (fs->points f)
-                                'title        (str (util/name+ f) " "
-                                                   (name t))]))]])
-      (for [f fs, t types]
-        (let [m (get-in datasets [f t])]
-          (->> (buckets dt t-max)
-               (map (juxt identity #(get m % 0)))))))))
+    (try
+      (g/raw-plot!
+       (concat (rate-preamble test output-path)
+               (nemesis-regions history)
+               ; Plot ops
+               [['plot (apply g/list
+                              (for [f fs, t types]
+                                ["-"
+                                 'with         'linespoints
+                                 'linetype     (type->color t)
+                                 'pointtype    (fs->points f)
+                                 'title        (str (util/name+ f) " "
+                                                    (name t))]))]])
+       (for [f fs, t types]
+         (let [m (get-in datasets [f t])]
+           (->> (buckets dt t-max)
+                (map (juxt identity #(get m % 0)))))))
+
+      (catch java.io.IOException _
+        (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))))
