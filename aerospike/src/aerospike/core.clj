@@ -528,7 +528,7 @@
           :nodes   (-> (slurp "/home/admin/nodes")
                        (str/split #"\n"))
           :model   (model/cas-register)
-          :checker (checker/compose {:linear checker/linearizable
+          :checker (checker/compose {:linear (checker/linearizable)
                                      :perf (checker/perf)})
           :nemesis (nemesis/partition-random-halves)}
          opts))
@@ -553,5 +553,5 @@
                                    gen/mix
                                    (gen/delay 1/100)
                                    std-gen)
-                   :checker   (checker/compose {:counter checker/counter
+                   :checker   (checker/compose {:counter (checker/counter)
                                                 :perf    (checker/perf)})}))
