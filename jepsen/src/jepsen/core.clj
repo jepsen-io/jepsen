@@ -18,6 +18,7 @@
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [knossos.core :as knossos]
+            [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
                                           fcatch
                                           real-pmap
@@ -476,6 +477,8 @@
                                    (when (:name test) (store/save-1! test))
                                    test))))))))
               _    (info "Analyzing")
+              ; Give each op in the history a monotonically increasing index
+              test (assoc test :history (history/index (:history test)))
               test (assoc test :results (checker/check-safe
                                           (:checker test)
                                           test
