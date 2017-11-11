@@ -269,7 +269,8 @@
                                                       [dir k])
                                        results (check-safe
                                                  checker test model h
-                                                 {:subdirectory subdir})]
+                                                 {:subdirectory subdir
+                                                  :history-key  k})]
                                    ; Write analysis
                                    (store/with-out-file test [subdir
                                                               "results.edn"]

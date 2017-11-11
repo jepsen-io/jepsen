@@ -51,6 +51,19 @@
                                 (pairs (dissoc invocations (:process op))
                                        ops))))))))
 
+(defn title [op start stop]
+  (str (when (and (= :nemesis (:process op)) (:value start)) (str (:value start) "\n"))
+       (when stop (str (long (util/nanos->ms
+                              (- (:time stop) (:time start))))
+                       " ms\n"))
+       (pr-str (:error op))))
+
+(defn body
+  [op start stop]
+  (str (:process op) " " (name+ (:f op)) " " (when (not= :nemesis (:process op)) (:value start))
+       (when (not= (:value start) (:value stop))
+         (str "<br />" (:value stop)))))
+
 (defn pair->div
   "Turns a pair of start/stop operations into a div."
   [history process-index [start stop]]
@@ -58,28 +71,43 @@
         op (or stop start)
         s {:width  col-width
            :left   (* gutter-width (get process-index p))
-           :top    (* height (:index start))}]
-    [:div {:class (str "op " (name (:type op)))
-           :style (style (cond (= :info (:type stop))
-                               (assoc s :height (* height
-                                                   (- (inc (count history))
-                                                      (:index start))))
+           :top    (* height (:sub-index start))}]
+    [:a {:href (str "#i" (:index op))}
+     [:div {:class (str "op " (name (:type op)))
+            :id (str "i" (:index op))
+            :style (style (cond (= :info (:type stop))
+                                (assoc s :height (* height
+                                                    (- (inc (count history))
+                                                       (:sub-index start))))
 
-                               stop
-                               (assoc s :height (* height
-                                                   (- (:index stop)
-                                                      (:index start))))
+                                stop
+                                (assoc s :height (* height
+                                                    (- (:sub-index stop)
+                                                       (:sub-index start))))
 
-                               true
-                               (assoc s :height height)))
-           :title (str (when (and (= :nemesis (:process op)) (:value start)) (str (:value start) "\n"))
-                       (when stop (str (long (util/nanos->ms
-                                              (- (:time stop) (:time start))))
-                                       " ms\n"))
-                       (pr-str (:error op)))}
-     (str (:process op) " " (name+ (:f op)) " " (when (not= :nemesis (:process op)) (:value start))
-          (when (not= (:value start) (:value stop))
-            (str "<br />" (:value stop))))]))
+                                true
+                                (assoc s :height height)))
+            :title (title op start stop)}
+      (body op start stop)]]))
+
+(defn linkify-time
+  "Remove - and : chars from a time string"
+  [t]
+  (clojure.string/replace t #"-|:" ""))
+
+(defn breadcrumbs
+  "Renders a series of back links increasing in depth"
+  [test history-key]
+  (let [files-name (str "/files/" (:name test))
+        start-time (linkify-time (str (:start-time test)))
+        indep      "independent"
+        key        (str history-key)]
+    [:div
+     [:a {:href "/"} "jepsen"] " / "
+     [:a {:href files-name} (str (:name test))] " / "
+     [:a {:href (str files-name "/" start-time)} start-time] " / "
+     [:a {:href (str files-name "/" start-time "/" )} indep] " / "
+     [:a {:href (str files-name "/" start-time "/" indep "/" key)} key]]))
 
 (defn process-index
   "Maps processes to columns"
@@ -90,6 +118,14 @@
        (reduce (fn [m p] (assoc m p (count m)))
                {})))
 
+(defn sub-index
+  "Attaches a :sub-index key to each element of this timeline's subhistory,
+  identifying its relative position."
+  [history]
+  (->> history
+       (mapv (fn [i op] (assoc op :sub-index i)) (range))
+       vec))
+
 (defn html
   []
   (reify checker/Checker
@@ -98,12 +134,12 @@
                     [:head
                      [:style stylesheet]]
                     [:body
-                     [:h1 (:name test)]
-                     [:p  (str (:start-time test))]
+                     (breadcrumbs test (:history-key opts))
+                     [:h1 (str (:name test) " key " (:history-key opts))]
                      [:div {:class "ops"}
                       (->> history
                            history/complete
-                           history/index
+                           sub-index
                            pairs
                            (map (partial pair->div
                                          history
