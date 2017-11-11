@@ -71,19 +71,19 @@
         op (or stop start)
         s {:width  col-width
            :left   (* gutter-width (get process-index p))
-           :top    (* height (:t-index start))}]
+           :top    (* height (:sub-index start))}]
     [:a {:href (str "#i" (:index op))}
      [:div {:class (str "op " (name (:type op)))
             :id (str "i" (:index op))
             :style (style (cond (= :info (:type stop))
                                 (assoc s :height (* height
                                                     (- (inc (count history))
-                                                       (:t-index start))))
+                                                       (:sub-index start))))
 
                                 stop
                                 (assoc s :height (* height
-                                                    (- (:t-index stop)
-                                                       (:t-index start))))
+                                                    (- (:sub-index stop)
+                                                       (:sub-index start))))
 
                                 true
                                 (assoc s :height height)))
@@ -118,12 +118,12 @@
        (reduce (fn [m p] (assoc m p (count m)))
                {})))
 
-(defn t-index
-  "Attaches a :t-index key to each element of the history, identifying its
-  position in the timeline."
+(defn sub-index
+  "Attaches a :sub-index key to each element of this timeline's subhistory,
+  identifying its relative position."
   [history]
   (->> history
-       (mapv (fn [i op] (assoc op :t-index i)) (range))
+       (mapv (fn [i op] (assoc op :sub-index i)) (range))
        vec))
 
 (defn html
@@ -139,7 +139,7 @@
                      [:div {:class "ops"}
                       (->> history
                            history/complete
-                           t-index
+                           sub-index
                            pairs
                            (map (partial pair->div
                                          history
