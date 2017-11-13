@@ -54,7 +54,7 @@
 
 (defn nemesis? [op] (= :nemesis (:process op)))
 
-(defn render-op    [op] (str "Op:\n" (pr-str op)))
+(defn render-op    [op] (str "Op:\n" (pprint-str op)))
 (defn render-msg   [op] (str "Msg: " (pr-str (:value op))))
 (defn render-error [op] (str "Err: " (pr-str (:error op))))
 
