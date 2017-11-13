@@ -22,12 +22,12 @@
 
 (def stylesheet
   (str ".ops        { position: absolute; }\n"
-       ".op         { position: absolute;
-                      padding:  2px; }\n"
+       ".op         { position: absolute; padding: 2px; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); transition: all 0.3s cubic-bezier(.25,.8,.25,1); }\n"
        ".op.invoke  { background: #eeeeee; }\n"
        ".op.ok      { background: #6DB6FE; }\n"
        ".op.info    { background: #FFAA26; }\n"
-       ".op.fail    { background: #FEB5DA; }\n"))
+       ".op.fail    { background: #FEB5DA; }\n"
+       ".op:target  { box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); }\n"))
 
 (defn pairs
   "Pairs up ops from each process in a history. Yields a lazy sequence of [info]
@@ -52,11 +52,14 @@
                                        ops))))))))
 
 (defn title [op start stop]
-  (str (when (and (= :nemesis (:process op)) (:value start)) (str (:value start) "\n"))
-       (when stop (str (long (util/nanos->ms
-                              (- (:time stop) (:time start))))
-                       " ms\n"))
-       (pr-str (:error op))))
+  (let [nemesis? (and (= :nemesis (:process op))
+                      (:value start))]
+    (str (when nemesis?
+           (str (:value start) "\n"))
+         (when stop
+           (str (long (util/nanos->ms (- (:time stop) (:time start))))
+                " ms\n"))
+         (pr-str (:error op)))))
 
 (defn body
   [op start stop]
