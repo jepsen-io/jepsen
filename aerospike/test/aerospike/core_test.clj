@@ -9,6 +9,6 @@
   (let [test (jepsen/run! (cas-register-test))]
     (is (:valid? (:results test)))))
 
-(deftest counter
-  (let [test (jepsen/run! (counter-test))]
-    (is (:valid? (:results test)))))
+;(deftest counter
+;  (let [test (jepsen/run! (counter-test))]
+;    (is (:valid? (:results test)))))
