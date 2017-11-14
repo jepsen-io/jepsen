@@ -2,9 +2,10 @@
   "Renders an HTML timeline of a history."
   (:require [clojure.core.reducers :as r]
             [clojure.string :as str]
+            [clj-time.coerce :as t-coerce]
             [hiccup.core :as h]
             [knossos.history :as history]
-            [jepsen.util :as util :refer [name+]]
+            [jepsen.util :as util :refer [name+ pprint-str]]
             [jepsen.store :as store]
             [jepsen.checker :as checker]))
 
@@ -22,12 +23,12 @@
 
 (def stylesheet
   (str ".ops        { position: absolute; }\n"
-       ".op         { position: absolute;
-                      padding:  2px; }\n"
+       ".op         { position: absolute; padding: 2px; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); transition: all 0.3s cubic-bezier(.25,.8,.25,1); }\n"
        ".op.invoke  { background: #eeeeee; }\n"
        ".op.ok      { background: #6DB6FE; }\n"
        ".op.info    { background: #FFAA26; }\n"
-       ".op.fail    { background: #FEB5DA; }\n"))
+       ".op.fail    { background: #FEB5DA; }\n"
+       ".op:target  { box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); }\n"))
 
 (defn pairs
   "Pairs up ops from each process in a history. Yields a lazy sequence of [info]
@@ -51,22 +52,51 @@
                                 (pairs (dissoc invocations (:process op))
                                        ops))))))))
 
-(defn title [op start stop]
-  (str (when (and (= :nemesis (:process op)) (:value start)) (str (:value start) "\n"))
-       (when stop (str (long (util/nanos->ms
-                              (- (:time stop) (:time start))))
-                       " ms\n"))
-       (pr-str (:error op))))
+(defn nemesis? [op] (= :nemesis (:process op)))
+
+(defn render-op    [op] (str "Op:\n" (pprint-str op)))
+(defn render-msg   [op] (str "Msg: " (pr-str (:value op))))
+(defn render-error [op] (str "Err: " (pr-str (:error op))))
+
+(defn render-duration [start stop]
+  (let [stop (:time stop)
+        start (:time start)
+        dur (->> start
+                 (- stop)
+                 util/nanos->ms
+                 long)]
+    (str "Dur: " dur " ms")))
+
+(defn render-wall-time [test op]
+  (let [start (-> test :start-time t-coerce/to-long)
+        op    (-> op :time util/nanos->ms long)
+        w     (t-coerce/from-long (+ start op))]
+    (str "Wall-clock Time: " w)))
+
+(defn title [test op start stop]
+  (str (when (nemesis? op) (render-msg start))
+       (when stop          (render-duration start stop))
+       "\n"
+       (render-error op)
+       "\n"
+       (render-wall-time test op)
+       "\n"
+       "\n"
+       (render-op op)))
 
 (defn body
   [op start stop]
-  (str (:process op) " " (name+ (:f op)) " " (when (not= :nemesis (:process op)) (:value start))
-       (when (not= (:value start) (:value stop))
-         (str "<br />" (:value stop)))))
+  (let [same-pair-values? (= (:value start) (:value stop))]
+    (str (:process op)
+         " "
+         (name+ (:f op))
+         " "
+         (when-not (nemesis? op) (:value start))
+         (when-not same-pair-values? (str "<br />" (:value stop))))))
 
 (defn pair->div
   "Turns a pair of start/stop operations into a div."
-  [history process-index [start stop]]
+  [history test process-index [start stop]]
   (let [p (:process start)
         op (or stop start)
         s {:width  col-width
@@ -87,7 +117,7 @@
 
                                 true
                                 (assoc s :height height)))
-            :title (title op start stop)}
+            :title (title test op start stop)}
       (body op start stop)]]))
 
 (defn linkify-time
@@ -143,6 +173,7 @@
                            pairs
                            (map (partial pair->div
                                          history
+                                         test
                                          (process-index history))))]]])
            (spit (store/path! test (:subdirectory opts) "timeline.html")))
       {:valid? true})))

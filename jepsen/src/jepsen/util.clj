@@ -265,8 +265,11 @@
     ~@body
      (nanos->ms (- (System/nanoTime) t0#))))
 
+(defn pprint-str [x]
+  (with-out-str (pprint x)))
+
 (defn spy [x]
-  (info (with-out-str (pprint x)))
+  (info (pprint-str x))
   x)
 
 (defmacro timeout
