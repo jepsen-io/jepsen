@@ -10,18 +10,18 @@
                     [control   :as c :refer [|]]
                     [client    :as client]
                     [checker   :as checker]
-                    [model     :as model]
                     [generator :as gen]
+                    [independent :as independent]
                     [nemesis   :as nemesis]
                     [os        :as os]
                     [store     :as store]
-                    [report    :as report]
                     [tests     :as tests]]
             [jepsen.control [net :as net]
                             [util :as net/util]]
+            [jepsen.checker.timeline :as timeline]
             [jepsen.nemesis.time :as nt]
             [jepsen.os.debian :as debian]
-            [knossos.core :as knossos]
+            [knossos.model :as model]
             [wall.hack])
   (:import (clojure.lang ExceptionInfo)
            (com.aerospike.client AerospikeClient
@@ -105,22 +105,18 @@
   it can't connect."
   [node]
   (with-retry [tries 10]
-    (info "Creating client")
     (AerospikeClient. node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
-      (info "Retrying client creation for" node "-" (.getMessage e))
+      (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
 
 (defn connect
   "Returns a client for the given node. Blocks until the client is available."
   [node]
-  (info "Client is attempting to connect")
-
   ;; FIXME - client no longer blocks till cluster is ready.
-
   (let [client (create-client node)]
     ; Wait for connection
     (while (not (.isConnected client))
@@ -132,8 +128,6 @@
                 (catch AerospikeException$Timeout e
                   true))
       (Thread/sleep 10))
-    ; Wait more
-
     client))
 
 ;;; asinfo commands:
@@ -243,7 +237,7 @@
    ;(c/exec :echo
    ;        "#!/bin/bash\nfaketime -m -f \"+$((RANDOM%20))s x1.${RANDOM}\" /usr/local/bin/asd $*" :> "/usr/bin/asd")
    ;(c/exec :chmod "0755" "/usr/bin/asd")))
-   )
+   ))
 
 (defn configure!
   "Uploads configuration files to the given node."
@@ -327,12 +321,12 @@
     (set! (.socketTimeout p) 10000)
     p))
 
-;; (def ^Policy linearize-read-policy
-;;   "Policy needed for linearizability testing."
-;;   ;; FIXME - need supported client - prefer to install client from packages/.
-;;   (let [p (Policy. policy)]
-;;     (set! (.linearizeReads p) true)
-;;     p))
+(def ^Policy linearize-read-policy
+   "Policy needed for linearizability testing."
+   ;; FIXME - need supported client - prefer to install client from packages/.
+   (let [p (Policy. policy)]
+     (set! (.linearizeRead p) true)
+     p))
 
 (def ^WritePolicy write-policy
   (let [p (WritePolicy. policy)]
@@ -379,10 +373,9 @@
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
   set, and key. Returns nil if no record found."
-  ;; FIXME - use linearize-read-policy.
   [^AerospikeClient client namespace set key]
   (-> client
-      (.get policy (Key. namespace set key))
+      (.get linearize-read-policy (Key. namespace set key))
       record->map))
 
 (defn cas!
@@ -442,32 +435,35 @@
            22 (assoc ~op :type :fail, :error :forbidden)
            (throw e#))))))
 
-(defrecord CasRegisterClient [client namespace set key]
+(defrecord CasRegisterClient [client namespace set]
   client/Client
   (setup! [this test node]
     (let [client (connect node)]
-      (Thread/sleep 10000)
+      (Thread/sleep 10000) ; TODO: remove?
       (assoc this :client client)))
 
   (invoke! [this test op]
     (with-errors op #{:read}
-      (case (:f op)
-        :read (assoc op
-                     :type :ok,
-                     :value (-> client (fetch namespace set key) :bins :value))
+      (let [[k v] (:value op)]
+        (case (:f op)
+          :read (assoc op
+                       :type :ok,
+                       :value (independent/tuple
+                                k (-> client (fetch namespace set k)
+                                      :bins :value)))
 
-        :cas   (let [[v v'] (:value op)]
-                 (cas! client namespace set key
-                       (fn [r]
-                         ; Verify that the current value is what we're cas'ing
-                         ; from
-                         (when (not= v (:value r))
-                           (throw (ex-info "skipping cas" {})))
-                         {:value v'}))
-                 (assoc op :type :ok))
+          :cas   (let [[v v'] v]
+                   (cas! client namespace set k
+                         (fn [r]
+                           ; Verify that the current value is what we're cas'ing
+                           ; from
+                           (when (not= v (:value r))
+                             (throw (ex-info "skipping cas" {})))
+                           {:value v'}))
+                   (assoc op :type :ok))
 
-        :write (do (put! client namespace set key {:value (:value op)})
-                   (assoc op :type :ok)))))
+          :write (do (put! client namespace set k {:value v})
+                     (assoc op :type :ok))))))
 
   (teardown! [this test]
     (close client)))
@@ -475,13 +471,13 @@
 (defn cas-register-client
   "A basic CAS register on top of a single key and bin."
   []
-  (CasRegisterClient. nil ans "cats" "mew"))
+  (CasRegisterClient. nil ans "cats"))
 
 (defrecord CounterClient [client namespace set key]
   client/Client
   (setup! [this test node]
     (let [client (connect node)]
-      (Thread/sleep 3000)
+      (Thread/sleep 3000) ; TODO: remove?
       (put! client namespace set key {:value 0})
       (assoc this :client client)))
 
@@ -526,11 +522,11 @@
   (gen/phases
     (->> gen
          (gen/nemesis
-           (gen/seq (cycle [(gen/sleep 2)
+           (gen/seq (cycle [(gen/sleep 5)
                             {:type :info :f :start}
-                            (gen/sleep 10)
+                            (gen/sleep 5)
                             {:type :info :f :stop}])))
-         (gen/time-limit 60))
+         (gen/time-limit 120))
     ; Recover
     (gen/nemesis
       (gen/once {:type :info :f :stop}))
@@ -550,21 +546,29 @@
           :nodes   (-> (slurp "/home/admin/nodes")
                        (str/split #"\n"))
           :model   (model/cas-register)
-          :checker (checker/compose {:linear (checker/linearizable)
-                                     :perf (checker/perf)})
-          :nemesis (nemesis/partition-random-halves)}
+          :nemesis (nemesis/partition-majorities-ring)}
          opts))
 
 (defn cas-register-test
   []
   (aerospike-test "cas register"
                   {:client    (cas-register-client)
-;                   :nemesis   (nemesis/hammer-time "asd")
-;                   :nemesis   (nemesis/noop)
-                   :generator (->> [r w cas cas cas]
-                                   gen/mix
-                                   (gen/delay 1)
-                                   std-gen)}))
+                   :checker (checker/compose
+                              {:linear (independent/checker
+                                         (checker/linearizable))
+                               :timeline (independent/checker
+                                           (timeline/html))
+                               :perf   (checker/perf)})
+                   :concurrency 100
+                   :generator (std-gen
+                                (independent/concurrent-generator
+                                  10
+                                  (range)
+                                  (fn [k]
+                                    (->> [r w cas cas cas]
+                                         gen/mix
+                                         (gen/stagger 1)
+                                         (gen/limit 150)))))}))
 
 (defn counter-test
   []

@@ -38,6 +38,8 @@
   barrier where (count nodes threads) must come to sync on the test map.
 - [ ] jepsen.control/upload should take java.io.Files as well as strings, and
   use .getCanonicalPath to figure out what to upload. Maybe return remote path?
+- [ ] Extract jepsen.model models and move them into knossos.model; delete
+  jepsen.model.
 
 ## Extensions
 
