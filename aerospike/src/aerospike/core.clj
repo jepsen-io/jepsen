@@ -417,7 +417,7 @@
 
        ;; Connection errors could be either successful or failing
        (catch AerospikeException$Connection e#
-         (assoc ~op :type error-type#, :error :timeout))
+         (assoc ~op :type error-type#, :error :connection))
 
        (catch ExceptionInfo e#
          (case (.getMessage e#)
@@ -430,9 +430,14 @@
          (case (.getResultCode e#)
            ; Generation error; CAS can't have taken place.
            3 (assoc ~op :type :fail, :error :generation-mismatch)
-           ;; Unavailable error: CAS can't have taken place.
-           11 (assoc ~op :type :fail, :error :unavailable)
-           22 (assoc ~op :type :fail, :error :forbidden)
+
+           ;; Unavailable error: CAS can't have taken place. THEORETICALLY.
+           ;; In reality, it looks like these succeed anyway.
+           11 (assoc ~op :type error-type#, :error [:unavailable
+                                                    (.getMessage e#)])
+
+           ;; Forbidden
+           22 (assoc ~op :type :fail, :error [:forbidden (.getMessage e#)])
            (throw e#))))))
 
 (defrecord CasRegisterClient [client namespace set]
@@ -565,10 +570,9 @@
                                   10
                                   (range)
                                   (fn [k]
-                                    (->> [r w cas cas cas]
-                                         gen/mix
+                                    (->> (gen/reserve 5 r (gen/mix [w cas cas]))
                                          (gen/stagger 1)
-                                         (gen/limit 150)))))}))
+                                         (gen/limit 80)))))}))
 
 (defn counter-test
   []
