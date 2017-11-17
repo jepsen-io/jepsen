@@ -6,8 +6,8 @@
             [jepsen.db :as db]
             [jepsen.client :as client]
             [jepsen.generator :as gen]
-            [jepsen.model :as model]
-            [jepsen.checker :as checker]))
+            [jepsen.checker :as checker]
+            [knossos.model :as model]))
 
 (deftest perf-test
   (let [history [{:process 3, :type :invoke, :f :read}

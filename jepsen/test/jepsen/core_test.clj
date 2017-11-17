@@ -11,8 +11,8 @@
             [jepsen.client :as client]
             [jepsen.generator :as gen]
             [jepsen.store :as store]
-            [jepsen.model :as model]
-            [jepsen.checker :as checker]))
+            [jepsen.checker :as checker]
+            [knossos.model :as model]))
 
 (deftest basic-cas-test
   (let [state (atom nil)
