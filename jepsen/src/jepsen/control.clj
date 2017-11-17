@@ -115,7 +115,7 @@
 (defn wrap-trace
   "Logs argument to console when tracing is enabled."
   [arg]
-  (do (when *trace* (info arg))
+  (do (when *trace* (info "Host:" *host* "arg:" arg))
       arg))
 
 (defn throw-on-nonzero-exit
