@@ -53,7 +53,7 @@
                          (try
                            {:name        test-name
                             :start-time  test-time
-                            :results     (store/load-results test-name test-time)}
+                            :results     (store/memoized-load-results test-name test-time)}
                            (catch java.io.FileNotFoundException e
                              ; Incomplete test
                              {:name       test-name
