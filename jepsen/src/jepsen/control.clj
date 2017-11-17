@@ -2,6 +2,7 @@
   "Provides SSH control over a remote node. There's a lot of dynamically bound
   state in this namespace because we want to make it as simple as possible for
   scripts to open connections to various nodes."
+  (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap
                                              with-retry
@@ -187,12 +188,25 @@
   (rc/with-conn [s *session*]
     (ssh/scp-to *session* current-path node-path)))
 
+(defn file->path
+  "Takes an object, if it's an instance of java.io.File, gets the path, otherwise
+  returns the object"
+  [x]
+  (if (instance? java.io.File x)
+    (.getCanonicalPath x)
+    x))
+
 (defn upload
-  "Copies local path(s) to remote node. Takes arguments for clj-ssh/scp-to."
-  [& args]
+  "Copies local path(s) to remote node and returns the remote path.
+  Takes arguments for clj-ssh/scp-to."
+  [& [local-paths remote-path & remaining]]
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
-      (apply ssh/scp-to s args))
+      (let [local-paths (if (sequential? local-paths)
+                          (map ensure-path local-paths)
+                          (ensure-path local-paths))]
+        (apply ssh/scp-to s local-paths remote-path remaining)
+        remote-path))
     (catch com.jcraft.jsch.JSchException e
       (if (and (pos? tries)
                (or (= "session is down" (.getMessage e))
