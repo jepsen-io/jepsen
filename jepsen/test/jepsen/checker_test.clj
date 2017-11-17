@@ -3,8 +3,8 @@
   (:use jepsen.checker
         clojure.test)
   (:require [knossos.core :refer [ok-op invoke-op]]
+            [knossos.model :as model]
             [multiset.core :as multiset]
-            [jepsen.model :as model]
             [jepsen.checker.perf :refer :all]))
 
 (deftest queue-test
