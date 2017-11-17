@@ -37,7 +37,8 @@
            (com.aerospike.client.policy Policy
                                         ConsistencyLevel
                                         GenerationPolicy
-                                        WritePolicy)))
+                                        WritePolicy
+                                        RecordExistsAction)))
 
 (def local-package-dir
   "Local directory for Aerospike packages."
@@ -368,8 +369,18 @@
   set, and key."
   ([client namespace set key bins]
    (put! client write-policy namespace set key bins))
-  ([^AerospikeClient client ^WritePolicy policy, namespace set key bins]
+  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (.put client policy (Key. namespace set key) (map->bins bins))))
+
+(defn put-if-absent!
+  "Writes a map of bin names to bin values to the record at the given
+  namespace, set, and key, if and only if the record does not presently exist."
+  ([client namespace set key bins]
+   (put-if-absent! client write-policy namespace set key bins))
+  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+   (let [p (WritePolicy. policy)]
+     (set! (.recordExistsAction p) RecordExistsAction/CREATE_ONLY)
+     (put! client p namespace set key bins))))
 
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
@@ -432,10 +443,14 @@
            ; Generation error; CAS can't have taken place.
            3 (assoc ~op :type :fail, :error :generation-mismatch)
 
-           ;; Unavailable error: CAS can't have taken place. THEORETICALLY.
-           ;; In reality, it looks like these succeed anyway.
-           11 (assoc ~op :type error-type#, :error [:unavailable
-                                                    (.getMessage e#)])
+           -8 (assoc ~op :type error-type#, :error :server-unavailable)
+
+           ; With our custom client, these are guaranteed failures. Not so in
+           ; the stock client!
+           11 (assoc ~op :type :fail, :error :partition-unavailable)
+
+           ; Hot key
+           14 (assoc ~op :type :fail, :error :hot-key)
 
            ;; Forbidden
            22 (assoc ~op :type :fail, :error [:forbidden (.getMessage e#)])

@@ -2,7 +2,8 @@
   "Entry point for aerospike tests"
   (:require [aerospike [support :as support]
                        [counter :as counter]
-                       [cas-register :as cas-register]]
+                       [cas-register :as cas-register]
+                       [set :as set]]
             [jepsen [cli :as cli]
                     [checker :as checker]
                     [generator :as gen]
@@ -21,7 +22,8 @@
       :model             for the checker}"
   []
   {:cas-register (cas-register/workload)
-   :counter      (counter/workload)})
+   :counter      (counter/workload)
+   :set          (set/workload)})
 
 (defn aerospike-test
   "Constructs a Jepsen test map from CLI options."
