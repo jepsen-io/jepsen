@@ -286,7 +286,8 @@
   (rc/close! session))
 
 (defmacro with-ssh
-  "Takes a map of SSH configuration and evaluates body in that scope. Options:
+  "Takes a map of SSH configuration and evaluates body in that scope. Catches
+  JSchExceptions and re-throws with all available debugging context. Options:
 
   :dummy?
   :username
@@ -301,7 +302,11 @@
              *private-key-path* (get ~ssh :private-key-path *private-key-path*)
              *strict-host-key-checking* (get ~ssh :strict-host-key-checking
                                              *strict-host-key-checking*)]
-     ~@body))
+     (try
+       ~@body
+       (catch com.jcraft.jsch.JSchException e
+         (error "SSH error, configuration is:\n\n" (util/pprint-str (debug-data))))
+         (throw e))))
 
 (defmacro with-session
   "Binds a host and session and evaluates body. Does not open or close session;
