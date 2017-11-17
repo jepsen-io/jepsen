@@ -96,7 +96,9 @@
     :validate [(partial re-find #"^(file|https?)://.*\.(tar|tgz|zip)")
                "Must be a file://, http://, or https:// URL including .tar, .tgz, or .zip"]]))
 
-(def tarball-opt package-opt)
+(defn tarball-opt
+  [default]
+  (package-opt "tarball" default))
 
 (defn test-usage
   []
