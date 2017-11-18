@@ -321,6 +321,7 @@
   "General operation policy"
   (let [p (Policy.)]
     (set! (.socketTimeout p) 10000)
+    (set! (.maxRetries p) 0)
     p))
 
 (def ^Policy linearize-read-policy
