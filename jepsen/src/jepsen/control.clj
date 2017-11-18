@@ -2,6 +2,7 @@
   "Provides SSH control over a remote node. There's a lot of dynamically bound
   state in this namespace because we want to make it as simple as possible for
   scripts to open connections to various nodes."
+  (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap
                                              with-retry
@@ -115,7 +116,7 @@
 (defn wrap-trace
   "Logs argument to console when tracing is enabled."
   [arg]
-  (do (when *trace* (info arg))
+  (do (when *trace* (info "Host:" *host* "arg:" arg))
       arg))
 
 (defn throw-on-nonzero-exit
@@ -187,12 +188,25 @@
   (rc/with-conn [s *session*]
     (ssh/scp-to *session* current-path node-path)))
 
+(defn file->path
+  "Takes an object, if it's an instance of java.io.File, gets the path, otherwise
+  returns the object"
+  [x]
+  (if (instance? java.io.File x)
+    (.getCanonicalPath x)
+    x))
+
 (defn upload
-  "Copies local path(s) to remote node. Takes arguments for clj-ssh/scp-to."
-  [& args]
+  "Copies local path(s) to remote node and returns the remote path.
+  Takes arguments for clj-ssh/scp-to."
+  [& [local-paths remote-path & remaining]]
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
-      (apply ssh/scp-to s args))
+      (let [local-paths (if (sequential? local-paths)
+                          (map ensure-path local-paths)
+                          (ensure-path local-paths))]
+        (apply ssh/scp-to s local-paths remote-path remaining)
+        remote-path))
     (catch com.jcraft.jsch.JSchException e
       (if (and (pos? tries)
                (or (= "session is down" (.getMessage e))
@@ -286,7 +300,8 @@
   (rc/close! session))
 
 (defmacro with-ssh
-  "Takes a map of SSH configuration and evaluates body in that scope. Options:
+  "Takes a map of SSH configuration and evaluates body in that scope. Catches
+  JSchExceptions and re-throws with all available debugging context. Options:
 
   :dummy?
   :username
@@ -301,7 +316,11 @@
              *private-key-path* (get ~ssh :private-key-path *private-key-path*)
              *strict-host-key-checking* (get ~ssh :strict-host-key-checking
                                              *strict-host-key-checking*)]
-     ~@body))
+     (try
+       ~@body
+       (catch com.jcraft.jsch.JSchException e
+         (error "SSH error, configuration is:\n\n" (util/pprint-str (debug-data))))
+         (throw e))))
 
 (defmacro with-session
   "Binds a host and session and evaluates body. Does not open or close session;
