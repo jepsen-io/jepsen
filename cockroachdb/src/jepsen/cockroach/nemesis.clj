@@ -8,6 +8,7 @@
              [generator :as gen]
              [reconnect :as rc]
              [util :as util :refer [letr]]]
+            [jepsen.charybdefs :as charybdefs]
             [jepsen.nemesis.time :as nt]
             [jepsen.cockroach.client :as cc]
             [jepsen.cockroach.auto :as auto]
@@ -315,3 +316,13 @@
    :name   "splits"
    :client (split-nemesis)
    :clocks false})
+
+;; Periodic disk failures
+(defn disk
+  []
+  (merge (nemesis-single-gen)
+         {:name "disk"
+          ;; The cockroach process usually reacts to disk failures by dying,
+          ;; so restart it after the nemesis restores the disk.
+          :client (restarting (charybdefs/nemesis))
+          :clocks false}))

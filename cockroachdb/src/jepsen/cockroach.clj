@@ -31,6 +31,7 @@
                                                      db-user
                                                      db-passwd
                                                      store-path
+                                                     cleanup-path
                                                      dbname
                                                      verlog
                                                      log-files
@@ -103,11 +104,11 @@
         (c/su
           (auto/kill! test node)
 
-          (info node "Erasing the store...")
-          (c/exec :rm :-rf store-path)
-
           (info node "Stopping tcpdump...")
           (meh (c/exec :killall -9 :tcpdump))
+
+          (info node "Erasing the store...")
+          (c/exec :rm :-rf cleanup-path)
 
           (info node "Clearing the logs...")
           (doseq [f log-files]

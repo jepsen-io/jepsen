@@ -7,11 +7,13 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [jepsen.cli :as jc]
+            [jepsen.control :as c]
             [jepsen.os :as os]
             [jepsen.os.debian :as debian]
             [jepsen.os.ubuntu :as ubuntu]
             [jepsen.core :as jepsen]
             [jepsen.web :as web]
+            [jepsen.charybdefs :as charybdefs]
             [jepsen.cockroach :as cockroach]
             [jepsen.cockroach [adya :as adya]
                               [bank :as bank]
@@ -54,7 +56,8 @@
 ;   "start-stop"                 `(cln/startstop 1)
    "start-stop-2"               `(cln/startstop 2)
 ;   "start-kill"                 `(cln/startkill 1)
-   "start-kill-2"               `(cln/startkill 2)})
+   "start-kill-2"               `(cln/startkill 2)
+   "disk"                       `(cln/disk)})
 
 (def opt-spec
   "Command line options for tools.cli"
@@ -122,6 +125,9 @@
            :usage (jc/test-usage)
            :run (fn [{:keys [options]}]
                   (pprint options)
+                  (c/with-ssh (:ssh options)
+                    (c/on-many (:nodes options)
+                      (charybdefs/install!)))
                   (doseq [i        (range (:test-count options))
                           test-fn  (:test-fns options)
                           [n1 n2]  (nemesis-product (:nemeses options)

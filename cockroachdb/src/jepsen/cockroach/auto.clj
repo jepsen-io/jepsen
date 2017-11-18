@@ -32,10 +32,18 @@
 ;; Paths
 (def working-path "Home directory for cockroach setup" "/opt/cockroach")
 (def cockroach "Cockroach binary" (str working-path "/cockroach"))
-(def store-path "Cockroach data dir" (str working-path "/cockroach-data"))
 (def pidfile "Cockroach PID file" (str working-path "/pid"))
 
-; Logs
+;; Hard-coded paths for use with the disk nemesis. When the disk
+;; nemesis is not used, we may want to use a normal path, but
+;; using the CharybdeFS filesystem all the time appears to work,
+;; with one exception: rm -rf /faulty/cockroach-data fails
+;; mysteriously. I'm not sure what's going on, but running
+;; the cleanup on /real instead of /faulty works around it.
+(def store-path "Cockroach data dir" "/faulty/cockroach-data")
+(def cleanup-path "Path to clean up after test" "/real/cockroach-data")
+
+                                        ; Logs
 (def log-path "Log directory" (str working-path "/logs"))
 (def verlog "Version log file" (str log-path "/version.txt"))
 (def pcaplog "pcap log file" (str log-path "/trace.pcap"))
@@ -49,6 +57,7 @@
 ;; Extra command-line arguments to give to `cockroach start`
 (def cockroach-start-arguments
   (concat [:start
+           :--store store-path
            ;; ... other arguments here ...
            ]
           (if insecure [:--insecure] [])))

@@ -2,6 +2,7 @@
   (:require [clojure.tools.logging :refer [info]]
             [jepsen.control :as c]
             [jepsen.control.util :as cu]
+            [jepsen.client :as client]
             [jepsen.os.debian :as debian]))
 
 (defn install-thrift!
@@ -83,3 +84,20 @@
   "Clear a previous failure injection."
   []
   (cookbook-command "--clear"))
+
+(defn nemesis
+  "A basic nemesis for disk fault injection.
+
+  When the nemesis is active, all disk operations under /faulty on one
+  node will fail with EIO.
+  "
+  []
+  (reify client/Client
+    (setup! [this test _] this)
+    (invoke! [this test op]
+      (assoc op :type :info, :value
+             (case (:f op)
+               :start (c/on (first (shuffle (:nodes test))) (break-all))
+               :stop (c/with-test-nodes test (clear)))))
+    (teardown! [this test]
+      (c/with-test-nodes test (clear)))))
