@@ -298,28 +298,3 @@
       op)
 
     (teardown! [this test])))
-
-
-; Notes for filesystem fault injection... someday
-
-;(defn install-thrift!
-;  [test]
-; apt-get install automake bison flex g++ git libboost1.55-all-dev libevent-dev libssl-dev libtool make pkg-config libglib2.0-dev
-; cd /tmp
-; wget http://www-eu.apache.org/dist/thrift/0.10.0/thrift-0.10.0.tar.gz
-; tar xvfz thrift-0.10.0.tar.gz
-; cd thrift-0.10.0
-; ./configure
-; make
-  ; make install
-
-
-; apt-get install python-thrift build-essential cmake libfuse-dev fuse
-; cd /opt
-; git clone https://github.com/scylladb/charybdefs.git
-; cd charybdefs
-; thrift -r --gen cpp server.thrift
-; Their cmake script can't handle /usr/local/bin
-; ln -s /usr/local/bin/thrift /usr/bin/thrift
-; cmake CMakeLists.txt
-; make
