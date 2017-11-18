@@ -23,6 +23,11 @@
   density?
 - [ ] Latency plots: layer least frequent events on top of more frequent ones
 
+## Web
+
+- Use utf-8 for transferring files; I think we're doing latin-1 or ascii or
+  8859-1 or something now.
+
 ## Performance
 
 - [x] Cache index page of web server

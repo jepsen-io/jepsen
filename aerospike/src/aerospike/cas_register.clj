@@ -99,4 +99,4 @@
                 (fn [k]
                   (->> (gen/reserve 5 r (gen/mix [w cas cas]))
                        (gen/stagger 1)
-                       (gen/limit 80))))})
+                       (gen/limit 150))))})

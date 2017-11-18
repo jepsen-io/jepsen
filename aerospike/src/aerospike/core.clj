@@ -34,7 +34,12 @@
                 checker
                 model]} (get (workloads) (:workload opts))
         generator (->> generator
-                       (gen/nemesis (gen/start-stop 10 10))
+                       (gen/nemesis
+                         (gen/seq
+                           (cycle [(gen/delay-fn (partial rand 10) nil)
+                                   {:type :info, :f :start}
+                                   (gen/delay-fn (partial rand 10) nil)
+                                   {:type :info, :f :stop}])))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not final-generator
                     generator
@@ -51,7 +56,7 @@
             :os       debian/os
             :db       (support/db)
             :client   client
-            :nemesis  (nemesis/partition-majorities-ring)
+            :nemesis  (nemesis/partition-random-halves)
             :generator generator
             :checker  (checker/compose
                       {:perf (checker/perf)
