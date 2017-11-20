@@ -284,15 +284,20 @@
 (defn session
   "Wraps clj-ssh-session in a wrapper for reconnection."
   [host]
-  (rc/open!
-    (rc/wrapper {:open    (if *dummy*
-                            (fn [] [:dummy host])
-                            (fn [] (clj-ssh-session host)))
-                 :name    [:control host]
-                 :close   (if *dummy*
-                            identity
-                            ssh/disconnect)
-                 :log?    true})))
+  (binding [*host* host]
+    (try
+     (rc/open!
+      (rc/wrapper {:open    (if *dummy*
+                              (fn [] [:dummy host])
+                              (fn [] (clj-ssh-session host)))
+                   :name    [:control host]
+                   :close   (if *dummy*
+                              identity
+                              ssh/disconnect)
+                   :log?    true}))
+     (catch com.jcraft.jsch.JSchException e
+       (error "Error opening SSH session. Verify username, password, and node hostnames are correct.\nSSH configuration is:\n" (util/pprint-str (debug-data)))
+       (throw e)))))
 
 (defn disconnect
   "Close a session"
@@ -316,11 +321,7 @@
              *private-key-path* (get ~ssh :private-key-path *private-key-path*)
              *strict-host-key-checking* (get ~ssh :strict-host-key-checking
                                              *strict-host-key-checking*)]
-     (try
-       ~@body
-       (catch com.jcraft.jsch.JSchException e#
-         (error "SSH error, configuration is:\n\n" (util/pprint-str (debug-data)))
-         (throw e#)))))
+     ~@body))
 
 (defmacro with-session
   "Binds a host and session and evaluates body. Does not open or close session;
