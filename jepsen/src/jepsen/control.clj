@@ -203,8 +203,8 @@
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
       (let [local-paths (if (sequential? local-paths)
-                          (map ensure-path local-paths)
-                          (ensure-path local-paths))]
+                          (map file->path local-paths)
+                          (file->path local-paths))]
         (apply ssh/scp-to s local-paths remote-path remaining)
         remote-path))
     (catch com.jcraft.jsch.JSchException e
