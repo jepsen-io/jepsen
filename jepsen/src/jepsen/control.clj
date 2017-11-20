@@ -10,7 +10,7 @@
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [clojure.tools.logging :refer [warn info debug]]))
+            [clojure.tools.logging :refer [warn info debug error]]))
 
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
@@ -318,9 +318,9 @@
                                              *strict-host-key-checking*)]
      (try
        ~@body
-       (catch com.jcraft.jsch.JSchException e
-         (error "SSH error, configuration is:\n\n" (util/pprint-str (debug-data))))
-         (throw e))))
+       (catch com.jcraft.jsch.JSchException e#
+         (error "SSH error, configuration is:\n\n" (util/pprint-str (debug-data)))
+         (throw e#)))))
 
 (defmacro with-session
   "Binds a host and session and evaluates body. Does not open or close session;
