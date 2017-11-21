@@ -57,7 +57,7 @@
         (info node "installing etcd" version)
         (let [url (str "https://storage.googleapis.com/etcd/" version
                        "/etcd-" version "-linux-amd64.tar.gz")]
-          (cu/install-tarball! c/*host* url dir))
+          (cu/install-archive! url dir))
 
         (cu/start-daemon!
           {:logfile logfile
