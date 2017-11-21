@@ -179,6 +179,8 @@
                                       "results.edn")))]
     (clojure.edn/read file)))
 
+(def memoized-load-results (memoize load-results))
+
 (defn dir?
   "Is this a directory?"
   [^File f]
