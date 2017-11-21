@@ -2,8 +2,8 @@
 
 ## Error handling
 
-- [ ] When tracing SSH commands in jepsen.control, log the node name too
-- [ ] When calling methods in jepsen.control, it'd be nice if thrown
+- [x] When tracing SSH commands in jepsen.control, log the node name too
+- [x] When calling methods in jepsen.control, it'd be nice if thrown
   com.jcraft.jsch.JSchException's would also log debugging info about the node,
   username, password, etc.
 - [x] Better error on gnuplot missing
@@ -25,7 +25,7 @@
 
 ## Web
 
-- Use utf-8 for transferring files; I think we're doing latin-1 or ascii or
+- [ ] Use utf-8 for transferring files; I think we're doing latin-1 or ascii or
   8859-1 or something now.
 
 ## Performance
@@ -41,9 +41,9 @@
   in readability isn't really worth it.
 - [ ] Macro like (synchronize-nodes test), which enforces a synchronization
   barrier where (count nodes threads) must come to sync on the test map.
-- [ ] jepsen.control/upload should take java.io.Files as well as strings, and
+- [x] jepsen.control/upload should take java.io.Files as well as strings, and
   use .getCanonicalPath to figure out what to upload. Maybe return remote path?
-- [ ] Extract jepsen.model models and move them into knossos.model; delete
+- [x] Extract jepsen.model models and move them into knossos.model; delete
   jepsen.model.
 
 ## Extensions
