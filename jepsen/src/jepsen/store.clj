@@ -170,8 +170,6 @@
     (let [in (fress/create-reader file :handlers read-handlers)]
       (fress/read-object in))))
 
-(def memoized-load (memoize load))
-
 (defn load-results
   "Loads only a results.edn by name and time."
   [test-name test-time]
@@ -233,7 +231,7 @@
         (remove symlink?)
         (filter dir?)
         (map file-name)
-        (map (fn [f] [f (delay (memoized-load test-name f))]))
+        (map (fn [f] [f (delay (load test-name f))]))
         (into {}))))
 
 (defn update-symlinks!
