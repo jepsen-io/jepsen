@@ -14,13 +14,25 @@
   (:require [jepsen.util :as util]
             [knossos.history :as history]
             [clojure.core :as c]
-            [clojure.tools.logging :refer [warn info]])
+            [clojure.tools.logging :refer [warn info]]
+            [slingshot.slingshot :refer [throw+]])
   (:import (java.util.concurrent.atomic AtomicBoolean)
            (java.util.concurrent.locks LockSupport)
            (java.util.concurrent CyclicBarrier)))
 
 (defprotocol Generator
   (op [gen test process] "Yields an operation to apply."))
+
+(defn op-and-validate
+  "Wraps `op` to ensure we produce a valid operation for our
+  worker. Re-throws any exception we catch from the generator."
+  [gen test process]
+  (let [op (op gen test process)]
+    (when-not (or (nil? op) (map? op))
+      (throw+ {:type :invalid-op
+               :gen  gen
+               :op   op}))
+    op))
 
 (extend-protocol Generator
   nil
@@ -442,16 +454,3 @@
   "When the given generator completes, synchronizes, then yields nil."
   [gen]
   (->> gen (then void)))
-
-(defn op-and-validate
-  "Wraps `jepsen.generator/op` to ensure we produce a valid operation for our worker.
-  Re-throws any exception we catch from the generator."
-  [gen test process]
-  (try
-    (let [op (op gen test process)]
-      (assert (or (nil? op) (map? op))
-              (str "Expected an operation map from " gen ", but got " (pr-str op) " instead."))
-      op)
-    (catch Exception e
-      (warn "Generator" gen "threw")
-      (throw e))))
