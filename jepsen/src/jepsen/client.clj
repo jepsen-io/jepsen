@@ -2,7 +2,8 @@
   "Applies operations to a database."
   (:require [clojure.tools.logging :refer :all]
             [clojure.reflect :refer [reflect]]
-            [jepsen.util :as util]))
+            [jepsen.util :as util]
+            [dom-top.core :refer [with-retry]]))
 
 (defprotocol Client
   (open! [client test node]
@@ -27,8 +28,19 @@
     (setup!    [this test])
     (teardown! [this test])
     (invoke!   [this test op] (assoc op :type :ok))
+    ; TODO: this should be open, not open!
     (open!     [this test node] this)
     (close!    [this test])))
+
+(defn ensure-open
+  "Opens a client, logging and retrying Exceptions."
+  [client test node retry-interval-ms]
+  (with-retry []
+    (open! client test node)
+    (catch Exception e
+      (warn e "Error opening client for" node)
+      (Thread/sleep retry-interval-ms)
+      (retry))))
 
 (defn open-compat!
   "Attempts to call `open!` on the given client. If `open!` does not

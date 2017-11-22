@@ -383,7 +383,8 @@
               (when (client/closable? client)
                 ; We can close this client and open a new one to replace it.
                 (client/close! client test)
-                (set! client (client/open! (:client test) test node))))
+                (set! client (client/ensure-open
+                               (:client test) test node 1000))))
 
             (recur))))))
 
