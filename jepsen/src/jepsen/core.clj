@@ -249,7 +249,7 @@
   "Applies an operation to a client, catching client exceptions and converting
   them to infos. Returns a completion op, throwing if the completion is
   invalid."
-  [op client abort?]
+  [op test client abort?]
   (let [completion (try (-> (client/invoke! client test op)
                             (assoc :time (relative-time-nanos)))
                         (catch Throwable e
@@ -284,7 +284,7 @@
   "Applies an operation to a nemesis, catching exceptions and converting
   them to infos. Returns a completion op, throwing if the completion is
   invalid."
-  [op client abort?]
+  [op test client abort?]
   (let [completion (try (-> (nemesis/invoke-compat! client test op)
                             (assoc :time (relative-time-nanos)))
                         (catch Throwable e
@@ -318,7 +318,7 @@
   [op test client abort?]
   (util/log-op op)
   (conj-op! test op)
-  (let [completion (invoke-op! op client abort?)]
+  (let [completion (invoke-op! op test client abort?)]
     (conj-op! test completion)
     (util/log-op completion)
     completion))
@@ -331,7 +331,7 @@
     (util/log-op op)
     (doseq [history @histories]
       (swap! history conj op))
-    (let [completion (nemesis-invoke-op! op nemesis abort?)]
+    (let [completion (nemesis-invoke-op! op test nemesis abort?)]
       (doseq [history @histories]
         (swap! history conj op))
       (util/log-op completion)
