@@ -14,6 +14,7 @@
              "-XX:-OmitStackTraceInFastThrow"
              "-XX:MaxInlineLevel=32"
              "-XX:MaxRecursiveInlineLevel=2"
+             "-Des.set.netty.runtime.available.processors=false"
              "-server"]
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [jepsen "0.1.5"]
