@@ -301,7 +301,8 @@
       (g/raw-plot!
        (concat (latency-preamble test output-path)
                (nemesis-regions history)
-                                        ; Plot ops
+               (nemesis-lines history)
+               ; Plot ops
                [['plot (apply g/list
                               (for [f fs, q qs]
                                 ["-"
@@ -352,6 +353,7 @@
       (g/raw-plot!
        (concat (rate-preamble test output-path)
                (nemesis-regions history)
+               (nemesis-lines history)
                ; Plot ops
                [['plot (apply g/list
                               (for [f fs, t types]
