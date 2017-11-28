@@ -106,12 +106,12 @@
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
-  (with-retry [tries 10]
+  (with-retry [tries 30]
     (AerospikeClient. node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
-      (info "Retrying client creation -" (.getMessage e))
+      ; (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
 
@@ -441,6 +441,11 @@
 
        (catch com.aerospike.client.AerospikeException e#
          (case (.getResultCode e#)
+           ; This is error code "OK", which I guess also means "dunno"?
+           0 (condp instance? (.getCause e#)
+               java.io.EOFException (assoc ~op :type error-type#, :error :eof)
+               (throw e#))
+
            ; Generation error; CAS can't have taken place.
            3 (assoc ~op :type :fail, :error :generation-mismatch)
 
@@ -455,7 +460,9 @@
 
            ;; Forbidden
            22 (assoc ~op :type :fail, :error [:forbidden (.getMessage e#)])
-           (throw e#))))))
+
+           (do (info :error-code (.getResultCode e#))
+               (throw e#)))))))
 
 ; Nemeses
 

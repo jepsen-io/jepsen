@@ -9,9 +9,10 @@
 
 (defrecord SetClient [client namespace set key]
   client/Client
-  (setup! [this test node]
-    (let [client (s/connect node)]
-      (assoc this :client client)))
+  (open! [this test node]
+    (assoc this :client (s/connect node)))
+
+  (setup! [this test])
 
   (invoke! [this test op]
     (s/with-errors op #{}
@@ -35,7 +36,9 @@
                                             {:value (str (:value op))}))))
                  (assoc op :type :ok)))))
 
-  (teardown! [this test]
+  (teardown! [this test])
+
+  (close! [this test]
     (s/close client)))
 
 (defn set-client

@@ -3,11 +3,11 @@
   (:require [aerospike [support :as support]
                        [counter :as counter]
                        [cas-register :as cas-register]
+                       [nemesis :as nemesis]
                        [set :as set]]
             [jepsen [cli :as cli]
                     [checker :as checker]
                     [generator :as gen]
-                    [nemesis :as nemesis]
                     [tests :as tests]]
             [jepsen.os.debian :as debian])
   (:gen-class))
@@ -33,20 +33,17 @@
                 client
                 checker
                 model]} (get (workloads) (:workload opts))
+        nemesis (nemesis/killer opts)
         generator (->> generator
                        (gen/nemesis
-                         (gen/seq
-                           (cycle [(gen/delay-fn (partial rand 10) nil)
-                                   {:type :info, :f :start}
-                                   (gen/delay-fn (partial rand 10) nil)
-                                   {:type :info, :f :stop}])))
+                         (gen/delay-fn (partial rand 10)
+                                       (:generator nemesis)))
                        (gen/time-limit (:time-limit opts)))
-        generator (if-not final-generator
+        generator (if-not (or final-generator (:final-generator nemesis))
                     generator
                     (gen/phases generator
                                 (gen/log "Healing cluster")
-                                (gen/nemesis
-                                  (gen/once {:type :info, :f :stop}))
+                                (gen/nemesis (:final-generator nemesis))
                                 (gen/log "Waiting for quiescence")
                                 (gen/sleep 10)
                                 (gen/clients final-generator)))]
@@ -56,7 +53,7 @@
             :os       debian/os
             :db       (support/db)
             :client   client
-            :nemesis  (nemesis/partition-random-halves)
+            :nemesis  (:nemesis nemesis)
             :generator generator
             :checker  (checker/compose
                       {:perf (checker/perf)
@@ -68,7 +65,11 @@
   [[nil "--workload WORKLOAD" "Test workload to run"
     :parse-fn keyword
     :missing (str "--workload " (cli/one-of (workloads)))
-    :validate [(workloads) (cli/one-of (workloads))]]])
+    :validate [(workloads) (cli/one-of (workloads))]]
+   [nil "--max-dead-nodes COUNT" "Number of nodes that can simultaneously fail"
+    :parse-fn #(Long/parseLong %)
+    :default  2
+    :validate [pos? "must be positive"]]])
 
 (defn -main
   "Handles command-line arguments, running a Jepsen command."
