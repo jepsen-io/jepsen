@@ -201,6 +201,33 @@
                :fillstyle :transparent :solid 0.05
                :noborder]))))
 
+(defn nemesis-events
+  "Given a history, constructs a sequence of times, in seconds, marking nemesis
+  events other than start/stop pairs."
+  [history]
+  (->> history
+       (filter (fn [op]
+                 (and (= :nemesis (:process op))
+                      (not= :start (:f op))
+                      (not= :stop  (:f op)))))
+       (map (comp double util/nanos->secs :time))))
+
+(defn nemesis-lines
+  "Emits a sequence of gnuplot commands rendering vertical lines where nemesis
+  events occurred."
+  [history]
+  (->> history
+       nemesis-events
+       (map (fn [t]
+              [:set :arrow
+               :from (g/list t [:graph 0])
+               :to   (g/list t [:graph 1])
+               ; When gnuplot gets alpha rgb we can use this
+               ; :lc :rgb "#f3000000"
+               :lc :rgb "#dddddd"
+               :lw 1
+               :nohead]))))
+
 (defn preamble
   "Shared gnuplot preamble"
   [output-path]
@@ -231,6 +258,7 @@
       (g/raw-plot!
        (concat (latency-preamble test output-path)
                (nemesis-regions history)
+               (nemesis-lines history)
                ; Plot ops
                [['plot (apply g/list
                               (for [f fs, t types]
