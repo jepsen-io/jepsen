@@ -333,7 +333,7 @@
       (swap! history conj op))
     (let [completion (nemesis-invoke-op! op test nemesis abort?)]
       (doseq [history @histories]
-        (swap! history conj op))
+        (swap! history conj completion))
       (util/log-op completion)
       completion)))
 
