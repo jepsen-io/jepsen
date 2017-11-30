@@ -312,17 +312,6 @@
     ; Looks good!
     completion))
 
-(defn apply-op!
-  "Logs, journals, and invokes an operation, logging and journaling its
-  completion, and returning the completed operation."
-  [op test client abort?]
-  (util/log-op op)
-  (conj-op! test op)
-  (let [completion (invoke-op! op test client abort?)]
-    (conj-op! test completion)
-    (util/log-op completion)
-    completion))
-
 (defn nemesis-apply-op!
   "Logs, journals, and invokes an operation, logging and journaling its
   completion, and returning the completed operation."
@@ -363,30 +352,59 @@
           (throw+ {:type :worker-abort}))
 
         (when-let [op (generator/op-and-validate gen test process)]
-          (let [completion (-> op
-                               (assoc :process process
-                                      :time    (relative-time-nanos))
-                               (apply-op! test client abort?))]
-            (when (op/info? completion)
-              ; At this point all bets are off. If the client or network or DB
-              ; crashed before doing anything; this operation won't be a part
-              ; of the history. On the other hand, the DB may have applied this
-              ; operation and we *don't know* about it; e.g.  because of
-              ; timeout.
-              ;
-              ; This process is effectively hung; it can not initiate a new
-              ; operation without violating the single-threaded process
-              ; constraint. We cycle to a new process identifier, and leave the
-              ; invocation uncompleted in the history.
-              (set! process (+ process (:concurrency test)))
+          (let [op (assoc op
+                          :process process
+                          :time    (relative-time-nanos))]
+            ; We log here so users know what's going on, but wait to journal
+            ; the op to the history until the last possible moment.
+            (util/log-op op)
 
-              (when (client/closable? client)
-                ; We can close this client and open a new one to replace it.
-                (client/close! client test)
-                (set! client (client/ensure-open
-                               (:client test) test node 1000))))
+            ; Ensure a client exists
+            (when-not client
+              (try
+                ; Open a new client
+                (set! (.client this) (client/open! (:client test) test node))
+                (catch RuntimeException e
+                  (warn e "Error opening client")
+                  (let [fail (assoc op
+                                    :type  :fail
+                                    :error [:no-client
+                                            (.getMessage e)]
+                                    :time  (relative-time-nanos))]
+                    (conj-op! test op)
+                    (conj-op! test fail)
+                    (util/log-op fail)
+                    (set! (.client this) nil)))))
 
-            (recur))))))
+            ; If we have a client, we can go on to process the op.
+            (when client
+              ; Note that client creation can't have affected the state, so we
+              ; defer journaling the operation until the last possible moment.
+              (conj-op! test op)
+              (let [completion (invoke-op! op test client abort?)]
+                (conj-op! test completion)
+                (util/log-op completion)
+                (when (op/info? completion)
+                  ; At this point all bets are off. If the client or network or
+                  ; DB crashed before doing anything; this operation won't be a
+                  ; part of the history. On the other hand, the DB may have
+                  ; applied this operation and we *don't know* about it; e.g.
+                  ; because of timeout.
+                  ;
+                  ; This process is effectively hung; it can not initiate a new
+                  ; operation without violating the single-threaded process
+                  ; constraint. We cycle to a new process identifier, and leave
+                  ; the invocation uncompleted in the history.
+                  (set! process (+ process (:concurrency test)))
+
+                  (when (client/closable? client)
+                    ; We can close this client and open a new one to replace
+                    ; it.
+                    (client/close! client test)
+                    (set! client nil))))))
+
+          ; On to the next op
+          (recur)))))
 
   (teardown-worker! [this]
     (when client
