@@ -24,19 +24,34 @@
     (invoke! [this test op]
       (assoc
         op :value
-        (case (:f op)
-          :kill  (c/on-nodes test (:value op)
-                             (fn [test node]
-                               (if ((swap! dead capped-conj node max-dead)
-                                    node)
-                                 (do (meh (c/su (c/exec :killall :-9 :asd)))
-                                     :killed)
-                                 :still-alive)))
-          :restart (c/on-nodes test (:value op)
-                             (fn [test node]
-                               (c/su (c/exec :service :aerospike :restart))
-                               (swap! dead disj node)
-                               :started)))))
+        (c/on-nodes
+          test (:value op)
+          (fn [test node]
+            (case (:f op)
+              :kill (if ((swap! dead capped-conj node max-dead)
+                         node)
+                      (do (meh (c/su (c/exec :killall :-9 :asd)))
+                          :killed)
+                      :still-alive)
+
+              :restart (do (c/su
+                             (c/exec :service :aerospike :restart))
+                           (swap! dead disj node)
+                           :started)
+
+              :revive
+              (try (s/revive!)
+                   (catch java.lang.RuntimeException e
+                     (if (re-find #"Could not connect to node" (.getMessage e))
+                       :not-running
+                       (throw e))))
+
+              :recluster
+              (try (s/recluster!)
+                   (catch java.lang.RuntimeException e
+                     (if (re-find #"Could not connect to node" (.getMessage e))
+                       :not-running
+                       (throw e)))))))))
 
     (teardown! [this test])))
 
@@ -50,10 +65,29 @@
   [test process]
   {:type :info, :f :restart, :value (random-nonempty-subset (:nodes test))})
 
-(defn kill-restart-gen
-  "Mix of kill and restart operations."
+(defn revive-gen
+  "Revive all nodes."
+  [test process]
+  {:type :info, :f :revive, :value (:nodes test)})
+
+(defn recluster-gen
+  "Recluster all nodes."
+  [test process]
+  {:type :info, :f :recluster, :value (:nodes test)})
+
+(defn killer-gen-seq
+  "Sequence of kills, restarts, revivals, and reclusterings"
   []
-  (gen/mix [kill-gen restart-gen]))
+  (lazy-seq
+    (concat (rand-nth [[kill-gen]
+                       [restart-gen]
+                       [revive-gen recluster-gen]])
+            (killer-gen-seq))))
+
+(defn killer-gen
+  "A mix of kills, restarts, revivals, and reclusterings"
+  []
+  (gen/seq (killer-gen-seq)))
 
 (defn killer
   "A combined nemesis and generator for killing nodes. Options:
@@ -62,7 +96,11 @@
   [opts]
   (let [dead (atom #{})]
     {:nemesis (kill-nemesis (:max-dead-nodes opts) dead)
-     :generator (kill-restart-gen)
-     :final-generator (gen/once
-                        (fn [test _]
-                          {:type :info, :f :restart, :value (:nodes test)}))}))
+     :generator (killer-gen)
+     :final-generator (gen/concat
+                        (gen/once
+                          (fn [test _]
+                            {:type :info, :f :restart, :value (:nodes test)}))
+                        (gen/sleep 10)
+                        (gen/once revive-gen)
+                        (gen/once recluster-gen))}))

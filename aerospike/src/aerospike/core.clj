@@ -33,11 +33,12 @@
                 client
                 checker
                 model]} (get (workloads) (:workload opts))
+        time-limit (:time-limit opts)
         nemesis (nemesis/killer opts)
         generator (->> generator
                        (gen/nemesis
-                         (gen/delay-fn (partial rand 10)
-                                       (:generator nemesis)))
+                         (->> (:generator nemesis)
+                              (gen/delay 0)))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not (or final-generator (:final-generator nemesis))
                     generator
@@ -51,7 +52,7 @@
            opts
            {:name     (str "aerospike " (name (:workload opts)))
             :os       debian/os
-            :db       (support/db)
+            :db       (support/db opts)
             :client   client
             :nemesis  (:nemesis nemesis)
             :generator generator
@@ -66,10 +67,14 @@
     :parse-fn keyword
     :missing (str "--workload " (cli/one-of (workloads)))
     :validate [(workloads) (cli/one-of (workloads))]]
-   [nil "--max-dead-nodes COUNT" "Number of nodes that can simultaneously fail"
+   [nil "--replication-factor NUMBER" "Number of nodes which must store data"
+    :parse-fn #(Long/parseLong %)
+    :default 3
+    :validate [pos? "must be positive"]]
+   [nil "--max-dead-nodes NUMBER" "Number of nodes that can simultaneously fail"
     :parse-fn #(Long/parseLong %)
     :default  2
-    :validate [pos? "must be positive"]]])
+    :validate [(complement neg?) "must be non-negative"]]])
 
 (defn -main
   "Handles command-line arguments, running a Jepsen command."

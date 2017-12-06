@@ -167,6 +167,20 @@
           (when-not (.getAndSet emitted true)
             (op source test process)))))))
 
+(defn derefer
+  "Sometimes you need to build a generator not *now*, but *later*; e.g. because
+  it depends on state that won't be available until the generator is actually
+  invoked. Wrap a derefable returning a generator in this, and it'll be
+  deref'ed every time an op is requested. For instance:
+
+      (derefer (delay (gen/once {:type :drain-key, :value @key})))
+
+  Looks up the key to drain only once an operation is requested."
+  [dgen]
+  (reify Generator
+    (op [this test process]
+      (op @dgen test process))))
+
 (defn log*
   "Logs a message every time invoked, and yields nil."
   [msg]

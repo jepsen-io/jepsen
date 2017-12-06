@@ -4,10 +4,11 @@
             [clojure.string :as str]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [generator :as gen]]
+                    [generator :as gen]
+                    [independent :as independent]]
             [jepsen.checker.timeline :as timeline]))
 
-(defrecord SetClient [client namespace set key]
+(defrecord SetClient [client namespace set]
   client/Client
   (open! [this test node]
     (assoc this :client (s/connect node)))
@@ -15,26 +16,28 @@
   (setup! [this test])
 
   (invoke! [this test op]
-    (s/with-errors op #{}
-      (case (:f op)
-        :read (assoc op
-                     :type :ok,
-                     :value (-> client
-                                (s/fetch namespace set key)
-                                :bins
-                                :value
-                                (str/split #" ")
-                                (->> (map #(Long/parseLong %))
-                                     (into (sorted-set)))))
+    (let [[k v] (:value op)]
+      (s/with-errors op #{}
+        (case (:f op)
+          :read (assoc op
+                       :type :ok,
+                       :value (independent/tuple k
+                                (-> client
+                                   (s/fetch namespace set k)
+                                   :bins
+                                   :value
+                                   (str/split #" ")
+                                   (->> (map #(Long/parseLong %))
+                                        (into (sorted-set))))))
 
-        :add (do (try (s/cas! client namespace set key
-                              (fn [record]
-                                {:value (str (:value record) " " (:value op))}))
-                      (catch clojure.lang.ExceptionInfo e
-                        (if (= (.getMessage e) "cas not found")
-                          (s/put-if-absent! client namespace set key
-                                            {:value (str (:value op))}))))
-                 (assoc op :type :ok)))))
+          :add (do (try (s/cas! client namespace set k
+                                (fn [record]
+                                  {:value (str (:value record) " " v)}))
+                        (catch clojure.lang.ExceptionInfo e
+                          (if (= (.getMessage e) "cas not found")
+                            (s/put-if-absent! client namespace set k
+                                              {:value (str v)}))))
+                   (assoc op :type :ok))))))
 
   (teardown! [this test])
 
@@ -44,16 +47,30 @@
 (defn set-client
   "A set on top of a single key and bin"
   []
-  (SetClient. nil s/ans "cats" "meow"))
+  (SetClient. nil s/ans "cats"))
 
 (defn workload
   []
-  {:client  (set-client)
-   :checker (checker/compose
-              {:timeline (timeline/html)
-               :set      (checker/set)})
-   :generator (->> (range)
-                   (map (fn [x] {:type :invoke, :f :add, :value x}))
-                   gen/seq
-                   (gen/stagger 1/10))
-   :final-generator (gen/each (gen/once {:type :invoke, :f :read}))})
+  (let [max-key (atom 0)]
+    {:client  (set-client)
+     :checker (independent/checker (checker/set))
+     :generator (independent/concurrent-generator
+                  5
+                  (range)
+                  (fn [k]
+                    (swap! max-key max k)
+                    (->> (range)
+                         (map (fn [x] {:type :invoke, :f :add, :value x}))
+                         gen/seq
+                         (gen/stagger 1/10))))
+     :final-generator (gen/derefer
+                        (delay
+                          (locking keys
+                            (independent/concurrent-generator
+                              5
+                              (range (inc @max-key))
+                              (fn [k]
+                                (gen/stagger 10
+                                   (gen/each
+                                     (gen/once {:type :invoke
+                                                :f    :read}))))))))}))
