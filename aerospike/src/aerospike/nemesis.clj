@@ -3,7 +3,8 @@
             [jepsen [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]
-                    [util :refer [meh random-nonempty-subset]]]))
+                    [util :refer [meh random-nonempty-subset]]]
+            [jepsen.nemesis.time :as nt]))
 
 ; Nemeses
 
@@ -17,7 +18,7 @@
   "Takes a maximum number of dead processes to allow. Also takes an atom to
   track which nodes are dead. Kills processes with :f :kill, restarts them with
   :f :restart. :value op is a set of nodes to affect."
-  [max-dead dead]
+  [signal max-dead dead]
   (reify nemesis/Nemesis
     (setup! [this test] this)
 
@@ -30,7 +31,9 @@
             (case (:f op)
               :kill (if ((swap! dead capped-conj node max-dead)
                          node)
-                      (do (meh (c/su (c/exec :killall :-9 :asd)))
+                      (do (meh (c/su (c/exec :killall
+                                             (str "-" signal)
+                                             :asd)))
                           :killed)
                       :still-alive)
 
@@ -89,15 +92,46 @@
   []
   (gen/seq (killer-gen-seq)))
 
-(defn killer
-  "A combined nemesis and generator for killing nodes. Options:
+(defn full-nemesis
+  "Handles kills, restarts, revives, reclusters, clock skew, and partitions."
+  [opts]
+  (nemesis/compose
+    {{:partition-start :start
+      :partition-stop  :stop} (nemesis/partition-random-halves)
+
+     #{:kill :restart :revive :recluster} (kill-nemesis (if (:clean-kill opts)
+                                                          15 ; SIGTERM
+                                                          9) ; SIGKILL
+                                                        (:max-dead-nodes opts)
+                                                        (:dead opts))
+
+     {:clock-reset  :reset
+      :clock-bump   :bump
+      :clock-strobe :strobe} (nt/clock-nemesis)}))
+
+(defn full-gen
+  [opts]
+  "Generates kills, restarts, revives, reclusters, clock skews, and partitions."
+  (gen/mix [(gen/f-map {:strobe :clock-strobe
+                       :reset  :clock-reset
+                       :bump   :clock-bump}
+                      (nt/clock-gen))
+            (killer-gen)
+            (gen/seq (cycle [{:type :info, :f :partition-start}
+                             {:type :info, :f :partition-stop}]))]))
+
+(defn full
+  "A combined nemesis and generator for all kinds of havoc. Options:
 
   :max-dead-nodes   number of nodes allowed to be down simultaneously"
   [opts]
-  (let [dead (atom #{})]
-    {:nemesis (kill-nemesis (:max-dead-nodes opts) dead)
-     :generator (killer-gen)
+  (let [dead (atom #{})
+        opts (assoc opts :dead dead)]
+    {:nemesis (full-nemesis opts)
+     :generator (full-gen opts)
      :final-generator (gen/concat
+                        (gen/once {:type :info, :f :partition-stop})
+                        (gen/once {:type :info, :f :clock-reset})
                         (gen/once
                           (fn [test _]
                             {:type :info, :f :restart, :value (:nodes test)}))

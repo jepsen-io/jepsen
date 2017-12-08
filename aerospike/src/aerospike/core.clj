@@ -34,11 +34,11 @@
                 checker
                 model]} (get (workloads) (:workload opts))
         time-limit (:time-limit opts)
-        nemesis (nemesis/killer opts)
+        nemesis (nemesis/full opts)
         generator (->> generator
                        (gen/nemesis
                          (->> (:generator nemesis)
-                              (gen/delay 0)))
+                              (gen/delay 5)))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not (or final-generator (:final-generator nemesis))
                     generator
@@ -74,7 +74,9 @@
    [nil "--max-dead-nodes NUMBER" "Number of nodes that can simultaneously fail"
     :parse-fn #(Long/parseLong %)
     :default  2
-    :validate [(complement neg?) "must be non-negative"]]])
+    :validate [(complement neg?) "must be non-negative"]]
+   [nil "--clean-kill" "Terminate processes with SIGTERM to simulate fsync before commit"
+    :default false]])
 
 (defn -main
   "Handles command-line arguments, running a Jepsen command."

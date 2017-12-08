@@ -87,6 +87,16 @@
   (reify Generator
     (op [gen test process])))
 
+(defn f-map
+  "Takes a function `f-map` converting op functions (:f op) to other functions,
+  and a generator `g`. Returns a generator like `g`, but where fs are replaced
+  according to `f-map`. Useful for composing generators together for use with a
+  composed nemesis."
+  [f-map g]
+  (reify Generator
+    (op [gen test process]
+      (update (op g test process) :f f-map))))
+
 (defn sleep-til-nanos
   "High-resolution sleep; takes a time in nanos, relative to System/nanotime."
   [t]
