@@ -17,7 +17,7 @@
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [knossos.core :as knossos]
+            [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
                                           fcatch
@@ -30,8 +30,10 @@
             [jepsen.checker :as checker]
             [jepsen.client :as client]
             [jepsen.nemesis :as nemesis]
-            [jepsen.store :as store])
-  (:import (java.util.concurrent CyclicBarrier)))
+            [jepsen.store :as store]
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import (java.util.concurrent CyclicBarrier
+                                 CountDownLatch)))
 
 (defn synchronize
   "A synchronization primitive for tests. When invoked, blocks until all
@@ -140,193 +142,312 @@
      (finally
        (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
-(defn invoke-and-complete
-  "Applies the given op, returning the process and client used, or
-  a new process and client if the result of the invocation places our
-  process in an unknowable or indeterminate state."
-  [node process client test op]
-  (try
-    ; Evaluate operation
-    (let [completion (-> (client/invoke! client test op)
-                         (assoc :time (relative-time-nanos)))]
+(defprotocol Worker
+  "Polymorphic lifecycle for worker threads; synchronized setup, run, and
+  teardown phases, each with error recovery. Workers are singlethreaded and may
+  be stateful. Return value are ignored."
+  (worker-name      [worker])
+  (abort-worker!    [worker]) ; Lets a worker know it should abort
+  (setup-worker!    [worker])
+  (run-worker!      [worker])
+  (teardown-worker! [worker]))
 
-      ; Log completion
-      (util/log-op completion)
-
-      ; Validate completion
-      (let [t (:type completion)]
-        (assert (or (= t :ok)
-                    (= t :fail)
-                    (= t :info))
-                (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received " (pr-str completion) " instead")))
-      (assert (= (:process op) (:process completion)))
-      (assert (= (:f op)       (:f completion)))
-
-      ; Add completion to history
-      (conj-op! test completion)
-
-      (cond
-        ; If we know the result, continue with same process and client
-        (or (knossos/ok? completion) (knossos/fail? completion))
-        [process client]
-
-        ; Otherwise, return a new process and client
-        (client/closable? client)
-        [(+ process (:concurrency test))
-         (do (client/close! client test)
-             (client/open! (:client test) test node))]
-
-        ; DEPRECATED If we don't support creating a new client in the worker,
-        ; fallback to new process with same client
-        :else
-        [(+ process (:concurrency test))
-         client]))
-
-    (catch Throwable t
-      ; At this point all bets are off. If the client or network
-      ; or DB crashed before doing anything; this operation won't
-      ; be a part of the history. On the other hand, the DB may
-      ; have applied this operation and we *don't know* about it;
-      ; e.g.  because of timeout.
-      ;
-      ; This process is effectively hung; it can not initiate a
-      ; new operation without violating the single-threaded
-      ; process constraint. We cycle to a new process identifier,
-      ; and leave the invocation uncompleted in the history.
-      (let [op (assoc op
-                      :type :info
-                      :time  (relative-time-nanos)
-                      :error (str "indeterminate: "
-                                  (if (.getCause t)
-                                    (.. t getCause
-                                        getMessage)
-                                    (.getMessage t))))]
-        ; Add synthetic completion to history
-        (conj-op! test op))
-
-      (warn t "Invocation on process" process "indeterminate")
-
-      (if (client/closable? client)
-        ; New process, new client
-        [(+ process (:concurrency test))
-         (do (client/close! client test)
-             (client/open! (:client test) test node))]
-
-        ; DEPRECATED Fallback to new process id with the same client
-        [(+ process (:concurrency test))
-         client]))))
-
-(defn worker
-  "Spawns a future to execute a particular process in the history."
-  [test setup-barrier process node]
-  (let [gen (:generator test)]
-    (future
-      (with-thread-name (str "jepsen worker " process)
-        (info "Worker" process "with node" node "starting")
-
-        ; Differentiate our base client for this process
-        (let [client (client/open-compat! (:client test) test node)
-
-              ; Wait to begin ops until all clients are set up
-              _ (.await setup-barrier)
-
-              [process client exception] (loop [[process client exception exit?] [process client nil false]]
-                                           (if exit?
-                                             ; Return our worker state at the end of the loop
-                                             [process client exception]
-
-                                             ; Consume operations from the generator
-                                             (recur
-                                              (try
-                                                ; Obtain an operation to execute
-                                                (if-let [op (generator/op-and-validate gen test process)]
-                                                  (let [op (assoc op
-                                                                  :process process
-                                                                  :time    (relative-time-nanos))]
-                                                    ; Log invocation
-                                                    (util/log-op op)
-                                                    ; Add invocation to history
-                                                    (conj-op! test op)
-                                                    ; Apply the op and log its completion in the history
-                                                    (invoke-and-complete node process client test op))
-                                                  ; Out of ops
-                                                  [process client exception true])
-
-                                                ; Ensure cleanup by immediately exiting with any exception outside of invoke
-                                                (catch Exception e [process client e true])))))]
-
-          ; Ensure all ops are complete before any worker does teardown
-          (.await setup-barrier)
-          ; Close the client when we're out of ops to perform
-          (client/close-compat! client test)
-          (when exception
-            (warn "Worker for process" process "with node" node "threw")
-            (throw exception))
-          (info "Worker" process "with node" node "done"))))))
-
-(defn nemesis-worker
-  "Starts the nemesis thread, which draws failures from the generator and
-  evaluates them. Returns a future."
-  [test nemesis]
-  (let [gen       (:generator        test)
-        histories (:active-histories test)]
-    (future
-      (with-thread-name "jepsen nemesis"
-        (info "Nemesis starting")
-        (loop []
-          (when-let [op (generator/op-and-validate gen test :nemesis)]
-            (let [op (assoc op
-                            :process :nemesis
-                            :time    (relative-time-nanos))]
-              ; Log invocation in all histories of all currently running cases
-              (doseq [history @histories]
-                (swap! history conj op))
-
-              (try
-                (util/log-op op)
-                (let [completion (-> (nemesis/invoke-compat! nemesis test op)
-                                     (assoc :time (relative-time-nanos)))]
-                  (util/log-op completion)
-
-                  ; Nemesis is not allowed to affect the model
-                  (assert (= (:type op)    :info))
-                  (assert (= (:f op)       (:f completion)))
-                  (assert (= (:process op) (:process completion)))
-
-                  ; Log completion in all histories of all currently running
-                  ; cases
-                  (doseq [history @histories]
-                    (swap! history conj completion)))
+(defn do-worker!
+  "Runs a worker through setup, running, and teardown. Returns nil on success,
+  or a throwable if any phase threw."
+  [                 abort!
+   ^CountDownLatch  run-latch
+   ^CountDownLatch  teardown-latch
+                    worker]
+  (let [name (worker-name worker)]
+    (with-thread-name (str "jepsen " name)
+      (try (info "Starting" name)
+           (setup-worker! worker)
+           (try (.countDown run-latch)
+                (info "Running" name)
+                (run-worker! worker)
+                ; Normal termination
+                (.countDown teardown-latch)
+                (try (info "Stopping" name)
+                     (teardown-worker! worker)
+                     nil
+                     (catch Throwable t
+                       (warn t "Error tearing down" name)
+                       t))
 
                 (catch Throwable t
-                  (doseq [history @histories]
-                    (swap! history conj (assoc op
-                                               :time  (relative-time-nanos)
-                                               :error (str "crashed: " t))))
-                  (warn t "Nemesis crashed evaluating" op)))
+                  ; Failure in running
+                  (warn t "Error running" name)
+                  (abort! worker)
+                  (Thread/interrupted) ; Clear our interrupt state
+                  (.countDown teardown-latch)
+                  (try (info "Stopping" name)
+                       (teardown-worker! worker)
+                       t
+                       (catch Throwable t
+                         (warn t "Error tearing down" name)
+                         t))))
 
-              (recur))))
-        (info "nemesis done")))))
+           (catch Throwable t
+             ; Failure in setup process
+             (warn t "Error setting up" name)
+             (abort! worker)
+             (Thread/interrupted) ; Clear our interrupt state
+             (.countDown teardown-latch)
+             (try (info "Stopping" name)
+                  (teardown-worker! worker)
+                  t
+                  (catch Throwable t
+                    (warn t "Error tearing down" name)
+                    t)))))))
 
-(defmacro with-nemesis
-  "Sets up nemesis, starts nemesis worker thread, evaluates body, waits for
-  nemesis completion, and tears down nemesis."
-  [test & body]
-  ; Initialize nemesis
-  `(let [nemesis# (nemesis/setup-compat! (:nemesis ~test) ~test nil)]
-     (try
-       ; Launch nemesis thread
-       (let [worker# (nemesis-worker ~test nemesis#)
-             result# ~@body]
-         ; Wait for nemesis worker to complete
-         (info "Waiting for nemesis to complete")
-         (deref worker#)
-         (info "nemesis done.")
-         result#)
-       (finally
-         (info "Tearing down nemesis")
-         (nemesis/teardown-compat! nemesis# ~test)
-         (info "Nemesis torn down")))))
+(defn run-workers!
+  "Runs a set of workers."
+  [workers]
+  (let [n (count workers)
+        thread-group    (ThreadGroup. "jepsen workers")
+        aborting-worker (promise)
+        abort!          (fn abort! [w]
+                          (deliver aborting-worker w)
+                          (mapv abort-worker! workers)
+                          (.interrupt thread-group))
+        run-latch       (CountDownLatch. n)
+        teardown-latch  (CountDownLatch. n)
+        results         (take n (repeatedly promise))
+        threads         (mapv (fn [worker result]
+                                (Thread. thread-group
+                                         (bound-fn []
+                                           (deliver result
+                                                    (do-worker! abort!
+                                                                run-latch
+                                                                teardown-latch
+                                                                worker)))))
+                              workers
+                              results)]
+
+    ; Launch threads!
+    (doseq [t threads] (.start t))
+
+    ; Wait for completion
+    (let [results (mapv deref results)]
+      ; If nobody aborted already, we'll fill in a default of nil
+      (deliver aborting-worker nil)
+
+      ; Did any crash?
+      (when-let [aborting-worker @aborting-worker]
+        (->> (map (fn [worker result]
+                    (when (identical? worker aborting-worker)
+                      result))
+                  workers
+                  results)
+             (remove nil?)
+             first
+             throw)))))
+
+
+(defn invoke-op!
+  "Applies an operation to a client, catching client exceptions and converting
+  them to infos. Returns a completion op, throwing if the completion is
+  invalid."
+  [op test client abort?]
+  (let [completion (try (-> (client/invoke! client test op)
+                            (assoc :time (relative-time-nanos)))
+                        (catch Throwable e
+                          (when @abort? (throw e))
+
+                          ; Yes, we want Throwable here: assertion errors
+                          ; are not Exceptions. D-:
+                          (warn e "Process" (:process op) "crashed")
+
+                          ; Construct info from exception
+                          (assoc op
+                                 :type :info
+                                 :time (relative-time-nanos)
+                                 :error (str "indeterminate: "
+                                             (if (.getCause e)
+                                               (.. e getCause getMessage)
+                                               (.getMessage e))))))]
+    ; Validate completion
+    (let [t (:type completion)]
+      (assert (or (= t :ok)
+                  (= t :fail)
+                  (= t :info))
+              (str "Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received "
+                   (pr-str completion) " instead")))
+    (assert (= (:process op) (:process completion)))
+    (assert (= (:f op)       (:f completion)))
+
+    ; Looks good!
+    completion))
+
+(defn nemesis-invoke-op!
+  "Applies an operation to a nemesis, catching exceptions and converting
+  them to infos. Returns a completion op, throwing if the completion is
+  invalid."
+  [op test client abort?]
+  (let [completion (try (-> (nemesis/invoke-compat! client test op)
+                            (assoc :time (relative-time-nanos)))
+                        (catch Throwable e
+                          (when @abort? (throw e))
+
+                          ; Yes, we want Throwable here: assertion errors
+                          ; are not Exceptions. D-:
+                          (warn e "Process" (:process op) "crashed")
+
+                          ; Construct info from exception
+                          (assoc op
+                                 :type :info
+                                 :time (relative-time-nanos)
+                                 :error (str "indeterminate: "
+                                             (if (.getCause e)
+                                               (.. e getCause getMessage)
+                                               (.getMessage e))))))]
+    ; Validate completion
+    (assert (= (:type completion) :info)
+            (str "Expected nemesis/invoke! to return a map with :type :ok, :fail, or :info, but received "
+                 (pr-str completion) " instead"))
+    (assert (= (:process op) (:process completion)))
+    (assert (= (:f op)       (:f completion)))
+
+    ; Looks good!
+    completion))
+
+(defn nemesis-apply-op!
+  "Logs, journals, and invokes an operation, logging and journaling its
+  completion, and returning the completed operation."
+  [op test nemesis abort?]
+  (let [histories (:active-histories test)]
+    (util/log-op op)
+    (doseq [history @histories]
+      (swap! history conj op))
+    (let [completion (nemesis-invoke-op! op test nemesis abort?)]
+      (doseq [history @histories]
+        (swap! history conj completion))
+      (util/log-op completion)
+      completion)))
+
+(deftype ClientWorker
+  [test
+   node
+   worker-number
+   ^:unsynchronized-mutable process
+   ^:unsynchronized-mutable client
+   abort?]
+
+  Worker
+  (worker-name [this]
+    (str "worker " worker-number))
+
+  (abort-worker! [this]
+    (reset! abort? true))
+
+  (setup-worker! [this]
+    ; Create an initial client and perform setup
+    (set! client (client/open-compat! (:client test) test node)))
+
+  (run-worker! [this]
+    (let [gen (:generator test)]
+      (loop []
+        (when @abort?
+          (throw+ {:type :worker-abort}))
+
+        (when-let [op (generator/op-and-validate gen test process)]
+          (let [op (assoc op
+                          :process process
+                          :time    (relative-time-nanos))]
+            ; We log here so users know what's going on, but wait to journal
+            ; the op to the history until the last possible moment.
+            (util/log-op op)
+
+            ; Ensure a client exists
+            (when-not client
+              (try
+                ; Open a new client
+                (set! (.client this) (client/open! (:client test) test node))
+                (catch RuntimeException e
+                  (warn e "Error opening client")
+                  (let [fail (assoc op
+                                    :type  :fail
+                                    :error [:no-client
+                                            (.getMessage e)]
+                                    :time  (relative-time-nanos))]
+                    (conj-op! test op)
+                    (conj-op! test fail)
+                    (util/log-op fail)
+                    (set! (.client this) nil)))))
+
+            ; If we have a client, we can go on to process the op.
+            (when client
+              ; Note that client creation can't have affected the state, so we
+              ; defer journaling the operation until the last possible moment.
+              (conj-op! test op)
+              (let [completion (invoke-op! op test client abort?)]
+                (conj-op! test completion)
+                (util/log-op completion)
+                (when (op/info? completion)
+                  ; At this point all bets are off. If the client or network or
+                  ; DB crashed before doing anything; this operation won't be a
+                  ; part of the history. On the other hand, the DB may have
+                  ; applied this operation and we *don't know* about it; e.g.
+                  ; because of timeout.
+                  ;
+                  ; This process is effectively hung; it can not initiate a new
+                  ; operation without violating the single-threaded process
+                  ; constraint. We cycle to a new process identifier, and leave
+                  ; the invocation uncompleted in the history.
+                  (set! process (+ process (:concurrency test)))
+
+                  (when (client/closable? client)
+                    ; We can close this client and open a new one to replace
+                    ; it.
+                    (client/close! client test)
+                    (set! client nil))))))
+
+          ; On to the next op
+          (recur)))))
+
+  (teardown-worker! [this]
+    (when client
+      (client/close-compat! client test))))
+
+(defn client-worker
+  "A worker for executing operations on clients. Takes a test, an initial
+  process id, and a node to bind clients to."
+  [test process-id node]
+  (ClientWorker. test node process-id process-id nil (atom false)))
+
+(deftype NemesisWorker [test ^:unsynchronized-mutable nemesis abort?]
+  Worker
+  (worker-name [this] "nemesis")
+
+  (abort-worker! [this]
+    (reset! abort? true))
+
+  (setup-worker! [this]
+    (set! nemesis (nemesis/setup-compat! (:nemesis test) test nil)))
+
+  (run-worker! [this]
+    (let [gen (:generator test)]
+      (loop []
+        (when @abort?
+          (throw+ {:type :worker-abort}))
+
+        (when-let [op (generator/op-and-validate gen test :nemesis)]
+          (let [completion (-> op
+                               (assoc :process :nemesis
+                                      :time    (relative-time-nanos))
+                               (nemesis-apply-op! test nemesis abort?))]
+            ; We don't do anything to recover nemeses on crash
+            (recur))))))
+
+  (teardown-worker! [this]
+    (when nemesis
+      (nemesis/teardown-compat! nemesis test))))
+
+(defn nemesis-worker
+  "A worker for introducing failures. Takes a test."
+  [test]
+  (NemesisWorker. test nil (atom false)))
 
 (defn run-case!
   "Spawns nemesis and clients, runs a single test case, snarf the logs, and
@@ -338,23 +459,21 @@
     ; Register history with test's active set.
     (swap! (:active-histories test) conj history)
 
-    ; Launch nemesis
-    (with-nemesis test
-      ; Begin workload
-      (let [setup-barrier (java.util.concurrent.CyclicBarrier. (:concurrency test))
-            client-nodes  (if (empty? (:nodes test))
-                            ; If you've specified an empty node set, we'll still
-                            ; give you `concurrency` clients, with nil.
-                            (repeat (:concurrency test) nil)
-                            (->> test
-                                 :nodes
-                                 cycle
-                                 (take (:concurrency test))))
-            workers       (mapv (partial worker test setup-barrier)
-                                (iterate inc 0) ; PIDs
-                                client-nodes)]  ; Nodes for clients
-        ; Wait for workers to complete
-        (dorun (map deref workers))))
+    (let [client-nodes (if (empty? (:nodes test))
+                         ; If you gave us an empty node set, we'll
+                         ; still give you :concurrency client, but
+                         ; with nil nodes.
+                         (repeat (:concurrency test) nil)
+                         (->> test
+                              :nodes
+                              cycle
+                              (take (:concurrency test))))
+          clients (mapv (partial client-worker test)
+                        (iterate inc 0) ; Process IDs
+                        client-nodes)
+          nemesis (nemesis-worker test)]
+      ; Go!
+      (run-workers! (cons nemesis clients)))
 
     ; Download logs
     (snarf-logs! test)

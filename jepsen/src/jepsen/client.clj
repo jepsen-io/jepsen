@@ -2,15 +2,19 @@
   "Applies operations to a database."
   (:require [clojure.tools.logging :refer :all]
             [clojure.reflect :refer [reflect]]
-            [jepsen.util :as util]))
+            [jepsen.util :as util]
+            [dom-top.core :refer [with-retry]]))
 
 (defprotocol Client
   (open! [client test node]
           "Set up the client to work with a particular node. Returns a client
-          which is ready to accept operations via invoke!")
+          which is ready to accept operations via invoke! Open *should not*
+          affect the logical state of the test; it should not, for instance,
+          modify tables or insert records.")
   (close! [client test]
           "Close the client connection when work is completed or an invocation
-           crashes the client.")
+           crashes the client. Close should not affect the logical state of the
+          test.")
   (setup! [client test] [client test node]
           "Called once to set up database state for testing. 3 arity form is
            deprecated and will be removed in a future jepsen version.")
@@ -27,6 +31,7 @@
     (setup!    [this test])
     (teardown! [this test])
     (invoke!   [this test op] (assoc op :type :ok))
+    ; TODO: this should be open, not open!
     (open!     [this test node] this)
     (close!    [this test])))
 

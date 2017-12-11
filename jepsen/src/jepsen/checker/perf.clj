@@ -201,6 +201,33 @@
                :fillstyle :transparent :solid 0.05
                :noborder]))))
 
+(defn nemesis-events
+  "Given a history, constructs a sequence of times, in seconds, marking nemesis
+  events other than start/stop pairs."
+  [history]
+  (->> history
+       (filter (fn [op]
+                 (and (= :nemesis (:process op))
+                      (not= :start (:f op))
+                      (not= :stop  (:f op)))))
+       (map (comp double util/nanos->secs :time))))
+
+(defn nemesis-lines
+  "Emits a sequence of gnuplot commands rendering vertical lines where nemesis
+  events occurred."
+  [history]
+  (->> history
+       nemesis-events
+       (map (fn [t]
+              [:set :arrow
+               :from (g/list t [:graph 0])
+               :to   (g/list t [:graph 1])
+               ; When gnuplot gets alpha rgb we can use this
+               ; :lc :rgb "#f3000000"
+               :lc :rgb "#dddddd"
+               :lw 1
+               :nohead]))))
+
 (defn preamble
   "Shared gnuplot preamble"
   [output-path]
@@ -225,23 +252,46 @@
         datasets    (invokes-by-f-type history)
         fs          (util/polysort (keys datasets))
         fs->points  (fs->points fs)
+        ; Order for the key
+        key-order   (for [f (util/polysort fs), t types] [f t])
+        ; Order for points
+        plot-order  (->> key-order
+                         (sort-by (comp count (partial get-in datasets)))
+                         reverse)
         output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
                                                     "latency-raw.png"))]
     (try
       (g/raw-plot!
        (concat (latency-preamble test output-path)
                (nemesis-regions history)
+               (nemesis-lines history)
                ; Plot ops
                [['plot (apply g/list
-                              (for [f fs, t types]
-                                ["-"
-                                 'with        'points
-                                 'linetype    (type->color t)
-                                 'pointtype   (fs->points f)
-                                 'title       (str (util/name+ f) " "
-                                                   (name t))]))]])
-       (for [f fs, t types]
-         (map latency-point (get-in datasets [f t]))))
+                              (concat
+                                ; Plot
+                                (for [[f t] plot-order]
+                                  ["-"
+                                   'with        'points
+                                   'linetype    (type->color t)
+                                   'pointtype   (fs->points f)
+                                   'notitle])
+                                ; Key
+                                (for [[f t] key-order]
+                                  ["-"
+                                   'with        'points
+                                   'linetype    (type->color t)
+                                   'pointtype   (fs->points f)
+                                   'title       (str (util/name+ f) " "
+                                                     (name t))])))]])
+       (concat
+         ; Plot
+         (for [[f t] plot-order]
+           (map latency-point (get-in datasets [f t])))
+         ; Key
+         (for [[f t] key-order]
+           (if (seq (get-in datasets [f t]))
+             [[0 -1]] ; Dummy point to force rendering
+             []))))
 
       (catch java.io.IOException _
         (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))
@@ -273,7 +323,8 @@
       (g/raw-plot!
        (concat (latency-preamble test output-path)
                (nemesis-regions history)
-                                        ; Plot ops
+               (nemesis-lines history)
+               ; Plot ops
                [['plot (apply g/list
                               (for [f fs, q qs]
                                 ["-"
@@ -324,6 +375,7 @@
       (g/raw-plot!
        (concat (rate-preamble test output-path)
                (nemesis-regions history)
+               (nemesis-lines history)
                ; Plot ops
                [['plot (apply g/list
                               (for [f fs, t types]

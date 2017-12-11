@@ -14,13 +14,25 @@
   (:require [jepsen.util :as util]
             [knossos.history :as history]
             [clojure.core :as c]
-            [clojure.tools.logging :refer [warn info]])
+            [clojure.tools.logging :refer [warn info]]
+            [slingshot.slingshot :refer [throw+]])
   (:import (java.util.concurrent.atomic AtomicBoolean)
            (java.util.concurrent.locks LockSupport)
            (java.util.concurrent CyclicBarrier)))
 
 (defprotocol Generator
   (op [gen test process] "Yields an operation to apply."))
+
+(defn op-and-validate
+  "Wraps `op` to ensure we produce a valid operation for our
+  worker. Re-throws any exception we catch from the generator."
+  [gen test process]
+  (let [op (op gen test process)]
+    (when-not (or (nil? op) (map? op))
+      (throw+ {:type :invalid-op
+               :gen  gen
+               :op   op}))
+    op))
 
 (extend-protocol Generator
   nil
@@ -74,6 +86,16 @@
   "A generator which terminates immediately"
   (reify Generator
     (op [gen test process])))
+
+(defn f-map
+  "Takes a function `f-map` converting op functions (:f op) to other functions,
+  and a generator `g`. Returns a generator like `g`, but where fs are replaced
+  according to `f-map`. Useful for composing generators together for use with a
+  composed nemesis."
+  [f-map g]
+  (reify Generator
+    (op [gen test process]
+      (update (op g test process) :f f-map))))
 
 (defn sleep-til-nanos
   "High-resolution sleep; takes a time in nanos, relative to System/nanotime."
@@ -154,6 +176,20 @@
         (when-not (.get emitted)
           (when-not (.getAndSet emitted true)
             (op source test process)))))))
+
+(defn derefer
+  "Sometimes you need to build a generator not *now*, but *later*; e.g. because
+  it depends on state that won't be available until the generator is actually
+  invoked. Wrap a derefable returning a generator in this, and it'll be
+  deref'ed every time an op is requested. For instance:
+
+      (derefer (delay (gen/once {:type :drain-key, :value @key})))
+
+  Looks up the key to drain only once an operation is requested."
+  [dgen]
+  (reify Generator
+    (op [this test process]
+      (op @dgen test process))))
 
 (defn log*
   "Logs a message every time invoked, and yields nil."
@@ -442,16 +478,3 @@
   "When the given generator completes, synchronizes, then yields nil."
   [gen]
   (->> gen (then void)))
-
-(defn op-and-validate
-  "Wraps `jepsen.generator/op` to ensure we produce a valid operation for our worker.
-  Re-throws any exception we catch from the generator."
-  [gen test process]
-  (try
-    (let [op (op gen test process)]
-      (assert (or (nil? op) (map? op))
-              (str "Expected an operation map from " gen ", but got " (pr-str op) " instead."))
-      op)
-    (catch Exception e
-      (warn "Generator" gen "threw")
-      (throw e))))

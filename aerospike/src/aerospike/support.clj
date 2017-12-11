@@ -106,12 +106,12 @@
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
-  (with-retry [tries 10]
+  (with-retry [tries 30]
     (AerospikeClient. node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
-      (info "Retrying client creation -" (.getMessage e))
+      ; (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
 
@@ -134,9 +134,22 @@
 
 ;;; asinfo commands:
 (defn asadm-recluster!
+  "Reclusters all connected nodes."
   []
   ;; Sends to all clustered nodes.
   (c/trace (c/su (c/exec :asadm :-e "asinfo -v recluster:"))))
+
+(defn revive!
+  "Revives a namespace on the local node."
+  ([]
+   (revive! ans))
+  ([namespace]
+   (c/su (c/exec :asinfo :-v (str "revive:namespace=" namespace)))))
+
+(defn recluster!
+  "Reclusters the local node."
+  []
+  (c/su (c/exec :asinfo :-v "recluster:")))
 
 (defn roster
   [conn namespace]
@@ -243,7 +256,7 @@
 
 (defn configure!
   "Uploads configuration files to the given node."
-  [node test]
+  [node test opts]
   (info "Configuring...")
   (c/su
     ; Config file
@@ -252,7 +265,9 @@
                       slurp
                       (str/replace "$NODE_ADDRESS" (net/local-ip))
                       (str/replace "$MESH_ADDRESS"
-                                   (net/ip (jepsen/primary test))))
+                                   (net/ip (jepsen/primary test)))
+                      (str/replace "$REPLICATION_FACTOR"
+                                   (str (:replication-factor opts))))
             :> "/etc/aerospike/aerospike.conf")))
 
 (defn start!
@@ -300,14 +315,14 @@
 
 ;;; Test:
 (defn db
-  []
+  [opts]
   "Aerospike for a particular version."
   (reify db/DB
     (setup! [_ test node]
       (nt/reset-time!)
       (doto node
         (install!)
-        (configure! test)
+        (configure! test opts)
         (start! test)))
 
     (teardown! [_ test node]
@@ -441,6 +456,16 @@
 
        (catch com.aerospike.client.AerospikeException e#
          (case (.getResultCode e#)
+           ; This is error code "OK", which I guess also means "dunno"?
+           0 (condp instance? (.getCause e#)
+               java.io.EOFException
+               (assoc ~op :type error-type#, :error :eof)
+
+               java.net.SocketException
+               (assoc ~op :type error-type#, :error :socket-error)
+
+               (throw e#))
+
            ; Generation error; CAS can't have taken place.
            3 (assoc ~op :type :fail, :error :generation-mismatch)
 
@@ -455,14 +480,6 @@
 
            ;; Forbidden
            22 (assoc ~op :type :fail, :error [:forbidden (.getMessage e#)])
-           (throw e#))))))
 
-; Nemeses
-
-(defn killer
-  "Kills aerospike on a random node on start, restarts it on stop."
-  []
-  (nemesis/node-start-stopper
-    rand-nth
-    (fn start [test node] (c/su (c/exec :killall :-9 :asd)))
-    (fn stop  [test node] (start! node test))))
+           (do (info :error-code (.getResultCode e#))
+               (throw e#)))))))

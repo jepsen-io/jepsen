@@ -42,10 +42,10 @@
 
 (defrecord CasRegisterClient [client namespace set]
   client/Client
-  (setup! [this test node]
-    (let [client (s/connect node)]
-      (Thread/sleep 10000) ; TODO: remove?
-      (assoc this :client client)))
+  (open! [this test node]
+    (assoc this :client (s/connect node)))
+
+  (setup! [this test])
 
   (invoke! [this test op]
     (s/with-errors op #{:read}
@@ -70,7 +70,9 @@
           :write (do (s/put! client namespace set k {:value v})
                      (assoc op :type :ok))))))
 
-  (teardown! [this test]
+  (teardown! [this test])
+
+  (close! [this test]
     (s/close client)))
 
 (defn cas-register-client

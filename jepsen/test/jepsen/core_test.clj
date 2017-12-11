@@ -1,4 +1,5 @@
 (ns jepsen.core-test
+  (:refer-clojure :exclude [run!])
   (:use jepsen.core
         clojure.test
         clojure.pprint
@@ -19,6 +20,7 @@
         db    (tst/atom-db state)
         n     10
         test  (run! (assoc tst/noop-test
+                           :name       "basic cas"
                            :db         (tst/atom-db state)
                            :client     (tst/atom-client state)
                            :generator  (->> gen/cas
@@ -86,16 +88,62 @@
 (deftest worker-recovery-test
   ; Workers should only consume n ops even when failing.
   (let [invocations (atom 0)
-        n 30]
+        n 12]
     (run! (assoc tst/noop-test
+                 :name "worker recovery"
                  :client (reify client/Client
                            (setup! [c _ _] c)
                            (invoke! [_ _ _]
                              (swap! invocations inc)
-                             (assert false))
+                             (/ 1 0))
                            (teardown! [c _]))
                  :checker  (checker/unbridled-optimism)
                  :generator (->> (gen/queue)
                                  (gen/limit n)
                                  (gen/nemesis gen/void))))
       (is (= n @invocations))))
+
+(defn tracking-client
+  "Tracks connections in an atom."
+  ([conns]
+   (tracking-client conns (atom 0)))
+  ([conns uid]
+   (reify client/Client
+     (open! [c test node]
+       (let [uid (swap! uid inc)] ; silly hack
+         (swap! conns conj uid)
+         (tracking-client conns uid)))
+
+     (setup! [c test] c)
+
+     (invoke! [c test op]
+       (assoc op :type :ok))
+
+     (teardown! [c test] c)
+
+     (close! [c test]
+       (swap! conns disj uid)))))
+
+(deftest generator-recovery-test
+  ; Throwing an exception from a generator shouldn't break the core. We use
+  ; gen/phases to force a synchronization barrier in the generator, which would
+  ; ordinarily deadlock when one worker thread prematurely exits, and prove
+  ; that we can knock other worker threads out of that barrier and have them
+  ; abort cleanly.
+  (let [conns (atom #{})]
+    (is (thrown-with-msg?
+          ArithmeticException #"Divide by zero"
+          (run! (assoc tst/noop-test
+                       :name "generator recovery"
+                       :client (tracking-client conns)
+                       :generator (gen/clients
+                                    (gen/phases
+                                      (gen/each
+                                        (gen/once
+                                          (reify gen/Generator
+                                            (op [_ test process]
+                                              (if (= process 0)
+                                                (/ 1 0)
+                                                {:type :invoke, :f :meow})))))
+                                      (gen/once {:type :invoke, :f :done})))))))
+    (is (empty? @conns))))

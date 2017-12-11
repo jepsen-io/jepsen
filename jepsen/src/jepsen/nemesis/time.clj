@@ -70,6 +70,7 @@
   []
   (reify client/Client
     (setup! [nem test _]
+      (c/with-test-nodes test (install!))
       (reset-time! test)
       nem)
 
