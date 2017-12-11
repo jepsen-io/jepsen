@@ -284,20 +284,20 @@
 (defn session
   "Wraps clj-ssh-session in a wrapper for reconnection."
   [host]
-  (binding [*host* host]
-    (try
-     (rc/open!
-      (rc/wrapper {:open    (if *dummy*
-                              (fn [] [:dummy host])
-                              (fn [] (clj-ssh-session host)))
-                   :name    [:control host]
-                   :close   (if *dummy*
-                              identity
-                              ssh/disconnect)
-                   :log?    true}))
-     (catch com.jcraft.jsch.JSchException e
-       (error "Error opening SSH session. Verify username, password, and node hostnames are correct.\nSSH configuration is:\n" (util/pprint-str (debug-data)))
-       (throw e)))))
+  (rc/open!
+   (rc/wrapper {:open    (if *dummy*
+                           (fn [] [:dummy host])
+                           (fn [] (try
+                                    (clj-ssh-session host)
+                                    (catch com.jcraft.jsch.JSchException e
+                                      (error "Error opening SSH session. Verify username, password, and node hostnames are correct.\nSSH configuration is:\n"
+                                             (util/pprint-str (binding [*host* host] (debug-data))))
+                                      (throw e)))))
+                :name    [:control host]
+                :close   (if *dummy*
+                           identity
+                           ssh/disconnect)
+                :log?    true})))
 
 (defn disconnect
   "Close a session"
