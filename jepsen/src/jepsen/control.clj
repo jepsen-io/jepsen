@@ -2,6 +2,7 @@
   "Provides SSH control over a remote node. There's a lot of dynamically bound
   state in this namespace because we want to make it as simple as possible for
   scripts to open connections to various nodes."
+  (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap
                                              with-retry
@@ -9,7 +10,7 @@
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [clojure.tools.logging :refer [warn info debug]]))
+            [clojure.tools.logging :refer [warn info debug error]]))
 
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
@@ -115,7 +116,7 @@
 (defn wrap-trace
   "Logs argument to console when tracing is enabled."
   [arg]
-  (do (when *trace* (info arg))
+  (do (when *trace* (info "Host:" *host* "arg:" arg))
       arg))
 
 (defn throw-on-nonzero-exit
@@ -187,12 +188,25 @@
   (rc/with-conn [s *session*]
     (ssh/scp-to *session* current-path node-path)))
 
+(defn file->path
+  "Takes an object, if it's an instance of java.io.File, gets the path, otherwise
+  returns the object"
+  [x]
+  (if (instance? java.io.File x)
+    (.getCanonicalPath x)
+    x))
+
 (defn upload
-  "Copies local path(s) to remote node. Takes arguments for clj-ssh/scp-to."
-  [& args]
+  "Copies local path(s) to remote node and returns the remote path.
+  Takes arguments for clj-ssh/scp-to."
+  [& [local-paths remote-path & remaining]]
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
-      (apply ssh/scp-to s args))
+      (let [local-paths (if (sequential? local-paths)
+                          (map file->path local-paths)
+                          (file->path local-paths))]
+        (apply ssh/scp-to s local-paths remote-path remaining)
+        remote-path))
     (catch com.jcraft.jsch.JSchException e
       (if (and (pos? tries)
                (or (= "session is down" (.getMessage e))
@@ -271,14 +285,19 @@
   "Wraps clj-ssh-session in a wrapper for reconnection."
   [host]
   (rc/open!
-    (rc/wrapper {:open    (if *dummy*
-                            (fn [] [:dummy host])
-                            (fn [] (clj-ssh-session host)))
-                 :name    [:control host]
-                 :close   (if *dummy*
-                            identity
-                            ssh/disconnect)
-                 :log?    true})))
+   (rc/wrapper {:open    (if *dummy*
+                           (fn [] [:dummy host])
+                           (fn [] (try
+                                    (clj-ssh-session host)
+                                    (catch com.jcraft.jsch.JSchException e
+                                      (error "Error opening SSH session. Verify username, password, and node hostnames are correct.\nSSH configuration is:\n"
+                                             (util/pprint-str (binding [*host* host] (debug-data))))
+                                      (throw e)))))
+                :name    [:control host]
+                :close   (if *dummy*
+                           identity
+                           ssh/disconnect)
+                :log?    true})))
 
 (defn disconnect
   "Close a session"
@@ -286,7 +305,8 @@
   (rc/close! session))
 
 (defmacro with-ssh
-  "Takes a map of SSH configuration and evaluates body in that scope. Options:
+  "Takes a map of SSH configuration and evaluates body in that scope. Catches
+  JSchExceptions and re-throws with all available debugging context. Options:
 
   :dummy?
   :username
