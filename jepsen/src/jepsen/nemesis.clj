@@ -23,7 +23,10 @@
   Warns users that nemeses implementing `jepsen.client` have been deprecated."
   [nemesis test node]
   (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (setup! nemesis test)
+    (try
+      (setup! nemesis test)
+      (catch AbstractMethodError e
+        nemesis))
     (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, calling `jepsen.client/setup!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
         (client/setup! nemesis test node))))
 
@@ -40,7 +43,9 @@
   Warns users that nemeses implementing `jepsen.client` have been deprecated."
   [nemesis test]
   (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (teardown! nemesis test)
+    (try (teardown! nemesis test)
+         (catch AbstractMethodError e
+           nemesis))
     (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, falling back to `jepsen.client/teardown!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
         (client/teardown! nemesis test))))
 
