@@ -398,6 +398,16 @@
      (set! (.recordExistsAction p) RecordExistsAction/CREATE_ONLY)
      (put! client p namespace set key bins))))
 
+(defn append!
+  "Takes a namespace, set, and key, and a map of bins to values. For the record
+  identified by key, appends each value in `bins` to the current value of the
+  corresponding bin key."
+  ([client namespace set key bins]
+   (append! client write-policy namespace set key bins))
+  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+   (.append client policy (Key. namespace set key) (map->bins bins))))
+
+
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
   set, and key. Returns nil if no record found."
