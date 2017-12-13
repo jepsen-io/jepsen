@@ -105,8 +105,8 @@
    :f     :bump
    :value (zipmap (util/random-nonempty-subset (:nodes test))
                   (repeatedly (fn []
-                                (* (rand-nth [-1 1])
-                                   (Math/pow 2 (+ 2 (rand 16)))))))})
+                                (long (* (rand-nth [-1 1])
+                                         (Math/pow 2 (+ 2 (rand 16))))))))})
 
 (defn strobe-gen
   "Randomized clock strobe generator. On random subsets of the test's nodes,
@@ -117,8 +117,8 @@
    :f     :strobe
    :value (zipmap (util/random-nonempty-subset (:nodes test))
                   (repeatedly (fn []
-                                {:delta (Math/pow 2 (+ 2 (rand 16)))
-                                 :period (Math/pow 2 (rand 10))
+                                {:delta (long (Math/pow 2 (+ 2 (rand 16))))
+                                 :period (long (Math/pow 2 (rand 10)))
                                  :duration (rand 32)})))})
 
 (defn clock-gen
