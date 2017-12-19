@@ -90,7 +90,11 @@
     :default  2
     :validate [(complement neg?) "must be non-negative"]]
    [nil "--clean-kill" "Terminate processes with SIGTERM to simulate fsync before commit"
-    :default false]])
+    :default false]
+   [nil "--pause-mode MODE" "Whether to pause nodes by pausing the process, or slowing the network"
+    :default :process
+    :parse-fn keyword
+    :validate [#{:process :net} "Must be one of :process, :net."]]])
 
 (defn -main
   "Handles command-line arguments, running a Jepsen command."
