@@ -4,7 +4,8 @@
             [jepsen [util :as util]
                     [client :as client]
                     [control :as c]
-                    [generator :as gen]]
+                    [generator :as gen]
+                    [nemesis :as nemesis]]
             [clojure.java.io :as io])
   (:import (java.io File)))
 
@@ -68,7 +69,7 @@
 
       {:f :bump, :value {node1 delta-ms ...}}"
   []
-  (reify client/Client
+  (reify nemesis/Nemesis
     (setup! [nem test _]
       (c/with-test-nodes test (install!))
       (reset-time! test)
