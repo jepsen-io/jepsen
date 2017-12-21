@@ -29,8 +29,7 @@
           test (:value op)
           (fn [test node]
             (case (:f op)
-              :kill (if ((swap! dead capped-conj node max-dead)
-                         node)
+              :kill (if ((swap! dead capped-conj node max-dead) node)
                       (do (meh (c/su (c/exec :killall
                                              (str "-" signal)
                                              :asd)))
@@ -80,17 +79,24 @@
 
 (defn killer-gen-seq
   "Sequence of kills, restarts, revivals, and reclusterings"
-  []
+  [test]
   (lazy-seq
-    (concat (rand-nth [[kill-gen]
-                       [restart-gen]
-                       [revive-gen recluster-gen]])
-            (killer-gen-seq))))
+    (concat (rand-nth [;[kill-gen]
+                       ;[restart-gen]
+                       ; Revive then recluster
+                       ;[revive-gen recluster-gen]
+                       ; Skew then restart
+                       (let [node (rand-nth (:nodes test))]
+                         [{:type :info, :f :clock-bump, :value {node 1000000}}
+                          {:type :info, :f :kill, :value [node]}
+                          {:type :info, :f :clock-reset, :value [node]}
+                          {:type :info, :f :restart, :value [node]}])])
+            (killer-gen-seq test))))
 
 (defn killer-gen
   "A mix of kills, restarts, revivals, and reclusterings"
-  []
-  (gen/seq (killer-gen-seq)))
+  [test]
+  (gen/seq (killer-gen-seq test)))
 
 (defn full-nemesis
   "Handles kills, restarts, revives, reclusters, clock skew, and partitions."
@@ -112,13 +118,14 @@
 (defn full-gen
   [opts]
   "Generates kills, restarts, revives, reclusters, clock skews, and partitions."
-  (gen/mix [(gen/f-map {:strobe :clock-strobe
-                       :reset  :clock-reset
-                       :bump   :clock-bump}
-                      (nt/clock-gen))
-            (killer-gen)
-            (gen/seq (cycle [{:type :info, :f :partition-start}
-                             {:type :info, :f :partition-stop}]))]))
+  (gen/mix [;(gen/f-map {:strobe :clock-strobe
+            ;            :reset  :clock-reset
+            ;            :bump   :clock-bump}
+            ;          (nt/clock-gen))
+            (killer-gen opts)
+            ;(gen/seq (cycle [{:type :info, :f :partition-start}
+            ;                 {:type :info, :f :partition-stop}]))
+            ]))
 
 (defn full
   "A combined nemesis and generator for all kinds of havoc. Options:

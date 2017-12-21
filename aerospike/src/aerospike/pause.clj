@@ -10,6 +10,7 @@
                     [independent :as independent]
                     [nemesis :as nemesis]
                     [net :as net]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.checker.timeline :as timeline]))
 
 (def healthy-delay
@@ -37,7 +38,7 @@
 
 (defn pause!
   "Pauses a node based on the :pause-mode of a test, and updates :state."
-  [state test]
+  [state test node]
   (case (:pause-mode test)
     :process (c/su (c/exec :killall :-19 :asd))
     ; This is a terrible hack; if we increase latency, we destroy our
@@ -51,26 +52,39 @@
                                 "tc qdisc del dev eth0 root")
                            (c/lit "&"))
                    (Thread/sleep 1000) ; Give that a second to take effect
-                   ))
+                   )
+    ; We need some extra time here because it takes a few seconds for the
+    ; secondary to take over, and we need it to commit records *more* than
+    ; pause-delay seconds in the past relative to us.
+    :clock (do (nt/bump-time! (* 2 pause-delay))
+               (Thread/sleep (rand-int 2000))
+               (c/su (c/exec :killall :-15 :asd))))
   :paused)
 
 (defn resume!
   "Resumes a node based on the :pause-mode of a test, and updates :state."
-  [state test]
+  [state test node]
   (case (:pause-mode test)
     :process (c/su (c/exec :killall :-18 :asd))
-    :net     nil) ; not applicable
+    :net     nil ; not applicable
+    :clock   (do (nt/reset-time!)
+                 (c/su (c/exec :service :aerospike :restart))))
   :resumed)
 
 (defn nemesis
   [state]
   (reify nemesis/Nemesis
+    (setup! [this test]
+      (c/with-test-nodes test (nt/install!))
+      (nt/reset-time! test)
+      this)
+
     (invoke! [this test op]
       (let [v (c/on-nodes test (:value op)
                                    (fn [test node]
                                      (case (:f op)
-                                       :pause  (pause! state test)
-                                       :resume (resume! state test))))]
+                                       :pause  (pause! state test node)
+                                       :resume (resume! state test node))))]
         (case (:f op)
           :pause  (swap! state assoc :state :paused)
           :resume (swap! state next-healthy test))
@@ -82,7 +96,7 @@
   (open! [this test node]
     (assoc this :client (s/connect node)))
 
-  (setup! [this test])
+  (setup! [this test] this)
 
   (invoke! [this test op]
     (let [[k v] (:value op)]

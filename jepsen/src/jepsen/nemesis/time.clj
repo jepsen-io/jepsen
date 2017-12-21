@@ -70,7 +70,7 @@
       {:f :bump, :value {node1 delta-ms ...}}"
   []
   (reify nemesis/Nemesis
-    (setup! [nem test _]
+    (setup! [nem test]
       (c/with-test-nodes test (install!))
       (reset-time! test)
       nem)

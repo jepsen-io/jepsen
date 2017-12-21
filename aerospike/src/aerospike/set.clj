@@ -26,17 +26,13 @@
                                    (s/fetch namespace set k)
                                    :bins
                                    :value
+                                   (or "")
                                    (str/split #" ")
-                                   (->> (map #(Long/parseLong %))
+                                   (->> (remove str/blank?)
+                                        (map #(Long/parseLong %))
                                         (into (sorted-set))))))
 
-          :add (do (try (s/cas! client namespace set k
-                                (fn [record]
-                                  {:value (str (:value record) " " v)}))
-                        (catch clojure.lang.ExceptionInfo e
-                          (if (= (.getMessage e) "cas not found")
-                            (s/put-if-absent! client namespace set k
-                                              {:value (str v)}))))
+          :add (do (s/append! client namespace set k {:value (str " " v)})
                    (assoc op :type :ok))))))
 
   (teardown! [this test])

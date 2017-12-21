@@ -52,7 +52,7 @@
         generator (->> generator
                        (gen/nemesis
                          (->> (:generator nemesis)
-                              (gen/delay 5)))
+                              (gen/delay 1)))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not (or final-generator (:final-generator nemesis))
                     generator
@@ -94,7 +94,7 @@
    [nil "--pause-mode MODE" "Whether to pause nodes by pausing the process, or slowing the network"
     :default :process
     :parse-fn keyword
-    :validate [#{:process :net} "Must be one of :process, :net."]]])
+    :validate [#{:process :net :clock} "Must be one of :clock, :process, :net."]]])
 
 (defn -main
   "Handles command-line arguments, running a Jepsen command."
