@@ -81,16 +81,17 @@
   "Sequence of kills, restarts, revivals, and reclusterings"
   [test]
   (lazy-seq
-    (concat (rand-nth [;[kill-gen]
-                       ;[restart-gen]
+    (concat (rand-nth [[kill-gen]
+                       [restart-gen]
                        ; Revive then recluster
-                       ;[revive-gen recluster-gen]
+                       [revive-gen recluster-gen]
                        ; Skew then restart
-                       (let [node (rand-nth (:nodes test))]
-                         [{:type :info, :f :clock-bump, :value {node 1000000}}
-                          {:type :info, :f :kill, :value [node]}
-                          {:type :info, :f :clock-reset, :value [node]}
-                          {:type :info, :f :restart, :value [node]}])])
+                       ;(let [node (rand-nth (:nodes test))]
+                       ;  [{:type :info, :f :clock-bump, :value {node 1000000}}
+                       ;   {:type :info, :f :kill, :value [node]}
+                       ;   {:type :info, :f :clock-reset, :value [node]}
+                       ;   {:type :info, :f :restart, :value [node]}])])
+                       ])
             (killer-gen-seq test))))
 
 (defn killer-gen
@@ -118,14 +119,16 @@
 (defn full-gen
   [opts]
   "Generates kills, restarts, revives, reclusters, clock skews, and partitions."
-  (gen/mix [;(gen/f-map {:strobe :clock-strobe
-            ;            :reset  :clock-reset
-            ;            :bump   :clock-bump}
-            ;          (nt/clock-gen))
-            (killer-gen opts)
-            ;(gen/seq (cycle [{:type :info, :f :partition-start}
-            ;                 {:type :info, :f :partition-stop}]))
-            ]))
+  (->> [(when (:clocks opts) (gen/f-map {:strobe :clock-strobe
+                                         :reset  :clock-reset
+                                         :bump   :clock-bump}
+                                        (nt/clock-gen)))
+        (when (:kills opts) (killer-gen opts))
+        (when (:partitions opts)
+          (gen/seq (cycle [{:type :info, :f :partition-start}
+                           {:type :info, :f :partition-stop}])))]
+       (remove nil?)
+       gen/mix))
 
 (defn full
   "A combined nemesis and generator for all kinds of havoc. Options:
