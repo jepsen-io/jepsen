@@ -59,6 +59,12 @@
   [n]
   (inc (int (Math/floor (/ n 2)))))
 
+(defn rand-nth-empty
+  "Like rand-nth, but returns nil if the collection is empty."
+  [coll]
+  (try (rand-nth coll)
+       (catch IndexOutOfBoundsException e nil)))
+
 (defn fraction
   "a/b, but if b is zero, returns unity."
   [a b]

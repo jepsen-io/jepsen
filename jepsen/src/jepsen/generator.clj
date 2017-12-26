@@ -252,12 +252,14 @@
 
 (defn mix
   "A random mixture of operations. Takes a collection of generators and chooses
-  between them uniformly."
+  between them uniformly. If the collection is empty, generator returns nil."
   [gens]
   (let [gens (vec gens)]
-    (reify Generator
-      (op [_ test process]
-        (op (rand-nth gens) test process)))))
+    (if (empty? gens)
+      void
+      (reify Generator
+        (op [_ test process]
+          (op (rand-nth gens) test process))))))
 
 (def cas
   "Random cas/read ops for a compare-and-set register over a small field of
