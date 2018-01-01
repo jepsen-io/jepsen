@@ -119,12 +119,12 @@
 (defn full-gen
   [opts]
   "Generates kills, restarts, revives, reclusters, clock skews, and partitions."
-  (->> [(when (:clocks opts) (gen/f-map {:strobe :clock-strobe
-                                         :reset  :clock-reset
-                                         :bump   :clock-bump}
-                                        (nt/clock-gen)))
-        (when (:kills opts) (killer-gen opts))
-        (when (:partitions opts)
+  (->> [(when-not (:no-clocks opts) (gen/f-map {:strobe :clock-strobe
+                                                :reset  :clock-reset
+                                                :bump   :clock-bump}
+                                               (nt/clock-gen)))
+        (when-not (:no-kills opts) (killer-gen opts))
+        (when-not (:no-partitions opts)
           (gen/seq (cycle [{:type :info, :f :partition-start}
                            {:type :info, :f :partition-stop}])))]
        (remove nil?)

@@ -93,13 +93,13 @@
     :default false]
    [nil "--no-clocks" "Allow the nemesis to change the clock"
     :default  false
-    :assoc-fn (fn [m k v] (assoc m :clocks? (not v)))]
+    :assoc-fn (fn [m k v] (assoc m :no-clocks v))]
    [nil "--no-partitions" "Allow the nemesis to introduce partitions"
     :default  false
-    :assoc-fn (fn [m k v] (assoc m :partitions? (not v)))]
+    :assoc-fn (fn [m k v] (assoc m :no-partitions v))]
    [nil "--no-kills" "Allow the nemesis to kill processes."
     :default  false
-    :assoc-fn (fn [m k v] (assoc m :kills? (not v)))]
+    :assoc-fn (fn [m k v] (assoc m :no-kills v))]
    [nil "--pause-mode MODE" "Whether to pause nodes by pausing the process, or slowing the network"
     :default :process
     :parse-fn keyword
