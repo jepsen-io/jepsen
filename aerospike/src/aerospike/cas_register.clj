@@ -92,7 +92,7 @@
   {:client  (cas-register-client)
    :checker (independent/checker
               (checker/compose
-                {:linear (checker/linearizable)
+                {:linear   (checker/linearizable)
                  :timeline (timeline/html)}))
    :model (model/cas-register)
    :generator (independent/concurrent-generator
@@ -101,4 +101,4 @@
                 (fn [k]
                   (->> (gen/reserve 5 r (gen/mix [w cas cas]))
                        (gen/stagger 1)
-                       (gen/limit 150))))})
+                       (gen/limit (+ 100 (rand-int 100))))))})

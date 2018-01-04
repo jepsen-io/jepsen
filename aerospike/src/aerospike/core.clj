@@ -52,7 +52,7 @@
         generator (->> generator
                        (gen/nemesis
                          (->> (:generator nemesis)
-                              (gen/delay 1)))
+                              (gen/delay (:nemesis-interval opts))))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not (or final-generator (:final-generator nemesis))
                     generator
@@ -97,6 +97,10 @@
    [nil "--no-partitions" "Allow the nemesis to introduce partitions"
     :default  false
     :assoc-fn (fn [m k v] (assoc m :no-partitions v))]
+   [nil "--nemesis-interval SECONDS" "How long between nemesis actions?"
+    :default 5
+    :parse-fn #(Long/parseLong %)
+    :validate [(complement neg?) "Must be non-negative"]]
    [nil "--no-kills" "Allow the nemesis to kill processes."
     :default  false
     :assoc-fn (fn [m k v] (assoc m :no-kills v))]
