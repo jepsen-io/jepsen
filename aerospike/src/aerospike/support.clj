@@ -267,7 +267,11 @@
                       (str/replace "$MESH_ADDRESS"
                                    (net/ip (jepsen/primary test)))
                       (str/replace "$REPLICATION_FACTOR"
-                                   (str (:replication-factor opts))))
+                                   (str (:replication-factor opts)))
+                      (str/replace "$COMMIT_TO_DEVICE"
+                                   (if (:commit-to-device opts)
+                                     "commit-to-device true"
+                                     "")))
             :> "/etc/aerospike/aerospike.conf")))
 
 (defn start!

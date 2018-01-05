@@ -91,6 +91,8 @@
     :validate [(complement neg?) "must be non-negative"]]
    [nil "--clean-kill" "Terminate processes with SIGTERM to simulate fsync before commit"
     :default false]
+   [nil "--no-revives" "Don't revive during the test (but revive at the end)"
+    :default false]
    [nil "--no-clocks" "Allow the nemesis to change the clock"
     :default  false
     :assoc-fn (fn [m k v] (assoc m :no-clocks v))]
@@ -104,6 +106,8 @@
    [nil "--no-kills" "Allow the nemesis to kill processes."
     :default  false
     :assoc-fn (fn [m k v] (assoc m :no-kills v))]
+   [nil "--commit-to-device" "Force writes to disk before commit"
+    :default false]
    [nil "--pause-mode MODE" "Whether to pause nodes by pausing the process, or slowing the network"
     :default :process
     :parse-fn keyword

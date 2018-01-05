@@ -80,19 +80,14 @@
 (defn killer-gen-seq
   "Sequence of kills, restarts, revivals, and reclusterings"
   [test]
-  (lazy-seq
-    (concat (rand-nth [[kill-gen]
+  (let [patterns (->> [[kill-gen]
                        [restart-gen]
                        ; Revive then recluster
-                       [revive-gen recluster-gen]
-                       ; Skew then restart
-                       ;(let [node (rand-nth (:nodes test))]
-                       ;  [{:type :info, :f :clock-bump, :value {node 1000000}}
-                       ;   {:type :info, :f :kill, :value [node]}
-                       ;   {:type :info, :f :clock-reset, :value [node]}
-                       ;   {:type :info, :f :restart, :value [node]}])])
-                       ])
-            (killer-gen-seq test))))
+                       (when-not (:no-revives test)
+                         [revive-gen recluster-gen])]
+                      (remove nil?)
+                      vec)]
+    (mapcat rand-nth (repeat patterns))))
 
 (defn killer-gen
   "A mix of kills, restarts, revivals, and reclusterings"
