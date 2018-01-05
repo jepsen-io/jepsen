@@ -9,7 +9,8 @@
                     [generator :as gen]
                     [independent :as independent]
                     [nemesis :as nemesis]
-                    [net :as net]]
+                    [net :as net]
+                    [util :as util :refer [real-pmap]]]
             [jepsen.nemesis.time :as nt]
             [jepsen.checker.timeline :as timeline]))
 
@@ -53,12 +54,14 @@
                            (c/lit "&"))
                    (Thread/sleep 1000) ; Give that a second to take effect
                    )
-    ; We need some extra time here because it takes a few seconds for the
-    ; secondary to take over, and we need it to commit records *more* than
-    ; pause-delay seconds in the past relative to us.
-    :clock (do (nt/bump-time! (* 2 pause-delay))
-               (Thread/sleep (rand-int 2000))
-               (c/su (c/exec :killall :-15 :asd))))
+    ; We're going to bump the clock, and immediately partition the node away,
+    ; so that it locally commits writes with a far-future clock, which will not
+    ; be replicated to other nodes.
+    :clock (do (nt/bump-time! (* 100 pause-delay))
+               (->> (remove #{node} (:nodes test))
+                    (real-pmap (fn [n]
+                                 (net/drop! (:net test) test node n)
+                                 (net/drop! (:net test) test n node))))))
   :paused)
 
 (defn resume!
@@ -68,7 +71,10 @@
     :process (c/su (c/exec :killall :-18 :asd))
     :net     nil ; not applicable
     :clock   (do (nt/reset-time!)
-                 (c/su (c/exec :service :aerospike :restart))))
+                 (net/heal! (:net test) test)
+                 (c/on-nodes test (remove #{node} (:nodes test))
+                             (fn restart [test node]
+                               (c/su (c/exec :service :aerospike :restart))))))
   :resumed)
 
 (defn nemesis
@@ -163,19 +169,19 @@
 
   We're going to:
 
-  - Pick, without loss of generality, pick a node A to interfere with, which is
+  - Without loss of generality, pick a node A to interfere with, which is
     currently the master for some key.
   - Begin continuous writes on B, C....
     - These writes will be proxied to A, the master.
   - Pause A. With luck, an in-flight write will be trapped in A's memory.
   - Continue writes on B, C, ...
     - These will fail until a new master (one of B, C, ...) is promoted
-  - Once one init succeeds, stop all writes and wait 25+ seconds.
+  - Once one write succeeds, stop all writes and wait 25+ seconds.
     - Let the final write's timestamp be t1
   - Resume A
     - A will process in-flight writes locally
     - assigning them timestamp t1 + 25
-  - Perform a read; the final init will be lost in favor of A.
+  - Perform a read; the final read will be lost in favor of A.
 
   What kind of writes will work with this workload? We need one where we can
   tell that we've lost updates. Blind writes are preferable, because CAS
