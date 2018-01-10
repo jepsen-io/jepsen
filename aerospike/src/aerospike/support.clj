@@ -268,6 +268,8 @@
                                    (net/ip (jepsen/primary test)))
                       (str/replace "$REPLICATION_FACTOR"
                                    (str (:replication-factor opts)))
+                      (str/replace "$HEARTBEAT_INTERVAL"
+                                   (str (:heartbeat-interval opts)))
                       (str/replace "$COMMIT_TO_DEVICE"
                                    (if (:commit-to-device opts)
                                      "commit-to-device true"

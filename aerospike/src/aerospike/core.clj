@@ -52,7 +52,10 @@
         generator (->> generator
                        (gen/nemesis
                          (->> (:generator nemesis)
-                              (gen/delay (:nemesis-interval opts))))
+                              (gen/delay (if (= :pause (:workload opts))
+                                           0 ; The pause workload has its own
+                                             ; schedule
+                                           (:nemesis-interval opts)))))
                        (gen/time-limit (:time-limit opts)))
         generator (if-not (or final-generator (:final-generator nemesis))
                     generator
@@ -111,7 +114,11 @@
    [nil "--pause-mode MODE" "Whether to pause nodes by pausing the process, or slowing the network"
     :default :process
     :parse-fn keyword
-    :validate [#{:process :net :clock} "Must be one of :clock, :process, :net."]]])
+    :validate [#{:process :net :clock} "Must be one of :clock, :process, :net."]]
+   [nil "--heartbeat-interval MS" "Aerospike heartbeat interval in milliseconds"
+    :default 150
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]]])
 
 (defn -main
   "Handles command-line arguments, running a Jepsen command."

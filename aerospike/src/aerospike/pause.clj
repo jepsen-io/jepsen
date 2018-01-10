@@ -24,7 +24,7 @@
 
 (def masters-limit
   "Maximum number of concurrently paused master nodes"
-  2)
+  1)
 
 (defn next-healthy
   "Moves a state to the next healthy state. Picks a new master and a new set of
@@ -38,8 +38,9 @@
                                             (count (:nodes test)))))))))
 
 (defn pause!
-  "Pauses a node based on the :pause-mode of a test, and updates :state."
-  [state test node]
+  "Pauses a node based on the :pause-mode of a test."
+  [test node]
+  (info "pause mode" (pr-str (:pause-mode test)))
   (case (:pause-mode test)
     :process (c/su (c/exec :killall :-19 :asd))
     ; This is a terrible hack; if we increase latency, we destroy our
@@ -57,16 +58,19 @@
     ; We're going to bump the clock, and immediately partition the node away,
     ; so that it locally commits writes with a far-future clock, which will not
     ; be replicated to other nodes.
-    :clock (do (nt/bump-time! (* 100 pause-delay))
-               (->> (remove #{node} (:nodes test))
-                    (real-pmap (fn [n]
-                                 (net/drop! (:net test) test node n)
-                                 (net/drop! (:net test) test n node))))))
+    :clock (do (nt/bump-time! (* 1000 pause-delay))
+               (info "Clock bumped by" pause-delay "seconds")
+               (c/on-nodes test (remove #{node} (:nodes test))
+                           (fn isolate [test n]
+                             (net/drop! (:net test) test node n)
+                             (info n "snubbed" node)
+                             (net/drop! (:net test) test n node)
+                             (info node "snubbed" n)))))
   :paused)
 
 (defn resume!
   "Resumes a node based on the :pause-mode of a test, and updates :state."
-  [state test node]
+  [test node]
   (case (:pause-mode test)
     :process (c/su (c/exec :killall :-18 :asd))
     :net     nil ; not applicable
@@ -89,8 +93,8 @@
       (let [v (c/on-nodes test (:value op)
                                    (fn [test node]
                                      (case (:f op)
-                                       :pause  (pause! state test node)
-                                       :resume (resume! state test node))))]
+                                       :pause  (pause!  test node)
+                                       :resume (resume! test node))))]
         (case (:f op)
           :pause  (swap! state assoc :state :paused)
           :resume (swap! state next-healthy test))
@@ -150,7 +154,9 @@
             :pausing (assert false "should be unreachable")
             :paused  (do (Thread/sleep 100)
                          (recur test process))
-            :wait    (do (Thread/sleep pause-delay)
+            :wait    (do (Thread/sleep (if (= :clock (:pause-mode test))
+                                         0
+                                         pause-delay))
                          {:type :info, :f :resume, :value (:masters @state)}))
 
           ; Client ops
@@ -197,7 +203,9 @@
     fail until an election promotes another node. The first successful client
     write during :paused moves us to...
   - wait: we cease all operations for 25+ seconds, then the generator picks new
-    keys, issues a nemesis resume operation, and moves us to :healthy"
+    keys, issues a nemesis resume operation, and moves us to :healthy
+
+  This is an awful hack and is subject to SO many deadlocks"
   [test]
   (let [state (atom (next-healthy {:state :wait} test))
         gen   (generator state)]
@@ -212,9 +220,8 @@
                         (count (:nodes test))
                         (range (peek (:keys @state)))
                         (fn [k]
-                          (gen/each
-                            (gen/once {:type :invoke
-                                       :f    :read})))))))}
+                          (gen/once {:type :invoke
+                                     :f    :read}))))))}
      :nemesis {:nemesis           (nemesis state)
                :generator         gen
                :final-generator   (gen/concat
