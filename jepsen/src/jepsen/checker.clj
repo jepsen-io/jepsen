@@ -177,6 +177,109 @@
              :lost-frac       (util/fraction (count lost) (count attempts))
              :recovered-frac  (util/fraction (count recovered) (count attempts))}))))))
 
+(comment 
+(defn linearizable-list
+  "Checks a linearizable list, where :append operations add unique records to
+  the list, and :read shows the current contents of the list. Tracks:
+
+  :ok-count           Records which were acknowledged, and present in all
+                      future reads
+  :recovered          Records which were indeterminate, then present in all
+                      reads after some point
+  :recovered-count
+  :lost               Records which were successful, then not present in a
+                      subsequent read
+  :lost-count
+  :duplicated         Records which appeared multiple times
+  :duplicated-count
+  :unexpected         Records which supposedly were NOT appended, then appeared
+  :unexpected-count
+  :pending-count      Records which were still indeterminate at the end of the
+                      test
+
+  This checker returns false if any records were lost, duplicated, or
+  unexpected.
+
+  This is not a strict linearizability checker; it will detect some, but not
+  all, nonlinearizable histories."
+  []
+  (reify Checker
+    (check [this test model history opts]
+      (loop [history    (seq history)
+             linearized []  ; Fixed order
+             pending    #{} ; In flight
+             ok-unread  #{} ; Should be present, but we don't have an order
+             duplicated {}  ; Map of values to first op where a dup was found
+             unexpected {}  ; Map of values to first op where observed
+             lost       {}] ; Map of values to first op where lost
+        (if history
+          (let [op (first history)
+                h  (next history)
+                f (:f op)
+                t (:type op)
+                v (:value op)]
+            (condp = f
+              :append
+              (condp = t
+                ; This value is in flight
+                :invoke (recur h linearized
+                               (conj pending v)
+                               ok-unread
+                               duplicated
+                               unexpected
+                               lost)
+
+                ; Value should be linearized, but hasn't been observed yet
+                :ok     (recur h linearized
+                               (disj pending v)
+                               (conj ok-unread v)
+                               duplicated
+                               unexpected
+                               lost)
+
+                ; Value won't be linearized
+                :fail   (recur h linearized
+                               (disj pending v)
+                               ok-unread
+                               duplicated
+                               unexpected
+                               lost)
+
+                ; Not sure
+                :info   (recur h linearized
+                               pending
+                               ok-unread
+                               duplicated
+                               unexpected
+                               lost)
+
+              :read
+              (condp = t
+                ; Read begins. We conservatively assume that the read OBSERVES
+                ; state now, but defer actually promoting observed records to
+                ; the linearized order until the read has completed, so that we
+                ; can proceed in linear time, rather than exploring concurrent
+                ; orders. This is one reason why this checker is not a true
+                ; linearizability checker.
+                ;
+                ; So... the list we read should be a linear extension of the
+                ; linearized list. 
+                :invoke
+
+                ; OK, by this point the read has completed, and any values we
+                ; read have definitely been linearized.
+                :ok
+
+                ; No effect
+                :fail (recur h linearized pending ok-unread)
+
+                ; Likewise
+                :info (recur h linearized pending ok-unread))))
+          ; Done
+          {:ok-count         (count linearized)
+           :pending-count    (count pending)}))))))
+           )
+
 (defn expand-queue-drain-ops
   "Takes a history. Looks for :drain operations with their value being a
   collection of queue elements, and expands them to a sequence of :dequeue
