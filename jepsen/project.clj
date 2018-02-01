@@ -1,4 +1,4 @@
-(defproject jepsen "0.1.7-SNAPSHOT"
+(defproject jepsen "0.1.7"
   :description "Call Me Maybe: Network Partitions in Practice"
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/data.fressian "0.2.1"]
@@ -6,7 +6,7 @@
                  [spootnik/unilog "0.7.13"]
                  [org.clojure/tools.cli "0.3.5"]
                  [clj-time "0.11.0"]
-                 [knossos "0.3.2-SNAPSHOT" :exclusions [org.slf4j/slf4j-log4j12]]
+                 [knossos "0.3.2" :exclusions [org.slf4j/slf4j-log4j12]]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.1"]
                  [http-kit "2.1.18"]
