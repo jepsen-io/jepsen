@@ -1,4 +1,4 @@
-# Refining a test
+# Refining Tests
 
 Our test identified a fault, but it took some luck and clever guessing to
 stumble upon it. It's time to refine our test, to make it faster, easier to

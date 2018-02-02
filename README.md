@@ -9,8 +9,13 @@ been used to verify everything from eventually-consistent commutative databases
 to linearizable coordination systems to distributed task schedulers. It can
 also generate graphs of performance and availability, helping you characterize
 how a system responds to different faults. See
-[aphyr.com](https://aphyr.com/tags/jepsen) for examples of the sorts of
-analyses you can carry out with Jepsen.
+[jepsen.io](https://jepsen.io/analyses) for examples of the sorts of analyses
+you can carry out with Jepsen.
+
+## Documentation
+
+This [tutorial](doc/tutorial/index.md) walks you through writing a Jepsen test
+from scratch.
 
 ## Design overview
 
@@ -84,17 +89,6 @@ INFO  jepsen.core - Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
    [253 255 256]
    ...}}
 ```
-
-## Writing a test
-
-If you don't know Clojure, you'll want to learn some of the basics. Try
-[Clojure From the Ground
-Up](https://aphyr.com/posts/301-clojure-from-the-ground-up-welcome) and
-[Clojure for the Brave and True](http://www.braveclojure.com/). Or you can
-reimplement Jepsen's ideas in a language you *do* know. Either way's fine!
-
-For a complete guide to writing a test, start with
-[scaffolding](doc/scaffolding.md).
 
 ## FAQ
 

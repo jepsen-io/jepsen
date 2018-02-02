@@ -1,4 +1,4 @@
-# Adding a checker
+# Checking Correctness
 
 With our generator and clients performing operations, we've got a history to
 analyze for correctness. Jepsen uses a *model* to represent the abstract
