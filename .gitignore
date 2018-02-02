@@ -29,3 +29,4 @@ bench/**
 */resources/datomic/riak-transactor.properties
 /.nrepl-port
 .idea
+jepsen/doc

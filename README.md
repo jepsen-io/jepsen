@@ -17,7 +17,7 @@ you can carry out with Jepsen.
 This [tutorial](doc/tutorial/index.md) walks you through writing a Jepsen test
 from scratch.
 
-For reference, see the [API documentation](doc/api/).
+For reference, see the [API documentation](http://jepsen-io.github.io/jepsen/).
 
 ## Design overview
 
