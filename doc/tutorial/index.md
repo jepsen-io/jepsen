@@ -1,8 +1,8 @@
 # Tutorial
 
 This tutorial will walk you through writing a Jepsen test from scratch. It is
-also the basis for a paid [class](https://jepsen.io/training) offered by Jepsen
-training.
+also the basis for a [training class](https://jepsen.io/training) offered by
+Jepsen.
 
 If you aren't familiar with the Clojure language, we recommend you start with
 [Clojure for the Brave and True](http://www.braveclojure.com/), [Clojure From
