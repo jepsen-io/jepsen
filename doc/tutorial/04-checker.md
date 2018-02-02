@@ -7,22 +7,20 @@ that model. We'll require `knossos.model` and `jepsen.checker`:
 
 ```clj
 (ns jepsen.etcdemo
-  (:gen-class)
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
-            [verschlimmbesserung.core :as v]
-            [slingshot.slingshot :refer [try+]]
-            [knossos.model :as model]
             [jepsen [checker :as checker]
                     [cli :as cli]
                     [client :as client]
                     [control :as c]
                     [db :as db]
                     [generator :as gen]
-                    [tests :as tests]
-                    [util :as util :refer [timeout]]]
+                    [tests :as tests]]
             [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian]
+            [knossos.model :as model]
+            [slingshot.slingshot :refer [try+]]
+            [verschlimmbesserung.core :as v]))
 ```
 
 Remember how we chose to model our operations as reads, writes, and cas operations?
@@ -38,7 +36,7 @@ concerned, they're arbitrary values. However, our *client* understands how to
 interpret those operations, when it dispatches based on `(case (:f op) :read
 ...)`. Now we need a *model* of the system which understands those same
 operations. Knossos defines a Model data type for us, which takes a model and an
-operation to apply, and returns a new model resulting from that operation. Here's what that looks like:
+operation to apply, and returns a new model resulting from that operation. Here's that code, inside `knossos.model`:
 
 ```clj
 (definterface+ Model
@@ -54,8 +52,7 @@ operation to apply, and returns a new model resulting from that operation. Here'
 ```
 
 It turns out that the Knossos checker defines some common models for things
-like locks and registers. Here's one from
-[knossos.model](https://github.com/jepsen-io/knossos/blob/443a5a081c76be315eb01c7990cc7f1d9e41ed9b/src/knossos/model.clj#L66-L80).
+like locks and registers. Here's one for [a compare-and-set register](https://github.com/jepsen-io/knossos/blob/443a5a081c76be315eb01c7990cc7f1d9e41ed9b/src/knossos/model.clj#L66-L80)--exactly the datatype we're modeling.
 
 ```clj
 (defrecord CASRegister [value]
@@ -74,8 +71,9 @@ like locks and registers. Here's one from
                (inconsistent (str "can't read " (:value op)
                                   " from register " value))))))
 ```
-We don't need to write these in our tests. I just want you to know how they
-work.
+We don't need to write these in our tests, as long as `knossos` provides a
+model for the type of thing we're checking. This is just so you can see how
+things work under the hood.
 
 This defrecord defines a new data type called `CASRegister`, which has a
 single, immutable field, called `value`. It satisfies the `Model` interface we
@@ -90,26 +88,26 @@ register. Reads are similar, except that we always allow reads of `nil` to pass
 through. This allows us to satisfy histories which include reads that never
 returned.
 
-We'll add a model to our test by constructing a fresh `CASRegister` with a
-`nil` value--to match the `nil` value of an uninitialized node in etcd.
+We'll add this to our test by providing a `:model` field.
 
 ```clj
 (defn etcd-test
-  "Given an options map from the command-line runner (e.g. :nodes, :ssh,
-  :concurrency, ...), constructs a test map."
+  "Given an options map from the command line runner (e.g. :nodes, :ssh,
+  :concurrency ...), constructs a test map."
   [opts]
   (merge tests/noop-test
-         {:name "etcd"
-          :os debian/os
-          :db (db "v3.1.5")
-          :client (client nil)
-          :model  (model/cas-register)
-          :checker checker/linearizable
-          :generator (->> (gen/mix [r w cas])
-                          (gen/stagger 1)
-                          (gen/clients)
-                          (gen/time-limit 15))}
-         opts))
+         opts
+         {:name       "etcd"
+          :os         debian/os
+          :db         (db "v3.1.5")
+          :client     (Client. nil)
+          :model      (model/cas-register)
+          :checker    (checker/linearizable)
+          :generator  (->> (gen/mix [r w cas])
+                           (gen/stagger 1)
+                           (gen/nemesis nil)
+                           (gen/time-limit 15))}))
+
 ```
 
 To analyze the history, we'll specify a `:checker` for the test.
@@ -157,7 +155,7 @@ performance graphs.
 ```clj
          :checker (checker/compose
                     {:perf   (checker/perf)
-                     :linear checker/linearizable})))
+                     :linear (checker/linearizable)})
 ```
 
 ```bash
@@ -170,32 +168,18 @@ We can also generate HTML visualizations of the history. Let's add the `jepsen.c
 
 ```clj
 (ns jepsen.etcdemo
-  (:gen-class)
-  (:require [clojure.tools.logging :refer :all]
-            [clojure.string :as str]
-            [verschlimmbesserung.core :as v]
-            [slingshot.slingshot :refer [try+]]
-            [knossos.model :as model]
-            [jepsen [checker :as checker]
-                    [cli :as cli]
-                    [client :as client]
-                    [control :as c]
-                    [db :as db]
-                    [generator :as gen]
-                    [tests :as tests]
-                    [util :as util :refer [timeout]]]
+  (:require ...
             [jepsen.checker.timeline :as timeline]
-            [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]))
+            ...))
 ```
 
 And add that checker to the test:
 
 ```clj
-          :checker (checker/compose
-                     {:perf     (checker/perf)
-                      :timeline (timeline/html)
-                      :linear   checker/linearizable})
+          :checker    (checker/compose
+                        {:perf      (checker/perf)
+                         :linear    (checker/linearizable)
+                         :timeline  (timeline/html)})
 ```
 
 Now we can plot how different processes performed operations over time--which
@@ -208,4 +192,4 @@ $ open store/latest/timeline.html
 ```
 
 Now that we've got a passing test, it's time to [introduce
-failures](nemesis.md) into the system.
+failures](05-nemesis.md) into the system.

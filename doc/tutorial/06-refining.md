@@ -27,7 +27,7 @@ reducing the number of crashed operations. We'll start with reads.
 When an operation times out, we get a long stacktrace like
 
 ```
-WARN [2017-03-31 19:12:46,969] jepsen worker 0 - jepsen.core Process 0 indeterminate
+WARN [2018-02-02 16:14:37,588] jepsen worker 1 - jepsen.core Process 11 crashed
 java.net.SocketTimeoutException: Read timed out
   at java.net.SocketInputStream.socketRead0(Native Method) ~[na:1.8.0_40]
   ...
@@ -40,59 +40,55 @@ they succeed or fail, because the effects are equivalent. We can therefore
 safely convert crashed reads to failed reads, and improve checker performance.
 
 ```clj
-    (invoke! [this test op]
-      (case (:f op)
-        :read (try (let [value (-> conn
-                                   (v/get "r" {:quorum? true})
-                                   parse-long)]
-                     (assoc op :type :ok, :value value))
-                   (catch java.net.SocketTimeoutException e
-                     (assoc op :type :fail, :error :timeout)))
-        :write (do (v/reset! conn "r" (:value op))
-                   (assoc op :type, :ok))
-        :cas (try+
-               (let [[value value'] (:value op)]
-                 (assoc op :type (if (v/cas! conn "r" value value'
-                                             {:prev-exist? true})
-                                   :ok
-                                   :fail)))
-               (catch [:errorCode 100] _
-                 (assoc op :type :fail, :error :not-found)))))
+  (invoke! [_ test op]
+    (case (:f op)
+      :read  (try (let [value (-> conn
+                                  (v/get "foo" {:quorum? true})
+                                  parse-long)]
+                    (assoc op :type :ok, :value value))
+                  (catch java.net.SocketTimeoutException ex
+                    (assoc op :type :fail, :error :timeout)))
+      :write (do (v/reset! conn "foo" (:value op))
+                 (assoc op :type :ok))
+      :cas (try+
+             (let [[old new] (:value op)]
+               (assoc op :type (if (v/cas! conn "foo" old new)
+                                 :ok
+                                 :fail)))
+             (catch [:errorCode 100] ex
+               (assoc op :type :fail, :error :not-found)))))
 ```
 
 Better yet--we can get rid of all the exception stacktrace noise in the logs if
 we catch socket timeouts on all three paths at once. We'll handle not-found
-errors there too, even though they only happen on `:cas` ops--it keeps the code a
-little cleaner.
+errors there too, even though they only happen on `:cas` ops--it keeps the code
+a little cleaner.
 
 ```clj
-    (invoke! [this test op]
-      (try+
-        (case (:f op)
-          :read (let [value (-> conn
-                                (v/get "r" {:quorum? true})
-                                parse-long)]
-                  (assoc op :type :ok, :value value))
+  (invoke! [_ test op]
+    (try+
+      (case (:f op)
+        :read (let [value (-> conn
+                              (v/get "foo" {:quorum? true})
+                              parse-long)]
+                (assoc op :type :ok, :value value))
+        :write (do (v/reset! conn "foo" (:value op))
+                   (assoc op :type :ok))
+        :cas (let [[old new] (:value op)]
+               (assoc op :type (if (v/cas! conn "foo" old new)
+                                 :ok
+                                 :fail))))
 
-          :write (do (v/reset! conn "r" (:value op))
-                     (assoc op :type, :ok))
+      (catch java.net.SocketTimeoutException e
+        (assoc op
+               :type  (if (= :read (:f op)) :fail :info)
+               :error :timeout))
 
-          :cas (let [[value value'] (:value op)]
-                 (assoc op :type (if (v/cas! conn "r" value value'
-                                             {:prev-exist? true})
-                                   :ok
-                                   :fail))))
-
-        (catch java.net.SocketTimeoutException e
-          (assoc op
-                 :type (if (= :read (:f op)) :fail :info)
-                 :error :timeout))
-
-        (catch [:errorCode 100] e
-          (assoc op :type :fail, :error :not-found))))
+      (catch [:errorCode 100] e
+        (assoc op :type :fail, :error :not-found))))
 ```
 
-Now we get nice short timeout errors.
+Now we get nice short timeout errors on *all* operations, not just reads.
 
 ```bash
 INFO [2017-03-31 19:34:47,351] jepsen worker 4 - jepsen.util 4  :info :cas  [4 4] :timeout
@@ -111,12 +107,8 @@ single-key test into one which operates on multiple keys. The
 
 ```clj
 (ns jepsen.etcdemo
-  (:gen-class)
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
-            [verschlimmbesserung.core :as v]
-            [slingshot.slingshot :refer [try+]]
-            [knossos.model :as model]
             [jepsen [checker :as checker]
                     [cli :as cli]
                     [client :as client]
@@ -125,11 +117,13 @@ single-key test into one which operates on multiple keys. The
                     [generator :as gen]
                     [independent :as independent]
                     [nemesis :as nemesis]
-                    [tests :as tests]
-                    [util :as util :refer [timeout]]]
+                    [tests :as tests]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian]
+            [knossos.model :as model]
+            [slingshot.slingshot :refer [try+]]
+            [verschlimmbesserung.core :as v]))
 ```
 
 We have a generator that emits operations on a single key, like `{:type :invoke,
@@ -137,19 +131,19 @@ We have a generator that emits operations on a single key, like `{:type :invoke,
 *multiple* keys. Instead of `:value v`, we want `:value [key v]`.
 
 ```clj
-          :generator (->> (independent/concurrent-generator
-                            10
-                            (range)
-                            (fn [k]
-                              (->> (gen/mix [r w cas])
-                                   (gen/stagger 1/10)
-                                   (gen/limit 100))))
-                          (gen/nemesis
-                            (gen/seq (cycle [(gen/sleep 5)
-                                             {:type :info, :f :start}
-                                             (gen/sleep 5)
-                                             {:type :info, :f :stop}])))
-                          (gen/time-limit (:time-limit opts)))}
+          :generator  (->> (independent/concurrent-generator
+                             10
+                             (range)
+                             (fn [k]
+                               (->> (gen/mix [r w cas])
+                                    (gen/stagger 1/10)
+                                    (gen/limit 100))))
+                           (gen/nemesis
+                             (gen/seq (cycle [(gen/sleep 5)
+                                              {:type :info, :f :start}
+                                              (gen/sleep 5)
+                                              {:type :info, :f :stop}])))
+                           (gen/time-limit (:time-limit opts)))}))
 ```
 
 Our mix of reads, writes, and cas ops is still in there, but it's been wrapped
@@ -158,39 +152,38 @@ that particular key. We're using `concurrent-generator` to have 10 threads per
 key, with keys taken from the infinite sequence of integers `(range)`, and
 generators for those keys derived from `(fn [k] ...)`.
 
-`concurrent-generator` changed the shape of our values from `v` to `[k v]`, so
+`concurrent-generator` changes the shape of our values from `v` to `[k v]`, so
 we need to modify our client to understand how to read and write to different
 keys.
 
 ```clj
-    (invoke! [this test op]
-      (let [[k v] (:value op)]
-        (try+
-          (case (:f op)
-            :read (let [value (-> conn
-                                  (v/get k {:quorum? true})
-                                  parse-long)]
-                    (assoc op :type :ok, :value (independent/tuple k value)))
+  (invoke! [_ test op]
+    (let [[k v] (:value op)]
+      (try+
+        (case (:f op)
+          :read (let [value (-> conn
+                                (v/get "foo" {:quorum? true})
+                                parse-long)]
+                  (assoc op :type :ok, :value (independent/tuple k value)))
 
-            :write (do (v/reset! conn k v)
-                       (assoc op :type, :ok))
+          :write (do (v/reset! conn k v)
+                     (assoc op :type :ok))
 
-            :cas (let [[value value'] v]
-                   (assoc op :type (if (v/cas! conn k value value'
-                                               {:prev-exist? true})
-                                     :ok
-                                     :fail))))
+          :cas (let [[old new] v]
+                 (assoc op :type (if (v/cas! conn k old new)
+                                   :ok
+                                   :fail))))
 
-          (catch java.net.SocketTimeoutException e
-            (assoc op
-                   :type (if (= :read (:f op)) :fail :info)
-                   :error :timeout))
+        (catch java.net.SocketTimeoutException e
+          (assoc op
+                 :type  (if (= :read (:f op)) :fail :info)
+                 :error :timeout))
 
-          (catch [:errorCode 100] e
-            (assoc op :type :fail, :error :not-found)))))
+        (catch [:errorCode 100] e
+          (assoc op :type :fail, :error :not-found)))))
 ```
 
-See how our hardcoded key `"r"` is gone? Now every key is parameterized by the
+See how our hardcoded key `"foo"` is gone? Now every key is parameterized by the
 operation itself. Also note that where we modify the value--for instance, in
 `:f :read`--we have to construct a special `independent/tuple` for the
 key/value pair. Having a special datatype for tuples allows

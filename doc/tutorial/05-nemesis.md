@@ -6,12 +6,8 @@ provides several built-in failure modes.
 
 ```clj
 (ns jepsen.etcdemo
-  (:gen-class)
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
-            [verschlimmbesserung.core :as v]
-            [slingshot.slingshot :refer [try+]]
-            [knossos.model :as model]
             [jepsen [checker :as checker]
                     [cli :as cli]
                     [client :as client]
@@ -19,11 +15,13 @@ provides several built-in failure modes.
                     [db :as db]
                     [generator :as gen]
                     [nemesis :as nemesis]
-                    [tests :as tests]
-                    [util :as util :refer [timeout]]]
+                    [tests :as tests]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]))
+            [jepsen.os.debian :as debian]
+            [knossos.model :as model]
+            [slingshot.slingshot :refer [try+]]
+            [verschlimmbesserung.core :as v]))
 ```
 
 We'll pick a simple nemesis to start, and add it to the `:nemesis` key for the
@@ -32,31 +30,32 @@ it receives a `:start` op, and heals the network when it receives a `:stop`.
 
 ```clj
 (defn etcd-test
-  "Given an options map from the command-line runner (e.g. :nodes, :ssh,
-  :concurrency, ...), constructs a test map."
+  "Given an options map from the command line runner (e.g. :nodes, :ssh,
+  :concurrency ...), constructs a test map."
   [opts]
   (merge tests/noop-test
-         {:name "etcd"
-          :os debian/os
-          :db (db "v3.1.5")
-          :client (client nil)
-          :nemesis (nemesis/partition-random-halves)
-          :model  (model/cas-register)
-          :checker (checker/compose
-                     {:perf     (checker/perf)
-                      :timeline (timeline/html)
-                      :linear   checker/linearizable})
-          :generator (->> (gen/mix [r w cas])
-                          (gen/stagger 1)
-                          (gen/clients)
-                          (gen/time-limit 15))}
-         opts))
+         opts
+         {:name       "etcd"
+          :os         debian/os
+          :db         (db "v3.1.5")
+          :client     (Client. nil)
+          :nemesis    (nemesis/partition-random-halves)
+          :model      (model/cas-register)
+          :checker    (checker/compose
+                        {:perf      (checker/perf)
+                         :linear    (checker/linearizable)
+                         :timeline  (timeline/html)})
+          :generator  (->> (gen/mix [r w cas])
+                           (gen/stagger 1)
+                           (gen/nemesis nil)
+                           (gen/time-limit 15))}))
+
 ```
 
 Like regular clients, the nemesis draws operations from the generator. Right
-now our generator only emits ops to regular clients thanks to
-`gen/clients`. We'll replace that with `gen/nemesis`, which splits off nemesis
-ops into their own dedicated sub-generator.
+now our generator only emits ops to regular clients--the nemesis just gets
+`nil`, which tells it there's nothing to do. We'll replace that with a
+dedicated generator for nemesis operations. We're also going to increase the time limit, so we have enough time to see the nemesis take effect.
 
 ```clj
           :generator (->> (gen/mix [r w cas])
@@ -66,7 +65,7 @@ ops into their own dedicated sub-generator.
                                              {:type :info, :f :start}
                                              (gen/sleep 5)
                                              {:type :info, :f :stop}])))
-                          (gen/time-limit 15))}
+                          (gen/time-limit 30))}
 ```
 
 `gen/seq` takes a sequence of generators and emits a single op from each one.
@@ -76,18 +75,19 @@ which ends once the time limit is up.
 The network partition causes some operations to crash:
 
 ```clj
-WARN [2017-03-31 18:00:09,328] jepsen worker 3 - jepsen.core Process 3 indeterminate
+WARN [2018-02-02 15:54:53,380] jepsen worker 1 - jepsen.core Process 1 crashed
 java.net.SocketTimeoutException: Read timed out
 ```
 
 ... and so on. If we *know* an operation didn't take place we can make the
-checker more efficient (and detect more bugs!) by returning ops with
-`:type :fail` instead of letting `client/invoke!` throw exceptions, but letting
-every error crash the process is still legal.
+checker more efficient (and detect more bugs!) by returning ops with `:type
+:fail` instead of letting `client/invoke!` throw exceptions, but letting every
+error crash the process is still safe: jepsen's checkers understand that a
+crashed operation may or may not take place.
 
 ## Finding a bug
 
-We've hardcoded a 15 second time limit into our test, but it'd be nice if we
+We've hardcoded a 30 second time limit into our test, but it'd be nice if we
 could control that at the command line. Jepsen's CLI kit provides a
 `--time-limit` switch, which is passed to `etcd-test` as `:time-limit`, in the
 options map. Let's hook that up now:
@@ -163,7 +163,7 @@ that:
     (invoke! [this test op]
       (case (:f op)
         :read (let [value (-> conn
-                              (v/get "r" {:quorum? true})
+                              (v/get "foo" {:quorum? true})
                               parse-long)]
                 (assoc op :type :ok, :value value))
       ...
@@ -182,4 +182,4 @@ same issue I identified in
 [2014](https://aphyr.com/posts/316-jepsen-etcd-and-consul), and dialogue with
 the etcd team led them to introduce the *quorum* read option.
 
-Take a quick break! You've earned it! Then, if you like, we can move onto [refining the test](refining.md).
+Take a quick break! You've earned it! Then, if you like, we can move onto [refining the test](06-refining.md).

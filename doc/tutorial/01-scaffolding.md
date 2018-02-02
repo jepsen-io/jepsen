@@ -1,7 +1,10 @@
 # Test scaffolding
 
-Let's say we want to write a test for etcd: a distributed consensus
-system. We'll begin by creating a new Leiningen project in any directory.
+In this tutorial, we're going to write a test for etcd: a distributed consensus
+system. I want to encourage you to *type* the code yourself, even if you don't
+understand everything yet. It'll help you learn faster, and you won't get as lost when we start updating small pieces of larger functions.
+
+We'll begin by creating a new Leiningen project in any directory.
 
 ```bash
 $ lein new jepsen.etcdemo
@@ -9,13 +12,25 @@ Generating a project called jepsen.etcdemo based on the 'default' template.
 The default template is intended for library projects, not applications.
 To see other templates (app, plugin, etc), try `lein help new`.
 $ cd jepsen.etcdemo
+$ ls
+CHANGELOG.md  doc/  LICENSE  project.clj  README.md  resources/  src/  test/
 ```
 
-We'll need a few Clojure libraries for this test. Open `project.clj`, which
-specifies the project's dependencies and other metadata. We'll add a `:main`
-namespace, which is how we'll run the test from the command line. In addition
-to depending on the Clojure language itself, we'll pull in the Jepsen library
-(at version 0.1.4), and Verschlimmbesserung: a library for talking to etcd.
+Like any fresh Clojure project, we have a blank changelog, a directory for
+documentation, a copy of the Eclipse Public License, a `project.clj` file,
+which tells `leiningen` how to build and run our code, and a README. The
+`resources` directory is a place for us to data files--for instance, config
+files for a database we want to test. `src` has our source code, organized into
+directories and files which match the namespace structure of our code. `test`
+is for testing our code. Note that this *whole directory* is a "Jepsen test";
+the `test` directory is a convention for most Clojure libraries, and we won't
+be using it here.
+
+We'll start by editing `project.clj`, which specifies the project's
+dependencies and other metadata. We'll add a `:main` namespace, which is how
+we'll run the test from the command line. In addition to depending on the
+Clojure language itself, we'll pull in the Jepsen library (at version 0.1.7),
+and Verschlimmbesserung: a library for talking to etcd.
 
 ```clj
 (defproject jepsen.etcdemo "0.1.0-SNAPSHOT"
@@ -23,12 +38,12 @@ to depending on the Clojure language itself, we'll pull in the Jepsen library
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main jepsen.etcdemo
-  :dependencies [[org.clojure/clojure "1.8.0"]
-                 [jepsen "0.1.4"]
+  :dependencies [[org.clojure/clojure "1.9.0"]
+                 [jepsen "0.1.7"]
                  [verschlimmbesserung "0.1.3"]])
 ```
 
-Let's try running this program with `lein run` (after running `lein deps` to get dependencies - just the first time).
+Let's try running this program with `lein run`.
 
 ```bash
 $ lein run
@@ -39,8 +54,7 @@ Exception in thread "main" java.lang.Exception: Cannot find anything to run for:
 Ah, yes. We haven't written anything to run yet. We need a main function in the `jepsen.etcdemo` namespace, which will receive our command line args and run the test. In `src/jepsen/etcdemo.clj`:
 
 ```clj
-(ns jepsen.etcdemo
-  (:gen-class))
+(ns jepsen.etcdemo)
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
@@ -49,9 +63,10 @@ Ah, yes. We haven't written anything to run yet. We need a main function in the 
   (prn "Hello, world!" args))
 ```
 
-`:gen-class` is a bit of Clojure plumbing; it tells Clojure that we intend to
-run this namespace from the command line. Our `-main` function takes a variable
-number of arguments (`args`), and prints them out after "Hello World":
+Clojure, by default, calls our `-main` function with any arguments we passed on
+the command line--whatever we type after `lein run`. It takes a variable number
+of arguments (that's the `&` symbol), and calls that argument list `args`. We
+print that argument list after "Hello World":
 
 ```bash
 $ lein run hi there
@@ -63,7 +78,6 @@ errors, logging, etc. Let's pull in the `jepsen.cli` namespace, call it `cli` fo
 
 ```clj
 (ns jepsen.etcdemo
-  (:gen-class)
   (:require [jepsen.cli :as cli]
             [jepsen.tests :as tests]))
 
@@ -103,41 +117,72 @@ Let's give it a shot!
 
 ```bash
 $ lein run test
-09:50:17.038 [main] INFO  jepsen.cli - Test options:
+13:04:30.927 [main] INFO  jepsen.cli - Test options:
  {:concurrency 5,
  :test-count 1,
  :time-limit 60,
- :nodes [:n1 :n2 :n3 :n4 :n5],
+ :nodes ["n1" "n2" "n3" "n4" "n5"],
  :ssh
  {:username "root",
   :password "root",
   :strict-host-key-checking false,
   :private-key-path nil}}
 
-INFO [2017-03-30 09:50:20,395] jepsen nemesis - jepsen.core Nemesis starting
-INFO [2017-03-30 09:50:20,396] jepsen nemesis - jepsen.core nemesis done
-INFO [2017-03-30 09:50:20,398] jepsen worker 0 - jepsen.core Worker 0 starting
-INFO [2017-03-30 09:50:20,398] jepsen worker 4 - jepsen.core Worker 4 starting
-INFO [2017-03-30 09:50:20,398] jepsen worker 3 - jepsen.core Worker 3 starting
-INFO [2017-03-30 09:50:20,398] jepsen worker 1 - jepsen.core Worker 1 starting
-INFO [2017-03-30 09:50:20,398] jepsen worker 2 - jepsen.core Worker 2 starting
-INFO [2017-03-30 09:50:20,398] jepsen worker 0 - jepsen.core Worker 0 done
-INFO [2017-03-30 09:50:20,398] jepsen worker 4 - jepsen.core Worker 4 done
-INFO [2017-03-30 09:50:20,398] jepsen worker 3 - jepsen.core Worker 3 done
-INFO [2017-03-30 09:50:20,398] jepsen worker 1 - jepsen.core Worker 1 done
-INFO [2017-03-30 09:50:20,398] jepsen worker 2 - jepsen.core Worker 2 done
-INFO [2017-03-30 09:50:20,398] jepsen test runner - jepsen.core Waiting for nemesis to complete
-INFO [2017-03-30 09:50:20,399] jepsen test runner - jepsen.core nemesis done.
-INFO [2017-03-30 09:50:20,399] jepsen test runner - jepsen.core Tearing down nemesis
-INFO [2017-03-30 09:50:20,399] jepsen test runner - jepsen.core Nemesis torn down
-INFO [2017-03-30 09:50:20,401] jepsen test runner - jepsen.core Run complete, writing
-INFO [2017-03-30 09:50:20,443] jepsen test runner - jepsen.core Analyzing
-INFO [2017-03-30 09:50:20,457] jepsen test runner - jepsen.core Analysis complete
-INFO [2017-03-30 09:50:20,466] jepsen results - jepsen.store Wrote /home/aphyr/jepsen/etcdemo/store/noop/20170330T095017.000-0500/results.edn
-INFO [2017-03-30 09:50:20,472] main - jepsen.core {:valid? true,
- :configs ({:model {}, :last-op nil, :pending []}),
- :final-paths ()}
+INFO [2018-02-02 13:04:30,994] jepsen test runner - jepsen.core Running test:
+ {:concurrency 5,
+ :db
+ #object[jepsen.db$reify__1259 0x6dcf7b6a "jepsen.db$reify__1259@6dcf7b6a"],
+ :name "noop",
+ :start-time
+ #object[org.joda.time.DateTime 0x79d4ff58 "2018-02-02T13:04:30.000-06:00"],
+ :net
+ #object[jepsen.net$reify__3493 0xae3c140 "jepsen.net$reify__3493@ae3c140"],
+ :client
+ #object[jepsen.client$reify__3380 0x20027c44 "jepsen.client$reify__3380@20027c44"],
+ :barrier
+ #object[java.util.concurrent.CyclicBarrier 0x2bf3ec4 "java.util.concurrent.CyclicBarrier@2bf3ec4"],
+ :ssh
+ {:username "root",
+  :password "root",
+  :strict-host-key-checking false,
+  :private-key-path nil},
+ :checker
+ #object[jepsen.checker$unbridled_optimism$reify__3146 0x1410d645 "jepsen.checker$unbridled_optimism$reify__3146@1410d645"],
+ :nemesis
+ #object[jepsen.nemesis$reify__3574 0x4e6cbdf1 "jepsen.nemesis$reify__3574@4e6cbdf1"],
+ :active-histories #<Atom@210a26b: #{}>,
+ :nodes ["n1" "n2" "n3" "n4" "n5"],
+ :test-count 1,
+ :generator
+ #object[jepsen.generator$reify__1936 0x1aac0a47 "jepsen.generator$reify__1936@1aac0a47"],
+ :os
+ #object[jepsen.os$reify__1176 0x438aaa9f "jepsen.os$reify__1176@438aaa9f"],
+ :time-limit 60,
+ :model {}}
 
+INFO [2018-02-02 13:04:35,389] jepsen nemesis - jepsen.core Starting nemesis
+INFO [2018-02-02 13:04:35,389] jepsen worker 1 - jepsen.core Starting worker 1
+INFO [2018-02-02 13:04:35,389] jepsen worker 2 - jepsen.core Starting worker 2
+INFO [2018-02-02 13:04:35,389] jepsen worker 0 - jepsen.core Starting worker 0
+INFO [2018-02-02 13:04:35,390] jepsen worker 3 - jepsen.core Starting worker 3
+INFO [2018-02-02 13:04:35,390] jepsen worker 4 - jepsen.core Starting worker 4
+INFO [2018-02-02 13:04:35,391] jepsen nemesis - jepsen.core Running nemesis
+INFO [2018-02-02 13:04:35,391] jepsen worker 1 - jepsen.core Running worker 1
+INFO [2018-02-02 13:04:35,391] jepsen worker 2 - jepsen.core Running worker 2
+INFO [2018-02-02 13:04:35,391] jepsen worker 0 - jepsen.core Running worker 0
+INFO [2018-02-02 13:04:35,391] jepsen worker 3 - jepsen.core Running worker 3
+INFO [2018-02-02 13:04:35,391] jepsen worker 4 - jepsen.core Running worker 4
+INFO [2018-02-02 13:04:35,391] jepsen nemesis - jepsen.core Stopping nemesis
+INFO [2018-02-02 13:04:35,391] jepsen worker 1 - jepsen.core Stopping worker 1
+INFO [2018-02-02 13:04:35,391] jepsen worker 2 - jepsen.core Stopping worker 2
+INFO [2018-02-02 13:04:35,391] jepsen worker 0 - jepsen.core Stopping worker 0
+INFO [2018-02-02 13:04:35,391] jepsen worker 3 - jepsen.core Stopping worker 3
+INFO [2018-02-02 13:04:35,391] jepsen worker 4 - jepsen.core Stopping worker 4
+INFO [2018-02-02 13:04:35,397] jepsen test runner - jepsen.core Run complete, writing
+INFO [2018-02-02 13:04:35,434] jepsen test runner - jepsen.core Analyzing
+INFO [2018-02-02 13:04:35,435] jepsen test runner - jepsen.core Analysis complete
+INFO [2018-02-02 13:04:35,438] jepsen results - jepsen.store Wrote /home/aphyr/jepsen/jepsen.etcdemo/store/noop/20180202T130430.000-0600/results.edn
+INFO [2018-02-02 13:04:35,440] main - jepsen.core {:valid? true}
 
 Everything looks good! ヽ(‘ー`)ノ
 ```
@@ -185,7 +230,7 @@ $ lein run test --help
       --time-limit SECONDS        60                     Excluding setup and teardown, how long should a test run for, in seconds?
 ```
 
-We'll use `lein run` throughout this guide to re-run our Jepsen test. Each time we run a test, Jepsen will create a new directory in `store/`. You can see the latest results in `store/latest`:
+We'll use `lein run test ...` throughout this guide to re-run our Jepsen test. Each time we run a test, Jepsen will create a new directory in `store/`. You can see the latest results in `store/latest`:
 
 ```bash
 $ ls store/latest/
@@ -211,6 +256,9 @@ Jepsen also comes with a built-in web browser for browsing these results. Let's 
             args))
 ```
 
+This works because `cli/run!` takes a map of command names to specifications of
+how to run those commands. We're merging those maps together with `merge`.
+
 ```bash
 $ lein run serve
 13:29:21.425 [main] INFO  jepsen.web - Web server running.
@@ -234,4 +282,4 @@ Open up a new terminal window, and leave the web server running there. That way
 we can see the results of our tests without having to start and stop it
 repeatedly.
 
-With this groundwork in place, we'll write the code to [set up and tear down the database](db.md)
+With this groundwork in place, we'll write the code to [set up and tear down the database](02-db.md)
