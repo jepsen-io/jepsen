@@ -1,4 +1,4 @@
-(defproject jepsen "0.1.8-SNAPSHOT"
+(defproject jepsen "0.1.7"
   :description "Call Me Maybe: Network Partitions in Practice"
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/data.fressian "0.2.1"]
@@ -17,10 +17,14 @@
                  [dom-top "1.0.1"]
                  [slingshot "0.12.2"]]
   :main jepsen.cli
-  :plugins [[lein-localrepo "0.5.4"]]
+  :plugins [[lein-localrepo "0.5.4"]
+            [lein-codox "0.10.3"]]
   :aot [jepsen.cli clojure.tools.logging.impl]
 ;        clojure.tools.logging.impl]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"
-             "-XX:-OmitStackTraceInFastThrow"])
+             "-XX:-OmitStackTraceInFastThrow"]
+  :codox {:output-path "doc/"
+          :source-uri "https://github.com/jepsen-io/jepsen/blob/{version}/jepsen/{filepath}#L{line}"
+          :metadata {:doc/format :markdown}})

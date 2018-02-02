@@ -17,6 +17,8 @@ you can carry out with Jepsen.
 This [tutorial](doc/tutorial/index.md) walks you through writing a Jepsen test
 from scratch.
 
+For reference, see the [API documentation](doc/api/).
+
 ## Design overview
 
 A Jepsen test runs as a Clojure program on a *control node*. That program uses
