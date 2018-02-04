@@ -18,7 +18,8 @@
                      [linear :as linear]
                      [wgl :as wgl]
                      [history :as history]]
-            [knossos.linear.report :as linear.report]))
+            [knossos.linear.report :as linear.report])
+  (:import (java.util.concurrent Semaphore)))
 
 (def valid-priorities
   "A map of :valid? values to their importance. Larger numbers are considered
@@ -73,6 +74,37 @@
           {:valid? :unknown
            :error (with-out-str (trace/print-cause-trace t))}))))
 
+(defn compose
+  "Takes a map of names to checkers, and returns a checker which runs each
+  check (possibly in parallel) and returns a map of names to results; plus a
+  top-level :valid? key which is true iff every checker considered the history
+  valid."
+  [checker-map]
+  (reify Checker
+    (check [this test model history opts]
+      (let [results (->> checker-map
+                         (pmap (fn [[k checker]]
+                                 [k (check-safe checker test model history opts)]))
+                         (into {}))]
+        (assoc results :valid? (merge-valid (map :valid? (vals results))))))))
+
+(defn concurrency-limit
+  "Takes positive integer limit and a checker. Puts an upper bound on the
+  number of concurrent executions of this checker. Use this when a checker is
+  particularly thread or memory intensive, to reduce context switching and
+  memory cost."
+  [limit checker]
+  ; We use a fair semaphore here because we want checkers to finish ASAP so
+  ; they can release their memory, and because we don't invoke check that
+  ; often.
+  (let [sem (Semaphore. limit true)]
+    (reify Checker
+      (check [this test model history opts]
+        (try (.acquire sem)
+             (check checker test model history opts)
+             (finally
+               (.release sem)))))))
+
 (defn unbridled-optimism
   "Everything is awesoooommmmme!"
   []
@@ -85,26 +117,26 @@
   ([]
    (linearizable :competition))
   ([algorithm]
-   (reify Checker
-     (check [this test model history opts]
-       (let [a ((case algorithm
-                  :competition  competition/analysis
-                  :linear       linear/analysis
-                  :wgl          wgl/analysis)
-                model history)]
-         (when-not (:valid? a)
-           (try
-             ; Renderer can't handle really broad concurrencies yet
-             (linear.report/render-analysis!
-               history a (.getCanonicalPath
-                           (store/path! test (:subdirectory opts)
-                                        "linear.svg")))
-             (catch Throwable e
-               (warn e "Error rendering linearizability analysis"))))
-         ; Writing these can take *hours* so we truncate
-         (assoc a
-                :final-paths (take 10 (:final-paths a))
-                :configs     (take 10 (:configs a))))))))
+     (reify Checker
+       (check [this test model history opts]
+         (let [a ((case algorithm
+                    :competition  competition/analysis
+                    :linear       linear/analysis
+                    :wgl          wgl/analysis)
+                  model history)]
+           (when-not (:valid? a)
+             (try
+               ; Renderer can't handle really broad concurrencies yet
+               (linear.report/render-analysis!
+                 history a (.getCanonicalPath
+                             (store/path! test (:subdirectory opts)
+                                          "linear.svg")))
+               (catch Throwable e
+                 (warn e "Error rendering linearizability analysis"))))
+           ; Writing these can take *hours* so we truncate
+           (assoc a
+                  :final-paths (take 10 (:final-paths a))
+                  :configs     (take 10 (:configs a))))))))
 
 (defn queue
   "Every dequeue must come from somewhere. Validates queue operations by
@@ -372,20 +404,6 @@
                 (recur history (+ lower (:value op)) upper pending-reads reads)
 
                 (recur history lower upper pending-reads reads))))))))
-
-(defn compose
-  "Takes a map of names to checkers, and returns a checker which runs each
-  check (possibly in parallel) and returns a map of names to results; plus a
-  top-level :valid? key which is true iff every checker considered the history
-  valid."
-  [checker-map]
-  (reify Checker
-    (check [this test model history opts]
-      (let [results (->> checker-map
-                         (pmap (fn [[k checker]]
-                                 [k (check-safe checker test model history opts)]))
-                         (into {}))]
-        (assoc results :valid? (merge-valid (map :valid? (vals results))))))))
 
 (defn latency-graph
   "Spits out graphs of latencies."

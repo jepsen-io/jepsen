@@ -11,7 +11,8 @@
             [jepsen.generator :as gen :refer [Generator]]
             [clojure.tools.logging :refer :all]
             [clojure.core.reducers :as r]
-            [clojure.pprint :refer [pprint]]))
+            [clojure.pprint :refer [pprint]]
+            [dom-top.core :refer [bounded-pmap]]))
 
 (def dir
   "What directory should we write independent results to?"
@@ -263,26 +264,27 @@
     (check [this test model history opts]
       (let [ks       (history-keys history)
             results  (->> ks
-                          (map (fn [k]
-                                 (let [h (subhistory k history)
-                                       subdir (concat (:subdirectory opts)
-                                                      [dir k])
-                                       results (check-safe
-                                                 checker test model h
-                                                 {:subdirectory subdir
-                                                  :history-key  k})]
-                                   ; Write analysis
-                                   (store/with-out-file test [subdir
-                                                              "results.edn"]
-                                     (pprint results))
+                          (bounded-pmap
+                            (fn [k]
+                              (let [h (subhistory k history)
+                                    subdir (concat (:subdirectory opts)
+                                                   [dir k])
+                                    results (check-safe
+                                              checker test model h
+                                              {:subdirectory subdir
+                                               :history-key  k})]
+                                ; Write analysis
+                                (store/with-out-file test [subdir
+                                                           "results.edn"]
+                                  (pprint results))
 
-                                   ; Write history
-                                   (store/with-out-file test [subdir
-                                                              "history.edn"]
-                                     (util/print-history prn h))
+                                ; Write history
+                                (store/with-out-file test [subdir
+                                                           "history.edn"]
+                                  (util/print-history prn h))
 
-                                   ; Return results as a map
-                                   [k results])))
+                                ; Return results as a map
+                                [k results])))
                           (into {}))
             failures (->> results
                           (reduce (fn [failures [k result]]
@@ -291,6 +293,6 @@
                                       (conj! failures k)))
                                   (transient []))
                           persistent!)]
-        {:valid?  (merge-valid (map :valid? (vals results)))
-         :results results
+        {:valid?   (merge-valid (map :valid? (vals results)))
+         :results  results
          :failures failures}))))
