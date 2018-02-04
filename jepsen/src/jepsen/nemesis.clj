@@ -49,19 +49,6 @@
     (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, falling back to `jepsen.client/teardown!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
         (client/teardown! nemesis test))))
 
-(defn snub-nodes!
-  "Drops all packets from the given nodes."
-  [test dest sources]
-  (->> sources (pmap #(net/drop! (:net test) test % dest)) dorun))
-
-(defn partition!
-  "Takes a *grudge*: a map of nodes to the collection of nodes they should
-  reject messages from, and makes the appropriate changes. Does not heal the
-  network first, so repeated calls to partition! are cumulative right now."
-  [test grudge]
-  (c/on-nodes test (fn snub [test node]
-                     (snub-nodes! test node (get grudge node)))))
-
 (defn bisect
   "Given a sequence, cuts it in half; smaller half first."
   [coll]
@@ -113,10 +100,10 @@
     (invoke! [this test op]
       (case (:f op)
         :start (let [grudge (grudge (:nodes test))]
-                 (partition! test grudge)
-                 (assoc op :value (str "Cut off " (pr-str grudge))))
+                 (net/drop-all! test grudge)
+                 (assoc op :value [:isolated grudge]))
         :stop  (do (net/heal! (:net test) test)
-                   (assoc op :value "fully connected"))))
+                   (assoc op :value :network-healed))))
 
     (teardown! [this test]
       (net/heal! (:net test) test))))
