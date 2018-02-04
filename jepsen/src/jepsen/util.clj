@@ -9,6 +9,7 @@
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
+            [dom-top.core :refer [bounded-future]]
             [knossos.history :as history])
   (:import (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
@@ -167,7 +168,8 @@
                               #(File/createTempFile "jepsen-history" ".part"))]
        (try
          (->> chunks
-              (map (fn [file chunk] (future (write-history! file printer chunk) file))
+              (map (fn [file chunk]
+                     (bounded-future (write-history! file printer chunk) file))
                    files)
               doall
               (map deref)
