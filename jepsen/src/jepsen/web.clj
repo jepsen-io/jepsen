@@ -282,20 +282,35 @@
    :headers {"Content-Type" "text/plain"}
    :body "404 not found"})
 
+(def content-type
+  "Map of extensions to known content-types"
+  {"txt"  "text/plain"
+   "log"  "text/plain"
+   "edn"  "text/plain" ; Wrong, but we like seeing it in-browser
+   "json" "text/plain" ; Ditto
+   "html" "text/html"
+   "svg"  "image/svg+xml"})
+
 (defn files
   "Serve requests for /files/ urls"
   [req]
-  (let [pathname ((re-find #"^/files/(.+)$" (:uri req)) 1)
+  (let [pathname ((re-find #"^/files/(.+)\z" (:uri req)) 1)
+        ext      (when-let [m (re-find #"\.(\w+)\z" pathname)] (m 1))
         f    (File. store/base-dir pathname)]
     (assert-file-in-scope! f)
     (cond
       (.isFile f)
-      (response/file-response pathname
-                              {:root             store/base-dir
-                               :index-files?     false
-                               :allow-symlinks?  false})
+      (let [res (response/file-response pathname
+                                        {:root             store/base-dir
+                                         :index-files?     false
+                                         :allow-symlinks?  false})]
+          (if-let [ct (content-type ext)]
+            (-> res
+                (response/content-type ct)
+                (response/charset "utf-8"))
+            res))
 
-      (re-find #"\.zip\z" pathname)
+      (= ext "zip")
       (zip req f)
 
       (.isDirectory f)
