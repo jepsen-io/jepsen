@@ -15,3 +15,5 @@ or any guide that works for you.
 4. [Checking Correctness](04-checker.md)
 5. [Introducing Faults](05-nemesis.md)
 6. [Refining Tests](06-refining.md)
+7. [Tuning with Parameters](07-parameters.md)
+8. [Adding a Set Test](08-set.md)
