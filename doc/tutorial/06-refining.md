@@ -234,5 +234,4 @@ $ lein run test --time-limit 30 --concurrency 100
 
 Look at that! We can perform far more operations in a limited time window now. This helps us find bugs faster.
 
-There are lots more techniques in Jepsen, but this is where our discussion
-draws to a close. Thanks for reading!
+We've hardcoded a lot so far. Let's make some of those choices [configurable](07-parameters.md) at the command line.
