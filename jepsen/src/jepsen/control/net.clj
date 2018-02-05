@@ -17,8 +17,8 @@
             (re-find #"inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"))
        1))
 
-(defn ip
-  "Look up an ip for a hostname"
+(defn ip*
+  "Look up an ip for a hostname. Unmemoized."
   [host]
   ; getent output is of the form:
   ; 74.125.239.39   STREAM host.com
@@ -28,3 +28,7 @@
                          (str/split-lines)
                          (first))
                     #"\s+")))
+
+(def ip
+  "Look up an ip for a hostname. Memoized."
+  (memoize ip*))
