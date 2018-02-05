@@ -29,8 +29,8 @@ be using it here.
 We'll start by editing `project.clj`, which specifies the project's
 dependencies and other metadata. We'll add a `:main` namespace, which is how
 we'll run the test from the command line. In addition to depending on the
-Clojure language itself, we'll pull in the Jepsen library (at version 0.1.7),
-and Verschlimmbesserung: a library for talking to etcd.
+Clojure language itself, we'll pull in the Jepsen library, and
+Verschlimmbesserung: a library for talking to etcd.
 
 ```clj
 (defproject jepsen.etcdemo "0.1.0-SNAPSHOT"
@@ -39,7 +39,7 @@ and Verschlimmbesserung: a library for talking to etcd.
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main jepsen.etcdemo
   :dependencies [[org.clojure/clojure "1.9.0"]
-                 [jepsen "0.1.7"]
+                 [jepsen "0.1.8"]
                  [verschlimmbesserung "0.1.3"]])
 ```
 
