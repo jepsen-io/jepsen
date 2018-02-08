@@ -91,11 +91,11 @@ connected clients later.
   :concurrency, ...), constructs a test map."
   [opts]
   (merge tests/noop-test
+         opts
          {:name "etcd"
           :os debian/os
           :db (db "v3.1.5")
-          :client (Client. nil)}
-         opts))
+          :client (Client. nil)}))
 ```
 
 Now, let's complete our `setup!` function by connecting to etcd. The
@@ -127,11 +127,11 @@ Verschlimmbesserung time out requests after 5 seconds, too.
   :concurrency, ...), constructs a test map."
   [opts]
   (merge tests/noop-test
+         opts
          {:name "etcd"
           :os debian/os
           :db (db "v3.1.5")
-          :client (Client. nil)}
-         opts))
+          :client (Client. nil)}))
 ```
 
 Remember, the initial client *has no connections*--like a stem cell, it has the
