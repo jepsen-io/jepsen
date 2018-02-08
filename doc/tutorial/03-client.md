@@ -199,12 +199,12 @@ not sure. `invoke!` can also throw an exception, which is automatically
 converted to an `:info`.
 
 Let's start by handling reads. We'll use `v/get` to read the value of a single
-key. We can pick any name we like--let's call it "r" for "register".
+key. We can pick any name we like--let's call it "foo" for now.
 
 ```clj
     (invoke! [this test op]
       (case (:f op)
-        :read (assoc op :type :ok, :value (v/get conn "r")))))
+        :read (assoc op :type :ok, :value (v/get conn "foo")))))
 ```
 
 We dispatch based on the `:f` field of the operation, and when it's a
@@ -370,12 +370,12 @@ error code.
 ```clj
     (invoke! [this test op]
       (case (:f op)
-        :read (assoc op :type :ok, :value (parse-long (v/get conn "r")))
-        :write (do (v/reset! conn "r" (:value op))
+        :read (assoc op :type :ok, :value (parse-long (v/get conn "foo")))
+        :write (do (v/reset! conn "foo" (:value op))
                    (assoc op :type, :ok))
         :cas (try+
                (let [[value value'] (:value op)]
-                 (assoc op :type (if (v/cas! conn "r" value value'
+                 (assoc op :type (if (v/cas! conn "foo" value value'
                                              {:prev-exist? true})
                                    :ok
                                    :fail)))
