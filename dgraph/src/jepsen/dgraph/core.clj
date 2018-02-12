@@ -11,10 +11,16 @@
          {:name (str "dgraph " (:version opts))
           :db   (s/db)}))
 
+(defn parse-long [x] (Long/parseLong x))
+
 (def cli-opts
   "Additional command line options"
   [["-v" "--version VERSION" "What version number of dgraph should we test?"
-    :default "1.0.2"]])
+    :default "1.0.2"]
+   [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
+    :default 3
+    :parse-fn parse-long
+    :validate [pos? "Must be a positive integer."]]])
 
 (defn -main
   "Handles command line arguments; running tests or the web server."
