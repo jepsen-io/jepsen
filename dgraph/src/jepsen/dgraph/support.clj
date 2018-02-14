@@ -160,8 +160,9 @@
   (reify db/DB
     (setup! [_ test node]
       (cu/install-archive!
-        (str "https://github.com/dgraph-io/dgraph/releases/download/v"
-             (:version test) "/dgraph-linux-amd64.tar.gz")
+        (or (:package-url test)
+            (str "https://github.com/dgraph-io/dgraph/releases/download/v"
+                 (:version test) "/dgraph-linux-amd64.tar.gz"))
         dir)
 
       (when (= node (jepsen/primary test))

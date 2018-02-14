@@ -36,10 +36,13 @@
     :validate [workloads (cli/one-of workloads)]]
    ["-v" "--version VERSION" "What version number of dgraph should we test?"
     :default "1.0.3"]
+   [nil "--package-url URL" "Ignore version; install this tarball instead"
+    :validate [(partial re-find #"\A(file)|(https?)://")
+               "Should be an HTTP url"]]
    [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
     :default 3
     :parse-fn parse-long
-    :validate [pos? "Must be a positive integer."]]])
+    :validate [pos? "Must be a positive integer"]]])
 
 (defn -main
   "Handles command line arguments; running tests or the web server."
