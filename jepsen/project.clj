@@ -15,7 +15,8 @@
                  [org.clojars.achim/multiset "0.1.0"]
                  [byte-streams "0.2.2"]
                  [dom-top "1.0.2"]
-                 [slingshot "0.12.2"]]
+                 [slingshot "0.12.2"]
+                 [org.clojure/data.codec "0.1.1"]]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
             [lein-codox "0.10.3"]]
