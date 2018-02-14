@@ -4,6 +4,7 @@
             [clj-http.client :as http]
             [clojure.pprint :refer [pprint]]
             [cheshire.core :as json]
+            [dom-top.core :refer [with-retry]]
             [jepsen [db       :as db]
                     [control  :as c]
                     [core     :as jepsen]]
@@ -21,19 +22,21 @@
 (def ratel-pidfile (str dir "ratel.pid"))
 
 ; Ports
-(def internal-port  7080)
-(def public-port    8080)
+(def zero-internal-port 5080)
+(def zero-public-port   6080)
+(def internal-port      7080)
+(def public-port        8080)
 
 (def alpha-port-offset  0)
-(def zero-port-offset   1)
+(def zero-port-offset   0)
 (def ratel-port-offset  2)
 
-(def alpha-internal-port  (+ internal-port  alpha-port-offset))
-(def zero-internal-port   (+ internal-port  zero-port-offset))
-(def ratel-internal-port  (+ internal-port  ratel-port-offset))
-(def alpha-public-port    (+ public-port    alpha-port-offset))
-(def zero-public-port     (+ public-port    zero-port-offset))
-(def ratel-public-port    (+ public-port    ratel-port-offset))
+(def alpha-internal-port  (+ internal-port      alpha-port-offset))
+(def zero-internal-port   (+ zero-internal-port zero-port-offset))
+(def ratel-internal-port  (+ internal-port      ratel-port-offset))
+(def alpha-public-port    (+ public-port        alpha-port-offset))
+(def zero-public-port     (+ zero-public-port   zero-port-offset))
+(def ratel-public-port    (+ public-port        ratel-port-offset))
 
 
 (defn node-idx
@@ -109,7 +112,6 @@
 (defn zero-state
   "Fetches zero /state from the given node."
   [node]
-  (info "Checking zero state on" node)
   (-> (http/get (str "http://" node ":" zero-public-port "/state")
                 http-opts)
       :body
@@ -140,8 +142,7 @@
   "Blocks until this Zero indicates the cluster is ready to go."
   [node test]
   (or (cluster-ready? node test)
-      (do (info "retrying")
-          (Thread/sleep 1000)
+      (do (Thread/sleep 1000)
           (recur node test))))
 
 (defn db
@@ -170,12 +171,7 @@
 
       (when (= node (jepsen/primary test))
         (wait-for-cluster node test)
-        (info "Cluster ready."))
-
-      (info (with-out-str (pprint (zero-state node))))
-
-      (when (= node (jepsen/primary test))
-        (read-line)))
+        (info "Cluster ready.")))
 
     (teardown! [_ test node]
       (stop-ratel!)
