@@ -20,21 +20,32 @@
                        "name: string @index(exact) .")
                        ;"type: string @index(term)")
       (catch io.grpc.StatusRuntimeException e
-        (if (and (< 1 attempts)
-                 (.getCause e)
-                 (instance? java.net.ConnectException
-                            (.getCause (.getCause e))))
-          (do (info "GRPC interface unavailable; retrying in 5 seconds")
-              (Thread/sleep 5000)
-              (retry (dec attempts)))
-          (throw e))))
+        (cond (<= attempts 1)
+              (throw e)
+
+              (and (.getCause e)
+                   (instance? java.net.ConnectException
+                              (.getCause (.getCause e))))
+              (do (info "GRPC interface unavailable, retrying in 5 seconds")
+                  (Thread/sleep 5000)
+                  (retry (dec attempts)))
+
+              (re-find #"server is not ready to accept requests"
+                       (.getMessage e))
+              (do (info "Server not ready, retrying in 5 seconds")
+                  (Thread/sleep 5000)
+                  (retry (dec attempts)))
+
+              :else
+              (throw e))))
 
     (try
       (c/with-txn [t conn]
         (c/mutate! t {:name "kyle"
-                      :type "pup"}))
+                      :type "engineer"}))
       (catch TxnConflictException e))
 
+    (info "Ready.")
     (read-line))
 
   (invoke! [this test op]

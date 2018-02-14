@@ -141,9 +141,15 @@
 (defn wait-for-cluster
   "Blocks until this Zero indicates the cluster is ready to go."
   [node test]
-  (or (cluster-ready? node test)
-      (do (Thread/sleep 1000)
-          (recur node test))))
+  (loop [attempts 20]
+    (or (cluster-ready? node test)
+        (do (when (<= attempts 1)
+              (throw (RuntimeException.
+                       (str "Cluster failed to converge. Curent state is\n"
+                            (with-out-str (pprint (zero-state node)))))))
+            (info "Waiting for cluster convergence")
+            (Thread/sleep 1000)
+            (recur (dec attempts))))))
 
 (defn db
   "Sets up dgraph. Test should include

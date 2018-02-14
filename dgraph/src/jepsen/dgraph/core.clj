@@ -1,4 +1,5 @@
 (ns jepsen.dgraph.core
+  (:gen-class)
   (:require [jepsen [cli :as cli]
                     [nemesis :as nemesis]
                     [generator :as gen]
