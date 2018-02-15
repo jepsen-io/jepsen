@@ -40,10 +40,15 @@
               (throw e))))
 
     (try
+      (Thread/sleep (rand-int 10000))
       (c/with-txn [t conn]
-        (c/mutate! t {:name "kyle"
-                      :type "engineer"}))
-      (catch TxnConflictException e))
+        (info "Upsert results:"
+              (pr-str (c/upsert! t
+                                 :name
+                                 {:name "kyle"
+                                  :type (str (rand-int 100))}))))
+      (catch TxnConflictException e
+        (info "Transaction aborted due to conflict.")))
 
     (info "Ready.")
     (read-line))

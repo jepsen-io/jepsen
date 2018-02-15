@@ -8,7 +8,8 @@
             [jepsen [db       :as db]
                     [control  :as c]
                     [core     :as jepsen]]
-            [jepsen.control.util :as cu]))
+            [jepsen.control.util :as cu]
+            [jepsen.dgraph.client :as dc]))
 
 ; Local paths
 (def dir "/opt/dgraph")
@@ -26,6 +27,7 @@
 (def zero-public-port   6080)
 (def internal-port      7080)
 (def public-port        8080)
+(def public-grpc-port   9080)
 
 (def alpha-port-offset  0)
 (def zero-port-offset   0)
@@ -37,7 +39,7 @@
 (def alpha-public-port    (+ public-port        alpha-port-offset))
 (def zero-public-port     (+ zero-public-port   zero-port-offset))
 (def ratel-public-port    (+ public-port        ratel-port-offset))
-
+(def alpha-public-grpc-port (+ public-grpc-port alpha-port-offset))
 
 (defn node-idx
   "Given a node and a test, returns the index for that particular node, based
@@ -168,17 +170,25 @@
       (when (= node (jepsen/primary test))
         (start-zero! test node)
         (Thread/sleep 10000))
+
       (jepsen/synchronize test)
       (when-not (= node (jepsen/primary test))
         (start-zero! test node))
-      (jepsen/synchronize test)
 
+      (jepsen/synchronize test)
       (start-alpha! test node)
       (start-ratel! test node)
 
       (when (= node (jepsen/primary test))
         (wait-for-cluster node test)
-        (info "Cluster ready.")))
+        (info "Cluster converged"))
+
+      (jepsen/synchronize test)
+      (let [conn (dc/open node alpha-public-grpc-port)]
+        (try (dc/await-ready conn)
+             (finally
+               (dc/close! conn))))
+      (info "GRPC ready"))
 
     (teardown! [_ test node]
       (stop-ratel!)

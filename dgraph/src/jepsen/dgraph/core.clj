@@ -6,10 +6,14 @@
                     [tests :as tests]]
             [jepsen.os.debian :as debian]
             [jepsen.dgraph [support :as s]
-                           [bank :as bank]]))
+                           [bank :as bank]
+                           [upsert :as upsert]]))
 
 (def workloads
-  {:bank bank/workload})
+  "A map of workload names to functions that can take opts and construct
+  workloads."
+  {:bank    bank/workload
+   :upsert  upsert/workload})
 
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
