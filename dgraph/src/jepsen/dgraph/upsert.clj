@@ -27,15 +27,16 @@
                     (assoc op
                            :type  (if inserted :ok :fail)
                            :value (first (vals inserted))))
-          :read (->> (c/query (str "{"
-                                   "  q(func: eq(email, \"bob@example.com\") {"
-                                   "    uid"
-                                   "  }"
-                                   "}"))
+          :read (->> (str "{\n"
+                          "  q(func: eq(email, \"bob@example.com\")) {\n"
+                          "    uid\n"
+                          "  }\n"
+                          "}")
+                     (c/query t)
                      :q
                      (map :uid)
                      sort
-                     (assoc :value op))))))
+                     (assoc op :type :ok, :value))))))
 
   (teardown! [this test])
 
@@ -54,8 +55,8 @@
                              (filter op/ok?)
                              (filter #(= :upsert (:f %))))
             bad-reads   (filter #(< 1 (count (:value %))) reads)]
-        {:valid?      (or (not (empty? bad-reads))
-                          (< 1 (count upserts)))
+        {:valid?      (and (not (empty? bad-reads))
+                           (<= (count upserts) 1))
          :bad-reads   bad-reads
          :ok-upserts  upserts}))))
 

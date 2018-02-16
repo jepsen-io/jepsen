@@ -169,6 +169,7 @@
 
       (when (= node (jepsen/primary test))
         (start-zero! test node)
+        ; TODO: figure out how long to block here
         (Thread/sleep 10000))
 
       (jepsen/synchronize test)

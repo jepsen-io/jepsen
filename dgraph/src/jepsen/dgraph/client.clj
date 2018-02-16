@@ -52,9 +52,10 @@
   `(let [~txn-sym (.newTransaction ^DgraphClient ~client)]
      (try
        (info "Begin transaction.")
-       ~@body
-       (.commit ~txn-sym)
-       (info "Transaction committed.")
+       (let [res# ~@body]
+         (.commit ~txn-sym)
+         (info "Transaction committed.")
+         res#)
        (catch RuntimeException e#
          (info "Transaction aborted.")
          (throw e#))
@@ -118,8 +119,9 @@
 
       query(txn \"query all($a: string) { all(func: eq(name, $a)) { uid } }\"
             {:a \"cat\"})"
-  ([txn query]
-   (query* txn query {}))
+  ([^DgraphClient$Transaction txn query-str]
+   (json/parse-string (.. txn (query query-str) getJson toStringUtf8)
+                      true))
   ([^DgraphClient$Transaction txn query vars]
    (info "Query (vars: " (pr-str vars) "): " query)
    (let [vars (->> vars
@@ -155,7 +157,7 @@
   "Blocks until the server is up and responding to requests, or throws. Returns
   client."
   [client]
-  (with-retry [attempts 20]
+  (with-retry [attempts 6]
     (with-txn [t client]
       (schema t))
     (catch io.grpc.StatusRuntimeException e
