@@ -27,6 +27,7 @@
                     (assoc op
                            :type  (if inserted :ok :fail)
                            :value (first (vals inserted))))
+
           :read (->> (str "{\n"
                           "  q(func: eq(email, \"bob@example.com\")) {\n"
                           "    uid\n"
@@ -55,7 +56,7 @@
                              (filter op/ok?)
                              (filter #(= :upsert (:f %))))
             bad-reads   (filter #(< 1 (count (:value %))) reads)]
-        {:valid?      (and (not (empty? bad-reads))
+        {:valid?      (and (empty? bad-reads)
                            (<= (count upserts) 1))
          :bad-reads   bad-reads
          :ok-upserts  upserts}))))
