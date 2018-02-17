@@ -88,7 +88,7 @@
   "Takes a mutation object and applies it to a transaction. Returns an
   Assigned."
   [^DgraphClient$Transaction txn mut]
-  (info "Mutate: " mut)
+  (info "Mutate:" mut)
   (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
                    (setSetJson (str->byte-string (json/generate-string mut)))
                    build)))
@@ -107,7 +107,9 @@
   (condp instance? x
     Long    "int"
     String  "string"
-    Boolean "boolean"
+    Boolean "bool"
+    Double  "float"
+    clojure.lang.BigInt "int"
     (throw (IllegalArgumentException.
              (str "Don't know graphql+- type of " (pr-str x))))))
 
@@ -123,9 +125,9 @@
    (json/parse-string (.. txn (query query-str) getJson toStringUtf8)
                       true))
   ([^DgraphClient$Transaction txn query vars]
-   (info "Query (vars: " (pr-str vars) "): " query)
+   (info "Query (vars:" (pr-str vars) "):" query)
    (let [vars (->> vars
-                   (map (fn [[k v]] [(str "$" (name k)) (name v)]))
+                   (map (fn [[k v]] [(str "$" (name k)) (str v)]))
                    (into {}))
          res (.queryWithVars txn query vars)]
      (json/parse-string (.. res getJson toStringUtf8) true))))

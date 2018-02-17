@@ -9,55 +9,63 @@
             [jepsen.tests.bank :as bank])
   (:import (io.dgraph TxnConflictException)))
 
+
+(defn find-account
+  "Finds an account by key. Returns an empty account when none exists."
+  [t k]
+  (-> (c/query t "{ q(func: eq(key, $key)) { uid key amount } }"
+                       {:key k})
+      :q
+      first
+      (dissoc :type) ; Note that we need :type for new accounts, but don't
+                     ; want to update it normally.
+      (or {:key k
+           :type "account"
+           :amount 0})))
+
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (with-retry [attempts 20]
-      (c/alter-schema! conn
-                       "name: string @index(exact) .")
-                       ;"type: string @index(term)")
-      (catch io.grpc.StatusRuntimeException e
-        (cond (<= attempts 1)
-              (throw e)
-
-              (and (.getCause e)
-                   (instance? java.net.ConnectException
-                              (.getCause (.getCause e))))
-              (do (info "GRPC interface unavailable, retrying in 5 seconds")
-                  (Thread/sleep 5000)
-                  (retry (dec attempts)))
-
-              (re-find #"server is not ready to accept requests"
-                       (.getMessage e))
-              (do (info "Server not ready, retrying in 5 seconds")
-                  (Thread/sleep 5000)
-                  (retry (dec attempts)))
-
-              :else
-              (throw e))))
-
+    (c/alter-schema! conn (str "key: int @index(int) .\n"
+                               "type: string @index(exact) .\n"
+                               "amount: int .\n"
+                               ))
     (try
-      (Thread/sleep (rand-int 10000))
       (c/with-txn [t conn]
-        (info "Upsert results:"
-              (pr-str (c/upsert! t
-                                 :name
-                                 {:name "kyle"
-                                  :type (str (rand-int 100))}))))
-      (catch TxnConflictException e
-        (info "Transaction aborted due to conflict.")))
-
-    (info "Ready.")
-    (read-line))
+        (pr-str (c/upsert! t
+                           :key
+                           {:key    (first (:accounts test))
+                            :type   "account"
+                            :amount (:total-amount test)})))
+      (catch TxnConflictException e)))
 
   (invoke! [this test op]
-    (info "here")
-    (case (:f op)
-      :read     op
-      :transfer op))
+    (c/with-conflict-as-fail op
+      (c/with-txn [t conn]
+        (case (:f op)
+          :read (->> (c/query t (str "{ q(func: eq(type, $type)) {\n"
+                                     "  key\n"
+                                     "  amount\n"
+                                     "}}")
+                              {:type "account"})
+                     :q
+                     (map (juxt :key :amount))
+                     (into (sorted-map))
+                     (assoc op :type :ok, :value))
+          :transfer (let [{:keys [from to amount]} (:value op)
+                          from  (find-account t from)
+                          to    (find-account t to)
+                          from' (update from :amount - amount)
+                          to'   (update to :amount + amount)]
+                      (if (or (neg? (:amount from'))
+                              (neg? (:amount to')))
+                        (assoc op :type :fail, :error :insufficient-funds)
+                        (do (c/mutate! t from')
+                            (c/mutate! t to')
+                            (assoc op :type :ok))))))))
 
   (teardown! [this test])
 

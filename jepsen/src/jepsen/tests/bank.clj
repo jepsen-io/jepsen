@@ -47,17 +47,16 @@
                            (r/filter op/ok?)
                            (r/filter #(= :read (:f %)))
                            (r/map (fn [op]
-                                    (let [balances (:value op)]
+                                    (let [balances (vals (:value op))]
                                       (cond (not= (:total-amount test)
                                                   (reduce + balances))
                                             {:type     :wrong-total
-                                             :expected (:total model)
-                                             :found    (reduce + balances)
+                                             :total    (reduce + balances)
                                              :op       op}
 
                                             (some neg? balances)
                                             {:type     :negative-value
-                                             :found    balances
+                                             :negative (filter neg? balances)
                                              :op       op}))))
                            (r/filter identity)
                            (into []))]
@@ -69,7 +68,7 @@
   with a generator and checker."
   []
   {:max-transfer  5
-   :amount        100
+   :total-amount  100
    :accounts      (vec (range 8))
    :checker       (checker)
    :generator     (generator)})
