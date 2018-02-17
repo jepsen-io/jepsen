@@ -35,11 +35,12 @@
                                ))
     (try
       (c/with-txn [t conn]
-        (pr-str (c/upsert! t
+        (c/upsert! t
                            :key
                            {:key    (first (:accounts test))
                             :type   "account"
-                            :amount (:total-amount test)})))
+                            :amount (:total-amount test)})
+        (info (c/schema t)))
       (catch TxnConflictException e)))
 
   (invoke! [this test op]

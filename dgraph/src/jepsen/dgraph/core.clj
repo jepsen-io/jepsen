@@ -24,7 +24,7 @@
            workload
            {:name (str "dgraph " (:version opts) " " (name (:workload opts)))
             :generator (->> (:generator workload)
-                            (gen/stagger 1/10)
+                            (gen/stagger 0)
                             (gen/nemesis nil)
                             (gen/time-limit (:time-limit opts)))
             :os   debian/os

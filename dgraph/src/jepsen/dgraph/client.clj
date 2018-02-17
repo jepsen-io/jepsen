@@ -51,14 +51,14 @@
   [[txn-sym client] & body]
   `(let [~txn-sym (.newTransaction ^DgraphClient ~client)]
      (try
-       (info "Begin transaction.")
-       (let [res# ~@body]
+       ;(info "Begin transaction.")
+       (let [res# (do ~@body)]
          (.commit ~txn-sym)
-         (info "Transaction committed.")
+         ;(info "Transaction committed.")
          res#)
-       (catch RuntimeException e#
-         (info "Transaction aborted.")
-         (throw e#))
+       ;(catch RuntimeException e#
+       ;  (info "Transaction aborted.")
+       ;  (throw e#))
        (finally
          (.discard ~txn-sym)))))
 
@@ -88,7 +88,7 @@
   "Takes a mutation object and applies it to a transaction. Returns an
   Assigned."
   [^DgraphClient$Transaction txn mut]
-  (info "Mutate:" mut)
+  ;(info "Mutate:" mut)
   (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
                    (setSetJson (str->byte-string (json/generate-string mut)))
                    build)))
@@ -125,7 +125,7 @@
    (json/parse-string (.. txn (query query-str) getJson toStringUtf8)
                       true))
   ([^DgraphClient$Transaction txn query vars]
-   (info "Query (vars:" (pr-str vars) "):" query)
+   ;(info "Query (vars:" (pr-str vars) "):" query)
    (let [vars (->> vars
                    (map (fn [[k v]] [(str "$" (name k)) (str v)]))
                    (into {}))
@@ -200,7 +200,7 @@
                             "  }\n"
                             "}")
                      {:a pred-value}))]
-      (info "Query results:" res)
+      ;(info "Query results:" res)
       (when (empty? (:all res))
-        (info "Inserting...")
+        ;(info "Inserting...")
         (mutate! t record)))))
