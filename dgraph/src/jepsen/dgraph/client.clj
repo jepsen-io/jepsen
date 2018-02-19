@@ -67,6 +67,25 @@
   thrown, returns `op` with :type :fail, :error :conflict."
   [op & body]
   `(try ~@body
+        (catch io.grpc.StatusRuntimeException e#
+          (condp re-find (.getMessage e#)
+            #"DEADLINE_EXCEEDED:"
+            (assoc ~op, :type :info, :error :timeout)
+
+            #"context deadline exceeded"
+            (assoc ~op, :type :info, :error :timeout)
+
+            #"Conflicts with pending transaction. Please abort."
+            (assoc ~op :type :fail, :error :conflict)
+
+            #"Predicate is being moved, please retry later"
+            (assoc ~op :type :fail, :error :predicate-moving)
+
+            #"No connection exists"
+            (assoc ~op :type :fail, :error :no-connection)
+
+            (throw e#)))
+
         (catch TxnConflictException e#
           (assoc ~op :type :fail, :error :conflict))))
 
@@ -97,6 +116,19 @@
   "Like mutate!*, but returns a map of key names to UID strings."
   [txn mut]
   (.getUidsMap (mutate!* txn mut)))
+
+(defn delete!
+  "Deletes a record. Can take either a map (treated as a JSON deletion), or a
+  UID string, in which case every outbound edge for the given entity is
+  deleted."
+  [^DgraphClient$Transaction txn str-or-map]
+  (if (string? str-or-map)
+    (recur txn {:uid str-or-map})
+    (.delete txn (.. (DgraphProto$Mutation/newBuilder)
+                     (setDeleteJson (-> str-or-map
+                                        json/generate-string
+                                        str->byte-string))
+                     build))))
 
 (defn graphql-type
   "Takes an object and infers a type in the query language, e.g.

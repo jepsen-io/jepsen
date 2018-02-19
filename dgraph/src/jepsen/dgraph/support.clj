@@ -165,7 +165,8 @@
         (or (:package-url test)
             (str "https://github.com/dgraph-io/dgraph/releases/download/v"
                  (:version test) "/dgraph-linux-amd64.tar.gz"))
-        dir)
+        dir
+        (:force-download test))
 
       (when (= node (jepsen/primary test))
         (start-zero! test node)
