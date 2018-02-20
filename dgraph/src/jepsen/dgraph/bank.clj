@@ -13,8 +13,7 @@
 (defn find-account
   "Finds an account by key. Returns an empty account when none exists."
   [t k]
-  (-> (c/query t "{ q(func: eq(key, $key)) { uid key amount } }"
-                       {:key k})
+  (-> (c/query t "{ q(func: eq(key, $key)) { uid key amount } }" {:key k})
       :q
       first
       (dissoc :type) ; Note that we need :type for new accounts, but don't
@@ -60,12 +59,19 @@
                           [from to] (disorderly
                                       (find-account t from)
                                       (find-account t to))
+                          _ (info :from (pr-str from))
+                          _ (info :to   (pr-str to))
                           from' (update from :amount - amount)
-                          to'   (update to :amount + amount)]
+                          to'   (update to   :amount + amount)]
                       (if (neg? (:amount from'))
                         (assoc op :type :fail, :error :insufficient-funds)
-                        (do (disorderly (c/mutate! t from')
-                                        (c/mutate! t to'))
+                        (do (disorderly
+                              (if (zero? (:amount from'))
+                                (c/delete! t (:uid from'))
+                                (c/mutate! t from'))
+                              (if (zero? (:amount to'))
+                                (c/delete! t (:uid to'))
+                                (c/mutate! t to')))
                             (assoc op :type :ok))))))))
 
   (teardown! [this test])

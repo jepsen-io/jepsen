@@ -127,7 +127,7 @@
   [^DgraphClient$Transaction txn str-or-map]
   (if (string? str-or-map)
     (recur txn {:uid str-or-map})
-    (.delete txn (.. (DgraphProto$Mutation/newBuilder)
+    (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
                      (setDeleteJson (-> str-or-map
                                         json/generate-string
                                         str->byte-string))
@@ -141,6 +141,7 @@
   [x]
   (condp instance? x
     Long    "int"
+    Integer "int"
     String  "string"
     Boolean "bool"
     Double  "float"

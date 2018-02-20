@@ -9,12 +9,14 @@
             [jepsen.os.debian :as debian]
             [jepsen.dgraph [support :as s]
                            [bank :as bank]
+                           [delete :as delete]
                            [upsert :as upsert]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
   {:bank    bank/workload
+   :delete  delete/workload
    :upsert  upsert/workload})
 
 (def nemeses
