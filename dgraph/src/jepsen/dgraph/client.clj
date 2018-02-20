@@ -84,6 +84,9 @@
             #"No connection exists"
             (assoc ~op :type :fail, :error :no-connection)
 
+            #"Only leader can decide to commit or abort"
+            (assoc ~op :type :fail, :error :only-leader-can-commit)
+
             (throw e#)))
 
         (catch TxnConflictException e#

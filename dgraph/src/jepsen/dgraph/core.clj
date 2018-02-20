@@ -17,24 +17,31 @@
   {:bank    bank/workload
    :upsert  upsert/workload})
 
+(def nemeses
+  "Map of nemesis names to {:nemesis :generator} maps."
+  {:partition-random-halves {:nemesis   (nemesis/partition-random-halves)
+                             :generator (gen/start-stop 2 2)}
+   :none                    {:nemesis   nemesis/noop
+                             :generator nil}})
+
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
   [opts]
-  (let [workload ((get workloads (:workload opts)) opts)]
+  (let [workload ((get workloads (:workload opts)) opts)
+        nemesis  (get nemeses (:nemesis opts))]
     (merge tests/noop-test
            opts
            workload
            {:name       (str "dgraph " (:version opts) " "
-                             (name (:workload opts)))
+                             (name (:workload opts)) " "
+                             (name (:nemesis opts)))
             :os         debian/os
             :db         (s/db)
             :generator  (->> (:generator workload)
                              (gen/stagger 0)
-                             (gen/nemesis
-                               (->> (gen/start-stop 10 10)
-                                    (gen/time-limit 40)))
+                             (gen/nemesis (:generator nemesis))
                              (gen/time-limit (:time-limit opts)))
-            :nemesis    (nemesis/partition-random-halves)
+            :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
                           {:perf (checker/perf)
                            :timeline (timeline/html)
@@ -48,6 +55,10 @@
     :parse-fn keyword
     :missing (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
+   [nil "--nemesis NAME" "Nemesis to apply"
+    :parse-fn keyword
+    :default :none
+    :validate [nemeses (cli/one-of nemeses)]]
    ["-v" "--version VERSION" "What version number of dgraph should we test?"
     :default "1.0.3"]
    [nil "--package-url URL" "Ignore version; install this tarball instead"
