@@ -2,7 +2,7 @@
   "Implements a bank-account test, where we transfer amounts between a pool of
   accounts, and verify that reads always see a constant amount."
   (:require [clojure.tools.logging :refer [info]]
-            [dom-top.core :refer [with-retry]]
+            [dom-top.core :refer [disorderly with-retry]]
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
                     [generator :as generator]]
@@ -57,15 +57,15 @@
                      (into (sorted-map))
                      (assoc op :type :ok, :value))
           :transfer (let [{:keys [from to amount]} (:value op)
-                          from  (find-account t from)
-                          to    (find-account t to)
+                          [from to] (disorderly
+                                      (find-account t from)
+                                      (find-account t to))
                           from' (update from :amount - amount)
                           to'   (update to :amount + amount)]
-                      (if (or (neg? (:amount from'))
-                              (neg? (:amount to')))
+                      (if (neg? (:amount from'))
                         (assoc op :type :fail, :error :insufficient-funds)
-                        (do (c/mutate! t from')
-                            (c/mutate! t to')
+                        (do (disorderly (c/mutate! t from')
+                                        (c/mutate! t to'))
                             (assoc op :type :ok))))))))
 
   (teardown! [this test])
