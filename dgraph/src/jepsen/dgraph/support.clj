@@ -67,7 +67,8 @@
 (defn start-alpha!
   "Launch dgraph data server on a node."
   [test node]
-  (c/su (cu/start-daemon!
+  (c/su (c/cd dir (c/exec (str "./" binary) :version :>> alpha-logfile))
+        (cu/start-daemon!
           {:logfile alpha-logfile
            :pidfile alpha-pidfile
            :chdir   dir}

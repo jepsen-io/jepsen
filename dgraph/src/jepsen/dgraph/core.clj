@@ -46,7 +46,7 @@
                                (gen/log "Healing cluster.")
                                (gen/nemesis (:final-generator nemesis))
                                (gen/log "Waiting for recovery.")
-                               (gen/sleep 600)
+                               (gen/sleep 60)
                                (gen/clients (:final-generator workload)))
                    gen)]
     (merge tests/noop-test
