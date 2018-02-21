@@ -45,8 +45,7 @@
                              (gen/time-limit (:time-limit opts)))
             :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
-                          {:perf (checker/perf)
-                           :timeline (timeline/html)
+                          {:perf     (checker/perf)
                            :workload (:checker workload)})})))
 
 (defn parse-long [x] (Long/parseLong x))
