@@ -18,9 +18,9 @@
 (def zero-logfile  (str dir "/zero.log"))
 (def alpha-logfile (str dir "/alpha.log"))
 (def ratel-logfile (str dir "/ratel.log"))
-(def zero-pidfile  (str dir "zero.pid"))
-(def alpha-pidfile (str dir "alpha.pid"))
-(def ratel-pidfile (str dir "ratel.pid"))
+(def zero-pidfile  (str dir "/zero.pid"))
+(def alpha-pidfile (str dir "/alpha.pid"))
+(def ratel-pidfile (str dir "/ratel.pid"))
 
 ; Ports
 (def zero-internal-port 5080)

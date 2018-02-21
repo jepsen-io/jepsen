@@ -10,39 +10,54 @@
             [jepsen.dgraph [support :as s]
                            [bank :as bank]
                            [delete :as delete]
-                           [upsert :as upsert]]))
+                           [upsert :as upsert]
+                           [set :as set]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
   {:bank    bank/workload
    :delete  delete/workload
-   :upsert  upsert/workload})
+   :upsert  upsert/workload
+   :set     set/workload})
 
 (def nemeses
-  "Map of nemesis names to {:nemesis :generator} maps."
-  {:partition-random-halves {:nemesis   (nemesis/partition-random-halves)
-                             :generator (gen/start-stop 2 2)}
-   :none                    {:nemesis   nemesis/noop
-                             :generator nil}})
+  "Map of nemesis names to {:nemesis :generator :final-generator} maps."
+  {:partition-random-halves
+   {:nemesis         (nemesis/partition-random-halves)
+    :generator       (gen/start-stop 2 2)
+    :final-generator (gen/once {:type :info, :f :stop})}
+
+   :none
+   {:nemesis   nemesis/noop
+    :generator nil}})
 
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
   [opts]
   (let [workload ((get workloads (:workload opts)) opts)
-        nemesis  (get nemeses (:nemesis opts))]
+        nemesis  (get nemeses (:nemesis opts))
+        gen      (->> (:generator workload)
+                      (gen/nemesis (:generator nemesis))
+                      (gen/time-limit (:time-limit opts)))
+        gen      (if (or (:final-generator workload)
+                         (:final-generator nemesis))
+                   (gen/phases gen
+                               (gen/log "Healing cluster.")
+                               (gen/nemesis (:final-generator nemesis))
+                               (gen/log "Waiting for recovery.")
+                               (gen/sleep 600)
+                               (gen/clients (:final-generator workload)))
+                   gen)]
     (merge tests/noop-test
            opts
-           workload
            {:name       (str "dgraph " (:version opts) " "
                              (name (:workload opts)) " "
                              (name (:nemesis opts)))
             :os         debian/os
             :db         (s/db)
-            :generator  (->> (:generator workload)
-                             (gen/stagger 0)
-                             (gen/nemesis (:generator nemesis))
-                             (gen/time-limit (:time-limit opts)))
+            :generator  gen
+            :client     (:client workload)
             :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
                           {:perf     (checker/perf)
