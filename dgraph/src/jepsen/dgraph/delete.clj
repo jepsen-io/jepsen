@@ -11,10 +11,9 @@
             [jepsen.checker.timeline :as timeline])
   (:import (io.dgraph TxnConflictException)))
 
-; We're playing super fast and loose here. These operations apply to a single
-; key; we generalize to multiple keys using jepsen.indepednent. Upserts and
-; deletes just upsert and delete {:key whatever}. Reads return the set of
-; matching records for the key.
+; These operations apply to a single key; we generalize to multiple keys using
+; jepsen.independent. Upserts and deletes just upsert and delete {:key
+; whatever}. Reads return the set of matching records for the key.
 
 (defn r [_ _] {:type :invoke, :f :read,   :value nil})
 (defn u [_ _] {:type :invoke, :f :upsert, :value nil})
@@ -42,7 +41,9 @@
                        (independent/tuple k)
                        (assoc op :type :ok, :value))
 
-            :upsert (assoc op :type (if (c/upsert! t :key {:key k}) :ok :fail))
+            :upsert (if-let [uid (c/upsert! t :key {:key k})]
+                      (assoc op :type :ok, :uid uid)
+                      (assoc op :type :fail, :error :present))
 
             :delete
             (if-let [uid (-> (c/query t "{ q(func: eq(key, $key)) { uid }}"
@@ -51,7 +52,7 @@
                              first
                              :uid)]
               (do (c/delete! t uid)
-                  (assoc op :type :ok))
+                  (assoc op :type :ok, :uid uid))
               (assoc op :type :fail, :error :not-found)))))))
 
   (teardown! [this test])
@@ -72,7 +73,7 @@
                                  (and (= :ok type)
                                       (= :read f)
                                       ; Which didn't...
-                                      (not ; Have nothing found
+                                      (not ; Find nothing
                                            (or (= 0 (count value))
                                                ; Or exactly one record
                                                (and (= 1 (count value))
@@ -89,7 +90,7 @@
   [opts]
   {:client      (Client. nil)
    :generator   (independent/concurrent-generator
-                  (count (:nodes test))
+                  (* 2 (count (:nodes opts)))
                   (range)
                   (fn [k]
                     (->> (gen/mix [r u d])
