@@ -19,7 +19,8 @@
   {:bank    bank/workload
    :delete  delete/workload
    :upsert  upsert/workload
-   :set     set/workload})
+   :set     set/workload
+   :uid-set set/uid-workload})
 
 (def nemeses
   "Map of nemesis names to {:nemesis :generator :final-generator} maps."
@@ -46,7 +47,7 @@
                                (gen/log "Healing cluster.")
                                (gen/nemesis (:final-generator nemesis))
                                (gen/log "Waiting for recovery.")
-                               (gen/sleep 60)
+                               (gen/sleep 10)
                                (gen/clients (:final-generator workload)))
                    gen)]
     (merge tests/noop-test
