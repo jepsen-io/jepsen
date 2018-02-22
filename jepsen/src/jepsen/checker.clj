@@ -181,8 +181,7 @@
                           (r/filter op/ok?)
                           (r/filter #(= :read (:f %)))
                           (r/map :value)
-                          (reduce (fn [_ x] x) nil)
-                          core/set)]
+                          (reduce (fn [_ x] x) nil))]
         (if-not final-read
           {:valid? :unknown
            :error  "Set was never read"}
