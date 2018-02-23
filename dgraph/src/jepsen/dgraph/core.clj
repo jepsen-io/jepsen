@@ -11,16 +11,18 @@
                            [bank :as bank]
                            [delete :as delete]
                            [upsert :as upsert]
-                           [set :as set]]))
+                           [set :as set]
+                           [sequential :as sequential]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {:bank    bank/workload
-   :delete  delete/workload
-   :upsert  upsert/workload
-   :set     set/workload
-   :uid-set set/uid-workload})
+  {:bank        bank/workload
+   :delete      delete/workload
+   :upsert      upsert/workload
+   :set         set/workload
+   :uid-set     set/uid-workload
+   :sequential  sequential/workload})
 
 (def nemeses
   "Map of nemesis names to {:nemesis :generator :final-generator} maps."
