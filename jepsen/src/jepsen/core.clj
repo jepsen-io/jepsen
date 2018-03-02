@@ -136,7 +136,9 @@
      ~@body
      (catch Throwable t#
        ; Emergency log dump!
-       (snarf-logs! ~test)
+       (if (satisfies? db/LogSnarfer (:db ~test))
+         (db/snarf-logs! (:db ~test) ~test)
+         (snarf-logs! ~test))
        (store/update-symlinks! ~test)
        (throw t#))
      (finally
@@ -476,7 +478,9 @@
       (run-workers! (cons nemesis clients)))
 
     ; Download logs
-    (snarf-logs! test)
+    (if (satisfies? db/LogSnarfer (:db test))
+      (db/snarf-logs! (:db test) test)
+      (snarf-logs! test))
 
     ; Unregister our history
     (swap! (:active-histories test) disj history)
@@ -497,6 +501,41 @@
             "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")))
   test)
 
+(def ^:private ssh-controls
+  {:start control/session
+   :stop control/disconnect})
+
+(defn- fake-session-error
+  []
+  (throw (IllegalStateException.
+           (str "Intentionally configured Jepsen to not establish SSH"
+                " connections, but attempted to use an SSH session anyway"))))
+
+(defn- fake-session
+  [host]
+  (jepsen.reconnect/wrapper
+    {:open    (constantly
+                (reify clj-ssh.ssh.protocols/Session
+                  (connect [s] (fake-session-error))
+                  (connect [s timeout] (fake-session-error))
+                  (connected? [s] false)
+                  (disconnect [s])
+                  (session [s] (fake-session-error))))
+
+     :name    [:control host]
+     :close   identity
+     :log?    true}))
+
+(def ^:private fake-ssh-controls
+  {:start fake-session
+   :stop identity})
+
+(defn- get-ssh-controls
+  [test]
+  (if (:no-ssh test)
+    fake-ssh-controls
+    ssh-controls))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -508,6 +547,12 @@
     :port               SSH listening port (22)
     :private-key-path   A path to an SSH identity file (~/.ssh/id_rsa)
     :strict-host-key-checking  Whether or not to verify host keys
+
+  :no-ssh     (optional) Causes Jepsen to skip establishing SSH connections when
+              set to true. This option is likely only meaningful for tests that
+              have the ability to run without OS-level virtualization and want
+              to run multiple nodes on a single machine.
+
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
   :client     A client for the database
@@ -571,8 +616,8 @@
               _    (info "Running test:\n" (with-out-str (pprint test)))
               test (control/with-ssh (:ssh test)
                      (with-resources [sessions
-                                      (bound-fn* control/session)
-                                      control/disconnect
+                                      (bound-fn* (:start (get-ssh-controls test)))
+                                      (:stop (get-ssh-controls test))
                                       (:nodes test)]
                        ; Index sessions by node name and add to test
                        (let [test (->> sessions

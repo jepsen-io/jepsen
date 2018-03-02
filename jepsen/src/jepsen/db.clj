@@ -11,6 +11,9 @@
 (defprotocol LogFiles
   (log-files [db test node] "Returns a sequence of log files for this node."))
 
+(defprotocol LogSnarfer
+  (snarf-logs! [db test] "Downloads logs for a test."))
+
 (def noop
   "Does nothing."
   (reify DB

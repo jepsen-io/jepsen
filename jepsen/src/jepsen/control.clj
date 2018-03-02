@@ -10,6 +10,7 @@
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
+            [clojure.java.shell :as shell]
             [clojure.tools.logging :refer [warn info debug error]]))
 
 ; STATE STATE STATE STATE
@@ -25,6 +26,9 @@
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 (def ^:dynamic *retries*  "How many times to retry conns"   5)
+(def ^:dynamic *run-locally*
+  "Whether to run commands on the local host rather than the remote host"
+  false)
 
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
@@ -100,17 +104,32 @@
   "Wraps command in a sudo subshell."
   [cmd]
   (if *sudo*
-    (merge cmd {:cmd (str "sudo -S -u " *sudo* " bash -c " (escape (:cmd cmd)))
+    (merge cmd {:cmd `("sudo" "-S" "-u" ~*sudo* "--" ~@(:cmd cmd))
                 :in  (if *password*
                        (str *password* "\n" (:in cmd))
                        (:in cmd))})
     cmd))
 
+(defn wrap-bash
+  "Wraps command in a bash shell."
+  [cmd]
+  (assoc cmd :cmd `("bash" "-c" ~(str/join " " (:cmd cmd)))))
+
+(defn wrap-bash-cd
+  "Wraps command in a bash shell prepended with a cd command."
+  [cmd]
+  (if (:dir cmd)
+    (-> cmd
+        (assoc :cmd `("bash" "-c" ~(escape (str "cd " (escape (:dir cmd)) "; "
+                                                (str/join " " (:cmd cmd))))))
+        (dissoc :dir))
+    (wrap-bash cmd)))
+
 (defn wrap-cd
   "Wraps command by changing to the current bound directory first."
   [cmd]
   (if *dir*
-    (assoc cmd :cmd (str "cd " (escape *dir*) "; " (:cmd cmd)))
+    (assoc cmd :dir *dir*)
     cmd))
 
 (defn wrap-trace
@@ -141,7 +160,7 @@
 (defn ssh*
   "Evaluates an SSH action against the current host. Retries packet corrupt
   errors."
-  [action]
+  [{cmd :cmd, :as action}]
   (with-retry [tries *retries*]
     (when (nil? *session*)
       (throw (RuntimeException.
@@ -149,7 +168,7 @@
                    (with-out-str (pprint (debug-data)))))))
 
     (rc/with-conn [s *session*]
-      (assoc (ssh/ssh s action)
+      (assoc (ssh/ssh s (assoc action :cmd (str/join " " cmd)))
              :host   *host*
              :action action))
     (catch com.jcraft.jsch.JSchException e
@@ -160,18 +179,26 @@
             (retry (dec tries)))
         (throw e)))))
 
+(defn sh*
+  "Evaluates a shell command."
+  [{cmd :cmd, :as action}]
+  (apply shell/sh (concat cmd (mapcat identity (dissoc action :cmd)))))
+
 (defn exec*
   "Like exec, but does not escape."
   [& commands]
-  (->> commands
-       (str/join " ")
-       (array-map :cmd)
-       wrap-cd
-       wrap-sudo
-       wrap-trace
-       ssh*
-       throw-on-nonzero-exit
-       just-stdout))
+  (-> (array-map :cmd commands)
+      wrap-cd
+      (as-> action (if *run-locally*
+                     (wrap-bash action)
+                     (wrap-bash-cd action)))
+      wrap-sudo
+      wrap-trace
+      (as-> action (if *run-locally*
+                     (sh* action)
+                     (ssh* action)))
+      throw-on-nonzero-exit
+      just-stdout))
 
 (defn exec
   "Takes a shell command and arguments, runs the command, and returns stdout,
@@ -379,3 +406,10 @@
   `(on-nodes ~test
              (fn [test# node#]
                ~@body)))
+
+(defmacro on-local
+  "Executes `body` on the local host (via bash) rather than the remote host
+  (via bash over the node's SSH connection)."
+  [& body]
+  `(binding [*run-locally* true]
+     ~@body))
