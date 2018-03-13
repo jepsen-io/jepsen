@@ -72,7 +72,7 @@ separate keys, or a pool of keys. Another is to use a single key, and have the
 value be a serialized data type, like a JSON array or Clojure set. We'll do the latter.
 
 ```clj
-(defrecord SetClient [conn]
+(defrecord SetClient [k conn]
   client/Client
     (open! [this test node]
         (assoc this :conn (v/connect (client-url node)
@@ -169,7 +169,7 @@ With that taken care of, back to `jepsen.etcdemo.set`. We'll require our
 support namespace here too, and use it in the client.
 
 ```clj
-(defrecord SetClient [conn]
+(defrecord SetClient [k conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (v/connect (s/client-url node)
@@ -405,6 +405,7 @@ Let's rewrite the linearizable register test as a workload, so it has the same s
 (defn register-workload
   "Tests linearizable reads, writes, and compare-and-set operations on
   independent keys."
+  [opts]
   {:client    (Client. nil)
    :checker   (independent/checker
                 (checker/compose
@@ -444,6 +445,36 @@ purely with workloads. We'll take a string workload option, and use it to look
 up the appropriate workload function, then call that with `opts` to build the
 appropriate workload. We'll also modify our test name to include the workload
 name.
+
+```clj
+(defn etcd-test
+  "Given an options map from the command line runner (e.g. :nodes, :ssh,
+  :concurrency ...), constructs a test map. Special options:
+
+      :quorum       Whether to use quorum reads
+      :rate         Approximate number of requests per second, per thread
+      :ops-per-key  Maximum number of operations allowed on any given key
+      :workload     Type of workload."
+  [opts]
+  (let [quorum    (boolean (:quorum opts))
+        workload  ((get workloads (:workload opts)) opts)]
+    (merge tests/noop-test
+           opts
+           {:name       (str "etcd q=" quorum " "
+                             (name (:workload opts)))
+            :quorum     quorum
+            :os         debian/os
+            :db         (db "v3.1.5")
+            :nemesis    (nemesis/partition-random-halves)
+            :model      (model/cas-register)
+            :client     (:client workload)
+            :checker    (checker/compose
+                          {:perf     (checker/perf)
+                           :workload (:checker workload)})
+   ...
+```
+
+Now, let's pass workload option specification to the CLI:
 
 ```clj
 (def cli-opts
