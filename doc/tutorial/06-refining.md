@@ -162,7 +162,7 @@ keys.
       (try+
         (case (:f op)
           :read (let [value (-> conn
-                                (v/get "foo" {:quorum? true})
+                                (v/get k {:quorum? true})
                                 parse-long)]
                   (assoc op :type :ok, :value (independent/tuple k value)))
 
@@ -193,10 +193,12 @@ Finally, our checker thinks in terms of a single value--but we can turn that
 into a checker that reasons about *independent* values, identified by keys.
 
 ```clj
-          :checker (checker/compose
-                     {:perf     (checker/perf)
-                      :timeline (timeline/html)
-                      :linear   (independent/checker checker/linearizable)})
+          :checker  (checker/compose 
+                      {:perf  (checker/perf)
+                       :indep (independent/checker 
+                                (checker/compose 
+                                {:timeline (timeline/html)
+                                 :linear (checker/linearizable)}))})
 ```
 
 Write one checker, get a family of n checkers for free! Maaaaagic!
