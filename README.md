@@ -96,9 +96,27 @@ INFO  jepsen.core - Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
 
 ### JSCH auth errors
 
-You might be hitting a jsch bug which doesn't know how to read hashed
-known_hosts files. Remove all keys for the DB hosts from your `known_hosts`
-file, then:
+If you see `com.jcraft.jsch.JSchException: Auth fail`, this means something
+about your test's `:ssh` map is wrong, or your control node's SSH environment
+is a bit weird.
+
+0. Confirm that you can ssh to the node that Jepsen failed to connect to. Try
+   `ssh -v` for verbose information--pay special attention to whether it uses a
+   password or private key.
+1. If you intend to use a username and password, confirm that they're specified
+   correctly in your test's `:ssh` map.
+2. If you intend to log in with a private key, make sure your SSH agent is
+   running.
+   - `ssh-add -l` should show the key you use to log in.
+   - If your agent isn't running, try lauching one with `ssh-agent`.
+   - If your agent shows no keys, you might need to add it with `ssh-add`.
+   - If you're SSHing to a control node, SSH might be forwarding your local
+     agent's keys rather than using those on the control node. Try `ssh -a` to
+     disable agent forwarding.
+
+If you've SSHed to a DB node already, you might also encounter a jsch bug which
+doesn't know how to read hashed known_hosts files. Remove all keys for the DB
+hosts from your `known_hosts` file, then:
 
 ```sh
 ssh-keyscan -t rsa n1 >> ~/.ssh/known_hosts
