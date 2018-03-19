@@ -39,15 +39,18 @@
            :> "/etc/init/faunadb.conf")
    (c/exec :echo
            (yaml/generate-string
-            (merge (yaml/parse-string
-                    (-> "faunadb.yml"
-                        io/resource
-                        slurp))
-                   {:auth_root_key root-key
-                    :network_broadcast_address node
-                    :network_host_id node
-                    :network_listen_address node
-                    :storage_transaction_log_nodes [[node]]}))
+            (dissoc (merge
+                     (yaml/parse-string (-> "faunadb.yml"
+                                            io/resource
+                                            slurp))
+                     {:auth_root_key root-key
+                      :network_broadcast_address node
+                      :network_host_id node
+                      :network_listen_address node})
+
+                    ;; leave replication and log topology initially unconfigured
+                    :network_datacenter_name
+                    :storage_transaction_log_nodes))
             :> "/etc/faunadb.yml")))
 
 (defn db
@@ -57,8 +60,7 @@
     (setup! [_ test node]
       (info node "installing FaunaDB" version)
       (install! version)
-      (configure! test node)
-      (c/su (c/exec :initctl :start :faunadb)))
+      (configure! test node))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
@@ -72,7 +74,7 @@
                :grep "start" |
                :xargs :-r |
                :cut :-f1 :-d\' \' |
-               :xargs :initctl :stop)
+               :xargs :-r :initctl :stop)
        (c/exec :rm :-rf "/var/lib/faunadb")))
 
     db/LogFiles
