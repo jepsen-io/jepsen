@@ -64,7 +64,11 @@
       (info node "tearing down FaunaDB")
       (c/su
        (c/exec :initctl :stop :faunadb)
-       (c/exec :rm :-rf "/var/lib/faunadb")))))
+       (c/exec :rm :-rf "/var/lib/faunadb")))
+
+    db/LogFiles
+    (log-files [_ test node]
+      ["/var/log/faunadb/core.log"])))
 
 (defn fauna-test
   "Given an options map from the command line
