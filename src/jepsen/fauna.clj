@@ -8,12 +8,16 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]))
 
+(def key
+  "FaunaDB dpkg repository key."
+  "TPwTIfv9rYCBsY9PR2Y31F1X5JEUFIifWopdM3RvdHXaLgjkOl0wPoNp1kif1hJS")
+
 (defn install!
   "Install a particular version of FaunaDB."
   [version]
   (debian/install-jdk8!)
   (debian/add-repo! "faunadb"
-                    "deb [arch=all] https://TPwTIfv9rYCBsY9PR2Y31F1X5JEUFIifWopdM3RvdHXaLgjkOl0wPoNp1kif1hJS@repo.fauna.com/enterprise/debian unstable non-free")
+                    (str/join ["deb [arch=all] https://" key "@repo.fauna.com/enterprise/debian unstable non-free"]))
   (c/su (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
                 :apt-key :add :-))
   (debian/install {"faunadb" version}))
