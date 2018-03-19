@@ -10,7 +10,7 @@
              [tests :as tests]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
-            [yaml.core :as yaml]))
+            [clj-yaml.core :as yaml]))
 
 (def root-key
   "Administrative key for the FaunaDB cluster."
@@ -55,7 +55,7 @@
             (merge
              (yaml/parse-string (-> "faunadb.yml"
                                     io/resource
-                                    slurp) :keywords true)
+                                    slurp))
              {:auth_root_key root-key
               :network_broadcast_address node
               :network_datacenter_name "replica-1"

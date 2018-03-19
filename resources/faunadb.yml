@@ -1,41 +1,8 @@
-auth_root_key: "secret"
-auth_root_key_hash: null
-
-encryption_algorithm: "SunX509"
-encryption_cipher_suites: [ "TLS_RSA_WITH_AES_128_CBC_SHA", "TLS_RSA_WITH_AES_256_CBC_SHA" ]
-encryption_keystore: null
-encryption_keystore_password: ""
-encryption_level: null
-encryption_protocol: "TLS"
-encryption_store_type: "JKS"
-encryption_truststore: null
-encryption_truststore_password: ""
-
-log_level: "info"
-log_path: "/var/log/faunadb"
-log_rotate_count: 0
-log_rotate_size_mb: 128
-log_slow_query_ms: 5000
-
-network_broadcast_address: null
+---
 network_coordinator_http_address: "127.0.0.1"
 network_coordinator_http_port: 8443
 network_admin_http_address: "127.0.0.1"
 network_admin_http_port: 8444
 network_cluster_name: "fauna"
-network_datacenter_name: "NoDC"
-network_host_id: null
-network_listen_address:
 network_peer_port: 7500
 network_peer_secure_port: 7501
-
-schema_retention_days: 1
-
-stats_host: null
-stats_port: 8125
-stats_prefix: null
-
-storage_data_path: "/var/lib/faunadb"
-storage_snapshot_path: "/var/lib/faunadb/snapshots"
-
-storage_transaction_log_nodes: null
