@@ -63,7 +63,16 @@
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
       (c/su
-       (c/exec :initctl :stop :faunadb)
+       ;; this over-complicated pipeline checks upstart for a
+       ;; configured _and_ running faunadb instance, before attempting
+       ;; to kill it.
+       (c/exec :initctl :list |
+               :grep :faunadb |
+               :xargs :-r |
+               :grep "start" |
+               :xargs :-r |
+               :cut :-f1 :-d\' \' |
+               :xargs :initctl :stop)
        (c/exec :rm :-rf "/var/lib/faunadb")))
 
     db/LogFiles
