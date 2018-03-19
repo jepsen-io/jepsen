@@ -1,8 +1,10 @@
 (ns jepsen.fauna
+  (:import com.faunadb.client.FaunaClient)
   (:require [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [jepsen [cli :as cli]
+             [client :as client]
              [control :as c :refer [|]]
              [db :as db]
              [tests :as tests]]
@@ -48,7 +50,8 @@
                       :network_host_id node
                       :network_listen_address node})
 
-                    ;; leave replication and log topology initially unconfigured
+                    ;; leave replication and log topology initially
+                    ;; unconfigured
                     :network_datacenter_name
                     :storage_transaction_log_nodes))
             :> "/etc/faunadb.yml")))
@@ -81,6 +84,21 @@
     (log-files [_ test node]
       ["/var/log/faunadb/core.log"])))
 
+(defrecord Client [conn]
+  client/Client
+  (open! [this test node]
+    (assoc this :conn (doto (FaunaClient/builder)
+                        (.withSecret root-key)
+                        (.build))))
+
+  (setup! [this test])
+
+  (invoke! [_ test op])
+
+  (teardown! [this test])
+
+  (close! [_ test]))
+
 (defn fauna-test
   "Given an options map from the command line
   runner (e.g. :nodes, :ssh, :concurrency, ...), constructs a test
@@ -90,7 +108,8 @@
          opts
          {:name "faunadb"
           :os    debian/os ;; NB. requires Ubuntu 14.04 LTS
-          :db    (db "2.5.0-0")}))
+          :db    (db "2.5.0-0")
+          :client (Client. nil)}))
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for browsing result."
