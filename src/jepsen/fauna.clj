@@ -71,14 +71,16 @@
     (setup! [_ test node]
       (info node "installing FaunaDB" version)
       (install! version)
-      (configure! test node))
+      (configure! test node)
+      (c/su
+       (c/exec :initctl :start :faunadb)))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
       (c/su
        ;; this over-complicated pipeline checks upstart for a
        ;; configured _and_ running faunadb instance, before attempting
-       ;; to kill it.
+       ;; to kill it... maybe just catch the exception.
        (c/exec :initctl :list |
                :grep :faunadb |
                :xargs :-r |
