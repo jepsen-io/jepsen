@@ -20,6 +20,10 @@
   "FaunaDB dpkg repository key."
   "TPwTIfv9rYCBsY9PR2Y31F1X5JEUFIifWopdM3RvdHXaLgjkOl0wPoNp1kif1hJS")
 
+(def partitions
+  "The number of log partitions in the FaunaDB cluster."
+  3)
+
 (defn install!
   "Install a particular version of FaunaDB."
   [version]
@@ -29,6 +33,13 @@
   (c/su (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
                 :apt-key :add :-))
   (debian/install {"faunadb" version}))
+
+(defn log-configuration
+  [test node]
+  (vals
+   (group-by (fn [n]
+               (mod (+ 1 (.indexOf (:nodes test) n)) partitions))
+             (:nodes test))))
 
 (defn configure!
   "Configure FaunaDB."
@@ -41,19 +52,16 @@
            :> "/etc/init/faunadb.conf")
    (c/exec :echo
            (yaml/generate-string
-            (dissoc (merge
-                     (yaml/parse-string (-> "faunadb.yml"
-                                            io/resource
-                                            slurp))
-                     {:auth_root_key root-key
-                      :network_broadcast_address node
-                      :network_host_id node
-                      :network_listen_address node})
-
-                    ;; leave replication and log topology initially
-                    ;; unconfigured
-                    :network_datacenter_name
-                    :storage_transaction_log_nodes))
+            (merge
+             (yaml/parse-string (-> "faunadb.yml"
+                                    io/resource
+                                    slurp) :keywords true)
+             {:auth_root_key root-key
+              :network_broadcast_address node
+              :network_datacenter_name "replica-1"
+              :network_host_id node
+              :network_listen_address node
+              :storage_transaction_log_nodes (log-configuration test node)}))
             :> "/etc/faunadb.yml")))
 
 (defn db
