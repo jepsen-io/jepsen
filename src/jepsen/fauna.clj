@@ -133,7 +133,8 @@
                                             (toString)))))
   (teardown! [this test])
 
-  (close! [this test]))
+  (close! [this test]
+    (.close conn)))
 
 (defn fauna-test
   "Given an options map from the command line
