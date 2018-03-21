@@ -58,6 +58,7 @@
                                     io/resource
                                     slurp))
              {:auth_root_key root-key
+              :network_coordinator_http_address node
               :network_broadcast_address node
               :network_datacenter_name "replica-1"
               :network_host_id node
