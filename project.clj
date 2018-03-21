@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/clojure "1.9.0"]
                  [clj-yaml "0.4.0"]
                  [jepsen "0.1.8"]
-                 [com.faunadb/faunadb-java "1.2.0"]])
+                 [com.faunadb/faunadb-java "1.2.0"]
+                 [com.faunadb/faunadb-java-dsl "1.2.0"]])

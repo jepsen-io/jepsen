@@ -1,6 +1,9 @@
 (ns jepsen.fauna
   (:import com.faunadb.client.FaunaClient)
-  (:require [clojure.java.io :as io]
+  (:import com.faunadb.client.query.Expr)
+  (:import com.faunadb.client.query.Language)
+  (:require [clj-yaml.core :as yaml]
+            [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [jepsen [cli :as cli]
@@ -8,10 +11,10 @@
              [control :as c :refer [|]]
              [core :as jepsen]
              [db :as db]
+             [generator :as gen]
              [tests :as tests]]
             [jepsen.control.util :as cu]
-            [jepsen.os.debian :as debian]
-            [clj-yaml.core :as yaml]))
+            [jepsen.os.debian :as debian]))
 
 (def root-key
   "Administrative key for the FaunaDB cluster."
@@ -102,20 +105,35 @@
     (log-files [_ test node]
       ["/var/log/faunadb/core.log"])))
 
-(defrecord Client [conn]
+(defn r   [_ _] {:type :invoke, :f :read, :value nil})
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+
+(defrecord BasicClient [conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (doto (FaunaClient/builder)
-                        (.withSecret root-key)
-                        (.build))))
+    (assoc this :conn (.build (doto (FaunaClient/builder)
+                                (.withEndpoint (str/join ["http://" node ":8443"]))
+                                (.withSecret root-key)))))
 
   (setup! [this test])
 
-  (invoke! [_ test op])
-
+  (invoke! [this test op]
+    (case (:f op)
+      :read (assoc op :type :ok :value (.. conn
+                                           (query (Language/Add (into-array
+                                                                 Expr [(Language/Value 1)
+                                                                       (Language/Value 2)])))
+                                           (get)
+                                           (toString)))
+      :write (assoc op :type :ok :value (.. conn
+                                            (query (Language/Add (into-array
+                                                                  Expr [(Language/Value 1)
+                                                                        (Language/Value (:value op))])))
+                                            (get)
+                                            (toString)))))
   (teardown! [this test])
 
-  (close! [_ test]))
+  (close! [this test]))
 
 (defn fauna-test
   "Given an options map from the command line
@@ -127,7 +145,11 @@
          {:name "faunadb"
           :os    debian/os ;; NB. requires Ubuntu 14.04 LTS
           :db    (db "2.5.0-0")
-          :client (Client. nil)}))
+          :client (BasicClient. nil)
+          :generator (->> (gen/mix [r w])
+                          (gen/stagger 1)
+                          (gen/nemesis nil)
+                          (gen/time-limit 15))}))
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for browsing result."
