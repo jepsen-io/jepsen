@@ -70,7 +70,6 @@
   [version]
   (reify db/DB
     (setup! [_ test node]
-      (info node "installing FaunaDB" version)
       (install! version)
       (configure! test node)
       (c/su
@@ -79,20 +78,24 @@
        (jepsen/synchronize test)
 
        (when (= node (jepsen/primary test))
+         (info node "initializing FaunaDB cluster")
          (c/exec :faunadb-admin :init)
          (Thread/sleep 10000)))
       (jepsen/synchronize test)
 
       (when (not= node (jepsen/primary test))
+        (info node "joining FaunaDB cluster")
         (c/exec :faunadb-admin :join (jepsen/primary test))
-        (Thread/sleep 5000))
+        (Thread/sleep 10000))
       (jepsen/synchronize test))
 
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
       (c/su
-       (debian/uninstall! :faunadb)))
+       (c/exec :initctl :stop :faunadb)
+       (debian/uninstall! :faunadb)
+       (c/exec :rm :-rf "/var/lib/faunadb")))
 
     db/LogFiles
     (log-files [_ test node]
