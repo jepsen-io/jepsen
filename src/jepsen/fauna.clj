@@ -6,6 +6,7 @@
             [jepsen [cli :as cli]
              [client :as client]
              [control :as c :refer [|]]
+             [core :as jepsen]
              [db :as db]
              [tests :as tests]]
             [jepsen.control.util :as cu]
@@ -73,7 +74,20 @@
       (install! version)
       (configure! test node)
       (c/su
-       (c/exec :initctl :start :faunadb)))
+       (c/exec :initctl :start :faunadb)
+       (Thread/sleep 30000)
+       (jepsen/synchronize test)
+
+       (when (= node (jepsen/primary test))
+         (c/exec :faunadb-admin :init)
+         (Thread/sleep 10000)))
+      (jepsen/synchronize test)
+
+      (when (not= node (jepsen/primary test))
+        (c/exec :faunadb-admin :join (jepsen/primary test))
+        (Thread/sleep 5000))
+      (jepsen/synchronize test))
+
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
@@ -88,7 +102,8 @@
                :xargs :-r |
                :cut :-f1 :-d\' \' |
                :xargs :-r :initctl :stop)
-       (c/exec :rm :-rf "/var/lib/faunadb")))
+       (c/exec :rm :-rf "/var/lib/faunadb")
+       (debian/uninstall! :faunadb)))
 
     db/LogFiles
     (log-files [_ test node]
