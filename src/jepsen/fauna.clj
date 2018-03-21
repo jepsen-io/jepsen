@@ -106,7 +106,7 @@
       ["/var/log/faunadb/core.log"])))
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
-(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
+(defn w   [_ _] {:type :invoke, :f :write, :value (.longValue (rand-int 5))})
 
 (defrecord BasicClient [conn]
   client/Client
