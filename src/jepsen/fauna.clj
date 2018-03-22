@@ -150,9 +150,22 @@
                           (gen/nemesis nil)
                           (gen/time-limit 15))}))
 
-(defn -main
-  "Handles command line arguments. Can either run a test, or a web server for browsing result."
-  [& args]
-  (cli/run! (merge (cli/single-test-cmd {:test-fn fauna-test})
-                   (cli/serve-cmd))
-            args))
+(defn basic-test
+  "Sets up the test parameters common to all tests."
+  [opts]
+  (merge
+    tests/noop-test
+    {:name    (str "faunadb" (str ":" (:name (:nemesis opts))))
+     :os      debian/os ;; NB. requires Ubuntu 14.04 LTS
+     :db      (db "2.5.0-0")
+     :client  (:client (:client opts))
+     :nemesis (:client (:nemesis opts))
+     :generator (gen/phases
+                  (->> (gen/nemesis (:during (:nemesis opts))
+                                    (:during (:client opts)))
+                       (gen/time-limit (:time-limit opts)))
+                  (gen/log "Nemesis terminating")
+                  (gen/nemesis (:final (:nemesis opts)))
+                  ; Final client
+                  (gen/clients (:final (:client opts))))}
+    (dissoc opts :name :client :nemesis)))

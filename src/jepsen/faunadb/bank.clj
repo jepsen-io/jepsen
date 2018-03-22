@@ -30,29 +30,28 @@
 
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
-  (setup! [this test node]
-    (let [conn (f/client node root-key)]
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          (f/query
-            conn
-            (Do
-              (If
-                (Exists classRef)
-                (Delete classRef)
-                (Obj "foo" (v "bar"))
-              (CreateClass (Obj "name" (v "accounts"))))
+  (open! [this test node]
+    (assoc this :conn (f/client node root-key)))
 
-            (dotimes [i n]
-              (Thread/sleep 500)
-              (info "Creating account" i)
-              (f/query
-                conn
-                (Create
-                  (Ref classRef i)
-                  (Obj "data" (Obj "balance" (v starting-balance)))))))
+  (setup! [this test]
+    (locking tbl-created?
+      (when (compare-and-set! tbl-created? false true)
+        (f/query
+          conn
+          (Do
+            (If
+              (Exists classRef)
+              (Delete classRef)
+              (Obj "foo" (v "bar")))
+            (CreateClass (Obj "name" (v "accounts")))))
 
-      (assoc this :conn conn))))))
+          (dotimes [i n]
+            (info "Creating account" i)
+            (f/query
+              conn
+              (Create
+                (Ref classRef i)
+                (Obj "data" (Obj "balance" (v starting-balance)))))))))
 
   (invoke! [this test op]
     (case (:f op)
@@ -61,11 +60,12 @@
         (->>
           (mapv
             (fn [i]
-             (f/query
+             (f/get
                conn
                (Select
                  balancePath
-                 (Get (Ref classRef i)))))
+                 (Get (Ref classRef i)))
+               f/LongField))
             (range n))
           (assoc op :type :ok, :value)))
 
@@ -75,23 +75,23 @@
           conn
           (Do
             (Let
-              ["a" (Subtract
+              {"a" (Subtract
                      (Select
                        balancePath
                        (Get (Ref classRef from)))
-                     amount)]
+                     amount)}
               (If
-                (Or (LessThan (Var "a")) 0)
+                (Or (LessThan (Var "a") 0))
                 (Abort "balance would go negative")
                 (Update
                   (Ref classRef from)
                   (Obj "data" (Obj "balance" (Var "a"))))))
             (Let
-              ["b" (Add
+              {"b" (Add
                      (Select
                        balancePath
                        (Get (Ref classRef to)))
-                     amount)]
+                     amount)}
               (Update
                 (Ref classRef to)
                 (Obj "data" (Obj "balance" (Var "b")))))))
@@ -161,7 +161,7 @@
 
 (defn bank-test-base
   [opts]
-  (fauna/fauna-test
+  (fauna/basic-test
     (merge
       {:client      {:client (:client opts)
                      :during (->> (gen/mix [bank-read bank-diff-transfer])

@@ -9,7 +9,7 @@
 
 (defn Ref
   [c i]
-  (Language/Ref c i))
+  (Language/Ref c (v i)))
 
 (defn ClassRef
   [c]
@@ -45,7 +45,7 @@
 
 (defn Arr
   [& vs]
-  (Language/Arr (into-array Expr vs)))
+  (Language/Arr vs))
 
 (defn Get
   [r]
@@ -60,24 +60,24 @@
   (Language/Select path expr))
 
 (defn Let
-  [[bindings] expr]
-  (Language/Let bindings expr))
+  [bindings expr]
+  (. (Language/Let bindings) (in expr)))
 
 (defn Subtract
   [& exprs]
-  (Language/Subtract (into-array Expr exprs)))
+  (Language/Subtract exprs))
 
 (defn Add
   [& exprs]
-  (Language/Add (into-array Expr exprs)))
+  (Language/Add exprs))
 
 (defn Or
   [& exprs]
-  (Language/Or (into-array Expr exprs)))
+  (Language/Or exprs))
 
 (defn LessThan
   [& exprs]
-  (Language/LT (into-array Expr exprs)))
+  (Language/LT exprs))
 
 (defn Var
   [n]
