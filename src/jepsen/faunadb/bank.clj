@@ -4,16 +4,12 @@
   (:use jepsen.faunadb.query)
   (:require [jepsen [client :as client]
                     [checker :as checker]
-                    [generator :as gen]
-                    [independent :as independent]
-                    [reconnect :as rc]
-                    [util :as util :refer [meh]]]
+                    [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.faunadb.client :as f]
             [jepsen.fauna :as fauna]
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer :all]
-            [knossos.model :as model]
             [knossos.op :as op]))
 
 (def classRef
@@ -161,8 +157,7 @@
     (merge
       {:client      {:client (:client opts)
                      :during (->> (gen/mix [bank-read bank-diff-transfer])
-                                  (gen/clients)
-                                  (gen/stagger 0))
+                                  (gen/clients))
                      :final (gen/clients (gen/once bank-read))}
        :checker     (checker/compose
                       {:perf    (checker/perf)
