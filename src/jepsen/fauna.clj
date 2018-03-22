@@ -2,6 +2,7 @@
   (:import com.faunadb.client.FaunaClient)
   (:import com.faunadb.client.query.Expr)
   (:import com.faunadb.client.query.Language)
+  (:use jepsen.faunadb.query)
   (:require [clj-yaml.core :as yaml]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
@@ -13,6 +14,7 @@
              [db :as db]
              [generator :as gen]
              [tests :as tests]]
+            [jepsen.faunadb.client :as f]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]))
 
@@ -111,26 +113,22 @@
 (defrecord BasicClient [conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (.build (doto (FaunaClient/builder)
-                                (.withEndpoint (str/join ["http://" node ":8443"]))
-                                (.withSecret root-key)))))
+    (assoc this :conn (f/client node root-key)))
 
   (setup! [this test])
 
   (invoke! [this test op]
     (case (:f op)
-      :read (assoc op :type :ok :value (.. conn
-                                           (query (Language/Add (into-array
-                                                                 Expr [(Language/Value 1)
-                                                                       (Language/Value 2)])))
-                                           (get)
-                                           (toString)))
-      :write (assoc op :type :ok :value (.. conn
-                                            (query (Language/Add (into-array
-                                                                  Expr [(Language/Value 1)
-                                                                        (Language/Value (:value op))])))
-                                            (get)
-                                            (toString)))))
+      :read
+      (assoc op
+             :type  :ok
+             :value (f/query conn (Add (v 1) (v 2))))
+
+      :write
+      (assoc op
+             :type  :ok
+             :value (f/query conn (Add (v 1) (v (:value op)))))))
+
   (teardown! [this test])
 
   (close! [this test]
