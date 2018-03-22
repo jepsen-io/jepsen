@@ -1,8 +1,4 @@
 (ns jepsen.fauna
-  (:import com.faunadb.client.FaunaClient)
-  (:import com.faunadb.client.query.Expr)
-  (:import com.faunadb.client.query.Language)
-  (:use jepsen.faunadb.query)
   (:require [clj-yaml.core :as yaml]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
@@ -106,49 +102,6 @@
     db/LogFiles
     (log-files [_ test node]
       ["/var/log/faunadb/core.log"])))
-
-(defn r   [_ _] {:type :invoke, :f :read, :value nil})
-(defn w   [_ _] {:type :invoke, :f :write, :value (.longValue (rand-int 5))})
-
-(defrecord BasicClient [conn]
-  client/Client
-  (open! [this test node]
-    (assoc this :conn (f/client node root-key)))
-
-  (setup! [this test])
-
-  (invoke! [this test op]
-    (case (:f op)
-      :read
-      (assoc op
-             :type  :ok
-             :value (f/query conn (Add (v 1) (v 2))))
-
-      :write
-      (assoc op
-             :type  :ok
-             :value (f/query conn (Add (v 1) (v (:value op)))))))
-
-  (teardown! [this test])
-
-  (close! [this test]
-    (.close conn)))
-
-(defn fauna-test
-  "Given an options map from the command line
-  runner (e.g. :nodes, :ssh, :concurrency, ...), constructs a test
-  map."
-  [opts]
-  (merge tests/noop-test
-         opts
-         {:name "faunadb"
-          :os    debian/os ;; NB. requires Ubuntu 14.04 LTS
-          :db    (db "2.5.0-0")
-          :client (BasicClient. nil)
-          :generator (->> (gen/mix [r w])
-                          (gen/stagger 1)
-                          (gen/nemesis nil)
-                          (gen/time-limit 15))}))
 
 (defn basic-test
   "Sets up the test parameters common to all tests."
