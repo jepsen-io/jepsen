@@ -6,12 +6,13 @@
             [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojure.java.io :as io]
-            [jepsen.cli :as jc]
-            [jepsen.core :as jepsen]
-            [jepsen.web :as web]
+            [jepsen [cli :as jc]
+                    [core :as jepsen]
+                    [web :as web]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.fauna :as fauna]
             [jepsen.faunadb [bank :as bank]
-                            [nemesis :as cln]]))
+                            [nemesis :as jfn]]))
 
 (def tests
   "A map of test names to test constructors."
@@ -19,15 +20,24 @@
 
 (def nemeses
   "Supported nemeses"
-  {"none"       `(cln/none)
-   "start-stop" `(cln/startstop 1)})
+  {"none"              `(jfn/none)
+   "parts"             `(jfn/parts)
+   "majority-ring"     `(jfn/majring)
+   "strobe-skews"      `(jfn/strobe-skews)
+   "small-skews"       `(jfn/small-skews)
+   "subcritical-skews" `(jfn/subcritical-skews)
+   "critical-skews"    `(jfn/critical-skews)
+   "big-skews"         `(jfn/big-skews)
+   "huge-skews"        `(jfn/huge-skews)
+   "start-kill"        `(jfn/startkill 1)
+   "start-stop"        `(jfn/startstop 1)})
 
 (def opt-spec
   "Command line options for tools.cli"
   [(jc/repeated-opt "-t" "--test NAME" "Test(s) to run" [] tests)
 
-  (jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
-                   [`(cln/none)]
+  (jc/repeated-opt nil "--nemesis NAME" "Which nemesis to use"
+                   [`(jfn/none)]
                    nemeses)
 
   (jc/repeated-opt nil "--nemesis2 NAME" "An additional nemesis to mix in"
@@ -46,8 +56,8 @@
   c2, restricted to remove:
 
     - Duplicate orders (a,b) (b,a)
-    - Pairs of clock-skew nemeses
-    - Identical nemeses"
+    - Pairs of clock-skew nemesis
+    - Identical nemesis"
   [c1 c2]
   (->> (for [n1 c1, n2 c2] [n1 n2])
        (reduce (fn [[pairs seen] [n1 n2 :as pair]]
@@ -76,7 +86,7 @@
                           [n1 n2]  (nemesis-product (:nemeses options)
                                                     (:nemeses2 options))]
                     ; Rehydrate test and run
-                    (let [nemesis  (cln/compose [(eval n1) (eval n2)])
+                    (let [nemesis  (jfn/compose [(eval n1) (eval n2)])
                           test (-> options
                                    (dissoc :test-fns :nemeses :nemeses2)
                                    (assoc :nemesis nemesis)

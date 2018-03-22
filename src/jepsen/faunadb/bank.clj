@@ -53,7 +53,7 @@
         (->>
           (mapv
             (fn [i]
-             (f/get
+             (f/queryGet
                conn
                (Select
                  balancePath
@@ -95,7 +95,6 @@
             (= (.getMessage (.getCause e)) "transaction aborted: balance would go negative")
             (assoc op :type :fail, :error [:negative to])
             (throw e)))))))
-
 
   (teardown! [this test])
 

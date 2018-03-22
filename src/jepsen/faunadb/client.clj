@@ -19,7 +19,7 @@
   [conn expr]
   (.. conn (query expr) (get)))
 
-(defn get
+(defn queryGet
   [conn expr field]
   (.get (query conn expr) field))
 

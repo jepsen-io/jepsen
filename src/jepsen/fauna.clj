@@ -10,7 +10,8 @@
              [db :as db]
              [generator :as gen]
              [tests :as tests]]
-            [jepsen.faunadb.client :as f]
+            [jepsen.faunadb [client :as f]
+             [auto :as auto]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]))
 
@@ -70,23 +71,7 @@
     (setup! [_ test node]
       (install! version)
       (configure! test node)
-      (c/su
-       (c/exec :initctl :start :faunadb)
-       (Thread/sleep 30000)
-       (jepsen/synchronize test)
-
-       (when (= node (jepsen/primary test))
-         (info node "initializing FaunaDB cluster")
-         (c/exec :faunadb-admin :init)
-         (Thread/sleep 10000)))
-      (jepsen/synchronize test)
-
-      (when (not= node (jepsen/primary test))
-        (info node "joining FaunaDB cluster")
-        (c/exec :faunadb-admin :join (jepsen/primary test))
-        (Thread/sleep 10000))
-      (jepsen/synchronize test))
-
+      (auto/start! test node))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
@@ -108,7 +93,7 @@
      :os      debian/os ;; NB. requires Ubuntu 14.04 LTS
      :db      (db "2.5.0-0")
      :client  (:client (:client opts))
-     :nemesis (:client (:nemesis opts))
+     :nemesis (:nemesis (:nemesis opts))
      :generator (gen/phases
                   (->> (gen/nemesis (:during (:nemesis opts))
                                     (:during (:client opts)))
