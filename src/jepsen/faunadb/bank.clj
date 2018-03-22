@@ -2,6 +2,7 @@
   "Simulates transfers between bank accounts"
   (:refer-clojure :exclude [test])
   (:use jepsen.faunadb.query)
+  (:import java.util.concurrent.ExecutionException)
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]]
@@ -63,31 +64,38 @@
 
       :transfer
       (let [{:keys [from to amount]} (:value op)]
-        (f/query
-          conn
-          (Do
-            (Let
-              {"a" (Subtract
-                     (Select
-                       balancePath
-                       (Get (Ref classRef from)))
-                     amount)}
-              (If
-                (Or (LessThan (Var "a") 0))
-                (Abort "balance would go negative")
+        (try
+          (f/query
+            conn
+            (Do
+              (Let
+                {"a" (Subtract
+                       (Select
+                         balancePath
+                         (Get (Ref classRef from)))
+                       amount)}
+                (If
+                  (Or (LessThan (Var "a") 0))
+                  (Abort "balance would go negative")
+                  (Update
+                    (Ref classRef from)
+                    (Obj "data" (Obj "balance" (Var "a"))))))
+              (Let
+                {"b" (Add
+                       (Select
+                         balancePath
+                         (Get (Ref classRef to)))
+                       amount)}
                 (Update
-                  (Ref classRef from)
-                  (Obj "data" (Obj "balance" (Var "a"))))))
-            (Let
-              {"b" (Add
-                     (Select
-                       balancePath
-                       (Get (Ref classRef to)))
-                     amount)}
-              (Update
-                (Ref classRef to)
-                (Obj "data" (Obj "balance" (Var "b")))))))
-        (assoc op :type :ok))))
+                  (Ref classRef to)
+                  (Obj "data" (Obj "balance" (Var "b")))))))
+          (assoc op :type :ok)
+        (catch ExecutionException e
+          (if
+            (= (.getMessage (.getCause e)) "transaction aborted: balance would go negative")
+            (assoc op :type :fail, :error [:negative to])
+            (throw e)))))))
+
 
   (teardown! [this test])
 
