@@ -19,7 +19,8 @@
 
 (def nemeses
   "Supported nemeses"
-  {"none"                       `(cln/none)})
+  {"none"       `(cln/none)
+   "start-stop" `(cln/startstop 1)})
 
 (def opt-spec
   "Command line options for tools.cli"

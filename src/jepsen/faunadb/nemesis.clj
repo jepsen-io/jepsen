@@ -121,14 +121,14 @@
 ;   :client (nemesis/partition-random-halves)
 ;   :clocks false})
 ;
-;;; start/stop server
-;(defn startstop
-;  [n]
-;  (merge (nemesis-single-gen)
-;         {:name (str "startstop" (if (> n 1) n ""))
-;          :client (nemesis/hammer-time
-;                    (comp (partial take n) shuffle) "cockroach")
-;          :clocks false}))
+;; start/stop server
+(defn startstop
+  [n]
+  (merge (nemesis-single-gen)
+         {:name (str "startstop" (if (> n 1) n ""))
+          :client (nemesis/hammer-time
+                    (comp (partial take n) shuffle) "faunadb")
+          :clocks false}))
 ;
 ;(defn startkill
 ;  [n]
