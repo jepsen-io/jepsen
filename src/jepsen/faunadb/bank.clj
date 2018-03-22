@@ -16,10 +16,6 @@
             [knossos.model :as model]
             [knossos.op :as op]))
 
-(def root-key
-  "Administrative key for the FaunaDB cluster."
-  "secret")
-
 (def classRef
   "Accounts class ref"
   (ClassRef (v "accounts")))
@@ -31,7 +27,7 @@
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (f/client node root-key)))
+    (assoc this :conn (f/client node)))
 
   (setup! [this test]
     (locking tbl-created?

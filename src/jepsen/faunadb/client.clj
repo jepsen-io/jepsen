@@ -5,8 +5,12 @@
   (:import com.faunadb.client.types.Field)
   (:require [clojure.string :as str]))
 
+(def root-key
+  "Administrative key for the FaunaDB cluster."
+  "secret")
+
 (defn client
-  [node root-key]
+  [node]
   (.build (doto (FaunaClient/builder)
             (.withEndpoint (str/join ["http://" node ":8443"]))
             (.withSecret root-key))))

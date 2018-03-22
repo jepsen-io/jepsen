@@ -14,10 +14,6 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]))
 
-(def root-key
-  "Administrative key for the FaunaDB cluster."
-  "secret")
-
 (def repo-key
   "FaunaDB dpkg repository key."
   "TPwTIfv9rYCBsY9PR2Y31F1X5JEUFIifWopdM3RvdHXaLgjkOl0wPoNp1kif1hJS")
@@ -58,7 +54,7 @@
              (yaml/parse-string (-> "faunadb.yml"
                                     io/resource
                                     slurp))
-             {:auth_root_key root-key
+             {:auth_root_key f/root-key
               :network_coordinator_http_address node
               :network_broadcast_address node
               :network_datacenter_name "replica-1"
