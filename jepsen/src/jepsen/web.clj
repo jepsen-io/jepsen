@@ -6,6 +6,7 @@
             [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
             [clojure.pprint :refer [pprint]]
+            [clj-time.format :as timef]
             [hiccup.core :as h]
             [ring.util.response :as response]
             [org.httpkit.server :as server])
@@ -102,10 +103,14 @@
 (defn test-row
   "Turns a test map into a table row."
   [t]
-  (let [r (:results t)]
+  (let [r    (:results t)
+        time (->> t
+                  :start-time
+                  (timef/parse   (timef/formatters :basic-date-time))
+                  (timef/unparse (timef/formatters :date-hour-minute-second)))]
     [:tr
      [:td [:a {:href (url t "")} (:name t)]]
-     [:td [:a {:href (url t "")} (:start-time t)]]
+     [:td [:a {:href (url t "")} time]]
      [:td {:style (str "background: " (valid-color (:valid? r)))}
       (:valid? r)]
      [:td [:a {:href (url t "results.edn")}    "results.edn"]]
