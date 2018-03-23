@@ -60,8 +60,10 @@ Slingshot too.
 
 ```clj
 (ns jepsen.etcdemo.set
-  (:require [jepsen [client :as client]
-            [generator :as gen]]
+  (:require [jepsen
+              [checker :as checker]
+              [client :as client]
+              [generator :as gen]]
             [slingshot.slingshot :refer [try+]]
             [verschlimmbesserung.core :as v]))
 ```
