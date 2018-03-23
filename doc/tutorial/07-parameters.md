@@ -242,5 +242,5 @@ histories can be *much* more difficult--even impossible.
 Linearizability checking is NP-hard; there's no way around that. We can design
 somewhat more efficient checkers, but eventually, that exponential cliff is
 going to bite us. Perhaps, however... we could verify a *weaker* property.
-Something in linear or logarithmic time. Let's [add a commutatative
+Something in linear or logarithmic time. Let's [add a commutative
 test](08-set.md)
