@@ -1,14 +1,15 @@
 # jepsen.mongodb-rocks
 
-A Clojure library designed to ... well, that part is up to you.
+A Jepsen stress test for comparing performance of mmapv1 and the experimental
+RocksDB backend for MongoDB.
 
 ## Usage
 
-FIXME
+`lein test`
 
 ## License
 
-Copyright © 2015 FIXME
+Copyright © 2015 Kyle Kingsbury
 
 Distributed under the Eclipse Public License either version 1.0 or (at
 your option) any later version.
