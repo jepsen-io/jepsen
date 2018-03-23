@@ -3,6 +3,7 @@
   (:refer-clojure :exclude [test])
   (:use jepsen.faunadb.query)
   (:import java.util.concurrent.ExecutionException)
+  (:import com.faunadb.client.types.Field)
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]]
@@ -10,6 +11,7 @@
             [jepsen.faunadb.client :as f]
             [jepsen.fauna :as fauna]
             [clojure.core.reducers :as r]
+            [clojure.string :as cstr]
             [clojure.tools.logging :refer :all]
             [knossos.op :as op]))
 
@@ -17,9 +19,17 @@
   "Accounts class ref"
   (ClassRef (v "accounts")))
 
+(def idxRef
+  "All Accounts index ref"
+  (IndexRef (v "all_accounts")))
+
 (def balancePath
   "Path to balance data"
   (Arr (v "data") (v "balance")))
+
+(def BalancesField
+  "A field extractor for balances"
+  (.collect (Field/at (into-array String ["data"])) f/LongField))
 
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
@@ -29,37 +39,36 @@
   (setup! [this test]
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
+        (f/query conn (CreateClass (Obj "name" (v "accounts"))))
+        (f/query
+          conn
+          (CreateIndex
+            (Obj
+              "name" (v "all_accounts")
+              "source" classRef)))
+              ;"values" (Arr (Obj "field" (Arr (v "data") (v "balance")))))))
+
+        (info (cstr/join ["Creating " n " accounts"]))
         (f/query
           conn
           (Do
-            (If
-              (Exists classRef)
-              (Delete classRef)
-              (Obj "foo" (v "bar")))
-            (CreateClass (Obj "name" (v "accounts")))))
-
-          (dotimes [i n]
-            (info "Creating account" i)
-            (f/query
-              conn
-              (Create
-                (Ref classRef i)
-                (Obj "data" (Obj "balance" (v starting-balance)))))))))
+            (mapv
+              (fn [i]
+                (Create (Ref classRef i)
+                        (Obj "data" (Obj "balance" (v starting-balance)))))
+              (range n)))))))
 
   (invoke! [this test op]
     (case (:f op)
       :read
       (let [n (:value op)]
         (->>
-          (mapv
-            (fn [i]
-             (f/queryGet
-               conn
-               (Select
-                 balancePath
-                 (Get (Ref classRef i)))
-               f/LongField))
-            (range n))
+          (f/queryGet
+            conn
+            (Map
+              (Paginate (Match idxRef))
+              (Lambda (v "r") (Select (Arr (v "data") (v "balance")) (Get (Var "r")))))
+            BalancesField)
           (assoc op :type :ok, :value)))
 
       :transfer

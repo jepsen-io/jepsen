@@ -15,17 +15,45 @@
   [c]
   (Language/Class c))
 
+(defn IndexRef
+  [c]
+  (Language/Index c))
+
 (defn CreateClass
   [p]
   (Language/CreateClass p))
+
+(defn CreateIndex
+  [p]
+  (Language/CreateIndex p))
 
 (defn Create
   [r p]
   (Language/Create r p))
 
+(defn Lambda
+  [a e]
+  (Language/Lambda a e))
+
+(defn Paginate
+  [e]
+  (Language/Paginate e))
+
+(defn Match
+  [e]
+  (Language/Match e))
+
 (defn Do
-  [& exprs]
-  (Language/Do exprs))
+  [e & es]
+  (Language/Do (flatten (cons e es))))
+
+(defn Foreach
+  [c l]
+  (Language/Foreach c l))
+
+(defn Map
+  [c l]
+  (Language/Map c l))
 
 (defn If
   [c t e]
@@ -40,12 +68,12 @@
   (Language/Delete r))
 
 (defn Obj
-  [k v]
-  (Language/Obj k v))
+  [& vs]
+  (Language/Obj (into {} (map vec (partition 2 vs)))))
 
 (defn Arr
-  [& vs]
-  (Language/Arr vs))
+  [v & vs]
+  (Language/Arr (flatten (cons v vs))))
 
 (defn Get
   [r]
