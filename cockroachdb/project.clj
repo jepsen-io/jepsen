@@ -8,7 +8,11 @@
                  [org.clojure/java.jdbc "0.6.1"]
                  [circleci/clj-yaml "0.5.5"]
                  [org.postgresql/postgresql "9.4.1211"]]
-  :jvm-opts ["-Xmx12g"
+  :jvm-opts ~(do (require '[clojure.string :as str])
+                 (into [] (concat (if (= "9" (nth (str/split (System/getProperty "java.version") #"\.") 0))
+                                    ["--add-modules" "java.xml.bind"]
+                                    nil)
+            ["-Xmx12g"
              "-XX:+UseConcMarkSweepGC"
              "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled"
@@ -16,7 +20,7 @@
              "-XX:+UseFastAccessorMethods"
              "-XX:MaxInlineLevel=32"
              "-XX:MaxRecursiveInlineLevel=2"
-             "-server"]
+             "-server"])))
   :main jepsen.cockroach.runner
   :aot [jepsen.cockroach.runner
         clojure.tools.logging.impl])
