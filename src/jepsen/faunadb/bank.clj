@@ -3,7 +3,11 @@
   (:refer-clojure :exclude [test])
   (:use jepsen.faunadb.query)
   (:import java.util.concurrent.ExecutionException)
+  (:import com.faunadb.client.types.Codec)
   (:import com.faunadb.client.types.Field)
+  (:import com.faunadb.client.types.Result)
+  (:import com.faunadb.client.types.Value)
+  (:import com.google.common.collect.ImmutableList)
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]]
@@ -27,9 +31,21 @@
   "Path to balance data"
   (Arr (v "data") (v "balance")))
 
+(def BalancesCodec
+  (reify Codec
+    (decode [this value]
+      (let [ref (.getId (.get (.. value (at (into-array Integer/TYPE [0])) (to Codec/REF))))
+            idxBalance (.get (.. value (at (into-array Integer/TYPE [1])) (to Codec/LONG)))
+            balance (.get (.. value (at (into-array Integer/TYPE [2])) (to Codec/LONG)))]
+        (Result/success {:ref ref, :idxBalance idxBalance, :balance balance})))
+
+    (encode [this v]
+      (Value/from (ImmutableList/of
+                    (:ref v) (:idxBalance v) (:balance v))))))
+
 (def BalancesField
   "A field extractor for balances"
-  (.collect (Field/at (into-array String ["data"])) f/LongField))
+  (.collect (Field/at (into-array String ["data"])) (Field/as BalancesCodec)))
 
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
@@ -45,8 +61,11 @@
           (CreateIndex
             (Obj
               "name" (v "all_accounts")
-              "source" classRef)))
-              ;"values" (Arr (Obj "field" (Arr (v "data") (v "balance")))))))
+              "source" classRef
+              "serialized" (v true)
+              "values" (Arr
+                         (Obj "field" (Arr (v "ref")))
+                         (Obj "field" (Arr (v "data") (v "balance")))))))
 
         (info (cstr/join ["Creating " n " accounts"]))
         (f/query
@@ -65,9 +84,32 @@
         (->>
           (f/queryGet
             conn
+            (Obj "data" (Arr
+              (mapv
+                (fn [i]
+                  (Arr
+                    (Ref classRef i)
+                    (v 0)
+                    (Select (Arr (v "data") (v "balance")) (Get (Ref classRef i)))))
+              (range n))))
+            BalancesField)
+          (assoc op :type :ok, :value)))
+
+      :index-read
+      (let [n (:value op)]
+        (->>
+          (f/queryGet
+            conn
             (Map
               (Paginate (Match idxRef))
-              (Lambda (v "r") (Select (Arr (v "data") (v "balance")) (Get (Var "r")))))
+              (Lambda
+                (v "r")
+                (Arr
+                  (Select (v 0) (Var "r"))
+                  (Select (v 1) (Var "r"))
+                  (Select
+                    (Arr (v "data") (v "balance"))
+                    (Get (Select (v 0) (Var "r")))))))
             BalancesField)
           (assoc op :type :ok, :value)))
 
@@ -143,7 +185,7 @@
                            (r/filter op/ok?)
                            (r/filter #(= :read (:f %)))
                            (r/map (fn [op]
-                                    (let [balances (:value op)]
+                                    (let [balances (mapv :balance (:value op))]
                                       (cond (not= (:n model) (count balances))
                                             {:type :wrong-n
                                              :expected (:n model)
