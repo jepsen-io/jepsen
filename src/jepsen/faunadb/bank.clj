@@ -157,11 +157,19 @@
     (.close conn)))
 
 (defn bank-read
-  "Reads the current state of all accounts"
+  "Reads the current state of all accounts without the index"
   [test _]
   (let [n (-> test :client :n)]
     {:type  :invoke,
      :f     :read,
+     :value n}))
+
+(defn bank-index-read
+  "Reads the current state of all accounts through the index"
+  [test _]
+  (let [n (-> test :client :n)]
+    {:type  :invoke,
+     :f     :index-read,
      :value n}))
 
 (defn bank-transfer
@@ -180,36 +188,44 @@
                              (-> op :value :to)))
               bank-transfer))
 
+(defn balance-check
+  [model op field]
+  (let [balances (mapv field (:value op))]
+    (cond (not= (:n model) (count balances))
+          {:type     :wrong-n
+           :field    field
+           :expected (:n model)
+           :found    (count balances)
+           :op       op}
+
+          (not= (:total model)
+                (reduce + balances))
+          {:type     :wrong-total
+           :field    field
+           :expected (:total model)
+           :found    (reduce + balances)
+           :op       op}
+
+          (some neg? balances)
+          {:type     :negative-value
+           :field    field
+           :found    balances
+           :op       op})))
+
 (defn bank-checker
   "Balances must all be non-negative and sum to the model's total."
   []
   (reify checker/Checker
     (check [this test model history opts]
       (let [bad-reads (->> history
-                           (r/filter op/ok?)
-                           (r/filter #(= :read (:f %)))
-                           (r/map (fn [op]
-                                    (let [balances (mapv :balance (:value op))]
-                                      (cond (not= (:n model) (count balances))
-                                            {:type :wrong-n
-                                             :expected (:n model)
-                                             :found    (count balances)
-                                             :op       op}
-
-                                            (not= (:total model)
-                                                  (reduce + balances))
-                                            {:type :wrong-total
-                                             :expected (:total model)
-                                             :found    (reduce + balances)
-                                             :op       op}
-
-                                            (some neg? balances)
-                                            {:type     :negative-value
-                                             :found    balances
-                                             :op       op}
-                                            ))))
-                           (r/filter identity)
-                           (into []))]
+                        (r/filter op/ok?)
+                        (r/filter #(not= :transfer (:f %)))
+                        (r/mapcat
+                          (fn [op]
+                              [(balance-check model op :balance)
+                              (balance-check model op :covered)]))
+                        (r/filter identity)
+                        (into []))]
         {:valid? (empty? bad-reads)
          :bad-reads bad-reads}))))
 
@@ -218,9 +234,10 @@
   (fauna/basic-test
     (merge
       {:client      {:client (:client opts)
-                     :during (->> (gen/mix [bank-read bank-diff-transfer])
-                                  (gen/clients))
-                     :final (gen/clients (gen/once bank-read))}
+                     :during (->> (gen/mix [bank-read bank-index-read bank-diff-transfer])
+                               (gen/clients))
+                     :final (->> (gen/seq [(gen/once bank-read) (gen/once bank-index-read)])
+                              (gen/clients))}
        :checker     (checker/compose
                       {:perf    (checker/perf)
                        :timeline (timeline/html)
