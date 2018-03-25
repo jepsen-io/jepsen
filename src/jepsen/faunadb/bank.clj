@@ -31,13 +31,17 @@
   "Path to balance data"
   (Arr (v "data") (v "balance")))
 
+(defn getField
+  [value idx codec]
+  (.get (.. value (at (into-array Integer/TYPE [idx])) (to codec))))
+
 (def BalancesCodec
   (reify Codec
     (decode [this value]
-      (let [ref (.getId (.get (.. value (at (into-array Integer/TYPE [0])) (to Codec/REF))))
-            idxBalance (.get (.. value (at (into-array Integer/TYPE [1])) (to Codec/LONG)))
-            balance (.get (.. value (at (into-array Integer/TYPE [2])) (to Codec/LONG)))]
-        (Result/success {:ref ref, :idxBalance idxBalance, :balance balance})))
+      (let [ref (. (getField value 0 Codec/REF) getId)
+            covered (getField value 1 Codec/LONG)
+            balance (getField value 2 Codec/LONG)]
+        (Result/success {:ref ref, :covered covered, :balance balance})))
 
     (encode [this v]
       (Value/from (ImmutableList/of
@@ -89,7 +93,7 @@
                 (fn [i]
                   (Arr
                     (Ref classRef i)
-                    (v 0)
+                    (v starting-balance) ;stub out the covered value for this non-index read
                     (Select (Arr (v "data") (v "balance")) (Get (Ref classRef i)))))
               (range n))))
             BalancesField)
