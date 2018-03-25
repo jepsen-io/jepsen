@@ -2,12 +2,14 @@
   "Simulates transfers between bank accounts"
   (:refer-clojure :exclude [test])
   (:use jepsen.faunadb.query)
-  (:import java.util.concurrent.ExecutionException)
+  (:import com.faunadb.client.errors.UnavailableException)
   (:import com.faunadb.client.types.Codec)
   (:import com.faunadb.client.types.Field)
   (:import com.faunadb.client.types.Result)
   (:import com.faunadb.client.types.Value)
   (:import com.google.common.collect.ImmutableList)
+  (:import java.io.IOException)
+  (:import java.util.concurrent.ExecutionException)
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]]
@@ -50,6 +52,24 @@
   "A field extractor for balances"
   (.collect (Field/at (into-array String ["data"])) (Field/as BalancesCodec)))
 
+(defmacro wrapped-query
+  [op & exprs]
+  `(try
+    ~@exprs
+    (catch ExecutionException e#
+      (cond
+        (instance? UnavailableException (.getCause e#))
+        (assoc ~op :type :fail, :error [:unavailable (.. e# (getCause) (getMessage))])
+
+        (instance? IOException (.getCause e#))
+        (assoc ~op :type :fail, :error [:io (.. e# (getCause) (getMessage))])
+
+        (= (.. e# (getCause) (getMessage)) "transaction aborted: balance would go negative")
+        (assoc ~op :type :fail, :error :negative)
+
+        :else
+        (throw e#)))))
+
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
   (open! [this test node]
@@ -79,38 +99,40 @@
   (invoke! [this test op]
     (case (:f op)
       :read
-      (let [n (:value op)]
-        (->>
-          (f/queryGet
-            conn
-            (Obj "data" (Arr
-              (mapv
-                (fn [i]
-                  (Arr
-                    (Ref classRef i)
-                    (Select (Arr (v "data") (v "balance")) (Get (Ref classRef i)))))
-              (range n))))
-            BalancesField)
-          (assoc op :type :ok, :value)))
+      (wrapped-query op
+        (let [n (:value op)]
+          (->>
+            (f/queryGet
+              conn
+              (Obj "data" (Arr
+                (mapv
+                  (fn [i]
+                    (Arr
+                      (Ref classRef i)
+                      (Select (Arr (v "data") (v "balance")) (Get (Ref classRef i)))))
+                (range n))))
+              BalancesField)
+            (assoc op :type :ok, :value))))
 
       :index-read
-      (let [n (:value op)]
-        (->>
-          (f/queryGet
-            conn
-            (Map
-              (Paginate (Match idxRef))
-              (Lambda
-                (v "r")
-                (Arr
-                  (Var "r")
-                  (Select (Arr (v "data") (v "balance")) (Get (Var "r"))))))
-            BalancesField)
-          (assoc op :type :ok, :value)))
+      (wrapped-query op
+        (let [n (:value op)]
+          (->>
+            (f/queryGet
+              conn
+              (Map
+                (Paginate (Match idxRef))
+                (Lambda
+                  (v "r")
+                  (Arr
+                    (Var "r")
+                    (Select (Arr (v "data") (v "balance")) (Get (Var "r"))))))
+              BalancesField)
+            (assoc op :type :ok, :value))))
 
       :transfer
-      (let [{:keys [from to amount]} (:value op)]
-        (try
+      (wrapped-query op
+        (let [{:keys [from to amount]} (:value op)]
           (f/query
             conn
             (Do
@@ -135,12 +157,7 @@
                 (Update
                   (Ref classRef to)
                   (Obj "data" (Obj "balance" (Var "b")))))))
-          (assoc op :type :ok)
-        (catch ExecutionException e
-          (if
-            (= (.. e (getCause) (getMessage)) "transaction aborted: balance would go negative")
-            (assoc op :type :fail, :error [:negative to])
-            (throw e)))))))
+          (assoc op :type :ok)))))
 
   (teardown! [this test])
 
