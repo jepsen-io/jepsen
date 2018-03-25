@@ -189,28 +189,31 @@
               bank-transfer))
 
 (defn balance-check
-  [model op field]
-  (let [balances (mapv field (:value op))]
-    (cond (not= (:n model) (count balances))
-          {:type     :wrong-n
-           :field    field
-           :expected (:n model)
-           :found    (count balances)
-           :op       op}
+  [model op typ field]
+  (if
+    (not= typ (:f op))
+    nil
+    (let [balances (mapv field (:value op))]
+      (cond (not= (:n model) (count balances))
+            {:type     :wrong-n
+             :field    field
+             :expected (:n model)
+             :found    (count balances)
+             :op       op}
 
-          (not= (:total model)
-                (reduce + balances))
-          {:type     :wrong-total
-           :field    field
-           :expected (:total model)
-           :found    (reduce + balances)
-           :op       op}
+            (not= (:total model)
+                  (reduce + balances))
+            {:type     :wrong-total
+             :field    field
+             :expected (:total model)
+             :found    (reduce + balances)
+             :op       op}
 
-          (some neg? balances)
-          {:type     :negative-value
-           :field    field
-           :found    balances
-           :op       op})))
+            (some neg? balances)
+            {:type     :negative-value
+             :field    field
+             :found    balances
+             :op       op}))))
 
 (defn bank-checker
   "Balances must all be non-negative and sum to the model's total."
@@ -222,8 +225,8 @@
                         (r/filter #(not= :transfer (:f %)))
                         (r/mapcat
                           (fn [op]
-                              [(balance-check model op :balance)
-                              (balance-check model op :covered)]))
+                              [(balance-check model op :read :balance)
+                              (balance-check model op :index-read :covered)]))
                         (r/filter identity)
                         (into []))]
         {:valid? (empty? bad-reads)
