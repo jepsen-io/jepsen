@@ -38,14 +38,13 @@
 (def BalancesCodec
   (reify Codec
     (decode [this value]
-      (let [ref (. (getField value 0 Codec/REF) getId)
-            covered (getField value 1 Codec/LONG)
-            balance (getField value 2 Codec/LONG)]
-        (Result/success {:ref ref, :covered covered, :balance balance})))
+      (Result/success
+        {:ref (. (getField value 0 Codec/REF) getId)
+         :balance (getField value 1 Codec/LONG)}))
 
     (encode [this v]
       (Value/from (ImmutableList/of
-                    (:ref v) (:idxBalance v) (:balance v))))))
+                    (:ref v) (:balance v))))))
 
 (def BalancesField
   "A field extractor for balances"
@@ -65,11 +64,7 @@
           (CreateIndex
             (Obj
               "name" (v "all_accounts")
-              "source" classRef
-              "serialized" (v true)
-              "values" (Arr
-                         (Obj "field" (Arr (v "ref")))
-                         (Obj "field" (Arr (v "data") (v "balance")))))))
+              "source" classRef)))
 
         (info (cstr/join ["Creating " n " accounts"]))
         (f/query
@@ -93,7 +88,6 @@
                 (fn [i]
                   (Arr
                     (Ref classRef i)
-                    (v starting-balance) ;stub out the covered value for this non-index read
                     (Select (Arr (v "data") (v "balance")) (Get (Ref classRef i)))))
               (range n))))
             BalancesField)
@@ -109,11 +103,8 @@
               (Lambda
                 (v "r")
                 (Arr
-                  (Select (v 0) (Var "r"))
-                  (Select (v 1) (Var "r"))
-                  (Select
-                    (Arr (v "data") (v "balance"))
-                    (Get (Select (v 0) (Var "r")))))))
+                  (Var "r")
+                  (Select (Arr (v "data") (v "balance")) (Get (Var "r"))))))
             BalancesField)
           (assoc op :type :ok, :value)))
 
@@ -147,7 +138,7 @@
           (assoc op :type :ok)
         (catch ExecutionException e
           (if
-            (= (.getMessage (.getCause e)) "transaction aborted: balance would go negative")
+            (= (.. e (getCause) (getMessage)) "transaction aborted: balance would go negative")
             (assoc op :type :fail, :error [:negative to])
             (throw e)))))))
 
@@ -189,31 +180,25 @@
               bank-transfer))
 
 (defn balance-check
-  [model op typ field]
-  (if
-    (not= typ (:f op))
-    nil
-    (let [balances (mapv field (:value op))]
-      (cond (not= (:n model) (count balances))
-            {:type     :wrong-n
-             :field    field
-             :expected (:n model)
-             :found    (count balances)
-             :op       op}
+  [model op]
+  (let [balances (mapv :balance (:value op))]
+    (cond (not= (:n model) (count balances))
+          {:type     :wrong-n
+           :expected (:n model)
+           :found    (count balances)
+           :op       op}
 
-            (not= (:total model)
-                  (reduce + balances))
-            {:type     :wrong-total
-             :field    field
-             :expected (:total model)
-             :found    (reduce + balances)
-             :op       op}
+          (not= (:total model)
+                (reduce + balances))
+          {:type     :wrong-total
+           :expected (:total model)
+           :found    (reduce + balances)
+           :op       op}
 
-            (some neg? balances)
-            {:type     :negative-value
-             :field    field
-             :found    balances
-             :op       op}))))
+          (some neg? balances)
+          {:type     :negative-value
+           :found    balances
+           :op       op})))
 
 (defn bank-checker
   "Balances must all be non-negative and sum to the model's total."
@@ -223,10 +208,7 @@
       (let [bad-reads (->> history
                         (r/filter op/ok?)
                         (r/filter #(not= :transfer (:f %)))
-                        (r/mapcat
-                          (fn [op]
-                              [(balance-check model op :read :balance)
-                              (balance-check model op :index-read :covered)]))
+                        (r/map (fn [op] (balance-check model op)))
                         (r/filter identity)
                         (into []))]
         {:valid? (empty? bad-reads)
