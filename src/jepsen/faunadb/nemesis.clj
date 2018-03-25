@@ -172,51 +172,26 @@
       (net/fast! (:net test) test)
       (nemesis/teardown! nem test))))
 
-(defn restarting
-  "Wraps a nemesis. After underlying nemesis has completed :stop, restarts
-  nodes."
-  [nem]
-  (reify nemesis/Nemesis
-    (setup! [this test]
-      (nemesis/setup! nem test)
-      this)
-
-    (invoke! [this test op]
-      (let [op' (nemesis/invoke! nem test op)]
-        (if (= :stop (:f op))
-          (let [stop (c/on-nodes test (fn [test node]
-                                        (try
-                                          (auto/start! test node)
-                                          :started
-                                          (catch RuntimeException e
-                                            (.getMessage e)))))]
-            (assoc op' :value [(:value op') stop]))
-          op')))
-
-    (teardown! [this test]
-      (nemesis/teardown! nem test))))
-
 (defn strobe-time
   "In response to a :start op, strobes the clock between current time and delta
   ms ahead, flipping every period ms, for duration seconds. On stop, restarts
   nodes."
   [delta period duration]
-  (restarting
-    (reify nemesis/Nemesis
-      (setup! [this test]
-        (c/with-test-nodes test (nt/install!))
-        (auto/reset-clocks! test)
-        this)
+  (reify nemesis/Nemesis
+    (setup! [this test]
+      (c/with-test-nodes test (nt/install!))
+      (nt/reset-time! test)
+      this)
 
-      (invoke! [this test op]
-        (assoc op :value
-               (case (:f op)
-                 :start (c/with-test-nodes test
-                          (nt/strobe-time! delta period duration))
-                 :stop nil)))
+    (invoke! [this test op]
+      (assoc op :value
+             (case (:f op)
+               :start (c/with-test-nodes test
+                        (nt/strobe-time! delta period duration))
+               :stop nil)))
 
-      (teardown! [this test]
-        (auto/reset-clocks! test)))))
+    (teardown! [_ test]
+      (nt/reset-time! test))))
 
 (defn strobe-skews
   []
@@ -232,28 +207,29 @@
   "On randomly selected nodes, adjust the system clock by dt seconds.  Uses
   millisecond precision.  Restarts the db server if it stops."
   [dt]
-  (restarting
-    (reify nemesis/Nemesis
-      (setup! [this test]
-        (c/with-test-nodes test (nt/install!))
-        (auto/reset-clocks! test)
-        this)
+  (reify nemesis/Nemesis
+    (setup! [this test]
+      (c/with-test-nodes test (nt/install!))
+      (nt/reset-time! test)
+      this)
 
-      (invoke! [this test op]
-        (assoc op :value
-               (case (:f op)
-                 :start
-                 (c/with-test-nodes test
-                          (if (< (rand) 0.5)
-                            (do (c/su (c/exec "/opt/jepsen/bumptime"
-                                              (* 1000 dt)))
-                                dt)
-                            0))
-                 :stop (c/with-test-nodes test
-                         (auto/reset-clock!)))))
+    (invoke! [this test op]
+      (assoc op :value
+             (case (:f op)
+               :start
+               (c/with-test-nodes
+                 test
+                 (if (< (rand) 0.5)
+                   (do (nt/bump-time! (* 1000 dt)) dt)
+                   0))
 
-      (teardown! [this test]
-        (auto/reset-clocks! test)))))
+               :stop
+               (c/with-test-nodes
+                 test
+                 (nt/reset-time!)))))
+
+    (teardown! [this test]
+      (nt/reset-time! test))))
 
 (defn skew
   "A skew nemesis"
