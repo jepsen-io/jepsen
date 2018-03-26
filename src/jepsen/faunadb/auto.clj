@@ -14,7 +14,7 @@
 
 (defn start!
   "Start faunadb on node."
-  [test node]
+  [test node replicas]
   (if (not= "faunadb stop/waiting"
             (c/exec :initctl :status :faunadb))
     (info node "FaunaDB already running.")
@@ -35,6 +35,19 @@
           (c/exec :faunadb-admin :join (jepsen/primary test))
           (Thread/sleep 10000))
         (jepsen/synchronize test)
+
+        (when (= node (jepsen/primary test))
+          (info node (str/join ["creating " replicas " replicas"]))
+          (if (not= 1 replicas)
+            (c/exec :faunadb-admin
+                    :update-replication
+                    (mapv
+                     (fn [i]
+                       (str/join ["replica-" i]))
+                     (range replicas))))
+          (Thread/sleep 10000)
+        (jepsen/synchronize test))
+
         (info node "FaunaDB started")))
   :started)
 
@@ -67,15 +80,25 @@
   (debian/install {"faunadb" version}))
 
 (defn log-configuration
-  [test node partitions]
-  (vals
-   (group-by (fn [n]
-               (mod (+ 1 (.indexOf (:nodes test) n)) partitions))
-             (:nodes test))))
+  "Configure the transaction log for the current topology."
+  [test node replicas]
+  (if (= 1 replicas)
+    [[(jepsen/primary :test)]]
+    (vals
+     (group-by (fn [n]
+                 (mod (+ 1 (.indexOf (:nodes test) n)) replicas))
+               (:nodes test)))))
+
+(defn replica
+  "Returns the index of the replica to which the node belongs."
+  [test node replicas]
+  (if (= 1 replicas)
+    0
+    (mod (.indexOf (:nodes test) node) replicas)))
 
 (defn configure!
   "Configure FaunaDB."
-  [test node partitions]
+  [test node replicas]
   (info "Configuring" node)
   (c/su
    (c/exec :echo (-> "faunadb.conf"
@@ -91,10 +114,10 @@
              {:auth_root_key f/root-key
               :network_coordinator_http_address node
               :network_broadcast_address node
-              :network_datacenter_name (str/join ["replica-" (.indexOf (:nodes test) node)])
+              :network_datacenter_name (str/join ["replica-" (replica test node replicas)])
               :network_host_id node
               :network_listen_address node
-              :storage_transaction_log_nodes (log-configuration test node partitions)}))
+              :storage_transaction_log_nodes (log-configuration test node replicas)}))
             :> "/etc/faunadb.yml")))
 
 (defn teardown!
@@ -103,4 +126,5 @@
   (stop! test node)
   (debian/uninstall! :faunadb)
   (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")
+  (c/exec :bash :-c "rm -rf /var/log/faunadb/*")
   (info node "FaunaDB removed"))

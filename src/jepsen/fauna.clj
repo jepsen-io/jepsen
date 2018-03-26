@@ -9,8 +9,8 @@
             [jepsen.os.debian :as debian]
             [jepsen.faunadb.auto :as auto]))
 
-(def partitions
-  "The number of log partitions in the FaunaDB cluster."
+(def replicas
+  "The number of replicas in the FaunaDB cluster."
   3)
 
 (defn db
@@ -19,8 +19,8 @@
   (reify db/DB
     (setup! [_ test node]
       (auto/install! version)
-      (auto/configure! test node partitions)
-      (auto/start! test node))
+      (auto/configure! test node replicas)
+      (auto/start! test node replicas))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
@@ -28,7 +28,9 @@
 
     db/LogFiles
     (log-files [_ test node]
-      ["/var/log/faunadb/core.log"])))
+      ["/var/log/faunadb/core.log"
+       "/var/log/faunadb/query.log"
+       "/var/log/faunadb/exception.log"])))
 
 (defn basic-test
   "Sets up the test parameters common to all tests."
