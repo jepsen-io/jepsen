@@ -12,10 +12,10 @@
   (:import java.util.concurrent.ExecutionException)
   (:require [jepsen [client :as client]
                     [checker :as checker]
+                    [fauna :as fauna]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.faunadb.client :as f]
-            [jepsen.fauna :as fauna]
             [clojure.core.reducers :as r]
             [clojure.string :as cstr]
             [clojure.tools.logging :refer :all]
@@ -67,8 +67,7 @@
         (= (.. e# (getCause) (getMessage)) "transaction aborted: balance would go negative")
         (assoc ~op :type :fail, :error :negative)
 
-        :else
-        (throw e#)))))
+        :else (throw e#)))))
 
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
@@ -235,15 +234,15 @@
   [opts]
   (fauna/basic-test
     (merge
-      {:client      {:client (:client opts)
-                     :during (->> (gen/mix [bank-read bank-index-read bank-diff-transfer])
-                               (gen/clients))
-                     :final (->> (gen/seq [(gen/once bank-read) (gen/once bank-index-read)])
-                              (gen/clients))}
-       :checker     (checker/compose
-                      {:perf    (checker/perf)
-                       :timeline (timeline/html)
-                       :details (bank-checker)})}
+      {:client {:client (:client opts)
+                :during (->> (gen/mix [bank-read bank-index-read bank-diff-transfer])
+                          (gen/clients))
+                :final (->> (gen/seq [(gen/once bank-read) (gen/once bank-index-read)])
+                         (gen/clients))}
+       :checker (checker/compose
+                  {:perf    (checker/perf)
+                   :timeline (timeline/html)
+                   :details (bank-checker)})}
       (dissoc opts :client))))
 
 (defn test
