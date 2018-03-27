@@ -20,14 +20,14 @@
     (info node "FaunaDB already running.")
     (do (info node "Starting FaunaDB...")
         (c/su
-         (c/exec :initctl :start :faunadb)
-         (Thread/sleep 30000)
-         (jepsen/synchronize test)
+          (c/exec :initctl :start :faunadb))
+        (Thread/sleep 30000)
+        (jepsen/synchronize test)
 
-         (when (= node (jepsen/primary test))
-           (info node "initializing FaunaDB cluster")
-           (c/exec :faunadb-admin :init)
-           (Thread/sleep 10000)))
+        (when (= node (jepsen/primary test))
+          (info node "initializing FaunaDB cluster")
+          (c/exec :faunadb-admin :init)
+          (Thread/sleep 10000))
         (jepsen/synchronize test)
 
         (when (not= node (jepsen/primary test))
@@ -45,8 +45,8 @@
                      (fn [i]
                        (str/join ["replica-" i]))
                      (range replicas))))
-          (Thread/sleep 10000)
-        (jepsen/synchronize test))
+          (Thread/sleep 10000))
+        (jepsen/synchronize test)
 
         (info node "FaunaDB started")))
   :started)
