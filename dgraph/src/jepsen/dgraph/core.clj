@@ -54,7 +54,7 @@
                    gen)]
     (merge tests/noop-test
            opts
-           workload
+           (dissoc workload :final-generator)
            {:name       (str "dgraph " (:version opts) " "
                              (name (:workload opts)) " "
                              (name (:nemesis opts)))
