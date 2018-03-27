@@ -108,7 +108,7 @@
                   (fn [i]
                     (Arr
                       (Ref classRef i)
-                      (Select (Arr (v "data") (v "balance")) (Get (Ref classRef i)))))
+                      (Select balancePath (Get (Ref classRef i)))))
                 (range n))))
               BalancesField)
             (assoc op :type :ok, :value))))
@@ -125,7 +125,7 @@
                   (v "r")
                   (Arr
                     (Var "r")
-                    (Select (Arr (v "data") (v "balance")) (Get (Var "r"))))))
+                    (Select balancePath (Get (Var "r"))))))
               BalancesField)
             (assoc op :type :ok, :value))))
 
