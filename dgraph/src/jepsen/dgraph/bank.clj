@@ -9,7 +9,6 @@
             [jepsen.tests.bank :as bank])
   (:import (io.dgraph TxnConflictException)))
 
-
 (defn find-account
   "Finds an account by key. Returns an empty account when none exists."
   [t k]
@@ -34,11 +33,10 @@
                                ))
     (try
       (c/with-txn [t conn]
-        (c/upsert! t
-                           :key
-                           {:key    (first (:accounts test))
-                            :type   "account"
-                            :amount (:total-amount test)})
+        (c/upsert! t :key
+                   {:key    (first (:accounts test))
+                    :type   "account"
+                    :amount (:total-amount test)})
         (info (c/schema t)))
       (catch TxnConflictException e)))
 

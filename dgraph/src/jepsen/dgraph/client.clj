@@ -139,6 +139,10 @@
       \"4\" -> \"string\",
       4     -> \"int\""
   [x]
+  (when-not x
+    (throw (IllegalArgumentException.
+             "Can't infer graphql+- type for `nil`; did you mean to pass a non-nil value instead?")))
+
   (condp instance? x
     Long    "int"
     Integer "int"
@@ -229,7 +233,7 @@
 
   Returns nil if upsert did not take place. Returns mutation results otherwise."
   [t pred record]
-  (let [pred-value (get record pred)]
+  (if-let [pred-value (get record pred)]
     (let [res (-> (query t (str "{\n"
                             "  all(func: eq(" (name pred) ", $a)) {\n"
                             "    uid\n"
@@ -239,4 +243,8 @@
       ;(info "Query results:" res)
       (when (empty? (:all res))
         ;(info "Inserting...")
-        (mutate! t record)))))
+        (mutate! t record)))
+
+    (throw (IllegalArgumentException.
+             (str "Record " (pr-str record) " has no value for "
+                  (pr-str pred))))))
