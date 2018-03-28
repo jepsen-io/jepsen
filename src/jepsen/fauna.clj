@@ -18,9 +18,10 @@
   [version]
   (reify db/DB
     (setup! [_ test node]
-      (auto/install! version)
-      (auto/configure! test node replicas)
-      (auto/start! test node replicas))
+      (let [width (min replicas (count (:nodes test)))]
+        (auto/install! version)
+        (auto/configure! test node width)
+        (auto/start! test node width)))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
