@@ -3,6 +3,9 @@
   (:import com.faunadb.client.query.Language)
   (:import com.faunadb.client.query.Expr))
 
+(def Null
+  (Language/Null))
+
 (defn v
   [value]
   (Language/Value value))
@@ -36,8 +39,10 @@
   (Language/Lambda a e))
 
 (defn Paginate
-  [e]
-  (Language/Paginate e))
+  ([e] (Language/Paginate e))
+  ([e a] (if (= Null a)
+           (Paginate e)
+           (. (Paginate e) (after a)))))
 
 (defn Match
   [e]

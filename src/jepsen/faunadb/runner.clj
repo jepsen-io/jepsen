@@ -11,12 +11,15 @@
                     [web :as web]]
             [jepsen.nemesis.time :as nt]
             [jepsen.fauna :as fauna]
-            [jepsen.faunadb [bank :as bank]
-                            [nemesis :as jfn]]))
+            [jepsen.faunadb
+             [bank :as bank]
+             [sets :as sets]
+             [nemesis :as jfn]]))
 
 (def tests
   "A map of test names to test constructors."
-  {"bank" bank/test})
+  {"sets" sets/test
+   "bank" bank/test})
 
 (def nemeses
   "Supported nemeses"
