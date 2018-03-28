@@ -119,3 +119,7 @@
 (defn Abort
   [reason]
   (Language/Abort reason))
+
+(defn Equals
+  [& exprs]
+  (Language/Equals exprs))
