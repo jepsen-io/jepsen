@@ -12,6 +12,9 @@
   "Administrative key for the FaunaDB cluster."
   "secret")
 
+(def BoolField
+  (Field/as Codec/BOOLEAN))
+
 (def LongField
   (Field/as Codec/LONG))
 

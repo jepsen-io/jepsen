@@ -13,12 +13,14 @@
             [jepsen.fauna :as fauna]
             [jepsen.faunadb
              [bank :as bank]
+             [register :as register]
              [sets :as sets]
              [nemesis :as jfn]]))
 
 (def tests
   "A map of test names to test constructors."
   {"sets" sets/test
+   "register" register/test
    "bank" bank/test})
 
 (def nemeses
