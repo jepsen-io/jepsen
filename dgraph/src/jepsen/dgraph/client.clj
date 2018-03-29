@@ -5,7 +5,8 @@
             [clojure.tools.logging :refer [info]]
             [dom-top.core :refer [with-retry]]
             [wall.hack]
-            [cheshire.core :as json])
+            [cheshire.core :as json]
+            [jepsen.client :as jc])
   (:import (com.google.protobuf ByteString)
            (io.grpc ManagedChannel
                     ManagedChannelBuilder)
@@ -248,3 +249,67 @@
     (throw (IllegalArgumentException.
              (str "Record " (pr-str record) " has no value for "
                   (pr-str pred))))))
+
+(defrecord TxnClient [opts conn]
+  jc/Client
+  (open! [this test node]
+    (assoc this :conn (open node)))
+
+  (setup! [this test]
+    (alter-schema! conn (str "key: int @index(int) .\n"
+                               "val: int .\n")))
+
+  (invoke! [this test op]
+    (when-not (= :txn (:f op))
+      (throw (IllegalArgumentException.
+               (str "Expected a :txn op, but received " (pr-str op)))))
+
+    (with-conflict-as-fail op
+      (with-txn [t conn]
+        (->> (:value op)
+             (reduce
+               (fn [txn' [f k v :as micro-op]]
+                 (case f
+                   :r
+                   (let [res (query t (str "{ q(func: eq(key, $key)) {\n"
+                                           "  val\n"
+                                           "}}")
+                                    {:key k})
+                         reads (:q res)]
+                     (conj txn' [f k (condp = (count reads)
+                                       ; Not found
+                                       0 nil
+                                       ; Found
+                                       1 (:val (first reads))
+                                       ; Ummm
+                                       (throw (RuntimeException.
+                                                (str "Unexpected multiple results for key "
+                                                     (pr-str k) ": "
+                                                     (pr-str reads)))))]))
+
+                   ; TODO: we should be able to optimize this to do pure
+                   ; inserts and UID-direct writes without the upsert
+                   ; read-write cycle, at least when we know the state
+                   :w (do (if (:blind-insert-on-write? opts)
+                            (mutate! t {:key k :val v})
+                            (upsert! t :key {:key k, :val v}))
+                          (conj txn' micro-op))))
+               [])
+             (assoc op :type :ok, :value)))))
+
+  (teardown! [this test])
+
+  (close! [this test]
+    (close! conn)))
+
+(defn txn-client
+  "A client which can execute generic transcational workloads over arbitrary
+  integer keys and values.
+
+  Options:
+
+    :blind-insert-on-write?   If true, don't do upserts; just insert on every
+                              write. Only appropriate when you'll never write
+                              the same thing twice."
+  [opts]
+  (TxnClient. opts nil))

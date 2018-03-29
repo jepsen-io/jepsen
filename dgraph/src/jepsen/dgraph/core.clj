@@ -11,6 +11,7 @@
                            [bank :as bank]
                            [delete :as delete]
                            [upsert :as upsert]
+                           [long-fork :as long-fork]
                            [set :as set]
                            [sequential :as sequential]]))
 
@@ -19,6 +20,7 @@
   workloads."
   {:bank        bank/workload
    :delete      delete/workload
+   :long-fork   long-fork/workload
    :upsert      upsert/workload
    :set         set/workload
    :uid-set     set/uid-workload
