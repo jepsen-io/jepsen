@@ -22,7 +22,6 @@
         (c/su
           (c/exec :initctl :start :faunadb))
         (Thread/sleep 30000)
-        (jepsen/synchronize test)
 
         (when (= node (jepsen/primary test))
           (info node "initializing FaunaDB cluster")
@@ -73,11 +72,11 @@
   "Install a particular version of FaunaDB."
   [version]
   (debian/install-jdk8!)
-  (debian/add-repo! "faunadb"
-                    (str/join ["deb [arch=all] https://" repo-key "@repo.fauna.com/enterprise/debian unstable non-free"]))
+  (c/su (debian/add-repo! "faunadb"
+                          (str/join ["deb [arch=all] https://" repo-key "@repo.fauna.com/enterprise/debian unstable non-free"])))
   (c/su (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
                 :apt-key :add :-))
-  (debian/install {"faunadb" version}))
+  (c/su (debian/install {"faunadb" version})))
 
 (defn log-configuration
   "Configure the transaction log for the current topology."
@@ -123,8 +122,11 @@
 (defn teardown!
   "Gracefully stops FaunaDB and removes data files"
   [test node]
-  (stop! test node)
-  (debian/uninstall! :faunadb)
-  (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")
-  (c/exec :bash :-c "rm -rf /var/log/faunadb/*")
-  (info node "FaunaDB removed"))
+  (if (debian/installed? :faunadb)
+    (do
+      (stop! test node)
+      (debian/uninstall! :faunadb)
+      (c/su
+        (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")
+        (c/exec :bash :-c "rm -rf /var/log/faunadb/*"))
+      (info node "FaunaDB removed"))))
