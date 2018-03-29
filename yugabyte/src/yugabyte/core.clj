@@ -1,6 +1,7 @@
 (ns yugabyte.core
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
+            [clojurewerkz.cassaforte.client :as cassandra]
             [jepsen [cli :as cli]
                     [control :as c]
                     [db :as db]
@@ -12,6 +13,19 @@
 
 (def master-log-dir  "/home/yugabyte/master/logs")
 (def tserver-log-dir "/home/yugabyte/tserver/logs")
+
+(def setup-lock (Object.))
+
+(defn wait-for-recovery
+  "Waits for the driver to report all nodes are up"
+  [timeout-secs conn]
+  (timeout (* 1000 timeout-secs)
+           (throw (RuntimeException.
+                   (str "Driver didn't report all nodes were up in "
+                        timeout-secs "s - failing")))
+           (while (->> (cassandra/get-hosts conn)
+                       (map :is-up) and not)
+             (Thread/sleep 500))))
 
 (defn start!
   "Starts YugaByteDB."
@@ -47,6 +61,8 @@
     (setup! [_ test node]
       (info node "Setup YugaByteDB " version)
       (start! node test)
+; TODO - wait for all nodes up instead of sleep for each node.
+      (Thread/sleep 5000)
     )
 
     (teardown! [_ test node]
@@ -60,6 +76,9 @@
               (cu/ls-full tserver-log-dir)))
   )
 )
+
+(defn r [_ _] {:type :invoke, :f :read, :value nil})
+(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 1000000)})
 
 (defn yugabyte-test
   [opts]
