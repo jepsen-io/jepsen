@@ -62,7 +62,8 @@
           :--replicas     (:replicas test)
           :--my           (str node ":" zero-internal-port)
           (when-not (= node (jepsen/primary test))
-            [:--peer (str (jepsen/primary test) ":" zero-internal-port)]))))
+            [:--peer (str (jepsen/primary test) ":" zero-internal-port)])))
+  :started)
 
 (defn start-alpha!
   "Launch dgraph data server on a node."
@@ -77,7 +78,8 @@
           :--memory_mb  1024
           :--idx        (node-idx test node)
           :--my         (str node ":" alpha-internal-port)
-          :--zero       (str node ":" zero-internal-port))))
+          :--zero       (str node ":" zero-internal-port)))
+  :started)
 
 (defn start-ratel!
   "Launch dgraph UI server on a node."
@@ -88,22 +90,26 @@
            :chdir   dir}
           ratel-binary
           :-addr (str node ":" alpha-public-port)
-          :-port ratel-public-port)))
+          :-port ratel-public-port))
+  :started)
 
 (defn stop-zero!
   "Kills zero"
-  []
-  (c/su (cu/stop-daemon! zero-pidfile)))
+  [test node]
+  (c/su (cu/stop-daemon! zero-pidfile))
+  :stopped)
 
 (defn stop-alpha!
   "Kills alpha"
-  []
-  (c/su (cu/stop-daemon! alpha-pidfile)))
+  [test node]
+  (c/su (cu/stop-daemon! alpha-pidfile))
+  :stopped)
 
 (defn stop-ratel!
   "Kills ratel"
-  []
-  (c/su (cu/stop-daemon! ratel-pidfile)))
+  [test node]
+  (c/su (cu/stop-daemon! ratel-pidfile))
+  :stopped)
 
 (def http-opts
   "Default clj-http options"
@@ -194,9 +200,9 @@
       (info "GRPC ready"))
 
     (teardown! [_ test node]
-      (stop-ratel!)
-      (stop-alpha!)
-      (stop-zero!)
+      (stop-ratel! test node)
+      (stop-alpha! test node)
+      (stop-zero! test node)
       (c/exec :rm :-rf dir))
 
     db/LogFiles

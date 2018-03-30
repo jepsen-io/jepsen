@@ -2,18 +2,18 @@
   (:gen-class)
   (:require [jepsen [cli :as cli]
                     [checker :as checker]
-                    [nemesis :as nemesis]
                     [generator :as gen]
                     [tests :as tests]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.os.debian :as debian]
-            [jepsen.dgraph [support :as s]
-                           [bank :as bank]
+            [jepsen.dgraph [bank :as bank]
                            [delete :as delete]
-                           [upsert :as upsert]
                            [long-fork :as long-fork]
+                           [nemesis :as nemesis]
+                           [sequential :as sequential]
                            [set :as set]
-                           [sequential :as sequential]]))
+                           [support :as s]
+                           [upsert :as upsert]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
@@ -26,22 +26,11 @@
    :uid-set     set/uid-workload
    :sequential  sequential/workload})
 
-(def nemeses
-  "Map of nemesis names to {:nemesis :generator :final-generator} maps."
-  {:partition-random-halves
-   {:nemesis         (nemesis/partition-random-halves)
-    :generator       (gen/start-stop 2 2)
-    :final-generator (gen/once {:type :info, :f :stop})}
-
-   :none
-   {:nemesis   nemesis/noop
-    :generator nil}})
-
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
   [opts]
   (let [workload ((get workloads (:workload opts)) opts)
-        nemesis  (get nemeses (:nemesis opts))
+        nemesis  (nemesis/nemesis opts)
         gen      (->> (:generator workload)
                       (gen/nemesis (:generator nemesis))
                       (gen/time-limit (:time-limit opts)))
@@ -58,8 +47,7 @@
            opts
            (dissoc workload :final-generator)
            {:name       (str "dgraph " (:version opts) " "
-                             (name (:workload opts)) " "
-                             (name (:nemesis opts)))
+                             (name (:workload opts)))
             :os         debian/os
             :db         (s/db)
             :generator  gen
@@ -77,10 +65,6 @@
     :parse-fn keyword
     :missing (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
-   [nil "--nemesis NAME" "Nemesis to apply"
-    :parse-fn keyword
-    :default :none
-    :validate [nemeses (cli/one-of nemeses)]]
    ["-v" "--version VERSION" "What version number of dgraph should we test?"
     :default "1.0.3"]
    [nil "--package-url URL" "Ignore version; install this tarball instead"

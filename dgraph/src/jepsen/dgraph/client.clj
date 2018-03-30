@@ -63,35 +63,57 @@
        (finally
          (.discard ~txn-sym)))))
 
+(defmacro with-unavailable-backoff
+  "Wraps an expression returning a completion operation; for selected failure
+  modes, sleeps a random amount of time before returning, so we don't spin our
+  wheels against a down system."
+  [& body]
+  `(let [res# (do ~@body)]
+     (when (and (= :fail (:type res#))
+                (#{:unavailable
+                   :unhealthy-connection} (:error res#)))
+       (Thread/sleep (rand-int 2000)))
+     res#))
+
 (defmacro with-conflict-as-fail
   "Takes an operation and a body. Evaluates body; if a transaction conflict is
   thrown, returns `op` with :type :fail, :error :conflict."
   [op & body]
-  `(try ~@body
-        (catch io.grpc.StatusRuntimeException e#
-          (condp re-find (.getMessage e#)
-            #"DEADLINE_EXCEEDED:"
-            (assoc ~op, :type :info, :error :timeout)
+  `(with-unavailable-backoff
+     (try ~@body
+          (catch io.grpc.StatusRuntimeException e#
+            (condp re-find (.getMessage e#)
+              #"DEADLINE_EXCEEDED:"
+              (assoc ~op, :type :info, :error :timeout)
 
-            #"context deadline exceeded"
-            (assoc ~op, :type :info, :error :timeout)
+              #"context deadline exceeded"
+              (assoc ~op, :type :info, :error :timeout)
 
-            #"Conflicts with pending transaction. Please abort."
-            (assoc ~op :type :fail, :error :conflict)
+              #"Conflicts with pending transaction. Please abort."
+              (assoc ~op :type :fail, :error :conflict)
 
-            #"Predicate is being moved, please retry later"
-            (assoc ~op :type :fail, :error :predicate-moving)
+              #"Predicate is being moved, please retry later"
+              (assoc ~op :type :fail, :error :predicate-moving)
 
-            #"No connection exists"
-            (assoc ~op :type :fail, :error :no-connection)
+              #"Please retry again, server is not ready to accept requests"
+              (assoc ~op :type :fail, :error :not-ready-for-requests)
 
-            #"Only leader can decide to commit or abort"
-            (assoc ~op :type :fail, :error :only-leader-can-commit)
+              #"UNAVAILABLE"
+              (assoc ~op, :type :fail, :error :unavailable)
 
-            (throw e#)))
+              #"No connection exists"
+              (assoc ~op :type :fail, :error :no-connection)
 
-        (catch TxnConflictException e#
-          (assoc ~op :type :fail, :error :conflict))))
+              #"dispatchTaskOverNetwork: while retrieving connection. error: Unhealthy connection"
+              (assoc ~op :type :info, :error :unhealthy-connection)
+
+              #"Only leader can decide to commit or abort"
+              (assoc ~op :type :fail, :error :only-leader-can-commit)
+
+              (throw e#)))
+
+          (catch TxnConflictException e#
+            (assoc ~op :type :fail, :error :conflict)))))
 
 (defn str->byte-string
   "Converts a string to a protobuf bytestring."
