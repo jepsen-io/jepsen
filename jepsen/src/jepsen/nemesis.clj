@@ -7,8 +7,10 @@
             [jepsen.net         :as net]))
 
 (defprotocol Nemesis
-  (setup! [this test] "Set up the nemesis to work with the cluster. Returns the nemesis ready to be invoked")
-  (invoke! [this test op] "Apply an operation to the nemesis, which alters the cluster.")
+  (setup! [this test] "Set up the nemesis to work with the cluster. Returns the
+                      nemesis ready to be invoked")
+  (invoke! [this test op] "Apply an operation to the nemesis, which alters the
+                          cluster.")
   (teardown! [this test] "Tear down the nemesis when work is complete"))
 
 (def noop
@@ -19,8 +21,9 @@
     (teardown! [this test] this)))
 
 (defn setup-compat!
-  "Calls `jepsen.nemesis/setup!`, if possible, falling back to `jepsen.client/setup!`.
-  Warns users that nemeses implementing `jepsen.client` have been deprecated."
+  "Calls `jepsen.nemesis/setup!`, if possible, falling back to
+  `jepsen.client/setup!`. Warns users that nemeses implementing `jepsen.client`
+  have been deprecated."
   [nemesis test node]
   (if (instance? jepsen.nemesis.Nemesis nemesis)
     (try
@@ -39,8 +42,9 @@
     (client/invoke! nemesis test op)))
 
 (defn teardown-compat!
-  "Calls `jepsen.nemesis/teardown!`, if possible, falling back to `jepsen.client/teardown!`.
-  Warns users that nemeses implementing `jepsen.client` have been deprecated."
+  "Calls `jepsen.nemesis/teardown!`, if possible, falling back to
+  `jepsen.client/teardown!`. Warns users that nemeses implementing
+  `jepsen.client` have been deprecated."
   [nemesis test]
   (if (instance? jepsen.nemesis.Nemesis nemesis)
     (try (teardown! nemesis test)
@@ -196,8 +200,8 @@
 (defn clock-scrambler
   "Randomizes the system clock of all nodes within a dt-second window."
   [dt]
-  (reify client/Client
-    (setup! [this test _]
+  (reify Nemesis
+    (setup! [this test]
       this)
 
     (invoke! [this test op]
@@ -226,8 +230,8 @@
       {:value {:n1 [:killed \"java\"]}}"
   [targeter start! stop!]
   (let [nodes (atom nil)]
-    (reify client/Client
-      (setup! [this test _] this)
+    (reify Nemesis
+      (setup! [this test] this)
 
       (invoke! [this test op]
         (locking nodes
@@ -273,8 +277,8 @@
   where the value is a map of nodes to {:file, :drop} maps, on those nodes,
   drops the last :drop bytes from the given file."
   []
-  (reify client/Client
-    (setup! [this test _] this)
+  (reify Nemesis
+    (setup! [this test] this)
 
     (invoke! [this test op]
       (assert (= (:f op) :truncate))
