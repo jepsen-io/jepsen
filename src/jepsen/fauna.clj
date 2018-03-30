@@ -38,7 +38,9 @@
   [opts]
   (merge
     tests/noop-test
-    {:name    (str "faunadb" (str ":" (:name (:nemesis opts))))
+    {:name    (str "faunadb"
+                   (str ":" (:name opts))
+                   (str ":" (:name (:nemesis opts))))
      :os      debian/os ;; NB. requires Ubuntu 14.04 LTS
      :db      (db "2.5.1.rc1-0")
      :client  (:client (:client opts))
