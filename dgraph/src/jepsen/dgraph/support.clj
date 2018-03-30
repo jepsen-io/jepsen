@@ -5,6 +5,7 @@
             [clojure.pprint :refer [pprint]]
             [cheshire.core :as json]
             [dom-top.core :refer [with-retry]]
+            [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [db       :as db]
                     [control  :as c]
                     [core     :as jepsen]]
@@ -153,9 +154,9 @@
   (loop [attempts 20]
     (or (cluster-ready? node test)
         (do (when (<= attempts 1)
-              (throw (RuntimeException.
-                       (str "Cluster failed to converge. Curent state is\n"
-                            (with-out-str (pprint (zero-state node)))))))
+              (throw+ {:type        :cluster-failed-to-converge
+                       :node        node
+                       :zero-state  (zero-state node)}))
             (info "Waiting for cluster convergence")
             (Thread/sleep 1000)
             (recur (dec attempts))))))
@@ -188,16 +189,30 @@
       (start-alpha! test node)
       (start-ratel! test node)
 
-      (when (= node (jepsen/primary test))
-        (wait-for-cluster node test)
-        (info "Cluster converged"))
+      (try+
+        (when (= node (jepsen/primary test))
+          (wait-for-cluster node test)
+          (info "Cluster converged"))
 
-      (jepsen/synchronize test)
-      (let [conn (dc/open node alpha-public-grpc-port)]
-        (try (dc/await-ready conn)
-             (finally
-               (dc/close! conn))))
-      (info "GRPC ready"))
+        (jepsen/synchronize test)
+        (let [conn (dc/open node alpha-public-grpc-port)]
+          (try (dc/await-ready conn)
+               (finally
+                 (dc/close! conn))))
+        (info "GRPC ready")
+
+        (catch [:type :cluster-failed-to-converge] e
+          (warn e "Cluster failed to converge")
+          (throw (ex-info "Cluster failed to converge"
+                          {:type  :jepsen.db/setup-failed
+                           :node  node}
+                          e)))
+
+        (catch RuntimeException e ; Welp
+          (throw (ex-info "Couldn't get a client"
+                          {:type  :jepsen.db/setup-failed
+                           :node  node}
+                          e)))))
 
     (teardown! [_ test node]
       (stop-ratel! test node)

@@ -43,7 +43,7 @@
   (->> (gen/mix [(gen/seq (cycle (map op [:kill-alpha :restart-alpha])))
                  (gen/seq (cycle (map op [:kill-zero  :restart-zero])))])
   ;           (gen/seq (cycle (map op [:start-partition :stop-partition])))
-       (gen/stagger 30)))
+       (gen/stagger 15)))
 
 (defn nemesis
   "Composite nemesis and generator"

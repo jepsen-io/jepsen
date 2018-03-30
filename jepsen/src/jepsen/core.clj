@@ -85,14 +85,6 @@
      (finally
        (control/on-nodes ~test (partial os/teardown! (:os ~test))))))
 
-(defn setup-primary!
-  "Given a test, sets up the database primary, if the DB supports it."
-  [test]
-  (when (satisfies? db/Primary (:db test))
-    (let [p (primary test)]
-      (control/with-session p (get-in test [:sessions p])
-        (db/setup-primary! (:db test) test p)))))
-
 (defn snarf-logs!
   "Downloads logs for a test."
   [test]
@@ -130,8 +122,7 @@
   "Wraps body in DB setup and teardown."
   [test & body]
   `(try
-     (control/on-nodes ~test (partial db/cycle! (:db ~test)))
-     (setup-primary! ~test)
+     (db/cycle! ~test)
 
      ~@body
      (catch Throwable t#

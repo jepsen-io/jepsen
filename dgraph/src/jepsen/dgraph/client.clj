@@ -104,6 +104,11 @@
               #"No connection exists"
               (assoc ~op :type :fail, :error :no-connection)
 
+              ; Guessssing this means it couldn't even open a conn but not sure
+              ; This might be a fail???
+              #"Unavailable desc = all SubConns are in TransientFailure"
+              (assoc ~op :type :info, :error :unavailable-all-subconns-down)
+
               #"dispatchTaskOverNetwork: while retrieving connection. error: Unhealthy connection"
               (assoc ~op :type :info, :error :unhealthy-connection)
 
