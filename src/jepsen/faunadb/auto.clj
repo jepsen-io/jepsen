@@ -12,6 +12,14 @@
             [jepsen.os.debian :as debian]
             [jepsen.control.util :as cu]))
 
+(defn wait-for-replication
+  [node]
+  (let [mvmnt (c/exec :faunadb-admin :movement-status)]
+    (if (not= mvmnt "No data movement is currently in progress.")
+      (do
+        (Thread/sleep 1000)
+        (wait-for-replication node)))))
+
 (defn start!
   "Start faunadb on node."
   [test node replicas]
@@ -21,18 +29,17 @@
     (do (info node "Starting FaunaDB...")
         (c/su
           (c/exec :initctl :start :faunadb))
-        (Thread/sleep 30000)
+        (c/exec
+          :bash :-c "while ! netstat -tna | grep 'LISTEN\\>' | grep -q ':8444\\>'; do sleep 0.1; done")
 
         (when (= node (jepsen/primary test))
           (info node "initializing FaunaDB cluster")
-          (c/exec :faunadb-admin :init)
-          (Thread/sleep 10000))
+          (c/exec :faunadb-admin :init))
         (jepsen/synchronize test)
 
         (when (not= node (jepsen/primary test))
           (info node "joining FaunaDB cluster")
-          (c/exec :faunadb-admin :join (jepsen/primary test))
-          (Thread/sleep 10000))
+          (c/exec :faunadb-admin :join (jepsen/primary test)))
         (jepsen/synchronize test)
 
         (when (= node (jepsen/primary test))
@@ -44,7 +51,7 @@
                      (fn [i]
                        (str/join ["replica-" i]))
                      (range replicas))))
-          (Thread/sleep 10000))
+          (wait-for-replication node))
         (jepsen/synchronize test)
 
         (info node "FaunaDB started")))
