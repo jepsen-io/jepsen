@@ -35,13 +35,13 @@
   (let [db (:db test)]
     (loop [tries cycle-tries]
       ; Tear down every node
-      (info "Tearing down DBs")
+      (info "Tearing down DB")
       (control/on-nodes test (fcatch (partial teardown! db)))
 
       ; Start up every node
       (if (= :retry (try+
                       ; Normal set up
-                      (info "Setting up DBs")
+                      (info "Setting up DB")
                       (control/on-nodes test (partial setup! db))
 
                       ; Set up primary
