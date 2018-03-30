@@ -131,28 +131,29 @@
                      :workers {}})]
     (reify gen/Generator
       (op [this test process]
-        (let [txn (atom nil)
+        (let [op (atom nil)
               worker (gen/process->thread test process)]
           (swap! state (fn [{:keys [next-key workers] :as s}]
                          (if-let [k (get workers worker)]
                            ; Compute upper and lower bounds for this group
-                           (do (reset! txn (read-txn-for n k))
+                           (do (reset! op {:f     :read
+                                           :value (read-txn-for n k)})
                                (update s :workers assoc worker nil))
 
                            (if-let [k (and (< (rand) 0.5)
                                            (rand-nth-empty (keep val workers)))]
                              ; Read another active group
-                             (do (reset! txn (read-txn-for n k))
+                             (do (reset! op {:f     :read
+                                             :value (read-txn-for n k)})
                                  s)
 
                              ; Write a fresh key
-                             (do (reset! txn [[:w next-key 1]])
+                             (do (reset! op {:f :write,
+                                             :value [[:w next-key 1]]})
                                  {:next-key (inc next-key)
                                   :workers (assoc workers
                                                   worker next-key)})))))
-          {:type  :invoke
-           :f     :txn
-           :value @txn})))))
+          (assoc @op :type :invoke))))))
 
 (defn read-compare
   "Given two maps of keys to values, a and b, returns -1 if a dominates, 0 if
@@ -261,10 +262,8 @@
 
 (defn ensure-no-long-forks
   "Returns a checker error if any long forks exist."
-  [n history]
-  (let [forks (->> history
-                   (filter op/ok?)
-                   (filter (comp read-txn? :value))
+  [n reads]
+  (let [forks (->> reads
                    (groups n)
                    (mapcat find-forks))]
     (when (seq forks)
@@ -288,6 +287,27 @@
     (when (map? res)
       res)))
 
+(defn reads
+  "All ok read ops"
+  [history]
+  (->> history
+       (filter op/ok?)
+       (filter (comp read-txn? :value))))
+
+(defn early-reads
+  "Given a set of read txns finds those that are too early to tell us anything;
+  e.g. all nil"
+  [reads]
+  (->> (map :value reads)
+       (remove (partial some mop/value))))
+
+(defn late-reads
+  "Given a set of read txns, finds those that are too late to tell us anything;
+  e.g. all 1."
+  [reads]
+  (->> (map :value reads)
+       (filter (partial every? mop/value))))
+
 (defn checker
   "Takes a group size n, and a history of :txn transactions. Verifies that no
   key is written multiple times. Searches for read transactions where one read
@@ -295,9 +315,13 @@
   [n]
   (reify checker/Checker
     (check [this test model history opts]
-      (or (ensure-no-multiple-writes-to-one-key history)
-          (ensure-no-long-forks n history)
-          {:valid? true}))))
+      (let [reads (reads history)]
+        (merge {:reads-count      (count reads)
+                :early-read-count (count (early-reads reads))
+                :late-read-count  (count (late-reads reads))}
+               (or (ensure-no-multiple-writes-to-one-key history)
+                   (ensure-no-long-forks n reads)
+                   {:valid? true}))))))
 
 (defn workload
   "A package of a checker and generator to look for long forks. n is the group

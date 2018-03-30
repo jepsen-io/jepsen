@@ -260,10 +260,6 @@
                                "val: int .\n")))
 
   (invoke! [this test op]
-    (when-not (= :txn (:f op))
-      (throw (IllegalArgumentException.
-               (str "Expected a :txn op, but received " (pr-str op)))))
-
     (with-conflict-as-fail op
       (with-txn [t conn]
         (->> (:value op)
