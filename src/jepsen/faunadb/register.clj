@@ -44,7 +44,7 @@
   (invoke! [this test op]
     (let [id   (key (:value op))
           val' (val (:value op))]
-                              
+
       (case (:f op)
         :read (let [val (-> conn
                             (f/query
@@ -74,7 +74,7 @@
                                                   (Obj "data" (Obj "register" new)))
                                           (v true))
                                          (v false)))
-                                    (v true)) ; instance not found is ok - create may not have happened yet
+                                    (v false))
                                 f/BoolField)]
                (assoc op :type (if cas :ok :fail))))))
 
@@ -111,4 +111,4 @@
            :model (model/cas-register 0)
            :client (AtomicClient. (atom false) nil)}
           opts)))
-  
+
