@@ -115,6 +115,9 @@
               #"Only leader can decide to commit or abort"
               (assoc ~op :type :fail, :error :only-leader-can-commit)
 
+              #"This server doesn't serve group id:"
+              (assoc ~op :type :fail, :error :server-doesn't-serve-group)
+
               (throw e#)))
 
           (catch TxnConflictException e#
