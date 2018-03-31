@@ -51,5 +51,6 @@
   {:nemesis   (full-nemesis opts)
    :generator (composite-generator opts)
    :final-generator (gen/seq (map op [;:stop-partition
+                                      :restart-zero
                                       :restart-alpha
-                                      :restart-zero]))})
+                                      ]))})
