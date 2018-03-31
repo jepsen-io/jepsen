@@ -89,47 +89,62 @@
   "Downloads logs for a test."
   [test]
   ; Download logs
-  (when (satisfies? db/LogFiles (:db test))
-    (info "Snarfing log files")
-    (control/on-nodes test
-              (fn [test node]
-                (let [full-paths (db/log-files (:db test) test node)
-                      ; A map of full paths to short paths
-                      paths      (->> full-paths
-                                      (map #(str/split % #"/"))
-                                      util/drop-common-proper-prefix
-                                      (map (partial str/join "/"))
-                                      (zipmap full-paths))]
-                  (doseq [[remote local] paths]
-                    (info "downloading" remote "to" local)
-                    (try
-                      (control/download
-                        remote
-                        (.getCanonicalPath
-                          (store/path! test (name node)
-                                       ; strip leading /
-                                       (str/replace local #"^/" ""))))
-                      (catch java.io.IOException e
-                        (if (= "Pipe closed" (.getMessage e))
-                          (info remote "pipe closed")
-                          (throw e)))
-                      (catch java.lang.IllegalArgumentException e
-                        ; This is a jsch bug where the file is just being
-                        ; created
-                        (info remote "doesn't exist")))))))))
+  (locking snarf-logs!
+    (when (satisfies? db/LogFiles (:db test))
+      (info "Snarfing log files")
+      (control/on-nodes test
+        (fn [test node]
+          (let [full-paths (db/log-files (:db test) test node)
+                ; A map of full paths to short paths
+                paths      (->> full-paths
+                                (map #(str/split % #"/"))
+                                util/drop-common-proper-prefix
+                                (map (partial str/join "/"))
+                                (zipmap full-paths))]
+            (doseq [[remote local] paths]
+              (info "downloading" remote "to" local)
+              (try
+                (control/download
+                  remote
+                  (.getCanonicalPath
+                    (store/path! test (name node)
+                                 ; strip leading /
+                                 (str/replace local #"^/" ""))))
+                (catch java.io.IOException e
+                  (if (= "Pipe closed" (.getMessage e))
+                    (info remote "pipe closed")
+                    (throw e)))
+                (catch java.lang.IllegalArgumentException e
+                  ; This is a jsch bug where the file is just being
+                  ; created
+                  (info remote "doesn't exist"))))))))))
+
+(defmacro with-log-snarfing
+  "Evaluates body and ensures logs are snarfed afterwards. Will also download
+  logs in the event of JVM shutdown, so you can ctrl-c a test and get something
+  useful."
+  [test & body]
+  `(let [^Thread hook# (Thread.
+                         (bound-fn []
+                           (with-thread-name "Jepsen shutdown hook"
+                             (info "Downloading DB logs before JVM shutdown...")
+                             (snarf-logs! ~test)
+                             (store/update-symlinks! ~test))))]
+     (.. (Runtime/getRuntime) (addShutdownHook hook#))
+     (try
+       ~@body
+       (finally
+         (snarf-logs! ~test)
+         (store/update-symlinks! ~test)
+         (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
 
 (defmacro with-db
   "Wraps body in DB setup and teardown."
   [test & body]
   `(try
-     (db/cycle! ~test)
-
-     ~@body
-     (catch Throwable t#
-       ; Emergency log dump!
-       (snarf-logs! ~test)
-       (store/update-symlinks! ~test)
-       (throw t#))
+     (with-log-snarfing ~test
+       (db/cycle! ~test)
+       ~@body)
      (finally
        (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
@@ -441,7 +456,7 @@
   (NemesisWorker. test nil (atom false)))
 
 (defn run-case!
-  "Spawns nemesis and clients, runs a single test case, snarf the logs, and
+  "Spawns nemesis and clients, runs a single test case, and
   returns that case's history."
   [test]
   (let [history (atom [])
@@ -466,9 +481,6 @@
       ; Go!
       (run-workers! (cons nemesis clients)))
 
-    ; Download logs
-    (snarf-logs! test)
-
     ; Unregister our history
     (swap! (:active-histories test) disj history)
 
@@ -487,6 +499,8 @@
             "Everything looks good! ヽ(‘ー`)ノ"
             "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")))
   test)
+
+
 
 (defn run!
   "Runs a test. Tests are maps containing
