@@ -58,20 +58,27 @@
   [f]
   {:type :info, :f f, :value nil})
 
-(defn composite-generator
-  "Takes options:"
+(defn full-generator
+  "Takes a nemesis specification map from the command line, and constructs a
+  generator for the given types of nemesis operations, e.g. process kills and
+  partitions."
   [opts]
-  (->> (gen/mix [(op :fix-alpha)
-                 (gen/seq (cycle (map op [:kill-alpha :restart-alpha])))
-                 (gen/seq (cycle (map op [:kill-zero  :restart-zero])))])
-  ;           (gen/seq (cycle (map op [:start-partition :stop-partition])))
-       (gen/stagger 15)))
+  (->> [(when (:kill-alpha? opts)
+          [(op :fix-alpha)
+           (gen/seq (cycle (map op [:kill-alpha :restart-alpha])))])
+        (when (:kill-zero? opts)
+          [(gen/seq (cycle (map op [:kill-zero  :restart-zero])))])
+        (when (:partition? opts)
+          [(gen/seq (cycle (map op [:start-partition :stop-partition])))])]
+       (apply concat)
+       gen/mix
+       (gen/stagger 5)))
 
 (defn nemesis
   "Composite nemesis and generator"
   [opts]
   {:nemesis   (full-nemesis opts)
-   :generator (composite-generator opts)
+   :generator (full-generator opts)
    :final-generator (->> (map op [;:stop-partition
                                   :restart-zero
                                   :restart-alpha
