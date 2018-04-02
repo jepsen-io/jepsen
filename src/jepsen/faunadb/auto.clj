@@ -15,7 +15,7 @@
 (defn wait-for-replication
   [node]
   (let [mvmnt (c/exec :faunadb-admin :movement-status)]
-    (if (not= mvmnt "No data movement is currently in progress.")
+    (if (not= (last (str/split-lines mvmnt)) "No data movement is currently in progress.")
       (do
         (Thread/sleep 1000)
         (wait-for-replication node)))))
