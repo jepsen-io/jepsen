@@ -90,7 +90,7 @@
   "Configure the transaction log for the current topology."
   [test node replicas]
   (if (= 1 replicas)
-    [[(jepsen/primary :test)]]
+    [[(jepsen/primary test)]]
     (vals
      (group-by (fn [n]
                  (mod (+ 1 (.indexOf (:nodes test) n)) replicas))
