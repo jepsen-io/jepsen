@@ -83,6 +83,7 @@
                           (str/join ["deb [arch=all] https://" repo-key "@repo.fauna.com/enterprise/debian unstable non-free"])))
   (c/su (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
                 :apt-key :add :-))
+  (c/su (debian/update!))
   (c/su (debian/install {"faunadb" version})))
 
 (defn log-configuration
