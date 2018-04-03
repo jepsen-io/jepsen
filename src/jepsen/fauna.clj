@@ -42,7 +42,7 @@
                    (str ":" (:name opts))
                    (str ":" (:name (:nemesis opts))))
      :os      debian/os ;; NB. requires Ubuntu 14.04 LTS
-     :db      (db "2.5.1.rc1-0")
+     :db      (db "2.5.1.rc3-0")
      :client  (:client (:client opts))
      :nemesis (:nemesis (:nemesis opts))
      :generator (gen/phases
