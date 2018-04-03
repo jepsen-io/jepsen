@@ -235,7 +235,7 @@
   (fauna/basic-test
     (merge
       {:client {:client (:client opts)
-                :during (->> (gen/mix [bank-read bank-index-read bank-diff-transfer])
+                :during (->> (gen/mix [bank-read bank-diff-transfer])
                           (gen/clients))
                 :final (->> (gen/seq [(gen/once bank-read) (gen/once bank-index-read)])
                          (gen/clients))}
