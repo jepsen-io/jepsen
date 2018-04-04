@@ -20,40 +20,41 @@
         (Thread/sleep 1000)
         (wait-for-replication node)))))
 
-(defn start!
+(defn init!
   "Start faunadb on node."
   [test node replicas]
+  (when (= node (jepsen/primary test))
+    (info node "initializing FaunaDB cluster")
+    (c/exec :faunadb-admin :init))
+  (jepsen/synchronize test)
+
+  (when (not= node (jepsen/primary test))
+    (info node "joining FaunaDB cluster")
+    (c/exec :faunadb-admin :join (jepsen/primary test)))
+  (jepsen/synchronize test)
+
+  (when (= node (jepsen/primary test))
+    (info node (str/join ["creating " replicas " replicas"]))
+    (if (not= 1 replicas)
+      (c/exec :faunadb-admin
+              :update-replication
+              (mapv
+               (fn [i]
+                 (str/join ["replica-" i]))
+               (range replicas))))
+    (wait-for-replication node))
+  (jepsen/synchronize test)
+  :initialized)
+
+(defn start!
+  [test node]
   (if (not= "faunadb stop/waiting"
             (c/exec :initctl :status :faunadb))
     (info node "FaunaDB already running.")
     (do (info node "Starting FaunaDB...")
-        (c/su
-          (c/exec :initctl :start :faunadb))
+        (c/su (c/exec :initctl :start :faunadb))
         (c/exec
           :bash :-c "while ! netstat -tna | grep 'LISTEN\\>' | grep -q ':8444\\>'; do sleep 0.1; done")
-
-        (when (= node (jepsen/primary test))
-          (info node "initializing FaunaDB cluster")
-          (c/exec :faunadb-admin :init))
-        (jepsen/synchronize test)
-
-        (when (not= node (jepsen/primary test))
-          (info node "joining FaunaDB cluster")
-          (c/exec :faunadb-admin :join (jepsen/primary test)))
-        (jepsen/synchronize test)
-
-        (when (= node (jepsen/primary test))
-          (info node (str/join ["creating " replicas " replicas"]))
-          (if (not= 1 replicas)
-            (c/exec :faunadb-admin
-                    :update-replication
-                    (mapv
-                     (fn [i]
-                       (str/join ["replica-" i]))
-                     (range replicas))))
-          (wait-for-replication node))
-        (jepsen/synchronize test)
-
         (info node "FaunaDB started")))
   :started)
 
