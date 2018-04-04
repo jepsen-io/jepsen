@@ -29,6 +29,11 @@
   in readability isn't really worth it.
 - Macro like (synchronize-nodes test), which enforces a synchronization
   barrier where (count nodes threads) must come to sync on the test map.
+- Generator/each works on each *process*, not each *thread*, but almost always,
+  what people intend is for each thread--and that's how concat, independent,
+  etc work. This leads to weird scenarios like tests looping on a final read
+  forever and ever, as each process crashes, a new one comes in and gets a
+  fresh generator. Let's make it by thread?
 
 ## Extensions
 
