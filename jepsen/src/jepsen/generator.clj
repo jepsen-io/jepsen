@@ -17,10 +17,12 @@
             [clojure.walk :as walk]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [warn info]]
-            [slingshot.slingshot :refer [throw+]])
+            [slingshot.slingshot :refer [throw+]]
+            [tea-time.core :as tt])
   (:import (java.util.concurrent.atomic AtomicBoolean)
            (java.util.concurrent.locks LockSupport)
-           (java.util.concurrent CyclicBarrier)))
+           (java.util.concurrent BrokenBarrierException
+                                 CyclicBarrier)))
 
 (defprotocol Generator
   (op [gen test process] "Yields an operation to apply."))
@@ -396,21 +398,123 @@
   [n gen]
   (Limit. gen (atom (inc n))))
 
-(defgenerator TimeLimit [dt source t]
-  [dt (when-let [tt @t] ; Note this can't be t cuz t is rewritten by defgen
-        (util/nanos->secs tt)) source]
+
+; T I M E   L I M I T S
+;
+; Our general approach here is to schedule a task which will interrupt as
+; at the deadline. To figure out who to interrupt, we keep a set of
+; threads currently engaged in this time-limit; the deadline task
+; interrupts every thread in that set.
+;
+; To avoid a race condition where the deadline sees a thread that is
+; currently in the time-limit, that thread returns from the time-limit
+; and goes on to do something else, and we interrupt, it, we have a
+; *lock* on threads which prevents the deadline from killing threads once
+; they're on the way out.
+;
+; Now, the question is: what do we *do* with that interrupt? Our goal is
+; to return nil when we hit the time limit, but we *also* need to play
+; nicely with other potential causes of interrupts--for instance, nested
+; time-limits either enclosing us, or which we enclose.
+;
+; You might *think* that we could return nil on any interrupt, but this
+; might be incorrect. For instance, if we wrap a sequence of time-limited
+; operations, and the first one times out, the *second* one should get a
+; chance to execute--it should return nil, and we should never observe
+; its interruption.
+;
+; If an *enclosing* time limit fires and interrupts us, we have an
+; inverse problem: we might be surrounded by a generator that sees us run
+; out of operations and moves on to a new generator instead. Therefore we
+; *must* propagate interruptions triggered by our enclosing time limits.
+;
+; Essentially, we need a *side channel* to tell us: did *we* interrupt
+; ourselves, or did someone else? To do this, we store a local promise,
+; `interrupted?`, which the deadline task flips to `true` if it's going
+; to interrupt the thread. If we've interrupted ourselves, then we return
+; nil. If not, it might be some enclosing interrupt, which needs to
+; handle it instead; in that case, we rethrow.
+;
+; "Ah, but Kyle!? You exclaim, "What if two time limits fire
+; concurrently, and we are interrupted *while performing* this
+; bookkeeping!"
+;
+; This is a serious problem. You can be interrupted during `finally`. We
+; can't eliminate all concurrent interrupts, but we *can* eliminate our own.
+; We'll set up a *global* lock on the time-limit fn, and use the thread set to
+; make sure no other time-limit can interrupt a worker while the others are
+; triggering.
+(declare time-limit)
+(defgenerator TimeLimit [dt                 ; Time interval
+                         source             ; Underlying generator
+                         deadline           ; End time in micros
+                         threads            ; Atom: set of active threads
+                         interrupted?]      ; Atom: are we being interrupted?
+  [dt source]
+
   (op [_ test process]
-      (when (nil? @t)
-        (compare-and-set! t nil (+ (util/linear-time-nanos)
-                                   (util/secs->nanos dt))))
-      (when (<= (util/linear-time-nanos) @t)
-        (op source test process))))
+      (try
+        ; Initialize start time on first run
+        (when (nil? @deadline)
+          (let [d' (+ (tt/linear-time-micros)
+                      (tt/seconds->micros dt))]
+            (when (compare-and-set! deadline nil d')
+              ; We won the CAS to initialize our deadline. Schedule task to
+              ; interrupt active threads later.
+              (tt/at-linear-micros! d' (fn []
+                                         (locking time-limit
+                                           ; Mark ourself as interrupting
+                                           (reset! interrupted? true)
+
+                                           ; Interrupt those threads
+                                           (locking threads
+                                             (doseq [t @threads]
+                                               (.interrupt t)))
+
+                                           ; Wait for interrupt processing to
+                                           ; complete
+                                           (while (pos? (count @threads))
+                                             (Thread/sleep 100))
+
+                                           ; Clean up so future interrupts
+                                           ; aren't trapped in our handler
+                                           (reset! interrupted? false)))))))
+
+        (when (<= (tt/linear-time-micros) @deadline)
+          ; We haven't passed the deadline yet. Register this thread in the
+          ; thread set
+          (try
+            (swap! threads conj (Thread/currentThread))
+            ; Grab an operation from the underlying generator
+            (op source test process)
+            (finally
+              (locking threads
+                (swap! threads disj (Thread/currentThread))))))
+
+        (catch InterruptedException sea-lion
+          ; Okay. SOMEONE interrupted us. We're definitely not executing any
+          ; more. We could have been interrupted FROM the finally block, so
+          ; we need to remove ourselves from the executing set again...
+          (locking threads
+            (swap! threads disj (Thread/currentThread)))
+          (if @interrupted?
+            nil
+            (throw sea-lion)))
+
+        ; Ugh this is SUCH a special case thing but BrokenBarrier is also a
+        ; sort of interrupted exception???
+        (catch BrokenBarrierException sea-lion
+          (locking threads
+            (swap! threads disj (Thread/currentThread)))
+          (if @interrupted?
+            nil
+            (throw sea-lion))))))
 
 (defn time-limit
   "Yields operations from the underlying generator until dt seconds have
   elapsed."
   [dt source]
-  (TimeLimit. dt source (atom nil)))
+  (TimeLimit. dt source (atom nil) (atom #{}) (atom false)))
 
 (defgenerator Filter [f gen]
   [f gen]

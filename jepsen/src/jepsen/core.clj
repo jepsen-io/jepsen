@@ -31,6 +31,7 @@
             [jepsen.client :as client]
             [jepsen.nemesis :as nemesis]
             [jepsen.store :as store]
+            [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
                                  CountDownLatch)))
@@ -553,6 +554,8 @@
      the history
     - This generates the final report"
   [test]
+  ; TODO: clean this up properly, don't restart every time
+  (tt/start!)
   (try
     (log-results
       (with-thread-name "jepsen test runner"
