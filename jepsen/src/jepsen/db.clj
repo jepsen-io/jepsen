@@ -49,7 +49,7 @@
                         ; TODO: refactor primary out of core and here and
                         ; into util.
                         (info "Setting up primary" (first (:nodes test)))
-                        (control/on-nodes [(first (:nodes test))]
+                        (control/on-nodes test [(first (:nodes test))]
                                           (partial setup-primary! db)))
 
                       nil
