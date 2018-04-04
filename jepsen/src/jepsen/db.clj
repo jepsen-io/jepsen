@@ -1,7 +1,7 @@
 (ns jepsen.db
   "Allows Jepsen to set up and tear down databases."
   (:require [clojure.tools.logging :refer [info warn]]
-            [slingshot.slingshot :refer [try+]]
+            [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [control :as control]
                     [util :refer [fcatch]]]))
 
@@ -57,9 +57,11 @@
                         (info :caught e))
                       (catch [:type ::setup-failed] e
                         (if (< 1 tries)
-                          (do (warn e "Unable to set up database; retrying...")
+                          (do (info :throwable (pr-str (type (:throwable &throw-context))))
+                              (warn (:throwable &throw-context)
+                                    "Unable to set up database; retrying...")
                               :retry)
 
                           ; Out of tries, abort!
-                          (throw e)))))
+                          (throw+ e)))))
         (recur (dec tries))))))
