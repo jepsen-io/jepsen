@@ -39,10 +39,10 @@ history, analysis, and any supplementary results are written to the filesystem
 under `store/<test-name>/<date>/` for later review. Symlinks to the latest
 results are maintained at each level for convenience.
 
-
 ## Setting up a Jepsen environment
 
-Your local machine needs a JVM and leiningen 2 installed. Probably want JNA for SSH auth too.
+Your control node needs a JVM and Leiningen 2 installed. Probably want JNA for
+SSH auth too.
 
 ```sh
 sudo apt-get install openjdk-8-jre openjdk-8-jre-headless libjna-java
@@ -62,7 +62,8 @@ at your prod machines unless you like to live dangerously, or you wrote the
 test and know exactly what it's doing.
 
 You can run your DB nodes as separate physical machines, VMs, LXC instances, or
-via Docker.
+via Docker. Note that containers (LXC and Docker) can't change system clocks,
+so you won't be able to test anything that relies on clock skew.
 
 - You can launch a complete Jepsen cluster from the [AWS
   Marketplace](https://aws.amazon.com/marketplace/pp/B01LZ7Y7U0?qid=1486758124485&sr=0-1&ref_=srh_res_product_title).
