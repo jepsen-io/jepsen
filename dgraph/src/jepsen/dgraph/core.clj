@@ -53,7 +53,8 @@
            opts
            (dissoc workload :final-generator)
            {:name       (str "dgraph " (:version opts) " "
-                             (name (:workload opts)))
+                             (name (:workload opts))
+                             (:when (:upsert-schema opts) " @upsert"))
             :os         debian/os
             :db         (s/db)
             :generator  gen
@@ -97,6 +98,9 @@
     :validate [(partial re-find #"\A(file)|(https?)://")
                "Should be an HTTP url"]]
    ["-f" "--force-download" "Ignore the package cache; download again."
+    :default false]
+   [nil "--upsert-schema"
+    "If present, tests will use @upsert schema directives."
     :default false]
    [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
     :default 3

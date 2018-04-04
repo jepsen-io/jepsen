@@ -16,7 +16,9 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn "email: string @index(exact) @upsert ."))
+    (c/alter-schema! conn (str "email: string @index(exact)"
+                               (when (:upsert-schema test) " @upsert")
+                               " .")))
 
   (invoke! [this test op]
     (let [[k v] (:value op)]

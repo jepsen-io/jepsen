@@ -27,8 +27,10 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "key: int @index(int) .\n"
-                               "type: string @index(exact) .\n"
+    (c/alter-schema! conn (str "key: int @index(int)"
+                               (when (:upsert-schema test) " @upsert") " .\n"
+                               "type: string @index(exact)"
+                               (when (:upsert-schema test) " @upsert") " .\n"
                                "amount: int .\n"
                                ))
     (try

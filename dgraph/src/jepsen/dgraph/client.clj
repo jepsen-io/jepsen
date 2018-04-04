@@ -286,8 +286,10 @@
     (assoc this :conn (open node)))
 
   (setup! [this test]
-    (alter-schema! conn (str "key: int @index(int) .\n"
-                               "val: int .\n")))
+    (alter-schema! conn (str "key: int @index(int)"
+                             (when (:upsert-schema test) " @upsert")
+                             " .\n"
+                             "val: int .\n")))
 
   (invoke! [this test op]
     (with-conflict-as-fail op

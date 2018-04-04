@@ -15,7 +15,9 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "type: string @index(exact) .\n"
+    (c/alter-schema! conn (str "type: string @index(exact)"
+                               (when (:upsert-schema test) " @upsert")
+                               " .\n"
                                "value: int @index(int) .\n")))
 
   (invoke! [this test op]

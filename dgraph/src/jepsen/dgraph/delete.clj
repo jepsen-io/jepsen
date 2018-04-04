@@ -25,7 +25,9 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "key: int @index(int) .\n")))
+    (c/alter-schema! conn (str "key: int @index(int)"
+                               (when (:upsert-schema test) " @upsert")
+                               " .\n")))
 
   (invoke! [this test op]
     (let [[k v] (:value op)]
