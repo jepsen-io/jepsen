@@ -41,8 +41,7 @@
         gen      (->> (:generator workload)
                       (gen/nemesis (:generator nemesis))
                       (gen/time-limit (:time-limit opts)))
-        gen      (if (or (:final-generator workload)
-                         (:final-generator nemesis))
+        gen      (if (:final-generator workload)
                    (gen/phases gen
                                (gen/log "Healing cluster.")
                                (gen/nemesis (:final-generator nemesis))
