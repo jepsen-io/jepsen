@@ -70,7 +70,7 @@
   (invoke! [this test op]
     (let [[k _] (:value op)]
       (c/with-conflict-as-fail op
-        (c/with-txn [t conn]
+        (c/with-txn test [t conn]
           (case (:f op)
             :inc (let [{:keys [uid value] :or {value 0}}
                        (->> (c/query t "{ q(func: eq(key, $key)) {

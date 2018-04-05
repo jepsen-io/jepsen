@@ -36,7 +36,12 @@
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
   [opts]
-  (let [workload ((get workloads (:workload opts)) opts)
+  (let [version  (if-let [p (:package-url opts)]
+                   (if-let [m (re-find #"([^/]+)/[^/.]+\.tar\.gz" p)]
+                     (m 1)
+                     "unknown")
+                   (:version opts))
+        workload ((get workloads (:workload opts)) opts)
         nemesis  (nemesis/nemesis (:nemesis opts))
         gen      (->> (:generator workload)
                       (gen/nemesis (:generator nemesis))
@@ -52,9 +57,11 @@
     (merge tests/noop-test
            opts
            (dissoc workload :final-generator)
-           {:name       (str "dgraph " (:version opts) " "
+           {:name       (str "dgraph " version " "
                              (name (:workload opts))
+                             " s=" (name (:sequencing opts))
                              (:when (:upsert-schema opts) " @upsert"))
+            :version    version
             :os         debian/os
             :db         (s/db)
             :generator  gen
@@ -102,6 +109,10 @@
    [nil "--upsert-schema"
     "If present, tests will use @upsert schema directives."
     :default false]
+   ["-s" "--sequencing MODE" "Whether to use server or client side sequencing"
+    :default :server
+    :parse-fn keyword
+    :validate [#{:client :server} "Must be either `client` or `server`."]]
    [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
     :default 3
     :parse-fn parse-long

@@ -23,7 +23,7 @@
   (invoke! [this test op]
     (let [[k v] (:value op)]
       (c/with-conflict-as-fail op
-        (c/with-txn [t conn]
+        (c/with-txn test [t conn]
           (case (:f op)
             :upsert (let [inserted (c/upsert! t
                                               :email

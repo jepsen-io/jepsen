@@ -32,7 +32,7 @@
   (invoke! [this test op]
     (let [[k v] (:value op)]
       (c/with-conflict-as-fail op
-        (c/with-txn [t conn]
+        (c/with-txn test [t conn]
           (case (:f op)
             :read (->> (c/query t (str "{ q(func: eq(key, $key)) {\n"
                                        "  uid\n"

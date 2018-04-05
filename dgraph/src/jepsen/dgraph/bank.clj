@@ -27,24 +27,29 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
+    (info "Altering schema")
     (c/alter-schema! conn (str "key: int @index(int)"
                                (when (:upsert-schema test) " @upsert") " .\n"
                                "type: string @index(exact)"
                                (when (:upsert-schema test) " @upsert") " .\n"
                                "amount: int .\n"
                                ))
+    (info "Schema altered")
+
     (try
-      (c/with-txn [t conn]
+      (info "Get txn")
+      (c/with-txn test [t conn]
+        (info "Txn ready")
         (c/upsert! t :key
                    {:key    (first (:accounts test))
                     :type   "account"
                     :amount (:total-amount test)})
-        (info (c/schema t)))
+        (info "Upserted"))
       (catch TxnConflictException e)))
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
-      (c/with-txn [t conn]
+      (c/with-txn test [t conn]
         (case (:f op)
           :read (->> (c/query t (str "{ q(func: eq(type, $type)) {\n"
                                      "  key\n"

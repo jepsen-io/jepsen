@@ -76,7 +76,8 @@
            :chdir   dir}
           binary
           :server
-          :--memory_mb  1024
+;          :--memory_mb  1024
+          :--lru_mb     1024
           :--idx        (node-idx test node)
           :--my         (str node ":" alpha-internal-port)
           :--zero       (str node ":" zero-internal-port)))
@@ -206,7 +207,7 @@
           (throw (ex-info "Cluster failed to converge"
                           {:type  :jepsen.db/setup-failed
                            :node  node}
-                          e)))
+                          (:throwable &throw-context))))
 
         (catch RuntimeException e ; Welp
           (throw (ex-info "Couldn't get a client"

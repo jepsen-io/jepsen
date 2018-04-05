@@ -14,6 +14,7 @@
                       DgraphClient
                       DgraphClient$Transaction
                       DgraphProto$Assigned
+                      DgraphProto$LinRead$Sequencing
                       DgraphProto$Mutation
                       DgraphProto$Response
                       DgraphProto$Operation
@@ -44,22 +45,25 @@
 (defmacro with-txn
   "Takes a vector of a symbol and a client. Opens a transaction on the client,
   binds it to that symbol, and evaluates body. Calls commit at the end of
-  the body, or discards the transaction if an exception is thrown. Ex:
+  the body, or discards the transaction if an exception is thrown. Options are:
 
-      (with-txn [t my-client]
+    :sequencing - :server or :client (default :server)
+
+  Ex:
+
+      (with-txn {:sequencing :client} [t my-client]
         (mutate! t ...)
         (mutate! t ...))"
-  [[txn-sym client] & body]
+  [opts [txn-sym client] & body]
   `(let [~txn-sym (.newTransaction ^DgraphClient ~client)]
      (try
-       ;(info "Begin transaction.")
+       (.setSequencing ~txn-sym
+                       (case (:sequencing ~opts :server)
+                          :server DgraphProto$LinRead$Sequencing/SERVER_SIDE
+                          :client DgraphProto$LinRead$Sequencing/CLIENT_SIDE))
        (let [res# (do ~@body)]
          (.commit ~txn-sym)
-         ;(info "Transaction committed.")
          res#)
-       ;(catch RuntimeException e#
-       ;  (info "Transaction aborted.")
-       ;  (throw e#))
        (finally
          (.discard ~txn-sym)))))
 
@@ -91,6 +95,9 @@
 
               #"Conflicts with pending transaction. Please abort."
               (assoc ~op :type :fail, :error :conflict)
+
+              #"readTs: \d+ less than minTs: \d+ for key:"
+              (assoc ~op :type :fail, :error :old-timestamp)
 
               #"Predicate is being moved, please retry later"
               (assoc ~op :type :fail, :error :predicate-moving)
@@ -231,7 +238,7 @@
   client."
   [client]
   (with-retry [attempts 6]
-    (with-txn [t client]
+    (with-txn {} [t client]
       (schema t))
     (catch io.grpc.StatusRuntimeException e
       (cond (<= attempts 1)
@@ -293,7 +300,7 @@
 
   (invoke! [this test op]
     (with-conflict-as-fail op
-      (with-txn [t conn]
+      (with-txn test [t conn]
         (->> (:value op)
              (reduce
                (fn [txn' [f k v :as micro-op]]
