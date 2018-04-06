@@ -34,7 +34,7 @@
 (defrecord AtomicClient [tbl-created? conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (f/client node)))
+    (assoc this :conn (f/linearized-client node)))
 
   (setup! [this test]
     (locking tbl-created?

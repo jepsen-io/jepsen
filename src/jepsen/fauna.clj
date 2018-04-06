@@ -21,7 +21,8 @@
       (let [width (min replicas (count (:nodes test)))]
         (auto/install! version)
         (auto/configure! test node width)
-        (auto/start! test node width)))
+        (auto/start! test node)
+        (auto/init! test node width)))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")

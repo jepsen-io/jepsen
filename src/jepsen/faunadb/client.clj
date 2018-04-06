@@ -21,7 +21,13 @@
 (defn client
   [node]
   (.build (doto (FaunaClient/builder)
-            (.withEndpoint (str/join ["http://" node ":8443"]))
+            (.withEndpoint (str "http://" node ":8443"))
+            (.withSecret root-key))))
+
+(defn linearized-client
+  [node]
+  (.build (doto (FaunaClient/builder)
+            (.withEndpoint (str "http://" node ":8443/linearized"))
             (.withSecret root-key))))
 
 (defn query
