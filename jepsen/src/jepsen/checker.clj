@@ -181,13 +181,14 @@
                           (r/filter op/ok?)
                           (r/filter #(= :read (:f %)))
                           (r/map :value)
-                          (reduce (fn [_ x] x) nil)
-                          core/set)]
+                          (reduce (fn [_ x] x) nil))]
         (if-not final-read
           {:valid? :unknown
            :error  "Set was never read"}
 
-          (let [; The OK set is every read value which we tried to add
+          (let [final-read (core/set final-read)
+
+                ; The OK set is every read value which we tried to add
                 ok          (set/intersection final-read attempts)
 
                 ; Unexpected records are those we *never* attempted.
