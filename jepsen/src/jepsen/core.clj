@@ -501,8 +501,6 @@
             "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")))
   test)
 
-
-
 (defn run!
   "Runs a test. Tests are maps containing
 

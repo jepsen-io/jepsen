@@ -31,6 +31,7 @@
   "These are the types of failures that the nemesis can perform"
   #{:kill-alpha?
     :kill-zero?
+    :fix-alpha?
     :partition?})
 
 (defn dgraph-test

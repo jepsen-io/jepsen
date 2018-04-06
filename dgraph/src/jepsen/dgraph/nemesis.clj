@@ -11,7 +11,7 @@
   "Responds to :start by killing alpha on random nodes, and to :stop by
   resuming them."
   []
-  (nemesis/node-start-stopper util/random-nonempty-subset
+  (nemesis/node-start-stopper identity ;util/random-nonempty-subset
                               s/stop-alpha!
                               s/start-alpha!))
 
@@ -64,24 +64,28 @@
   partitions."
   [opts]
   (->> [(when (:kill-alpha? opts)
-          [(op :fix-alpha)
-           (gen/seq (cycle (map op [:kill-alpha :restart-alpha])))])
+          [(gen/seq (cycle [(op :kill-alpha)
+                            (op :restart-alpha)]))])
         (when (:kill-zero? opts)
           [(gen/seq (cycle (map op [:kill-zero  :restart-zero])))])
+        (when (:fix-alpha? opts)
+          [(op :fix-alpha)])
         (when (:partition? opts)
           [(gen/seq (cycle (map op [:start-partition :stop-partition])))])]
        (apply concat)
        gen/mix
-       (gen/stagger 5)))
+       (gen/stagger 15)))
 
 (defn nemesis
   "Composite nemesis and generator"
   [opts]
   {:nemesis   (full-nemesis opts)
    :generator (full-generator opts)
-   :final-generator (->> (map op [;:stop-partition
+   :final-generator (->> (map op [:stop-partition
                                   :restart-zero
                                   :restart-alpha
-                                  :fix-alpha])
+                                  :fix-alpha
+                                  :restart-zero
+                                  :restart-alpha])
                          gen/seq
                          (gen/delay 5))})
