@@ -2,7 +2,7 @@
   "Clojure wrapper for the Java DGraph client library. This whole thing is
   *riddled* with escaping vulnerabilities, so, you know, tread carefully."
   (:require [clojure.string :as str]
-            [clojure.tools.logging :refer [info]]
+            [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [with-retry]]
             [wall.hack]
             [cheshire.core :as json]
@@ -135,14 +135,22 @@
   [s]
   (ByteString/copyFromUtf8 s))
 
-
 (defn alter-schema!
   "Takes a schema string (or any number of strings) and applies that alteration
-  to dgraph."
+  to dgraph. Retries if DEADLINE_EXCEEDED, since dgraph likes to throw this for
+  ??? reasons at the start of the test. Should be idempotent, so... hopefully
+  we can retry, at least in this context?"
   [^DgraphClient client & schemata]
-  (.alter client (.. (DgraphProto$Operation/newBuilder)
-                     (setSchema (str/join "\n" schemata))
-                     build)))
+  (with-retry [i 0]
+    (.alter client (.. (DgraphProto$Operation/newBuilder)
+                       (setSchema (str/join "\n" schemata))
+                       build))
+    (catch io.grpc.StatusRuntimeException e
+      (if (and (< i 3)
+               (re-find #"DEADLINE_EXCEEDED" (.getMessage e)))
+        (do (warn "Alter schema failed due to DEADLINE_EXCEEDED, retrying...")
+            (retry (inc i)))
+        (throw e)))))
 
 (defn ^DgraphProto$Assigned mutate!*
   "Takes a mutation object and applies it to a transaction. Returns an
