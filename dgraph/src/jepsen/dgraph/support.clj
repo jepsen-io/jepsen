@@ -4,7 +4,7 @@
             [clj-http.client :as http]
             [clojure.pprint :refer [pprint]]
             [cheshire.core :as json]
-            [dom-top.core :refer [with-retry]]
+            [dom-top.core :refer [assert+ with-retry]]
             [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [db       :as db]
                     [control  :as c]
@@ -66,6 +66,19 @@
             [:--peer (str (jepsen/primary test) ":" zero-internal-port)])))
   :started)
 
+(defn lru-opt
+  "Between 1.0.4 and 1.0.5, Dgraph changed the name of their mandatory LRU
+  memory option and there's no option that works across build, so we have to
+  detect which version of the option name to use from the help in order to test
+  different builds."
+  []
+  (let [usage (c/exec (str dir "/" binary) :server :--help)
+        opt (re-find #"(--(lru|memory)_mb)" usage)]
+    (assert+ opt RuntimeException
+             (str "Not sure whether to use --lru_mb or --memory_mb with "
+                  "this dgraph build. It told me:\n\n" usage))
+    [(opt 1) 1024]))
+
 (defn start-alpha!
   "Launch dgraph data server on a node."
   [test node]
@@ -76,8 +89,7 @@
            :chdir   dir}
           binary
           :server
-;          :--memory_mb  1024
-          :--lru_mb     1024
+          (lru-opt)
           :--idx        (node-idx test node)
           :--my         (str node ":" alpha-internal-port)
           :--zero       (str node ":" zero-internal-port)))
