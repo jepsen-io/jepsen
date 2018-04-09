@@ -52,7 +52,7 @@
                                (gen/log "Healing cluster.")
                                (gen/nemesis (:final-generator nemesis))
                                (gen/log "Waiting for recovery.")
-                               (gen/sleep 10)
+                               (gen/sleep (:final-recovery-time opts))
                                (gen/clients (:final-generator workload)))
                    gen)]
     (merge tests/noop-test
@@ -114,6 +114,10 @@
     :default :server
     :parse-fn keyword
     :validate [#{:client :server} "Must be either `client` or `server`."]]
+   [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
+    :default 10
+    :parse-fn parse-long
+    :validate [(complement neg?) "Must be a non-negative number"]]
    [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
     :default 3
     :parse-fn parse-long
