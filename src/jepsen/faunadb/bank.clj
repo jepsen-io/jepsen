@@ -12,6 +12,7 @@
   (:import java.util.concurrent.ExecutionException)
   (:require [jepsen [client :as client]
                     [checker :as checker]
+                    [core :as jepsen]
                     [fauna :as fauna]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
@@ -51,6 +52,27 @@
 (def BalancesField
   "A field extractor for balances"
   (.collect (Field/at (into-array String ["data"])) (Field/as BalancesCodec)))
+
+(defn do-index-read
+  [conn]
+  (f/queryGet
+    conn
+    (Map
+      (Paginate (Match idxRef))
+      (Lambda
+        (v "r")
+        (Arr
+          (Var "r")
+          (Select balancePath (Get (Var "r"))))))
+    BalancesField))
+
+(defn await-replication
+  [conn n]
+  (let [iCnt (count (do-index-read conn))]
+    (if (not= n iCnt)
+      (do
+        (Thread/sleep 1000)
+        (await-replication conn n)))))
 
 (defmacro wrapped-query
   [op & exprs]
@@ -93,7 +115,9 @@
               (fn [i]
                 (Create (Ref classRef i)
                         (Obj "data" (Obj "balance" (v starting-balance)))))
-              (range n)))))))
+              (range n))))))
+    (jepsen/synchronize test)
+    (await-replication conn n))
 
   (invoke! [this test op]
     (case (:f op)
@@ -115,19 +139,8 @@
 
       :index-read
       (wrapped-query op
-        (let [n (:value op)]
-          (->>
-            (f/queryGet
-              conn
-              (Map
-                (Paginate (Match idxRef))
-                (Lambda
-                  (v "r")
-                  (Arr
-                    (Var "r")
-                    (Select balancePath (Get (Var "r"))))))
-              BalancesField)
-            (assoc op :type :ok, :value))))
+        (->> (do-index-read conn)
+          (assoc op :type :ok, :value)))
 
       :transfer
       (wrapped-query op
@@ -235,7 +248,7 @@
   (fauna/basic-test
     (merge
       {:client {:client (:client opts)
-                :during (->> (gen/mix [bank-read bank-diff-transfer])
+                :during (->> (gen/mix [bank-read bank-index-read bank-diff-transfer])
                           (gen/clients))
                 :final (->> (gen/seq [(gen/once bank-read) (gen/once bank-index-read)])
                          (gen/clients))}
