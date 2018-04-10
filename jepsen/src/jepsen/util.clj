@@ -60,6 +60,11 @@
   [n]
   (inc (int (Math/floor (/ n 2)))))
 
+(defn fast-last
+  "Like last, but O(1) on counted collections."
+  [coll]
+  (nth coll (dec (count coll))))
+
 (defn rand-nth-empty
   "Like rand-nth, but returns nil if the collection is empty."
   [coll]

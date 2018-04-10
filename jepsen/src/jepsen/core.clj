@@ -487,6 +487,24 @@
 
     @history))
 
+(defn analyze!
+  "After running the test and obtaining a history, we perform some
+  post-processing on the history, run the checker, and write the test to disk
+  again."
+  [test]
+  (info "Analyzing...")
+  (let [; Give each op in the history a monotonically increasing index
+        test (assoc test :history (history/index (:history test)))
+
+        ; Run checkers
+        test (assoc test :results (checker/check-safe
+                                    (:checker test)
+                                    test
+                                    (:model test)
+                                    (:history test)))]
+    (info "Analysis complete")
+    (when (:name test) (store/save-2! test))))
+
 (defn log-results
   "Logs info about the results of a test to stdout, and returns test."
   [test]
@@ -600,17 +618,8 @@
                                                       :sessions)]
                                      (info "Run complete, writing")
                                      (when (:name test) (store/save-1! test))
-                                     test))))))))
-                _    (info "Analyzing")
-                ; Give each op in the history a monotonically increasing index
-                test (assoc test :history (history/index (:history test)))
-                test (assoc test :results (checker/check-safe
-                                            (:checker test)
-                                            test
-                                            (:model test)
-                                            (:history test)))]
-
-            (info "Analysis complete")
-            (when (:name test) (store/save-2! test)))))
+                                     test))))))))]
+            (analyze! test))))
       (finally
         (store/stop-logging!)))))
+

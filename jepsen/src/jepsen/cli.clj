@@ -9,8 +9,10 @@
             [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojure.java.io :as io]
-            [jepsen.core :as jepsen]
-            [jepsen.web :as web]))
+            [dom-top.core :refer [assert+]]
+            [jepsen [core :as jepsen]
+                    [store :as store]
+                    [web :as web]]))
 
 (def default-nodes ["n1" "n2" "n3" "n4" "n5"])
 
@@ -304,7 +306,12 @@ Options:\n")
    :tarball If present, adds a --tarball option to this command, defaulting to
             whatever URL is given here.
    :usage   Defaults to `jc/test-usage`. Optional.
-   :test-fn A function that receives the option map and constructs a test.}"
+   :test-fn A function that receives the option map and constructs a test.}
+
+  This comes with two commands: `test`, which runs a test and analyzes it, and
+  `analyze`, which constructs a test map using the same arguments as `run`, but
+  analyzes a history from disk instead.
+  "
   [opts]
   (let [opt-spec (into test-opt-spec (:opt-spec opts))
         opt-spec (if-let [default-tarball (:tarball opts)]
@@ -316,19 +323,54 @@ Options:\n")
                    opt-spec)
         opt-fn  (if (:tarball opts)
                   (comp test-opt-fn validate-tarball)
-                  test-opt-fn)]
+                  test-opt-fn)
+        opt-fn  (if-let [f (:opt-fn opts)]
+                  (comp f opt-fn)
+                  opt-fn)
+        test-fn (:test-fn opts)]
   {"test" {:opt-spec opt-spec
-           :opt-fn   (if-let [f (:opt-fn opts)]
-                       (comp f opt-fn)
-                       opt-fn)
+           :opt-fn   opt-fn
            :usage    (:usage opts test-usage)
            :run      (fn [{:keys [options]}]
                        (info "Test options:\n"
                              (with-out-str (pprint options)))
                        (doseq [i (range (:test-count options))]
-                         (let [test (jepsen/run! ((:test-fn opts) options))]
+                         (let [test (jepsen/run! (test-fn options))]
                            (when-not (:valid? (:results test))
-                             (System/exit 1)))))}}))
+                             (System/exit 1)))))}
+
+   "analyze" {:opt-spec opt-spec
+              :opt-fn   opt-fn
+              :usage    (:usage opts test-usage)
+              :run      (fn [{:keys [options]}]
+                          (info "Test options:\n"
+                                (with-out-str (pprint options)))
+                          (let [cli-test    (test-fn options)
+                                stored-test (store/latest)
+                                test (-> stored-test
+                                         (dissoc :results)
+                                         (merge cli-test)
+                                         (assoc :history
+                                                (:history stored-test)))]
+
+                            (assert+ stored-test IllegalStateException
+                                     "Not sure what the last test was")
+                            (assert+ (= (:name stored-test)
+                                        (:name cli-test))
+                                     IllegalStateException
+                                     (str "Stored test (" (:name stored-test)
+                                          ") and CLI test (" (:name cli-test)
+                                          ") have different names; aborting"))
+
+                            (info "Combined test:\n"
+                                  (-> test
+                                      (update :history (partial take 5))
+                                      (update :history vector)
+                                      (update :history conj '...)
+                                      pprint
+                                      with-out-str))
+
+                            (jepsen/analyze! test)))}}))
 
 (defn -main
   [& args]
