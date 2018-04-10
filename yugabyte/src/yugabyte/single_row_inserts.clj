@@ -27,6 +27,7 @@
             [clojurewerkz.cassaforte.policies :refer :all]
             [clojurewerkz.cassaforte.cql :as cql]
             [yugabyte.core :refer :all]
+            [yugabyte.nemesis :refer :all]
             )
   (:import (clojure.lang ExceptionInfo)
            (com.datastax.driver.core ConsistencyLevel)
@@ -170,8 +171,12 @@
           :generator (gen/phases
             (->> w
                  (gen/stagger 1)
-                 (gen/nemesis nil)
-                 (gen/time-limit 5))
+                 (gen/nemesis
+                   (gen/seq (cycle [(gen/sleep nemesis-delay)
+                                    {:type :info :f :start}
+                                    (gen/sleep nemesis-duration)
+                                    {:type :info :f :stop}])))
+                 (gen/time-limit (:time-limit opts)))
             (gen/clients (gen/once r))
           )
           :checker (checker/compose {:perf (checker/perf)

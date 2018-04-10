@@ -2,6 +2,7 @@
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojurewerkz.cassaforte.client :as cassandra]
+            [clj-http.client :as http]
             [jepsen [cli :as cli]
                     [control :as c]
                     [db :as db]
@@ -9,6 +10,8 @@
                     [util :as util :refer [meh timeout]]
             ]
             [jepsen.control.util :as cu]
+            [yugabyte.common :refer :all]
+            [yugabyte.nemesis :as nemesis]
             ))
 
 (def master-log-dir  "/home/yugabyte/master/logs")
@@ -31,8 +34,8 @@
   "Starts YugaByteDB."
   [node test]
   (info node "Starting YugaByteDB")
-  (info (meh (c/exec (c/lit "if [[ -e /home/yugabyte/master/master.out ]]; then /home/yugabyte/bin/yb-server-ctl.sh master start; fi"))))
-  (info (meh (c/exec (c/lit "/home/yugabyte/bin/yb-server-ctl.sh tserver start"))))
+  (start-master! node)
+  (start-tserver! node)
 )
 
 (defn stop!
@@ -93,4 +96,5 @@
               :username "yugabyte"
           }
           :db      (db "x.y.z")
+          :nemesis (nemesis/get-nemesis-by-name (:nemesis opts))
          }))
