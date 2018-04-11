@@ -116,6 +116,9 @@
               #"Unavailable desc = all SubConns are in TransientFailure"
               (assoc ~op :type :info, :error :unavailable-all-subconns-down)
 
+              #"rpc error: code = Unavailable desc = transport is closing"
+              (assoc ~op :type :info, :error :unavailable-transport-closing)
+
               #"dispatchTaskOverNetwork: while retrieving connection. error: Unhealthy connection"
               (assoc ~op :type :info, :error :unhealthy-connection)
 

@@ -48,12 +48,26 @@
   []
   (reify checker/Checker
     (check [this test model history opts]
-      (let [bad-reads (->> history
+      (let [accts     (set (:accounts test))
+            bad-reads (->> history
                            (r/filter op/ok?)
                            (r/filter #(= :read (:f %)))
                            (r/map (fn [op]
-                                    (let [balances (vals (:value op))]
-                                      (cond (not= (:total-amount test)
+                                    (let [ks       (keys (:value op))
+                                          balances (vals (:value op))]
+                                      (cond (not-every? accts ks)
+                                            {:type        :unexpected-key
+                                             :unexpected  (remove accts ks)
+                                             :op          op}
+
+                                            (some nil? balances)
+                                            {:type    :nil-balance
+                                             :nils    (->> (:value op)
+                                                           (remove key)
+                                                           (into {}))
+                                             :op      op}
+
+                                            (not= (:total-amount test)
                                                   (reduce + balances))
                                             {:type     :wrong-total
                                              :total    (reduce + balances)
@@ -88,7 +102,7 @@
        (r/filter #(= :read (:f %)))
        (r/map (fn [op]
                 [(util/nanos->secs (:time op))
-                 (reduce + (vals (:value op)))]))
+                 (reduce + (remove nil? (vals (:value op))))]))
        (into [])))
 
 (defn plotter
@@ -99,6 +113,7 @@
       (let [totals (->> history
                         (by-node test)
                         (util/map-vals points))
+            colors (perf/qs->colors (keys totals))
             path (.getCanonicalPath
                    (store/path! test (:subdirectory opts) "bank.png"))]
         (try
@@ -109,6 +124,7 @@
                                      ["-"
                                       'with       'points
                                       'pointtype  2
+                                      'linetype   (colors node)
                                       'title      (name node)]))]])
             (vals totals))
           {:valid? true}
