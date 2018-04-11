@@ -61,7 +61,11 @@
            {:name       (str "dgraph " version " "
                              (name (:workload opts))
                              " s=" (name (:sequencing opts))
-                             (:when (:upsert-schema opts) " @upsert"))
+                             (:when (:upsert-schema opts) " upsert")
+                             " nemesis="
+                             (->> (:nemesis opts)
+                                  (map #(->> % name butlast (apply str)))
+                                  (str/join ",")))
             :version    version
             :os         debian/os
             :db         (s/db)
