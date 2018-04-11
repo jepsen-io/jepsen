@@ -43,44 +43,73 @@
   []
   (gen/mix [diff-transfer read]))
 
+(defn err-badness
+  "Takes a bank error and returns a number, depending on its type. Bigger
+  numbers mean more egregious errors."
+  [test err]
+  (case (:type err)
+    :unexpected-key (count (:unexpected err))
+    :nil-balance    (count (:nils err))
+    :wrong-total    (Math/abs (float (/ (- (:total err) (:total-amount test))
+                                        (:total-amount test))))
+    :negative-value (- (reduce + (:negative err)))))
+
 (defn checker
 	"Balances must all be non-negative and sum to (:total test)."
   []
   (reify checker/Checker
     (check [this test model history opts]
       (let [accts     (set (:accounts test))
-            bad-reads (->> history
-                           (r/filter op/ok?)
-                           (r/filter #(= :read (:f %)))
-                           (r/map (fn [op]
-                                    (let [ks       (keys (:value op))
-                                          balances (vals (:value op))]
-                                      (cond (not-every? accts ks)
-                                            {:type        :unexpected-key
-                                             :unexpected  (remove accts ks)
-                                             :op          op}
+            reads (->> history
+                       (r/filter op/ok?)
+                       (r/filter #(= :read (:f %))))
+            errors (->> reads
+                        (r/map (fn [op]
+                                 (let [ks       (keys (:value op))
+                                       balances (vals (:value op))]
+                                   (cond (not-every? accts ks)
+                                         {:type        :unexpected-key
+                                          :unexpected  (remove accts ks)
+                                          :op          op}
 
-                                            (some nil? balances)
-                                            {:type    :nil-balance
-                                             :nils    (->> (:value op)
-                                                           (remove key)
-                                                           (into {}))
-                                             :op      op}
+                                         (some nil? balances)
+                                         {:type    :nil-balance
+                                          :nils    (->> (:value op)
+                                                        (remove val)
+                                                        (into {}))
+                                          :op      op}
 
-                                            (not= (:total-amount test)
-                                                  (reduce + balances))
-                                            {:type     :wrong-total
-                                             :total    (reduce + balances)
-                                             :op       op}
+                                         (not= (:total-amount test)
+                                               (reduce + balances))
+                                         {:type     :wrong-total
+                                          :total    (reduce + balances)
+                                          :op       op}
 
-                                            (some neg? balances)
-                                            {:type     :negative-value
-                                             :negative (filter neg? balances)
-                                             :op       op}))))
-                           (r/filter identity)
-                           (into []))]
-        {:valid? (empty? bad-reads)
-         :bad-reads bad-reads}))))
+                                         (some neg? balances)
+                                         {:type     :negative-value
+                                          :negative (filter neg? balances)
+                                          :op       op}))))
+                        (r/filter identity)
+                        (group-by :type))]
+        {:valid?      (every? empty? (vals errors))
+         :read-count  (count (into [] reads))
+         :error-count (reduce + (map count (vals errors)))
+         :first-error (util/min-by (comp :index :op) (map first (vals errors)))
+         :errors      (->> errors
+                           (map
+                             (fn [[type errs]]
+                               [type
+                                (merge {:count (count errs)
+                                        :first (first errs)
+                                        :worst (util/max-by
+                                                 (partial err-badness test)
+                                                 errs)
+                                        :last  (peek errs)}
+                                       (if (= type :wrong-total)
+                                         {:lowest  (util/min-by :total errs)
+                                          :highest (util/max-by :total errs)}
+                                         {}))]))
+                           (into {}))}))))
 
 (defn by-node
   "Groups operations by node."
@@ -119,7 +148,9 @@
         (try
           (g/raw-plot!
             (concat (perf/preamble path)
-                    [['plot (apply g/list
+                    [['set 'title (str (:name test) " bank")]
+                     '[set ylabel "Total of all accounts"]
+                     ['plot (apply g/list
                                    (for [[node points] totals]
                                      ["-"
                                       'with       'points
