@@ -1,6 +1,8 @@
 (ns jepsen.dgraph.nemesis
   "Failure modes!"
-  (:require [jepsen [control :as c]
+  (:require [clojure.pprint :refer [pprint]]
+            [clojure.tools.logging :refer [info warn]]
+            [jepsen [control :as c]
                     [generator :as gen]
                     [util :as util]
                     [nemesis :as nemesis]]
@@ -41,6 +43,37 @@
                               s/stop-zero!
                               s/start-zero!))
 
+(defn tablet-mover
+  "Moves tablets around at random"
+  []
+  (reify nemesis/Nemesis
+    (setup! [this test] this)
+
+    (invoke! [this test op]
+      (let [state  (s/zero-state (rand-nth (:nodes test)))
+            groups (->> state :groups keys)]
+        (info :state (with-out-str (pprint state)))
+        (->> state
+             :groups
+             vals
+             (map :tablets)
+             (mapcat vals)
+             shuffle
+             (map (fn [tablet]
+                    (let [pred   (:predicate tablet)
+                          group  (:groupId tablet)
+                          group' (rand-nth (remove #{group} groups))]
+                      ; Actually move tablet
+                      (info "Moving" pred "from" group "to" group')
+                      (s/move-tablet! (rand-nth (:nodes test)) pred group')
+                      (info "Moved" pred "from" group "to" group')
+                      ; Return predicate and new group
+                      [pred [group group']])))
+             (into (sorted-map))
+             (assoc op :value))))
+
+    (teardown! [this test])))
+
 (defn full-nemesis
   "Can kill and restart all processes and initiate network partitions."
   [opts]
@@ -51,7 +84,8 @@
      {:kill-zero        :start
       :restart-zero     :stop}  (zero-killer)
      {:start-partition  :start
-      :stop-partition   :stop}  (nemesis/partition-random-halves)}))
+      :stop-partition   :stop}  (nemesis/partition-random-halves)
+     #{:move-tablet}            (tablet-mover)}))
 
 (defn op
   "Construct a nemesis op"
@@ -71,7 +105,9 @@
         (when (:fix-alpha? opts)
           [(op :fix-alpha)])
         (when (:partition? opts)
-          [(gen/seq (cycle (map op [:start-partition :stop-partition])))])]
+          [(gen/seq (cycle (map op [:start-partition :stop-partition])))])
+        (when (:move-tablet? opts)
+          [(op :move-tablet)])]
        (apply concat)
        gen/mix
        (gen/stagger 15)))
@@ -81,11 +117,10 @@
   [opts]
   {:nemesis   (full-nemesis opts)
    :generator (full-generator opts)
-   :final-generator (->> (map op [:stop-partition
-                                  :restart-zero
-                                  :restart-alpha
-                                  :fix-alpha
-                                  :restart-zero
-                                  :restart-alpha])
+   :final-generator (->> [(when (:partition?  opts) :stop-partition)
+                          (when (:kill-zero?  opts) :restart-zero)
+                          (when (:kill-alpha? opts) :restart-alpha)]
+                         (remove nil?)
+                         (map op)
                          gen/seq
                          (gen/delay 5))})

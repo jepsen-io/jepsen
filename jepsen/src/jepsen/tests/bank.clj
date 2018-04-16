@@ -116,12 +116,11 @@
   [test history]
   (let [nodes (:nodes test)
         n     (count nodes)]
-    (group-by (fn [op]
-                (let [p (:process op)]
-                  (if (number? p)
-                    (nth nodes (mod p n))
-                    p)))
-              history)))
+    (->> history
+         (r/filter (comp number? :process))
+         (group-by (fn [op]
+                     (let [p (:process op)]
+                       (nth nodes (mod p n))))))))
 
 (defn points
   "Turns a history into a seqeunce of [time total-of-accounts] points."

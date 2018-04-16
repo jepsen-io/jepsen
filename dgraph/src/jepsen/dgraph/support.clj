@@ -132,22 +132,37 @@
    :throw-exceptions? true
    :throw-entire-message? true})
 
+(defn zero-url
+  "Takes a zero node and path fragmnets, and constructs a URL for it."
+  [node & path]
+  (str "http://" node ":" zero-public-port "/" (str/join "/" path)))
+
 (defn zero-state
   "Fetches zero /state from the given node."
   [node]
-  (-> (http/get (str "http://" node ":" zero-public-port "/state")
+  (-> (http/get (zero-url node "state")
                 http-opts)
       :body
       (json/parse-string (fn [k] (if (re-find #"\A\d+\z" k)
-                                   k
+                                   (Long/parseLong k)
                                    (keyword k))))))
+
+(defn move-tablet!
+  "Given a zero node, asks that node to move a tablet to the given group."
+  [node tablet group]
+  (-> (http/get (zero-url node "moveTablet")
+                (assoc http-opts
+                       :socket-timeout 20000
+                       :query-params {:tablet tablet
+                                      :group  group}))
+      :body))
 
 (defn cluster-ready?
   "Does this zero node think we're ready to start work?"
   [node test]
   (let [s       (zero-state node)
         indexen (->> (:nodes test)
-                     (map (comp str (partial node-idx test)))
+                     (map (partial node-idx test))
                      set)
         addrs   (->> (:nodes test)
                      (map #(str % ":" alpha-internal-port))

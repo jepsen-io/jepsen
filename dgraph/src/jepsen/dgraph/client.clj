@@ -102,6 +102,9 @@
               #"Predicate is being moved, please retry later"
               (assoc ~op :type :fail, :error :predicate-moving)
 
+              #"Tablet isn't being served by this instance"
+              (assoc ~op :type :fail, :error :tablet-not-served-by-instance)
+
               #"Please retry again, server is not ready to accept requests"
               (assoc ~op :type :fail, :error :not-ready-for-requests)
 

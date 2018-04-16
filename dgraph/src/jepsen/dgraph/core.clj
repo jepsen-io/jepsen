@@ -32,7 +32,8 @@
   #{:kill-alpha?
     :kill-zero?
     :fix-alpha?
-    :partition?})
+    :partition?
+    :move-tablet?})
 
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
@@ -64,7 +65,7 @@
                              (:when (:upsert-schema opts) " upsert")
                              " nemesis="
                              (->> (:nemesis opts)
-                                  (map #(->> % name butlast (apply str)))
+                                  (map #(->> % key name butlast (apply str)))
                                   (str/join ",")))
             :version    version
             :os         debian/os
@@ -98,7 +99,6 @@
     :default "kill-alpha,kill-zero,partition"
     :parse-fn parse-nemesis-spec
     :validate [(fn [parsed]
-                 (prn parsed)
                  (and (map? parsed)
                       (every? nemesis-specs (keys parsed))))
                (str "Should be a comma-separated list of failure types. A failure type "

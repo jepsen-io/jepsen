@@ -18,6 +18,7 @@
     (c/alter-schema! conn (str "type: string @index(exact)"
                                (when (:upsert-schema test) " @upsert")
                                " .\n"
+                               ; TODO: Do we really need to index this?
                                "value: int @index(int) .\n")))
 
   (invoke! [this test op]
@@ -60,7 +61,9 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn "value: [int] .")
+    (c/alter-schema! conn (str "value: [int]"
+                               (when (:upsert-schema test) " @upsert"
+                                 " .")))
     (c/with-txn test [t conn]
       (deliver uid (first (vals (c/mutate! t {:value -1}))))
       (info "UID is" @uid)))
