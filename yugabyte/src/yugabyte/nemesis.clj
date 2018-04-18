@@ -76,6 +76,8 @@
    "start-kill-master"          `(master-killer :-9)
    "start-stop-node"            `(node-killer)
    "start-kill-node"            `(node-killer :-9)
+   "partition-random-halves"    `(nemesis/partition-random-halves)
+   "partition-random-node"      `(nemesis/partition-random-node)
   }
 )
 

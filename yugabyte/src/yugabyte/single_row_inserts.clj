@@ -119,24 +119,27 @@
 
 (defrecord CQLRowInsertClient [conn]
   client/Client
-  (setup! [_ test node]
+  (open! [this test node]
+         (info "Opening connection")
+         (assoc this :conn (cassandra/connect (->> test :nodes (map name)) {:protocol-version 3})))
+  (setup! [_ test]
     (locking setup-lock
-      (let [conn (cassandra/connect (->> test :nodes (map name)) {:protocol-version 3})]
-        (cql/create-keyspace conn "jepsen_keyspace"
-                             (if-not-exists)
-                             (with {:replication
-                                    {:class "SimpleStrategy"
-                                     :replication_factor 3}}))
-        (cql/use-keyspace conn "jepsen_keyspace")
-        (cql/create-table conn "kv_pairs"
-                          (if-not-exists)
-                          (column-definitions {:id :int
-                                               :val :int
-                                               :primary-key [:id]}))
-        (->CQLRowInsertClient conn))))
+      (cql/create-keyspace conn "jepsen_keyspace"
+                           (if-not-exists)
+                           (with {:replication
+                                  {"class" "SimpleStrategy"
+                                   "replication_factor" 3}}))
+      (cql/use-keyspace conn "jepsen_keyspace")
+      (cql/create-table conn "kv_pairs"
+                        (if-not-exists)
+                        (column-definitions {:id :int
+                                             :val :int
+                                             :primary-key [:id]}))
+      (->CQLRowInsertClient conn)))
   (invoke! [this test op]
     (case (:f op)
-      :write (try (cql/insert conn "kv_pairs" (mk-pair (:value op)))
+      :write (try
+                (cql/insert conn "kv_pairs" (mk-pair (:value op)))
                 (assoc op :type :ok)
                 (catch UnavailableException e
                   (assoc op :type :fail :value (.getMessage e)))

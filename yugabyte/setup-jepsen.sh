@@ -28,5 +28,9 @@ do
   ssh-keygen -y -f $YB_PEM_FILE | \
     ssh ${SSH_OPTS[@]} centos@$node 'sudo sh -c "cat >>/home/yugabyte/.ssh/authorized_keys"'
 
+  # Allow passwordless sudo for yugabyte user.
+  ssh ${SSH_OPTS[@]} centos@$node \
+      'sudo sh -c "echo yugabyte ALL=\(ALL:ALL\) NOPASSWD:ALL >/etc/sudoers.d/yugabyte_sudoers"'
+
   ssh ${SSH_OPTS[@]} yugabyte@$node 'hostname'
 done
