@@ -122,7 +122,7 @@
   (open! [this test node]
          (info "Opening connection")
          (assoc this :conn (cassandra/connect (->> test :nodes (map name)) {:protocol-version 3})))
-  (setup! [_ test]
+  (setup! [this test]
     (locking setup-lock
       (cql/create-keyspace conn "jepsen_keyspace"
                            (if-not-exists)
@@ -161,8 +161,9 @@
                    (info "All nodes are down - sleeping 2s")
                    (Thread/sleep 2000)
                    (assoc op :type :fail :value (.getMessage e))))))
-  (teardown! [_ _]
-    (info "Tearing down client with conn" conn)
+   (teardown! [this test])
+   (close! [this test]
+    (info "Closing client with conn" conn)
     (cassandra/disconnect! conn)))
 
 (defn test
