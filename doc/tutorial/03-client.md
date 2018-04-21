@@ -85,7 +85,7 @@ construct a new Client, and pass `nil` as the value for `conn`. Remember, our
 initial seed client doesn't have a connection; Jepsen will call `open!` to get
 connected clients later.
 
-```
+```clj
 (defn etcd-test
   "Given an options map from the command-line runner (e.g. :nodes, :ssh,
   :concurrency, ...), constructs a test map."
