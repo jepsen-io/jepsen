@@ -204,7 +204,7 @@ key. We can pick any name we like--let's call it "foo" for now.
 ```clj
     (invoke! [this test op]
       (case (:f op)
-        :read (assoc op :type :ok, :value (v/get conn "foo")))))
+        :read (assoc op :type :ok, :value (v/get conn "foo"))))
 ```
 
 We dispatch based on the `:f` field of the operation, and when it's a
