@@ -96,7 +96,10 @@
     :missing (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
    [nil  "--nemesis SPEC" "A comma-separated list of nemesis types"
-    :default "kill-alpha,kill-zero,partition"
+    :default {:kill-alpha? true
+              :kill-zero? true
+              :partition? true
+              :move-tablet? true}
     :parse-fn parse-nemesis-spec
     :validate [(fn [parsed]
                  (and (map? parsed)

@@ -149,12 +149,14 @@
   (-> qs
       sort
       reverse
-      (zipmap (map vector (repeat 'rgb) ["red"
-                                         "orange"
-                                         "purple"
-                                         "blue"
-                                         "green"
-                                         "grey"]))))
+      (zipmap (map vector
+                   (repeat 'rgb)
+                   (cycle ["red"
+                           "orange"
+                           "purple"
+                           "blue"
+                           "green"
+                           "grey"])))))
 
 (def types
   "What types are we rendering?"
