@@ -1,17 +1,14 @@
 (ns yugabyte.core
   (:require [clojure.tools.logging :refer :all]
-            [clojure.string :as str]
             [clojurewerkz.cassaforte.client :as cassandra]
-            [clj-http.client :as http]
-            [jepsen [cli :as cli]
-                    [control :as c]
+            [jepsen [control :as c]
                     [db :as db]
                     [tests :as tests]
                     [util :as util :refer [meh timeout]]
             ]
             [jepsen.control.util :as cu]
-            [yugabyte.common :refer :all]
-            [yugabyte.nemesis :as nemesis]
+            [yugabyte [common :refer :all]
+                      [nemesis :as nemesis]]
             ))
 
 (def master-log-dir  "/home/yugabyte/master/logs")
@@ -79,9 +76,6 @@
               (cu/ls-full tserver-log-dir)))
   )
 )
-
-(defn r [_ _] {:type :invoke, :f :read, :value nil})
-(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 1000000)})
 
 (defn yugabyte-test
   [opts]

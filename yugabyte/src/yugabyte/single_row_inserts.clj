@@ -1,37 +1,21 @@
 (ns yugabyte.single-row-inserts
   (:require [clojure [pprint :refer :all]
-             [string :as str]]
-            [clojure.java.io :as io]
+                     [set :as set]]
             [clojure.core.reducers :as r]
-            [clojure.set :as set]
             [clojure.tools.logging :refer [debug info warn]]
-            [jepsen [core      :as jepsen]
-             [db        :as db]
-             [util      :as util :refer [meh timeout]]
-             [control   :as c :refer [| lit]]
-             [client    :as client]
-             [checker   :as checker]
-             [generator :as gen]
-             [nemesis   :as nemesis]
-             [store     :as store]
-             [report    :as report]
-             [tests     :as tests]]
-            [jepsen.checker.timeline :as timeline]
-            [jepsen.control [net :as net]
-             [util :as net/util]]
-            [jepsen.os.debian :as debian]
-            [knossos.core :as knossos]
+            [jepsen [client    :as client]
+                    [checker   :as checker]
+                    [generator :as gen]
+                    [util :as util :refer [meh timeout]]]
             [knossos.op :as op]
-            [clojurewerkz.cassaforte.client :as cassandra]
-            [clojurewerkz.cassaforte.query :refer :all]
-            [clojurewerkz.cassaforte.policies :refer :all]
-            [clojurewerkz.cassaforte.cql :as cql]
-            [yugabyte.core :refer :all]
-            [yugabyte.nemesis :refer :all]
+            [clojurewerkz.cassaforte [client :as cassandra]
+                                     [query :refer :all]
+                                     [policies :refer :all]
+                                     [cql :as cql]]
+            [yugabyte [core :refer :all]
+                      [nemesis :refer :all]]
             )
-  (:import (clojure.lang ExceptionInfo)
-           (com.datastax.driver.core ConsistencyLevel)
-           (com.datastax.driver.core.exceptions UnavailableException
+  (:import (com.datastax.driver.core.exceptions UnavailableException
                                                 WriteTimeoutException
                                                 ReadTimeoutException
                                                 NoHostAvailableException)))
@@ -165,6 +149,9 @@
    (close! [this test]
     (info "Closing client with conn" conn)
     (cassandra/disconnect! conn)))
+
+(defn r [_ _] {:type :invoke, :f :read, :value nil})
+(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 1000000)})
 
 (defn test
   [opts]

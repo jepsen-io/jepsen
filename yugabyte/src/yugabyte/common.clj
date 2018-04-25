@@ -1,11 +1,7 @@
 (ns yugabyte.common
   (:require [clojure.tools.logging :refer :all]
-            [clojure.string :as str]
             [clj-http.client :as http]
-            [jepsen [control :as c]
-                    [util :as util :refer [meh timeout]]
-            ]
-            [jepsen.control.util :as cu]
+            [jepsen.control :as c]
             ))
 
 (defn start-master!
