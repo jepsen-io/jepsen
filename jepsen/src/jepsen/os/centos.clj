@@ -43,6 +43,10 @@
        (catch Exception e
          (update!))))
 
+(defmacro dprint [x]
+  `((fn [x#] do
+      x#) ~x))
+
 (defn installed
   "Given a list of centos packages (strings, symbols, keywords, etc), returns
   the set of packages which are installed, as strings."
@@ -51,16 +55,17 @@
     (->> (c/exec :yum :list :installed)
          str/split-lines
          (map (comp first #(str/split %1 #"\s+")))
-         (map (comp second (partial re-find #"(.*)-[^\-]+")))
+         (map (comp second (partial re-find #"(.*)\.[^\-]+")))
          set
-         (#(filter %1 pkgs))
-         set)))
+         ((partial clojure.set/intersection pkgs))
+         dprint)))
 
 (defn uninstall!
   "Removes a package or packages."
   [pkg-or-pkgs]
   (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))
         pkgs (installed pkgs)]
+    (info "Uninstalling" pkgs)
     (c/su (apply c/exec :yum :-y :remove pkgs))))
 
 (defn installed?
@@ -77,7 +82,7 @@
   (some->> (c/exec :yum :list :installed)
            str/split-lines
            (map (comp first #(str/split %1 #";")))
-           (map (partial re-find #"(.*)-[^\-]+"))
+           (map (partial re-find #"(.*).[^\-]+"))
            (filter #(= (second %) (name pkg)))
            first
            first
@@ -110,7 +115,6 @@
   (reify os/OS
     (setup! [_ test node]
       (info node "setting up centos")
-
       (setup-hostfile!)
 
       (maybe-update!)
@@ -119,11 +123,10 @@
         ; Packages!
         (install [:wget
                   :curl
-                  :vim
+                  :vim-common
                   :unzip
                   :rsyslog
                   :iptables
-                  :iputils-ping
                   :iproute
                   :logrotate]))
 
