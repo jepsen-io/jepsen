@@ -33,7 +33,9 @@
                   :rsyslog
 		  :tcpdump
                   :logrotate])
-	(c/su (c/exec :service :ntp :stop)))
+        ;; This occasionally fails (roughly 1% of the time) for no apparent reason.
+        ;; Try it again if it fails.
+	(c/su (c/exec :service :ntp :stop "||" :service :ntp :stop)))
 
       (meh (net/heal! (:net test) test)))
 
