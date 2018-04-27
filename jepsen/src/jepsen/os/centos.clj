@@ -111,13 +111,35 @@
           (info "Installing" missing)
           (apply c/exec :yum :-y :install missing))))))
 
+(defn install-start-stop-daemon!
+  "Installs start-stop-daemon on centos"
+  []
+  (info "Installing start-stop-daemon")
+  (c/su
+    (c/exec :wget "http://ftp.de.debian.org/debian/pool/main/d/dpkg/dpkg_1.17.25.tar.xz")
+    (c/exec :tar :-xf :dpkg_1.17.25.tar.xz)
+    (c/exec "bash" "-c" "cd dpkg-1.17.25 && ./configure")
+    (c/exec "bash" "-c" "cd dpkg-1.17.25 && make")
+    (c/exec "bash" "-c" "cp /dpkg-1.17.25/utils/start-stop-daemon /usr/bin/start-stop-daemon")))
+
+(defn installed-start-stop-daemon?
+  "Is start-stop-daemon Installed?"
+  []
+  (->> (c/exec :ls :/usr/bin)
+       str/split-lines
+       (map (fn [line]
+              (if (re-find #"start-stop-daemon" line) "installed")))))
+
 (def os
   (reify os/OS
     (setup! [_ test node]
       (info node "setting up centos")
+
       (setup-hostfile!)
 
       (maybe-update!)
+
+      (if (not= "installed" (installed-start-stop-daemon?)) (install-start-stop-daemon!))
 
       (c/su
         ; Packages!
