@@ -127,8 +127,7 @@
   []
   (->> (c/exec :ls :/usr/bin)
        str/split-lines
-       (map (fn [line]
-              (if (re-find #"start-stop-daemon" line) "installed")))))
+       (some #(if (re-find #"start-stop-daemon" %) true))))
 
 (def os
   (reify os/OS
@@ -139,7 +138,7 @@
 
       (maybe-update!)
 
-      (if (not= "installed" (installed-start-stop-daemon?)) (install-start-stop-daemon!))
+      (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
       (c/su
         ; Packages!
