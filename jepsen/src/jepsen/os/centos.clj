@@ -148,6 +148,7 @@
                   :unzip
                   :rsyslog
                   :iptables
+                  :ncurses-devel
                   :iproute
                   :logrotate]))
 
