@@ -151,7 +151,7 @@
     (cassandra/disconnect! conn)))
 
 (defn r [_ _] {:type :invoke, :f :read, :value nil})
-(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 1000000)})
+(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 100)})
 
 (defn test
   [opts]
@@ -159,17 +159,9 @@
     (merge opts
          {:name "Single row inserts"
           :client (CQLRowInsertClient. nil)
-          :generator (gen/phases
-            (->> w
-                 (gen/stagger 1)
-                 (gen/nemesis
-                   (gen/seq (cycle [(gen/sleep nemesis-delay)
-                                    {:type :info :f :start}
-                                    (gen/sleep nemesis-duration)
-                                    {:type :info :f :stop}])))
-                 (gen/time-limit (:time-limit opts)))
-            (gen/clients (gen/once r))
-          )
+          :client-generator (->> w
+                                 (gen/stagger 1))
+          :client-final-generator (gen/once r)
           :checker (checker/compose {:perf (checker/perf)
                                      :details (check-inserts)})
          })))

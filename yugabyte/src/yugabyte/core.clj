@@ -3,10 +3,12 @@
             [clojurewerkz.cassaforte.client :as cassandra]
             [jepsen [control :as c]
                     [db :as db]
+                    [generator :as gen]
                     [tests :as tests]
                     [util :as util :refer [meh timeout]]
             ]
             [jepsen.control.util :as cu]
+            [jepsen.os.centos :as centos]
             [yugabyte [common :refer :all]
                       [nemesis :as nemesis]]
             ))
@@ -79,8 +81,18 @@
 
 (defn yugabyte-test
   [opts]
+  (let [{:keys [client-generator
+                client-final-generator]} opts
+        generator (->> client-generator
+                       (gen/nemesis (nemesis/gen opts))
+                       (gen/time-limit (:time-limit opts)))
+        generator (if-not client-final-generator
+                    generator
+                    (gen/phases
+                     generator
+                     (gen/clients client-final-generator)))]
   (merge tests/noop-test
-         opts
+         (dissoc opts :client-generator :client-final-generator)
          {
           :ssh {
               :port 54422
@@ -90,5 +102,7 @@
               :username "yugabyte"
           }
           :db      (db "x.y.z")
+          :os      centos/os
+          :generator generator
           :nemesis (nemesis/get-nemesis-by-name (:nemesis opts))
-         }))
+         })))

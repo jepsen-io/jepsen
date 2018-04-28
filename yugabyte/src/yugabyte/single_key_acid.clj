@@ -98,23 +98,14 @@
            {:name "Single key ACID"
             :client (CQLSingleKey. nil)
             :concurrency (max 10 (:concurrency opts))
-            :generator (gen/phases
-                         (->>
-                           (independent/concurrent-generator
-                                10
-                                (range)
-                                (fn [k]
-                                  (->> (gen/reserve 5 (gen/mix [w cas cas]) r)
-                                       (gen/delay-til 1/2)
-                                       (gen/stagger 0.1)
-                                       (gen/limit 100))))
-                           (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep nemesis-delay)
-                                              {:type :info :f :start}
-                                              (gen/sleep nemesis-duration)
-                                              {:type :info :f :stop}])))
-                           (gen/time-limit (:time-limit opts)))
-                        )
+            :client-generator (independent/concurrent-generator
+                               10
+                               (range)
+                               (fn [k]
+                                 (->> (gen/reserve 5 (gen/mix [w cas cas]) r)
+                                      (gen/delay-til 1/2)
+                                      (gen/stagger 0.1)
+                                      (gen/limit 100))))
             :model (model/cas-register 0)
             :checker (checker/compose {:perf (checker/perf)
                                        :indep (independent/checker

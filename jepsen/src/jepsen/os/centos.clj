@@ -1,5 +1,5 @@
-(ns jepsen.os.debian
-  "Common tasks for Debian boxes."
+(ns jepsen.os.centos
+  "Common tasks for Centos boxes."
   (:use clojure.tools.logging)
   (:require [clojure.set :as set]
             [jepsen.util :refer [meh]]
@@ -25,32 +25,30 @@
       (c/su (c/exec :echo hosts' :> "/etc/hosts")))))
 
 (defn time-since-last-update
-  "When did we last run an apt-get update, in seconds ago"
+  "When did we last run an yum update, in seconds ago"
   []
   (- (Long/parseLong (c/exec :date "+%s"))
-     (Long/parseLong (c/exec :stat :-c "%Y" "/var/cache/apt/pkgcache.bin" "||" :echo 0))))
+     (Long/parseLong (c/exec :rpm :-qa :--queryformat "%{INSTALLTIME}\n" | :sort :-hr | :head :-n1))))
 
 (defn update!
-  "Apt-get update."
+  "yum update."
   []
-  (c/su (c/exec :apt-get :update)))
+  (c/su (c/exec :yum :update)))
 
 (defn maybe-update!
-  "Apt-get update if we haven't done so recently."
+  "Yum update if we haven't done so recently."
   []
   (when (< 86400 (time-since-last-update))
     (update!)))
 
 (defn installed
-  "Given a list of debian packages (strings, symbols, keywords, etc), returns
+  "Given a list of centos packages (strings, symbols, keywords, etc), returns
   the set of packages which are installed, as strings."
   [pkgs]
   (let [pkgs (->> pkgs (map name) set)]
-    (->> (apply c/exec :dpkg :--get-selections pkgs)
+    (->> (c/exec :rpm :-q pkgs (c/lit "||") :true)
          str/split-lines
-         (map (fn [line] (str/split line #"\s+")))
-         (filter #(= "install" (second %)))
-         (map first)
+         (filter #(not (re-matches #".* is not installed" %)))
          set)))
 
 (defn uninstall!
@@ -58,10 +56,10 @@
   [pkg-or-pkgs]
   (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))
         pkgs (installed pkgs)]
-    (c/su (apply c/exec :apt-get :remove :--purge :-y pkgs))))
+    (c/su (apply c/exec :yum :remove :--purge :-y pkgs))))
 
 (defn installed?
-  "Are the given debian packages, or singular package, installed on the current
+  "Are the given centos packages, or singular package, installed on the current
   system?"
   [pkg-or-pkgs]
   (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))]
@@ -71,9 +69,7 @@
   "Given a package name, determines the installed version of that package, or
   nil if it is not installed."
   [pkg]
-  (->> (c/exec :apt-cache :policy (name pkg))
-       (re-find #"Installed: ([^\s]+)")
-       second))
+  (c/exec :rpm :-q :--queryformat "%{version}" (name pkg)))
 
 (defn install
   "Ensure the given packages are installed. Can take a flat collection of
@@ -86,7 +82,7 @@
       (for [[pkg version] pkgs]
         (when (not= version (installed-version pkg))
           (info "Installing" pkg version)
-          (c/exec :apt-get :install :-y :--force-yes
+          (c/exec :yum :install :-y
                   (str (name pkg) "=" version)))))
 
     ; Install any version
@@ -95,7 +91,7 @@
       (when-not (empty? missing)
         (c/su
           (info "Installing" missing)
-          (apply c/exec :apt-get :install :-y :--force-yes missing))))))
+          (apply c/exec :yum :install :-y missing))))))
 
 (defn add-key!
   "Receives an apt key from the given keyserver."
@@ -137,7 +133,7 @@
 (def os
   (reify os/OS
     (setup! [_ test node]
-      (info node "setting up debian")
+      (info node "setting up centos")
 
       (setup-hostfile!)
 
@@ -162,9 +158,13 @@
                   :rsyslog
                   :logrotate]))
 
+      (c/su (c/exec :systemctl :stop :ntpd))
+
       (meh (net/heal! (:net test) test)))
 
-    (teardown! [_ test node])
+    (teardown! [_ test node]
+      (info node "tearing down centos")
+      (c/su (c/exec :systemctl :start :ntpd)))
 
     (install-build-essential! [_]
-      (install [:build-essential]))))
+      (install [:gcc :gcc-c++ :make :openssl-devel]))))
