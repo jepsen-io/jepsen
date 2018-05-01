@@ -301,16 +301,37 @@
              (str "Record " (pr-str record) " has no value for "
                   (pr-str pred))))))
 
+(defn key-pred
+  "Computes the key predicate name for a given key."
+  [k opts]
+  (->> opts
+       :key-predicate-count
+       (mod (hash k))
+       (str "key_")))
+
+(defn val-pred
+  "Computes the value predicate name for a given key."
+  [k opts]
+  (->> opts
+       :value-predicate-count
+       (mod (hash k))
+       (str "val_")))
+
 (defrecord TxnClient [opts conn]
   jc/Client
   (open! [this test node]
     (assoc this :conn (open node)))
 
   (setup! [this test]
-    (alter-schema! conn (str "key: int @index(int)"
-                             (when (:upsert-schema test) " @upsert")
-                             " .\n"
-                             "val: int .\n")))
+    (let [keys (->> (range (:key-predicate-count opts))
+                    (map (fn [i] (str "key_" i ": int @index(int)"
+                                      (when (:upsert-schema test) " @upsert")
+                                      " .\n")))
+                    str/join)
+          vals (->> (range (:value-predicate-count opts))
+                    (map (fn [i] (str "val_" i ": int .\n")))
+                    str/join)]
+      (alter-schema! conn (str keys vals))))
 
   (invoke! [this test op]
     (with-conflict-as-fail op
@@ -318,31 +339,35 @@
         (->> (:value op)
              (reduce
                (fn [txn' [f k v :as micro-op]]
-                 (case f
-                   :r
-                   (let [res (query t (str "{ q(func: eq(key, $key)) {\n"
-                                           "  val\n"
-                                           "}}")
-                                    {:key k})
-                         reads (:q res)]
-                     (conj txn' [f k (condp = (count reads)
-                                       ; Not found
-                                       0 nil
-                                       ; Found
-                                       1 (:val (first reads))
-                                       ; Ummm
-                                       (throw (RuntimeException.
-                                                (str "Unexpected multiple results for key "
-                                                     (pr-str k) ": "
-                                                     (pr-str reads)))))]))
+                 (let [kp (key-pred k opts)
+                       vp (val-pred k opts)]
+                   (case f
+                     :r
+                     (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
+                                             "  " vp "\n"
+                                             "}}")
+                                      {:key k})
+                           reads (:q res)]
+                       (conj txn' [f k (condp = (count reads)
+                                         ; Not found
+                                         0 nil
+                                         ; Found
+                                         1 (get (first reads)
+                                                (keyword vp))
+                                         ; Ummm
+                                         (throw (RuntimeException.
+                                                  (str "Unexpected multiple results for key "
+                                                       (pr-str k) ": "
+                                                       (pr-str reads)))))]))
 
-                   ; TODO: we should be able to optimize this to do pure
-                   ; inserts and UID-direct writes without the upsert
-                   ; read-write cycle, at least when we know the state
-                   :w (do (if (:blind-insert-on-write? opts)
-                            (mutate! t {:key k :val v})
-                            (upsert! t :key {:key k, :val v}))
-                          (conj txn' micro-op))))
+                     ; TODO: we should be able to optimize this to do pure
+                     ; inserts and UID-direct writes without the upsert
+                     ; read-write cycle, at least when we know the state
+                     :w (do (if (:blind-insert-on-write? opts)
+                              (mutate! t {(keyword kp) k, (keyword vp) v})
+                              (upsert! t (keyword kp)
+                                       {(keyword kp) k, (keyword vp) v}))
+                            (conj txn' micro-op)))))
                [])
              (assoc op :type :ok, :value)))))
 
@@ -359,6 +384,15 @@
 
     :blind-insert-on-write?   If true, don't do upserts; just insert on every
                               write. Only appropriate when you'll never write
-                              the same thing twice."
+                              the same thing twice.
+    :value-predicate-count    How many predicates to stripe values over.
+                              Default: 5.
+    :key-predicate-count      How many predicates to stripe keys over. Default:
+                              5."
   [opts]
-  (TxnClient. opts nil))
+  (TxnClient.
+    (merge {:blind-insert-on-write? false
+            :value-predicate-count  5
+            :key-predicate-count    5}
+           opts)
+    nil))
