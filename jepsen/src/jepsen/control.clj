@@ -21,7 +21,7 @@
 (def ^:dynamic *sudo*     "User to sudo to"                 nil)
 (def ^:dynamic *username* "Username"                        "root")
 (def ^:dynamic *password* "Password (for login and sudo)"   "root")
-(def ^:dynamic *port*     "SSH listening port"              22)
+(def ^:dynamic *port*     "Default SSH listening port"      22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 (def ^:dynamic *retries*  "How many times to retry conns"   5)
@@ -267,7 +267,7 @@
 
 (defn clj-ssh-session
   "Opens a raw session to the given host."
-  [host]
+  [host port]
   (let [host  (name host)
         agent (ssh/ssh-agent {})
         _     (when *private-key-path*
@@ -277,27 +277,32 @@
                        host
                        {:username *username*
                         :password *password*
-                        :port *port*
+                        :port port
                         :strict-host-key-checking *strict-host-key-checking*})
       (ssh/connect))))
 
 (defn session
   "Wraps clj-ssh-session in a wrapper for reconnection."
-  [host]
-  (rc/open!
-   (rc/wrapper {:open    (if *dummy*
-                           (fn [] [:dummy host])
-                           (fn [] (try
-                                    (clj-ssh-session host)
+  ([hostname]
+    (let [parts (str/split hostname #":") host (first parts)]
+      (if (= (count parts) 2)
+        (session host (Integer/parseInt (second parts)))
+        (session host *port*))))
+  ([host port]
+    (rc/open!
+      (rc/wrapper {:open   (if *dummy*
+                            (fn [] [:dummy host])
+                            (fn [] (try
+                                    (clj-ssh-session host port)
                                     (catch com.jcraft.jsch.JSchException e
                                       (error "Error opening SSH session. Verify username, password, and node hostnames are correct.\nSSH configuration is:\n"
-                                             (util/pprint-str (binding [*host* host] (debug-data))))
+                                             (util/pprint-str (binding [*host* host *port* port] (debug-data))))
                                       (throw e)))))
-                :name    [:control host]
-                :close   (if *dummy*
-                           identity
-                           ssh/disconnect)
-                :log?    true})))
+                   :name   [:control host]
+                   :close  (if *dummy*
+                             identity
+                             ssh/disconnect)
+                   :log?   true}))))
 
 (defn disconnect
   "Close a session"
