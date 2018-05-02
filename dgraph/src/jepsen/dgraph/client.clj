@@ -105,6 +105,9 @@
               #"Tablet isn't being served by this instance"
               (assoc ~op :type :fail, :error :tablet-not-served-by-instance)
 
+              #"Request sent to wrong server"
+              (assoc ~op :type :fail, :error :wrong-server)
+
               #"Please retry again, server is not ready to accept requests"
               (assoc ~op :type :fail, :error :not-ready-for-requests)
 
@@ -301,21 +304,17 @@
              (str "Record " (pr-str record) " has no value for "
                   (pr-str pred))))))
 
-(defn key-pred
-  "Computes the key predicate name for a given key."
-  [k opts]
-  (->> opts
-       :key-predicate-count
-       (mod (hash k))
-       (str "key_")))
+(defn gen-pred
+  "Generates a predicate for a key, given a count of keys, and a prefix."
+  [prefix n k]
+  (str prefix "_" (mod (hash k) n)))
 
-(defn val-pred
-  "Computes the value predicate name for a given key."
-  [k opts]
-  (->> opts
-       :value-predicate-count
-       (mod (hash k))
-       (str "val_")))
+(defn gen-preds
+  "Given a key prefix and a number of keys, generates all predicate names that
+  might be used."
+  [prefix n]
+  (->> (range n)
+       (map (fn [i] (str prefix "_" i)))))
 
 (defrecord TxnClient [opts conn]
   jc/Client
@@ -323,13 +322,13 @@
     (assoc this :conn (open node)))
 
   (setup! [this test]
-    (let [keys (->> (range (:key-predicate-count opts))
-                    (map (fn [i] (str "key_" i ": int @index(int)"
-                                      (when (:upsert-schema test) " @upsert")
-                                      " .\n")))
+    (let [keys (->> (gen-preds "key" (:key-predicate-count opts))
+                    (map (fn [pred] (str pred ": int @index(int)"
+                                         (when (:upsert-schema test) " @upsert")
+                                         " .\n")))
                     str/join)
-          vals (->> (range (:value-predicate-count opts))
-                    (map (fn [i] (str "val_" i ": int .\n")))
+          vals (->> (gen-preds "val" (:value-predicate-count opts))
+                    (map (fn [pred] (str pred ": int .\n")))
                     str/join)]
       (alter-schema! conn (str keys vals))))
 
@@ -339,8 +338,8 @@
         (->> (:value op)
              (reduce
                (fn [txn' [f k v :as micro-op]]
-                 (let [kp (key-pred k opts)
-                       vp (val-pred k opts)]
+                 (let [kp (gen-pred "key" (:key-predicate-count opts) k)
+                       vp (gen-pred "val" (:value-predicate-count opts) k)]
                    (case f
                      :r
                      (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
