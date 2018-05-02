@@ -59,16 +59,17 @@
              (map :tablets)
              (mapcat vals)
              shuffle
-             (map (fn [tablet]
-                    (let [pred   (:predicate tablet)
-                          group  (:groupId tablet)
-                          group' (rand-nth (remove #{group} groups))]
-                      ; Actually move tablet
-                      (info "Moving" pred "from" group "to" group')
-                      (s/move-tablet! (rand-nth (:nodes test)) pred group')
-                      (info "Moved" pred "from" group "to" group')
-                      ; Return predicate and new group
-                      [pred [group group']])))
+             (keep (fn [tablet]
+                     (let [pred   (:predicate tablet)
+                           group  (:groupId tablet)
+                           group' (rand-nth groups)]
+                       (when-not (= group group')
+                         ; Actually move tablet
+                         (info "Moving" pred "from" group "to" group')
+                         (s/move-tablet! (rand-nth (:nodes test)) pred group')
+                         (info "Moved" pred "from" group "to" group')
+                         ; Return predicate and new group
+                         [pred [group group']]))))
              (into (sorted-map))
              (assoc op :value))))
 
