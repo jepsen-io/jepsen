@@ -13,6 +13,47 @@
 (def pred-count "Number of predicates to stripe keys and values across."
   3)
 
+(defn multi-pred-acct->key+amount
+  "Takes a query result like {:key_0 1 :amount_2 5} and returns [1 5], by
+  pattern-matching key_ and amount_ prefixes."
+  [record]
+  (reduce
+    (fn [[key amount] [pred value]]
+      (condp re-find (name pred)
+        #"^key_" (do (assert (not key)
+                             (str "Record " (pr-str record)
+                                  " contained unexpected multiple keys!"))
+                     [value amount])
+        #"^amount_" (do (assert (not amount)
+                                (str "Record " (pr-str record)
+                                     " contained unexpected multiple amounts!"))
+                        [key value])
+        [key amount]))
+    [nil nil]
+    record))
+
+(defn read-accounts
+  "Given a transaction, reads all accounts. If a type predicate is provided,
+  finds all accounts where that type predicate is \"account\". Otherwise, finds
+  all accounts across all type predicates. Returns a map of keys to amounts."
+  ; All predicates
+  ([t]
+   (->> (c/gen-preds "type" pred-count)
+        (map (partial read-accounts t))
+        (reduce merge)))
+  ; One predicate in particular
+  ([t type-predicate]
+   (let [q (str "{ q(func: eq(" type-predicate ", $type)) {\n"
+                (->> (concat (c/gen-preds "key"    pred-count)
+                             (c/gen-preds "amount" pred-count))
+                     (str/join "\n"))
+                "}}")]
+     (->> (c/query t q {:type "account"})
+          :q
+          ;((fn [x] (info :read-val (pr-str x)) x))
+          (map multi-pred-acct->key+amount)
+          (into (sorted-map))))))
+
 (defn find-account
   "Finds an account by key. Returns an empty account when none exists."
   [t k]
@@ -42,30 +83,13 @@
     (c/delete! t (assert+ (:uid account)))
     (let [k (assert+ (:key account))
           kp (c/gen-pred "key"    pred-count k)
-          ap (c/gen-pred "amount" pred-count k)]
+          ap (c/gen-pred "amount" pred-count k)
+          tp (c/gen-pred "type"   pred-count k)]
       (c/mutate! t (-> account
-                       (select-keys [:uid :type])
+                       (select-keys [:uid])
+                       (assoc (keyword tp) (:type account))
                        (assoc (keyword kp) (:key account))
                        (assoc (keyword ap) (:amount account)))))))
-
-(defn multi-pred-acct->key+amount
-  "Takes a query result like {:key_0 1 :amount_2 5} and returns [1 5], by
-  pattern-matching key_ and amount_ prefixes."
-  [record]
-  (reduce
-    (fn [[key amount] [pred value]]
-      (condp re-find (name pred)
-        #"^key_" (do (assert (not key)
-                             (str "Record " (pr-str record)
-                                  " contained unexpected multiple keys!"))
-                     [value amount])
-        #"^amount_" (do (assert (not amount)
-                                (str "Record " (pr-str record)
-                                     " contained unexpected multiple amounts!"))
-                        [key value])
-        [key amount]))
-    [nil nil]
-    record))
 
 (defrecord Client [conn]
   client/Client
@@ -83,8 +107,10 @@
                        " .\n"))
                 (c/gen-preds "key" pred-count))
 
-           ; Type schema
-           ["type: string @index(exact) .\n"]
+           ; Type schemas
+           (map (fn [pred]
+                  (str pred ": string @index(exact) .\n"))
+                (c/gen-preds "type" pred-count))
 
            ; Amount schemas
            (map (fn [pred]
@@ -98,11 +124,12 @@
     (try
       (c/with-txn test [t conn]
         (let [k (first (:accounts test))
-              kp (keyword (c/gen-pred "key" pred-count k))
-              ap (keyword (c/gen-pred "amount" pred-count k))
-              r  {kp      k
-                  :type   "account",
-                  ap      (:total-amount test)}]
+              tp (keyword (c/gen-pred "type"    pred-count k))
+              kp (keyword (c/gen-pred "key"     pred-count k))
+              ap (keyword (c/gen-pred "amount"  pred-count k))
+              r  {kp k
+                  tp "account",
+                  ap (:total-amount test)}]
           (info "Upserting" r)
           (c/upsert! t kp r)))
       (catch TxnConflictException e)))
@@ -111,17 +138,7 @@
     (c/with-conflict-as-fail op
       (c/with-txn test [t conn]
         (case (:f op)
-          :read (let [q (str "{ q(func: eq(type, $type)) {\n"
-                             (->> (concat (c/gen-preds "key"    pred-count)
-                                          (c/gen-preds "amount" pred-count))
-                                  (str/join "\n"))
-                             "}}")]
-                  (->> (c/query t q {:type "account"})
-                       :q
-                       ;((fn [x] (info :read-val (pr-str x)) x))
-                       (map multi-pred-acct->key+amount)
-                       (into (sorted-map))
-                       (assoc op :type :ok, :value)))
+          :read (assoc op :type :ok, :value (read-accounts t))
 
           :transfer (let [{:keys [from to amount]} (:value op)
                           [from to] (disorderly
