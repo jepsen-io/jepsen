@@ -549,7 +549,7 @@
   (op [_ test process]
       (let [threads (vec *threads*)
             thread  (process->thread test process)
-            _ (info threads thread)
+            ;_ (info threads thread)
             ; If our thread is smaller than some upper bound in gens, we've
             ; found our generator, since both *threads* and gens are ordered.
             [lower upper gen] (or (some (fn [[lower upper gen :as tuple]]
