@@ -10,6 +10,7 @@
             [jepsen.dgraph [bank :as bank]
                            [delete :as delete]
                            [long-fork :as long-fork]
+                           [linearizable-register :as lr]
                            [nemesis :as nemesis]
                            [sequential :as sequential]
                            [set :as set]
@@ -19,13 +20,14 @@
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {:bank        bank/workload
-   :delete      delete/workload
-   :long-fork   long-fork/workload
-   :upsert      upsert/workload
-   :set         set/workload
-   :uid-set     set/uid-workload
-   :sequential  sequential/workload})
+  {:bank                  bank/workload
+   :delete                delete/workload
+   :long-fork             long-fork/workload
+   :linearizable-register lr/workload
+   :upsert                upsert/workload
+   :set                   set/workload
+   :uid-set               set/uid-workload
+   :sequential            sequential/workload})
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform"

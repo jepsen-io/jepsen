@@ -42,6 +42,11 @@
   (doseq [c (wall.hack/field DgraphClient :clients client)]
     (.. c getChannel shutdown)))
 
+(defn abort-txn!
+  "Aborts a transaction object."
+  [^DgraphClient$Transaction t]
+  (.discard t))
+
 (defmacro with-txn
   "Takes a vector of a symbol and a client. Opens a transaction on the client,
   binds it to that symbol, and evaluates body. Calls commit at the end of
