@@ -45,7 +45,12 @@
 (defn abort-txn!
   "Aborts a transaction object."
   [^DgraphClient$Transaction t]
-  (.discard t))
+  (try (.discard t)
+       (catch io.grpc.StatusRuntimeException e
+         (if (re-find #"ABORTED: Transaction has been aborted\. Please retry\."
+                      (.getMessage e))
+           :aborted
+           (throw e)))))
 
 (defmacro with-txn
   "Takes a vector of a symbol and a client. Opens a transaction on the client,
@@ -58,7 +63,11 @@
 
       (with-txn {:sequencing :client} [t my-client]
         (mutate! t ...)
-        (mutate! t ...))"
+        (mutate! t ...))
+
+  If you commit or abort the transaction *within* body (e.g. before with-txn
+  commits it for you), with-txn will attempt to commit, *not* throw, and return
+  the result of `body`."
   [opts [txn-sym client] & body]
   `(let [~txn-sym (.newTransaction ^DgraphClient ~client)]
      (try
@@ -67,7 +76,10 @@
                           :server DgraphProto$LinRead$Sequencing/SERVER_SIDE
                           :client DgraphProto$LinRead$Sequencing/CLIENT_SIDE))
        (let [res# (do ~@body)]
-         (.commit ~txn-sym)
+         (try (.commit ~txn-sym)
+              (catch io.dgraph.TxnFinishedException e#
+                ; If the user manually committed or aborted, that's OK.
+                nil))
          res#)
        (finally
          (.discard ~txn-sym)))))

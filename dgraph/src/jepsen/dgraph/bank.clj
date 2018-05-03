@@ -148,12 +148,17 @@
                           _ (info :to   (pr-str to))
                           from' (update from :amount - amount)
                           to'   (update to   :amount + amount)]
+                      (disorderly
+                        (write-account! t from')
+                        (write-account! t to'))
                       (if (neg? (:amount from'))
-                        (assoc op :type :fail, :error :insufficient-funds)
-                        (do (disorderly
-                              (write-account! t from')
-                              (write-account! t to'))
-                            (assoc op :type :ok))))))))
+                        ; Whoops! Back out! Hey let's write some garbage just
+                        ; to make things fun.
+                        (do (write-account! t (update from' :amount - 1000))
+                            (write-account! t (update to'   :amount - 1000))
+                            (c/abort-txn! t)
+                           (assoc op :type :fail, :error :insufficient-funds))
+                        (assoc op :type :ok)))))))
 
   (teardown! [this test])
 
