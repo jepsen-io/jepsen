@@ -32,7 +32,9 @@
 (defrecord LostUpdatesClient [tbl-created? conn]
   client/Client
 
-  (setup! [this test node]
+  (setup! [this test])
+
+  (open! [this test node]
     (let [conn (c/jdbc-client node)]
       (info node "Connected")
       ;; Everyone's gotta block until we've made the table.
@@ -94,6 +96,8 @@
                                           k els']
                                        {:timeout c/timeout-delay})
                            (assoc op :type :ok)))))))))))
+
+  (close! [this test])
 
   (teardown! [this test]
     ))

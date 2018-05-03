@@ -31,7 +31,9 @@
 (defrecord DirtyReadClient [tbl-created? conn limit]
   client/Client
 
-  (setup! [this test node]
+  (setup! [this test])
+
+  (open! [this test node]
     (let [conn (c/jdbc-client node)]
       (info node "Connected")
       ;; Everyone's gotta block until we've made the table.
@@ -40,10 +42,10 @@
           (c/with-conn [c conn]
             (j/execute! c ["drop table if exists dirty_read"])
             (info node "Creating table dirty_read")
-             (j/execute! c
+            (j/execute! c
                          ["create table dirty_read (
                           id     integer primary key)"])
-             (j/execute! c
+            (j/execute! c
                          ["alter table dirty_read
                           set (number_of_replicas = \"0-all\")"]))))
 
@@ -87,6 +89,8 @@
                                        {:timeout c/timeout-delay})
                            (assoc op :type :ok)))))))))
 
+        (close! [this test])
+
         (teardown! [this test]
                    ))
 
@@ -100,10 +104,12 @@
   ([es-ops crate ^TransportClient es]
    (assert (set? es-ops))
    (reify client/Client
-     (setup! [this test node]
-       (let [crate (client/setup! crate test node)
+     (open! [this test node]
+       (let [crate (client/open! crate test node)
              es    (c/es-connect node)]
          (es-client es-ops crate es)))
+
+     (setup! [this test])
 
      (invoke! [this test op]
        (if-not (es-ops (:f op))
@@ -127,6 +133,8 @@
                     (do (c/es-index! es "dirty_read" "default"
                                      {:id (:value op)})
                         (assoc op :type :ok))))))
+
+     (close! [this test])
 
      (teardown! [this test]
        (client/teardown! crate test)
