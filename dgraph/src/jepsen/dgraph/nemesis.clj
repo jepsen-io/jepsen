@@ -111,7 +111,7 @@
           [(op :move-tablet)])]
        (apply concat)
        gen/mix
-       (gen/stagger 10)))
+       (gen/stagger (:interval opts))))
 
 (defn nemesis
   "Composite nemesis and generator"

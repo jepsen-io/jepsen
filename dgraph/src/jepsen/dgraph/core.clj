@@ -46,7 +46,9 @@
                      "unknown")
                    (:version opts))
         workload ((get workloads (:workload opts)) opts)
-        nemesis  (nemesis/nemesis (:nemesis opts))
+        nemesis  (nemesis/nemesis
+                   (assoc (:nemesis opts)
+                          :interval (:nemesis-interval opts)))
         gen      (->> (:generator workload)
                       (gen/nemesis (:generator nemesis))
                       (gen/time-limit (:time-limit opts)))
@@ -97,6 +99,11 @@
     :parse-fn keyword
     :missing (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
+   [nil "--nemesis-interval SECONDS"
+    "Roughly how long to wait between nemesis operations."
+    :default  10
+    :parse-fn parse-long
+    :validate [(complement neg?) "should be a non-negative number"]]
    [nil  "--nemesis SPEC" "A comma-separated list of nemesis types"
     :default {:kill-alpha? true
               :kill-zero? true
