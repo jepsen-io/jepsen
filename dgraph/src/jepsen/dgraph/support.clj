@@ -229,18 +229,19 @@
                  (dc/close! conn))))
         (info "GRPC ready")
 
-        (catch [:type :cluster-failed-to-converge] e
-          (warn e "Cluster failed to converge")
-          (throw (ex-info "Cluster failed to converge"
-                          {:type  :jepsen.db/setup-failed
-                           :node  node}
-                          (:throwable &throw-context))))
+        ;(catch [:type :cluster-failed-to-converge] e
+        ;  (warn e "Cluster failed to converge")
+        ;  (throw (ex-info "Cluster failed to converge"
+        ;                  {:type  :jepsen.db/setup-failed
+        ;                   :node  node}
+        ;                  (:throwable &throw-context))))
 
-        (catch RuntimeException e ; Welp
-          (throw (ex-info "Couldn't get a client"
-                          {:type  :jepsen.db/setup-failed
-                           :node  node}
-                          e)))))
+        ;(catch RuntimeException e ; Welp
+        ;  (throw (ex-info "Couldn't get a client"
+        ;                  {:type  :jepsen.db/setup-failed
+        ;                   :node  node}
+        ;                  e)))))
+        ))
 
     (teardown! [_ test node]
       (stop-ratel! test node)
