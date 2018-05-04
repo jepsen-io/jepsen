@@ -11,7 +11,7 @@ EOF
     exit 1
 fi
 
-CRATE_CLASSPATH=$CRATE_HOME/lib/*:$CRATE_HOME/lib/enterprise/*:$CRATE_HOME/lib/sigar/*
+CRATE_CLASSPATH=$CRATE_HOME/lib/*:$CRATE_HOME/lib/enterprise/*
 
 if [ "x$CRATE_MIN_MEM" = "x" ]; then
     CRATE_MIN_MEM=256m

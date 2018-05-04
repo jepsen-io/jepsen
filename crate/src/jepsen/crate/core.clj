@@ -282,7 +282,7 @@
     (debian/install [:apt-transport-https])
     (install-open-jdk8!)
     (cu/ensure-user! user)
-    (cu/install-tarball! node tarball-url base-dir false)
+    (cu/install-archive! tarball-url base-dir false)
     (c/exec :chown :-R (str user ":" user) base-dir))
   (info node "crate installed"))
 

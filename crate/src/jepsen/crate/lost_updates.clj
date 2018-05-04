@@ -32,7 +32,9 @@
 (defrecord LostUpdatesClient [tbl-created? conn]
   client/Client
 
-  (setup! [this test node]
+  (setup! [this test])
+
+  (open! [this test node]
     (let [conn (c/jdbc-client node)]
       (info node "Connected")
       ;; Everyone's gotta block until we've made the table.
@@ -43,8 +45,8 @@
             (info node "Creating table sets")
             (j/execute! c
                         ["create table if not exists sets (
-                         id     integer primary key,
-                         elements string)"])
+                         id       integer primary key,
+                         elements string INDEX OFF STORAGE WITH (columnstore = false))"])
             (j/execute! c
                         ["alter table sets
                          set (number_of_replicas = \"0-all\")"]))))
@@ -94,6 +96,8 @@
                                           k els']
                                        {:timeout c/timeout-delay})
                            (assoc op :type :ok)))))))))))
+
+  (close! [this test])
 
   (teardown! [this test]
     ))
