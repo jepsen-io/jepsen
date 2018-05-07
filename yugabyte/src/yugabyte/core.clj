@@ -17,6 +17,7 @@
 (def tserver-log-dir "/home/yugabyte/tserver/logs")
 
 (def setup-lock (Object.))
+(def keyspace "jepsen_keyspace")
 
 (defn wait-for-recovery
   "Waits for the driver to report all nodes are up"
@@ -34,6 +35,8 @@
   [node test]
   (info node "Starting YugaByteDB")
   (start-master! node)
+  ; TODO - wait for all masters up instead of sleep for each node.
+  (Thread/sleep 5000)
   (start-tserver! node)
 )
 
@@ -41,8 +44,10 @@
   "Stops YugaByteDB."
   [node]
   (info node "Stopping YugaByteDB")
-  (info (meh (c/exec (c/lit "/home/yugabyte/bin/yb-server-ctl.sh tserver stop; pkill -9 yb-tserver || true"))))
-  (info (meh (c/exec (c/lit "if [[ -e /home/yugabyte/master/master.out ]]; then /home/yugabyte/bin/yb-server-ctl.sh master stop; pkill -9 yb-master || true; fi"))))
+  (info (meh (c/exec (c/lit "/home/yugabyte/bin/yb-server-ctl.sh tserver stop; sleep 1;
+    pkill -9 yb-tserver || true"))))
+  (info (meh (c/exec (c/lit "if [[ -e /home/yugabyte/master/master.out ]]; then
+    /home/yugabyte/bin/yb-server-ctl.sh master stop; sleep 1; pkill -9 yb-master || true; fi"))))
 )
 
 (defn wipe!
@@ -59,25 +64,20 @@
 (defn db
   "YugaByteDB for a particular version."
   [version]
-  (reify db/DB
-    (setup! [_ test node]
-      (info node "Setup YugaByteDB " version)
-      (start! node test)
-; TODO - wait for all nodes up instead of sleep for each node.
-      (Thread/sleep 5000)
-    )
+  (reify
+    db/DB
+   (setup! [_ test node]
+           (info node "Setup YugaByteDB " version)
+           (start! node test))
 
     (teardown! [_ test node]
-      (info node "Tearing down YugaByteDB...")
-      (wipe! node)
-    )
+               (info node "Tearing down YugaByteDB...")
+               (wipe! node))
 
     db/LogFiles
     (log-files [_ test node]
-      (concat (cu/ls-full master-log-dir)
-              (cu/ls-full tserver-log-dir)))
-  )
-)
+               (concat (cu/ls-full master-log-dir)
+                       (cu/ls-full tserver-log-dir)))))
 
 (defn yugabyte-test
   [opts]

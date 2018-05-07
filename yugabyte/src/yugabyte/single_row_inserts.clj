@@ -7,13 +7,13 @@
                     [checker   :as checker]
                     [generator :as gen]
                     [util :as util :refer [meh timeout]]]
+            [jepsen.checker.timeline :as timeline]
             [knossos.op :as op]
             [clojurewerkz.cassaforte [client :as cassandra]
                                      [query :refer :all]
                                      [policies :refer :all]
                                      [cql :as cql]]
-            [yugabyte [core :refer :all]
-                      [nemesis :refer :all]]
+            [yugabyte.core :refer :all]
             )
   (:import (com.datastax.driver.core.exceptions UnavailableException
                                                 WriteTimeoutException
@@ -108,12 +108,12 @@
          (assoc this :conn (cassandra/connect (->> test :nodes (map name)) {:protocol-version 3})))
   (setup! [this test]
     (locking setup-lock
-      (cql/create-keyspace conn "jepsen_keyspace"
+      (cql/create-keyspace conn keyspace
                            (if-not-exists)
                            (with {:replication
                                   {"class" "SimpleStrategy"
                                    "replication_factor" 3}}))
-      (cql/use-keyspace conn "jepsen_keyspace")
+      (cql/use-keyspace conn keyspace)
       (cql/create-table conn "kv_pairs"
                         (if-not-exists)
                         (column-definitions {:id :int
@@ -151,7 +151,7 @@
     (cassandra/disconnect! conn)))
 
 (defn r [_ _] {:type :invoke, :f :read, :value nil})
-(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 100)})
+(defn w [_ _] {:type :invoke, :f :write, :value (rand-int 500)})
 
 (defn test
   [opts]
@@ -163,5 +163,6 @@
                                  (gen/stagger 1))
           :client-final-generator (gen/once r)
           :checker (checker/compose {:perf (checker/perf)
+                                     :timeline (timeline/html)
                                      :details (check-inserts)})
          })))

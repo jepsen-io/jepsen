@@ -11,8 +11,7 @@
                                      [query :refer :all]
                                      [policies :refer :all]
                                      [cql :as cql]]
-            [yugabyte [core :refer :all]
-                      [nemesis :refer :all]]
+            [yugabyte [core :refer :all]]
             )
   (:import (com.datastax.driver.core.exceptions UnavailableException
                                                 WriteTimeoutException
@@ -28,12 +27,12 @@
     (assoc this :conn (cassandra/connect [node] {:protocol-version 3})))
   (setup! [this test]
     (locking setup-lock
-      (cql/create-keyspace conn "jepsen_keyspace"
+      (cql/create-keyspace conn keyspace
                            (if-not-exists)
                            (with {:replication
                                   {"class" "SimpleStrategy"
                                    "replication_factor" 3}}))
-      (cql/use-keyspace conn "jepsen_keyspace")
+      (cql/use-keyspace conn keyspace)
       (cql/create-table conn table-name
                         (if-not-exists)
                         (column-definitions {:id :int
