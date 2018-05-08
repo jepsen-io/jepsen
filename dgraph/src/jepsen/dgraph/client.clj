@@ -271,7 +271,7 @@
   "Blocks until the server is up and responding to requests, or throws. Returns
   client."
   [client]
-  (with-retry [attempts 6]
+  (with-retry [attempts 16]
     (with-txn {} [t client]
       (schema t))
     (catch io.grpc.StatusRuntimeException e

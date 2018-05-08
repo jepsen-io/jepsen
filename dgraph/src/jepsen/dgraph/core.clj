@@ -15,6 +15,7 @@
                            [sequential :as sequential]
                            [set :as set]
                            [support :as s]
+                           [types :as types]
                            [upsert :as upsert]]))
 
 (def workloads
@@ -27,7 +28,8 @@
    :upsert                upsert/workload
    :set                   set/workload
    :uid-set               set/uid-workload
-   :sequential            sequential/workload})
+   :sequential            sequential/workload
+   :types                 types/workload})
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform"
