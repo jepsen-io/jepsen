@@ -17,7 +17,7 @@
              "-Des.set.netty.runtime.available.processors=false"
              "-server"]
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [jepsen "0.1.5"]
+                 [jepsen "0.1.8"]
                  [cheshire "5.6.2"]
                  [org.clojure/java.jdbc "0.7.2"]
                  [clj-http "3.1.0"]

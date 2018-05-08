@@ -29,7 +29,9 @@
 (defrecord VersionDivergenceClient [tbl-created? conn]
   client/Client
 
-  (setup! [this test node]
+  (setup! [this test])
+
+  (open! [this test node]
     (let [conn (c/jdbc-client node)]
       (info node "Connected")
       ;; Everyone's gotta block until we've made the table.
@@ -83,6 +85,8 @@
 
                 :else
                 (throw e))))))))
+
+  (close! [this test])
 
   (teardown! [this test]
     (rc/close! conn)))
