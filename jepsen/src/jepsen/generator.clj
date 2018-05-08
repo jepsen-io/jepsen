@@ -242,7 +242,8 @@
 (defgenerator Derefer [dgen]
   [dgen]
   (op [this test process]
-      (op @dgen test process)))
+      (let [gen @dgen]
+        (op gen test process))))
 
 (defn derefer
   "Sometimes you need to build a generator not *now*, but *later*; e.g. because
@@ -593,20 +594,28 @@
     (assert default)
     (Reserve. gens default)))
 
-(defgenerator Concat [sources]
+; processes is a map of process to the index of the source they're currently on.
+(defgenerator Concat [sources processes]
   [sources]
   (op [gen test process]
-    (loop [[source & sources] sources]
-      (when source
-        (if-let [op (op source test process)]
-          op
-          (recur sources))))))
+    (let [i (get @processes process 0)]
+      (when (< i (count sources))
+        (let [source (nth sources i)]
+          (if-let [op (op source test process)]
+            op
+            (do (swap! processes (fn [processes]
+                                   (if (= i (get processes process 0))
+                                     ; Good, nobody else has changed us
+                                     (assoc processes process (inc i))
+                                     ; Someone else beat us
+                                     processes)))
+                (recur test process))))))))
 
 (defn concat
   "Takes n generators and yields the first non-nil operation from any, in
   order."
   [& sources]
-  (Concat. sources))
+  (Concat. (vec sources) (atom {})))
 
 (defn nemesis
   "Combines a generator of normal operations and a generator for nemesis
