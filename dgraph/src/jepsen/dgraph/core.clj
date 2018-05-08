@@ -1,7 +1,10 @@
 (ns jepsen.dgraph.core
   (:gen-class)
   (:require [clojure.string :as str]
+            [clojure.tools.logging :refer [info warn]]
+            [clojure.pprint :refer [pprint]]
             [jepsen [cli :as cli]
+                    [core :as jepsen]
                     [checker :as checker]
                     [generator :as gen]
                     [tests :as tests]]
@@ -48,9 +51,7 @@
                      "unknown")
                    (:version opts))
         workload ((get workloads (:workload opts)) opts)
-        nemesis  (nemesis/nemesis
-                   (assoc (:nemesis opts)
-                          :interval (:nemesis-interval opts)))
+        nemesis  (nemesis/nemesis (:nemesis opts))
         gen      (->> (:generator workload)
                       (gen/nemesis (:generator nemesis))
                       (gen/time-limit (:time-limit opts)))
@@ -70,7 +71,7 @@
                              " s=" (name (:sequencing opts))
                              (:when (:upsert-schema opts) " upsert")
                              " nemesis="
-                             (->> (:nemesis opts)
+                             (->> (dissoc (:nemesis opts) :interval)
                                   (map #(->> % key name butlast (apply str)))
                                   (str/join ",")))
             :version    version
@@ -96,7 +97,19 @@
          (into {}))))
 
 (def cli-opts
-  "Additional command line options"
+  "Options for single and multiple tests"
+  [["-v" "--version VERSION" "What version number of dgraph should we test?"
+    :default "1.0.3"]
+   [nil "--package-url URL" "Ignore version; install this tarball instead"
+    :validate [(partial re-find #"\A(file)|(https?)://")
+               "Should be an HTTP url"]]
+   [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
+    :default 3
+    :parse-fn parse-long
+    :validate [pos? "Must be a positive integer"]]])
+
+(def single-test-opts
+  "Additional command line options for single tests"
   [["-w" "--workload NAME" "Test workload to run"
     :parse-fn keyword
     :missing (str "--workload " (cli/one-of workloads))
@@ -105,24 +118,19 @@
     "Roughly how long to wait between nemesis operations."
     :default  10
     :parse-fn parse-long
+    :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
     :validate [(complement neg?) "should be a non-negative number"]]
    [nil  "--nemesis SPEC" "A comma-separated list of nemesis types"
-    :default {:kill-alpha? true
-              :kill-zero? true
-              :partition? true
-              :move-tablet? true}
+    :default {}
     :parse-fn parse-nemesis-spec
+    :assoc-fn (fn [m k v]
+                (update m :nemesis merge v))
     :validate [(fn [parsed]
                  (and (map? parsed)
                       (every? nemesis-specs (keys parsed))))
                (str "Should be a comma-separated list of failure types. A failure type "
                     (.toLowerCase (cli/one-of nemesis-specs))
                     ". Or, you can use 'none' to indicate no failures.")]]
-   ["-v" "--version VERSION" "What version number of dgraph should we test?"
-    :default "1.0.3"]
-   [nil "--package-url URL" "Ignore version; install this tarball instead"
-    :validate [(partial re-find #"\A(file)|(https?)://")
-               "Should be an HTTP url"]]
    ["-f" "--force-download" "Ignore the package cache; download again."
     :default false]
    [nil "--upsert-schema"
@@ -135,16 +143,67 @@
    [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
     :default 10
     :parse-fn parse-long
-    :validate [(complement neg?) "Must be a non-negative number"]]
-   [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
-    :default 3
-    :parse-fn parse-long
-    :validate [pos? "Must be a positive integer"]]])
+    :validate [(complement neg?) "Must be a non-negative number"]]])
+
+(defn test-all-cmd
+  "A command to run a whole suite of tests in one go."
+  []
+  (let [opt-spec (into cli/test-opt-spec cli-opts)]
+    {"test-all"
+     {:opt-spec opt-spec
+      :opt-fn   cli/test-opt-fn
+      :usage    "TODO"
+      :run       (fn [{:keys [options]}]
+                   (info "CLI options:\n" (with-out-str (pprint options)))
+                   (let [force-download? (atom true)
+                         tests (for [i          (range (:test-count options))
+                                     workload   (remove #{:types}
+                                                        (keys workloads))
+                                     sequencing [:client :server]
+                                     nemesis    [; Nothing
+                                                 {:interval 1}
+                                                 ; Predicate migrations
+                                                 {:interval     5
+                                                  :move-tablet? true}
+                                                 ; Partitions
+                                                 {:interval     60
+                                                  :partition?   true}
+                                                 ; Process kills
+                                                 {:interval     30
+                                                  :kill-alpha?  true
+                                                  :kill-zero?   true}
+                                                 ; Everything
+                                                 {:interval     30
+                                                  :move-tablet? true
+                                                  :partition?   true
+                                                  :kill-alpha?  true
+                                                  :kill-zero?   true}]]
+                                 (assoc options
+                                        :workload       workload
+                                        :sequencing     sequencing
+                                        :nemesis        nemesis
+                                        :force-download @force-download?))]
+                     (->> tests
+                          (map-indexed
+                            (fn [i test-opts]
+                              (try
+                                (info "\n\n\nTest" (inc i) "/" (count tests))
+                                ; Run test
+                                (jepsen/run! (dgraph-test test-opts))
+                                ; We've run once, no need to download
+                                ; again
+                                (reset! force-download? false)
+                                (catch Exception e
+                                  (warn e "Test crashed; moving on...")))))
+                          dorun)))}}))
+
 
 (defn -main
   "Handles command line arguments; running tests or the web server."
   [& args]
-  (cli/run! (merge (cli/single-test-cmd {:test-fn   dgraph-test
-                                         :opt-spec  cli-opts})
+  (cli/run! (merge (test-all-cmd)
+                   (cli/single-test-cmd {:test-fn   dgraph-test
+                                         :opt-spec  (concat cli-opts
+                                                            single-test-opts)})
                    (cli/serve-cmd))
             args))

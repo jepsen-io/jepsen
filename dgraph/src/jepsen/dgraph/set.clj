@@ -62,8 +62,8 @@
 
   (setup! [this test]
     (c/alter-schema! conn (str "value: [int]"
-                               (when (:upsert-schema test) " @upsert"
-                                 " .")))
+                               (when (:upsert-schema test) " @upsert")
+                               " .\n"))
     (c/with-txn test [t conn]
       (deliver uid (first (vals (c/mutate! t {:value -1}))))
       (info "UID is" @uid)))
