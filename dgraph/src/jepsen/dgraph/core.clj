@@ -69,7 +69,7 @@
            {:name       (str "dgraph " version " "
                              (name (:workload opts))
                              " s=" (name (:sequencing opts))
-                             (:when (:upsert-schema opts) " upsert")
+                               (when (:upsert-schema opts) " upsert")
                              " nemesis="
                              (->> (dissoc (:nemesis opts) :interval)
                                   (map #(->> % key name butlast (apply str)))
@@ -106,7 +106,11 @@
    [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
     :default 3
     :parse-fn parse-long
-    :validate [pos? "Must be a positive integer"]]])
+    :validate [pos? "Must be a positive integer"]]
+   [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
+    :default 10
+    :parse-fn parse-long
+    :validate [(complement neg?) "Must be a non-negative number"]]])
 
 (def single-test-opts
   "Additional command line options for single tests"
@@ -139,11 +143,7 @@
    ["-s" "--sequencing MODE" "Whether to use server or client side sequencing"
     :default :server
     :parse-fn keyword
-    :validate [#{:client :server} "Must be either `client` or `server`."]]
-   [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
-    :default 10
-    :parse-fn parse-long
-    :validate [(complement neg?) "Must be a non-negative number"]]])
+    :validate [#{:client :server} "Must be either `client` or `server`."]]])
 
 (defn test-all-cmd
   "A command to run a whole suite of tests in one go."
@@ -160,6 +160,7 @@
                                      workload   (remove #{:types}
                                                         (keys workloads))
                                      sequencing [:client :server]
+                                     upsert     [false true]
                                      nemesis    [; Nothing
                                                  {:interval 1}
                                                  ; Predicate migrations
@@ -181,6 +182,7 @@
                                  (assoc options
                                         :workload       workload
                                         :sequencing     sequencing
+                                        :upsert-schema  upsert
                                         :nemesis        nemesis
                                         :force-download @force-download?))]
                      (->> tests
