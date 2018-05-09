@@ -125,7 +125,7 @@
     :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
     :validate [(complement neg?) "should be a non-negative number"]]
    [nil  "--nemesis SPEC" "A comma-separated list of nemesis types"
-    :default {}
+    :default {:interval 10}
     :parse-fn parse-nemesis-spec
     :assoc-fn (fn [m k v]
                 (update m :nemesis merge v))

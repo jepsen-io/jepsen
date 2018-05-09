@@ -8,7 +8,8 @@
             [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [db       :as db]
                     [control  :as c]
-                    [core     :as jepsen]]
+                    [core     :as jepsen]
+                    [util     :refer [meh]]]
             [jepsen.control.util :as cu]
             [jepsen.dgraph.client :as dc]))
 
@@ -160,21 +161,24 @@
 (defn cluster-ready?
   "Does this zero node think we're ready to start work?"
   [node test]
-  (let [s       (zero-state node)
-        indexen (->> (:nodes test)
-                     (map (partial node-idx test))
-                     set)
-        addrs   (->> (:nodes test)
-                     (map #(str % ":" alpha-internal-port))
-                     set)]
-    ; We need all zero nodes to be up
-    (and (= indexen (set (keys (:zeros s))))
-         ; We want every alpha node to be serving something
-         (->> (:groups s)
-              vals
-              (mapcat (fn [group] (map :addr (vals (:members group)))))
-              set
-              (= addrs)))))
+  (try
+    (let [s       (zero-state node)
+          indexen (->> (:nodes test)
+                       (map (partial node-idx test))
+                       set)
+          addrs   (->> (:nodes test)
+                       (map #(str % ":" alpha-internal-port))
+                       set)]
+      ; We need all zero nodes to be up
+      (and (= indexen (set (keys (:zeros s))))
+           ; We want every alpha node to be serving something
+           (->> (:groups s)
+                vals
+                (mapcat (fn [group] (map :addr (vals (:members group)))))
+                set
+                (= addrs))))
+    (catch java.net.SocketTimeoutException e
+      false)))
 
 (defn wait-for-cluster
   "Blocks until this Zero indicates the cluster is ready to go."
@@ -184,7 +188,7 @@
         (do (when (<= attempts 1)
               (throw+ {:type        :cluster-failed-to-converge
                        :node        node
-                       :zero-state  (zero-state node)}))
+                       :zero-state  (meh (zero-state node))}))
             (info "Waiting for cluster convergence")
             (Thread/sleep 1000)
             (recur (dec attempts))))))
