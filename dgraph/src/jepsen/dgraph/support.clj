@@ -248,7 +248,8 @@
       (stop-ratel! test node)
       (stop-alpha! test node)
       (stop-zero! test node)
-      (c/exec :rm :-rf dir))
+      (c/su
+        (c/exec :rm :-rf dir)))
 
     db/LogFiles
     (log-files [_ test node]
