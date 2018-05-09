@@ -177,6 +177,7 @@
 (defn delay
   "Every operation from the underlying generator takes dt seconds to return."
   [dt gen]
+  (assert (pos? dt))
   (delay-fn (constantly dt) gen))
 
 (defn sleep
@@ -188,6 +189,7 @@
   "Introduces uniform random timing noise with a mean delay of dt seconds for
   every operation. Delays range from 0 to 2 * dt."
   [dt gen]
+  (assert (pos? dt))
   (delay-fn (partial rand (* 2 dt)) gen))
 
 (defn next-tick-nanos
