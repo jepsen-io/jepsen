@@ -197,51 +197,52 @@
   []
   (reify db/DB
     (setup! [_ test node]
-      (cu/install-archive!
-        (or (:package-url test)
-            (str "https://github.com/dgraph-io/dgraph/releases/download/v"
-                 (:version test) "/dgraph-linux-amd64.tar.gz"))
-        dir
-        (:force-download test))
+      (c/su
+        (cu/install-archive!
+          (or (:package-url test)
+              (str "https://github.com/dgraph-io/dgraph/releases/download/v"
+                   (:version test) "/dgraph-linux-amd64.tar.gz"))
+          dir
+          (:force-download test))
 
-      (when (= node (jepsen/primary test))
-        (start-zero! test node)
-        ; TODO: figure out how long to block here
-        (Thread/sleep 10000))
-
-      (jepsen/synchronize test)
-      (when-not (= node (jepsen/primary test))
-        (start-zero! test node))
-
-      (jepsen/synchronize test)
-      (start-alpha! test node)
-      (start-ratel! test node)
-
-      (try+
         (when (= node (jepsen/primary test))
-          (wait-for-cluster node test)
-          (info "Cluster converged"))
+          (start-zero! test node)
+          ; TODO: figure out how long to block here
+          (Thread/sleep 10000))
 
         (jepsen/synchronize test)
-        (let [conn (dc/open node alpha-public-grpc-port)]
-          (try (dc/await-ready conn)
-               (finally
-                 (dc/close! conn))))
-        (info "GRPC ready")
+        (when-not (= node (jepsen/primary test))
+          (start-zero! test node))
 
-        ;(catch [:type :cluster-failed-to-converge] e
-        ;  (warn e "Cluster failed to converge")
-        ;  (throw (ex-info "Cluster failed to converge"
-        ;                  {:type  :jepsen.db/setup-failed
-        ;                   :node  node}
-        ;                  (:throwable &throw-context))))
+        (jepsen/synchronize test)
+        (start-alpha! test node)
+        (start-ratel! test node)
 
-        ;(catch RuntimeException e ; Welp
-        ;  (throw (ex-info "Couldn't get a client"
-        ;                  {:type  :jepsen.db/setup-failed
-        ;                   :node  node}
-        ;                  e)))))
-        ))
+        (try+
+          (when (= node (jepsen/primary test))
+            (wait-for-cluster node test)
+            (info "Cluster converged"))
+
+          (jepsen/synchronize test)
+          (let [conn (dc/open node alpha-public-grpc-port)]
+            (try (dc/await-ready conn)
+                 (finally
+                   (dc/close! conn))))
+          (info "GRPC ready")
+
+          ;(catch [:type :cluster-failed-to-converge] e
+          ;  (warn e "Cluster failed to converge")
+          ;  (throw (ex-info "Cluster failed to converge"
+          ;                  {:type  :jepsen.db/setup-failed
+          ;                   :node  node}
+          ;                  (:throwable &throw-context))))
+
+          ;(catch RuntimeException e ; Welp
+          ;  (throw (ex-info "Couldn't get a client"
+          ;                  {:type  :jepsen.db/setup-failed
+          ;                   :node  node}
+          ;                  e)))))
+          )))
 
     (teardown! [_ test node]
       (stop-ratel! test node)
