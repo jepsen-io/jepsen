@@ -13,3 +13,7 @@ To start run
     ./up.sh
     docker exec -it jepsen-control bash
 ````
+
+During development, it's convenient to run with `--dev` option, which mounts `$JEPSEN_ROOT` dir as `/jepsen` on Jepsen control container.
+
+Run `./up.sh --help` for more info.
