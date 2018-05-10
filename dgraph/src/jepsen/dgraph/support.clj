@@ -202,12 +202,19 @@
   (reify db/DB
     (setup! [_ test node]
       (c/su
-        (cu/install-archive!
-          (or (:package-url test)
-              (str "https://github.com/dgraph-io/dgraph/releases/download/v"
-                   (:version test) "/dgraph-linux-amd64.tar.gz"))
-          dir
-          (:force-download test))
+        (if-let [file (:local-binary test)]
+          (do ; Upload local file
+              (c/exec :mkdir :-p dir)
+              (info "Uploading" file "...")
+              (c/upload file (str dir "/" binary))
+              (c/exec :chmod :+x (str dir "/" binary)))
+          ; Install remote package
+          (cu/install-archive!
+            (or (:package-url test)
+                (str "https://github.com/dgraph-io/dgraph/releases/download/v"
+                     (:version test) "/dgraph-linux-amd64.tar.gz"))
+            dir
+            (:force-download test)))
 
         (when (= node (jepsen/primary test))
           (start-zero! test node)
@@ -220,7 +227,7 @@
 
         (jepsen/synchronize test)
         (start-alpha! test node)
-        (start-ratel! test node)
+        ; (start-ratel! test node)
 
         (try+
           (when (= node (jepsen/primary test))

@@ -45,11 +45,13 @@
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
   [opts]
-  (let [version  (if-let [p (:package-url opts)]
-                   (if-let [m (re-find #"([^/]+)/[^/.]+\.tar\.gz" p)]
-                     (m 1)
-                     "unknown")
-                   (:version opts))
+  (let [version  (if (:local-binary opts)
+                   "unknown"
+                   (if-let [p (:package-url opts)]
+                     (if-let [m (re-find #"([^/]+)/[^/.]+\.tar\.gz" p)]
+                       (m 1)
+                       "unknown")
+                     (:version opts)))
         workload ((get workloads (:workload opts)) opts)
         nemesis  (nemesis/nemesis (:nemesis opts))
         gen      (->> (:generator workload)
@@ -103,6 +105,8 @@
    [nil "--package-url URL" "Ignore version; install this tarball instead"
     :validate [(partial re-find #"\A(file)|(https?)://")
                "Should be an HTTP url"]]
+   [nil "--local-binary PATH"
+    "Ignore version and package; upload this local binary instead"]
    [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
     :default 3
     :parse-fn parse-long
