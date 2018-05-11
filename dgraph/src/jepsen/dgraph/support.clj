@@ -264,4 +264,9 @@
 
     db/LogFiles
     (log-files [_ test node]
-      [alpha-logfile zero-logfile ratel-logfile])))
+      (c/su (c/exec :tar :cjf (str dir "/data.tar.bz2")
+                    (map (partial str dir) ["/p" "/w" "/zw"])))
+
+      [alpha-logfile
+       zero-logfile
+       (str dir "/data.tar.bz2")])))
