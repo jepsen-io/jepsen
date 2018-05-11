@@ -84,9 +84,11 @@
       :restart-alpha    :stop}  (alpha-killer)
      {:kill-zero        :start
       :restart-zero     :stop}  (zero-killer)
-     {:start-partition  :start
-      :stop-partition   :stop}  (nemesis/partition-random-halves)
-     #{:move-tablet}            (tablet-mover)}))
+     #{:move-tablet}            (tablet-mover)
+     {:start-partition-halves  :start
+      :stop-partition-halves   :stop} (nemesis/partition-random-halves)
+     {:start-partition-ring    :start
+      :stop-partition-ring     :stop} (nemesis/partition-majorities-ring)}))
 
 (defn op
   "Construct a nemesis op"
@@ -105,8 +107,12 @@
           [(gen/seq (cycle (map op [:kill-zero  :restart-zero])))])
         (when (:fix-alpha? opts)
           [(op :fix-alpha)])
-        (when (:partition? opts)
-          [(gen/seq (cycle (map op [:start-partition :stop-partition])))])
+        (when (:partition-halves? opts)
+          [(gen/seq (cycle (map op [:start-partition-halves
+                                    :stop-partition-halves])))])
+        (when (:partition-ring? opts)
+          [(gen/seq (cycle (map op [:start-partition-ring
+                                    :stop-partition-ring])))])
         (when (:move-tablet? opts)
           [(op :move-tablet)])]
        (apply concat)
@@ -118,9 +124,10 @@
   [opts]
   {:nemesis   (full-nemesis opts)
    :generator (full-generator opts)
-   :final-generator (->> [(when (:partition?  opts) :stop-partition)
-                          (when (:kill-zero?  opts) :restart-zero)
-                          (when (:kill-alpha? opts) :restart-alpha)]
+   :final-generator (->> [(when (:partition-halves opts) :stop-partition-halves)
+                          (when (:partition-ring opts)   :stop-partition-ring)
+                          (when (:kill-zero?  opts)      :restart-zero)
+                          (when (:kill-alpha? opts)      :restart-alpha)]
                          (remove nil?)
                          (map op)
                          gen/seq

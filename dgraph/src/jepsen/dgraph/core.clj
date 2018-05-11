@@ -24,22 +24,24 @@
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {:bank                  bank/workload
-   :delete                delete/workload
-   :long-fork             long-fork/workload
-   :linearizable-register lr/workload
-   :upsert                upsert/workload
-   :set                   set/workload
-   :uid-set               set/uid-workload
-   :sequential            sequential/workload
-   :types                 types/workload})
+  {:bank                      bank/workload
+   :delete                    delete/workload
+   :long-fork                 long-fork/workload
+   :linearizable-register     lr/workload
+   :uid-linearizable-register lr/uid-workload
+   :upsert                    upsert/workload
+   :set                       set/workload
+   :uid-set                   set/uid-workload
+   :sequential                sequential/workload
+   :types                     types/workload})
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform"
   #{:kill-alpha?
     :kill-zero?
     :fix-alpha?
-    :partition?
+    :partition-halves?
+    :partition-ring?
     :move-tablet?})
 
 (defn dgraph-test

@@ -92,6 +92,7 @@
   `(let [res# (do ~@body)]
      (when (and (= :fail (:type res#))
                 (#{:unavailable
+                   :predicate-moving
                    :unhealthy-connection} (:error res#)))
        (Thread/sleep (rand-int 2000)))
      res#))
