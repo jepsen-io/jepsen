@@ -120,7 +120,8 @@
     (c/exec :tar :-xf :dpkg_1.17.25.tar.xz)
     (c/exec "bash" "-c" "cd dpkg-1.17.25 && ./configure")
     (c/exec "bash" "-c" "cd dpkg-1.17.25 && make")
-    (c/exec "bash" "-c" "cp /dpkg-1.17.25/utils/start-stop-daemon /usr/bin/start-stop-daemon")))
+    (c/exec "bash" "-c" "cp /dpkg-1.17.25/utils/start-stop-daemon /usr/bin/start-stop-daemon")
+    (c/exec "bash" "-c" "rm -f dpkg_1.17.25.tar.xz")))
 
 (defn installed-start-stop-daemon?
   "Is start-stop-daemon Installed?"
@@ -138,8 +139,6 @@
 
       (maybe-update!)
 
-      (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
-
       (c/su
         ; Packages!
         (install [:wget
@@ -151,6 +150,8 @@
                   :ncurses-devel
                   :iproute
                   :logrotate]))
+
+      (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
       (meh (net/heal! (:net test) test)))
 
