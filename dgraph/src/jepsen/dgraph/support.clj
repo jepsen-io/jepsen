@@ -264,6 +264,10 @@
 
     db/LogFiles
     (log-files [_ test node]
+      ; <sigh> we are not supposed to have side effects here but whatevs
+      (stop-ratel! test node)
+      (stop-alpha! test node)
+      (stop-zero! test node)
       (c/su (c/exec :tar :cjf (str dir "/data.tar.bz2")
                     (map (partial str dir) ["/p" "/w" "/zw"])))
 

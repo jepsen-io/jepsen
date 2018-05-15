@@ -168,23 +168,23 @@
                                      sequencing [:client :server]
                                      upsert     [false true]
                                      nemesis    [; Nothing
-                                                 {:interval 1}
+                                                 {:interval         1}
                                                  ; Predicate migrations
-                                                 {:interval     5
-                                                  :move-tablet? true}
+                                                 {:interval         5
+                                                  :move-tablet?     true}
                                                  ; Partitions
-                                                 {:interval     60
-                                                  :partition?   true}
+                                                 {:interval         30
+                                                  :partition-ring?  true}
                                                  ; Process kills
-                                                 {:interval     30
-                                                  :kill-alpha?  true
-                                                  :kill-zero?   true}
+                                                 {:interval         30
+                                                  :kill-alpha?      true
+                                                  :kill-zero?       true}
                                                  ; Everything
-                                                 {:interval     30
-                                                  :move-tablet? true
-                                                  :partition?   true
-                                                  :kill-alpha?  true
-                                                  :kill-zero?   true}]]
+                                                 {:interval         30
+                                                  :move-tablet?     true
+                                                  :partition-ring?  true
+                                                  :kill-alpha?      true
+                                                  :kill-zero?       true}]]
                                  (assoc options
                                         :workload       workload
                                         :sequencing     sequencing
