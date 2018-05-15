@@ -145,17 +145,17 @@
 (defn bank-test-base
   [opts]
   (cockroach/basic-test
-    (merge
-      {:client      {:client (:client opts)
-                     :during (->> (gen/mix [bank-read bank-diff-transfer])
-                                  (gen/clients)
-                                  (gen/stagger 0))
-                     :final (gen/clients (gen/once bank-read))}
-       :checker     (checker/compose
-                      {:perf    (checker/perf)
-                       :timeline (timeline/html)
-                       :details (bank-checker)})}
-      (dissoc opts :client))))
+   (merge
+    {:client      {:client (:client opts)
+                   :during (->> (gen/mix [bank-read bank-diff-transfer])
+                                (gen/clients))
+
+                   :final (gen/clients (gen/once bank-read))}
+     :checker     (checker/compose
+                   {:perf    (checker/perf)
+                    :timeline (timeline/html)
+                    :details (bank-checker)})}
+    (dissoc opts :client))))
 
 (defn test
   [opts]
