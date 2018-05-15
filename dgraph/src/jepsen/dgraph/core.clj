@@ -116,7 +116,9 @@
    [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
     :default 10
     :parse-fn parse-long
-    :validate [(complement neg?) "Must be a non-negative number"]]])
+    :validate [(complement neg?) "Must be a non-negative number"]]
+   [nil "--retry-db-setup" "Work around Dgraph cluster convergence bugs by retrying the setup process"
+    :default false]])
 
 (def single-test-opts
   "Additional command line options for single tests"
