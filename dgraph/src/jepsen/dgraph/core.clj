@@ -80,7 +80,7 @@
                                   (str/join ",")))
             :version    version
             :os         debian/os
-            :db         (s/db)
+            :db         (s/db opts)
             :generator  gen
             :client     (:client workload)
             :nemesis    (:nemesis nemesis)
@@ -149,7 +149,9 @@
    ["-s" "--sequencing MODE" "Whether to use server or client side sequencing"
     :default :server
     :parse-fn keyword
-    :validate [#{:client :server} "Must be either `client` or `server`."]]])
+    :validate [#{:client :server} "Must be either `client` or `server`."]]
+   [nil "--defer-db-teardown" "Wait until user input to tear down DB nodes"
+    :default false]])
 
 (defn test-all-cmd
   "A command to run a whole suite of tests in one go."

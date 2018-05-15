@@ -11,7 +11,8 @@
                     [core     :as jepsen]
                     [util     :refer [meh]]]
             [jepsen.control.util :as cu]
-            [jepsen.dgraph.client :as dc]))
+            [jepsen.dgraph.client :as dc])
+  (:import (java.util.concurrent CyclicBarrier)))
 
 ; Local paths
 (def dir "/opt/dgraph")
@@ -194,83 +195,102 @@
             (recur (dec attempts))))))
 
 (defn db
-  "Sets up dgraph. Test should include
+  "Sets up dgraph. Opts should include:
 
-    :version      Version to install e.g. 1.0.2
-    :replicas     How many copies of each group to store"
-  []
-  (reify db/DB
-    (setup! [_ test node]
-      (c/su
-        (if-let [file (:local-binary test)]
-          (do ; Upload local file
-              (c/exec :mkdir :-p dir)
-              (info "Uploading" file "...")
-              (c/upload file (str dir "/" binary))
-              (c/exec :chmod :+x (str dir "/" binary)))
-          ; Install remote package
-          (cu/install-archive!
-            (or (:package-url test)
-                (str "https://github.com/dgraph-io/dgraph/releases/download/v"
-                     (:version test) "/dgraph-linux-amd64.tar.gz"))
-            dir
-            (:force-download test)))
+    :nodes        A collection of node names
 
-        (when (= node (jepsen/primary test))
-          (start-zero! test node)
-          ; TODO: figure out how long to block here
-          (Thread/sleep 10000))
+  Test should include
 
-        (jepsen/synchronize test)
-        (when-not (= node (jepsen/primary test))
-          (start-zero! test node))
+  :version      Version to install e.g. 1.0.2
+  :replicas     How many copies of each group to store"
+  [opts]
+  ; Ugh this is such a hack. We need a place to synchronize before exiting on
+  ; teardown, but only AFTER the initial teardown we do as a part of setup. So
+  ; we build a CyclicBarrier here. Because we have to run after setup, we
+  ; *also* use a has-setup? atom which gets set to true as a part of the setup
+  ; process.
+  (let [teardown-barrier (CyclicBarrier. (count (:nodes opts)))
+        has-setup?       (atom false)]
+    (reify db/DB
+      (setup! [_ test node]
+        (c/su
+          (if-let [file (:local-binary test)]
+            (do ; Upload local file
+                (c/exec :mkdir :-p dir)
+                (info "Uploading" file "...")
+                (c/upload file (str dir "/" binary))
+                (c/exec :chmod :+x (str dir "/" binary)))
+            ; Install remote package
+            (cu/install-archive!
+              (or (:package-url test)
+                  (str "https://github.com/dgraph-io/dgraph/releases/download/v"
+                       (:version test) "/dgraph-linux-amd64.tar.gz"))
+              dir
+              (:force-download test)))
 
-        (jepsen/synchronize test)
-        (start-alpha! test node)
-        ; (start-ratel! test node)
-
-        (try+
           (when (= node (jepsen/primary test))
-            (wait-for-cluster node test)
-            (info "Cluster converged"))
+            (start-zero! test node)
+            ; TODO: figure out how long to block here
+            (Thread/sleep 10000))
 
           (jepsen/synchronize test)
-          (let [conn (dc/open node alpha-public-grpc-port)]
-            (try (dc/await-ready conn)
-                 (finally
-                   (dc/close! conn))))
-          (info "GRPC ready")
+          (when-not (= node (jepsen/primary test))
+            (start-zero! test node))
 
-          ;(catch [:type :cluster-failed-to-converge] e
-          ;  (warn e "Cluster failed to converge")
-          ;  (throw (ex-info "Cluster failed to converge"
-          ;                  {:type  :jepsen.db/setup-failed
-          ;                   :node  node}
-          ;                  (:throwable &throw-context))))
+          (jepsen/synchronize test)
+          (start-alpha! test node)
+          ; (start-ratel! test node)
 
-          ;(catch RuntimeException e ; Welp
-          ;  (throw (ex-info "Couldn't get a client"
-          ;                  {:type  :jepsen.db/setup-failed
-          ;                   :node  node}
-          ;                  e)))))
-          )))
+          (try+
+            (when (= node (jepsen/primary test))
+              (wait-for-cluster node test)
+              (info "Cluster converged"))
 
-    (teardown! [_ test node]
-      (stop-ratel! test node)
-      (stop-alpha! test node)
-      (stop-zero! test node)
-      (c/su
-        (c/exec :rm :-rf dir)))
+            (jepsen/synchronize test)
+            (let [conn (dc/open node alpha-public-grpc-port)]
+              (try (dc/await-ready conn)
+                   (finally
+                     (dc/close! conn))))
+            (info "GRPC ready")
 
-    db/LogFiles
-    (log-files [_ test node]
-      ; <sigh> we are not supposed to have side effects here but whatevs
-      (stop-ratel! test node)
-      (stop-alpha! test node)
-      (stop-zero! test node)
-      (c/su (c/exec :tar :cjf (str dir "/data.tar.bz2")
-                    (map (partial str dir) ["/p" "/w" "/zw"])))
+            ;(catch [:type :cluster-failed-to-converge] e
+            ;  (warn e "Cluster failed to converge")
+            ;  (throw (ex-info "Cluster failed to converge"
+            ;                  {:type  :jepsen.db/setup-failed
+            ;                   :node  node}
+            ;                  (:throwable &throw-context))))
 
-      [alpha-logfile
-       zero-logfile
-       (str dir "/data.tar.bz2")])))
+            ;(catch RuntimeException e ; Welp
+            ;  (throw (ex-info "Couldn't get a client"
+            ;                  {:type  :jepsen.db/setup-failed
+            ;                   :node  node}
+            ;                  e)))))
+            ))
+        (reset! has-setup? true))
+
+      (teardown! [this test node]
+        (when (:defer-db-teardown test)
+          (when @has-setup?
+            (when (= (jepsen/primary test) node)
+              (info "Waiting to tear down nodes; hit [enter] to tear down.")
+              (read-line))
+            (.await teardown-barrier)))
+
+        (stop-ratel! test node)
+        (stop-alpha! test node)
+        (stop-zero! test node)
+        (c/su
+          (c/exec :rm :-rf dir)))
+
+      db/LogFiles
+      (log-files [_ test node]
+        (let [tmp-dir "/tmp/jepsen-dgraph-data"
+              tarball (str dir "/data.tar.bz2")]
+          (c/su (c/exec :rm :-rf tmp-dir)
+                (c/exec :mkdir :-p tmp-dir)
+                (doseq [d ["p" "w" "zw"]]
+                  (meh (c/exec :cp :-r (str dir "/" d) tmp-dir)))
+                (c/exec :tar :cjf tarball tmp-dir))
+          [alpha-logfile
+           zero-logfile
+           tarball])))))
