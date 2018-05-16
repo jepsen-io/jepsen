@@ -23,23 +23,24 @@
 ; G2: Anti-dependency cycles
 (defrecord G2Client [table-created? client]
   client/Client
-  (setup! [this test node]
-    (let [client (c/client node)]
-      (locking table-created?
-        (when (compare-and-set! table-created? false true)
-          (c/with-conn [c client]
-            (c/with-timeout
-              (c/with-txn-retry
-                (j/execute! c "create table a (
+  (open! [this test node]
+    (assoc this :client (c/client node)))
+
+  (setup! [this test]
+    (locking table-created?
+      (when (compare-and-set! table-created? false true)
+        (c/with-conn [c client]
+          (c/with-timeout
+            (c/with-txn-retry
+              (j/execute! c "create table a (
                               id    int primary key,
                               key   int,
                               value int)"))
-              (c/with-txn-retry
-                (j/execute! c "create table b (
+            (c/with-txn-retry
+              (j/execute! c "create table b (
                               id    int primary key,
                               key   int,
-                              value int)"))))))
-      (assoc this :client client)))
+                              value int)")))))))
 
   (invoke! [this test op]
     (c/with-exception->op op
@@ -59,27 +60,30 @@
                                            " where key = ? and value % 3 = 0")
                                       k])
                        _  (when (or (seq as) (seq bs))
-                            ; Ah, the other txn has already committed
+                                        ; Ah, the other txn has already committed
                             (return (assoc op :type :fail :error :too-late)))
                        table (if a-id "a" "b")
                        id    (or a-id b-id)
                        r (c/insert! c table {:key k, :id id, :value 30})]
-                  (assoc op :type :ok)))
+                      (assoc op :type :ok)))
 
               :read
               (let [as (c/with-txn-retry
-                        (c/query c ["select * from a where
+                         (c/query c ["select * from a where
                                     key = ? and value % 3 = 0" k]))
                     bs (c/with-txn-retry
-                        (c/query c ["select * from b where
+                         (c/query c ["select * from b where
                                     key = ? and value % 3 = 0" k]))
                     values (->> (concat as bs)
                                 (map :id))]
-                    (assoc op
-                           :type :ok
-                           :value (independent/tuple k values)))))))))
+                (assoc op
+                       :type :ok
+                       :value (independent/tuple k values)))))))))
 
   (teardown! [this test]
+    nil)
+
+  (close! [this test]
     (rc/close! client)))
 
 (defn g2-test

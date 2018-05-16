@@ -96,20 +96,18 @@
 (defrecord SetsClient [tbl-created? conn]
   client/Client
 
-  (setup! [this test node]
-    (let [conn (c/client node)]
-      (info node "Connected")
+  (open! [this test node]
+    (assoc this :conn (c/client node)))
 
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          (c/with-conn [c conn]
-            (Thread/sleep 1000)
-            (j/execute! c ["drop table if exists set"])
-            (Thread/sleep 1000)
-            (info node "Creating table")
-            (j/execute! c ["create table set (val int)"]))))
-
-      (assoc this :conn conn)))
+  (setup! [this test]
+    (locking tbl-created?
+      (when (compare-and-set! tbl-created? false true)
+        (c/with-conn [c conn]
+          (Thread/sleep 1000)
+          (j/execute! c ["drop table if exists set"])
+          (Thread/sleep 1000)
+          (info "Creating table")
+          (j/execute! c ["create table set (val int)"])))))
 
   (invoke! [this test op]
     (c/with-exception->op op
@@ -125,11 +123,12 @@
                        (assoc op :type :ok, :value)))))))
 
   (teardown! [this test]
-    (try
-      (c/with-timeout
-        (c/with-conn [c conn]
-          (j/execute! c ["drop table set"])))
-      (finally (rc/close! conn)))))
+    (c/with-timeout
+      (c/with-conn [c conn]
+        (j/execute! c ["drop table set"]))))
+
+  (close! [this test]
+    (rc/close! conn)))
 
 (defn test
   [opts]
