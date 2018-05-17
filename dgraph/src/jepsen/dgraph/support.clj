@@ -233,7 +233,7 @@
             ; TODO: figure out how long to block here
             (Thread/sleep 10000))
 
-          (jepsen/synchronize test)
+          (jepsen/synchronize test 120)
           (when-not (= node (jepsen/primary test))
             (start-zero! test node))
 
@@ -246,7 +246,7 @@
               (wait-for-cluster node test)
               (info "Cluster converged"))
 
-            (jepsen/synchronize test)
+            (jepsen/synchronize test 300)
             (let [conn (dc/open node alpha-public-grpc-port)]
               (try (dc/await-ready conn)
                    (finally
