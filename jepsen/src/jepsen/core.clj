@@ -34,14 +34,23 @@
             [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
-                                 CountDownLatch)))
+                                 CountDownLatch
+                                 TimeUnit)))
 
 (defn synchronize
-  "A synchronization primitive for tests. When invoked, blocks until all
-  nodes have arrived at the same point."
-  [test]
-  (or (= ::no-barrier (:barrier test))
-      (.await ^CyclicBarrier (:barrier test))))
+  "A synchronization primitive for tests. When invoked, blocks until all nodes
+  have arrived at the same point.
+
+  This is often used in IO-heavy DB setup code to ensure all nodes have
+  completed some phase of execution before moving on to the next. However, if
+  an exception is thrown by one of those threads, the call to `synchronize`
+  will deadlock! To avoid this, we include a default timeout of 60 seconds,
+  which can be overridden by passing an alternate timeout in seconds."
+  ([test]
+   (synchronize test 60))
+  ([test timeout-s]
+   (or (= ::no-barrier (:barrier test))
+       (.await ^CyclicBarrier (:barrier test) timeout-s TimeUnit/SECONDS))))
 
 (defn conj-op!
   "Add an operation to a tests's history, and returns the operation."
@@ -170,6 +179,9 @@
     (with-thread-name (str "jepsen " name)
       (try (info "Starting" name)
            (setup-worker! worker)
+           (when (.interrupted (Thread/currentThread))
+             (throw InterruptedException. "Interrupted before running"))
+
            (try (.countDown run-latch)
                 (info "Running" name)
                 (run-worker! worker)
