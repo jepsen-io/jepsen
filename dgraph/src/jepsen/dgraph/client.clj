@@ -193,6 +193,19 @@
   [txn mut]
   (.getUidsMap (mutate!* txn mut)))
 
+(defn ^DgraphProto$Assigned set-nquads!*
+  "Takes a transaction and an n-quads string, and adds those set mutations to
+  the transaction."
+  [^DgraphClient$Transaction txn nquads]
+  (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
+                   (setSetNquads (str->byte-string nquads))
+                   build)))
+
+(defn set-nquads!
+  "Like set-nquads!*, but returns a map of key names to UID strings."
+  [txn nquads]
+  (.getUidsMap (set-nquads!* txn nquads)))
+
 (defn delete!
   "Deletes a record. Can take either a map (treated as a JSON deletion), or a
   UID string, in which case every outbound edge for the given entity is

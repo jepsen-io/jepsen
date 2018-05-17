@@ -11,6 +11,15 @@
                     [checker :as checker]
                     [generator :as gen]]))
 
+(defn hex
+  "Turns a number into a hex string."
+  [x]
+  (str ;"0x"
+       (format "%x"
+               (condp instance? x
+                 clojure.lang.BigInt (biginteger x)
+                 x))))
+
 ; Entities is an atom of a set of entities we've written
 (defrecord Client [conn entities]
   client/Client
@@ -27,7 +36,10 @@
         ; We take entity-attribute-value triples
         (let [[e a v] (:value op)]
           (case (:f op)
-            :write (let [e (first (vals (c/mutate! t {(keyword a) v})))]
+            :write (let [e (-> (c/set-nquads!
+                                 t (str "_:e <" a "> \"" v "\" .\n"))
+                               first
+                               val)]
                      (swap! entities conj e)
                      (assoc op
                             :type :ok
