@@ -179,8 +179,8 @@
     (with-thread-name (str "jepsen " name)
       (try (info "Starting" name)
            (setup-worker! worker)
-           (when (.interrupted (Thread/currentThread))
-             (throw InterruptedException. "Interrupted before running"))
+           (when (.isInterrupted (Thread/currentThread))
+             (throw (InterruptedException. "Interrupted before running")))
 
            (try (.countDown run-latch)
                 (info "Running" name)
