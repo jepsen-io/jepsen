@@ -58,6 +58,9 @@
 
    (repeated-opt "-n" "--node HOSTNAME" "Node(s) to run test on. Flag may be submitted many times, with one node per flag." default-nodes)
 
+   [nil "--nodes NODE_LIST" "Comma-separated list of node hostnames."
+    :parse-fn #(str/split % #",\s*")]
+
    [nil "--nodes-file FILENAME" "File containing node hostnames, one per line."]
 
    [nil "--username USER" "Username for logins"
@@ -141,6 +144,43 @@ Options:\n")
         (assoc-in parsed [:options :concurrency]
                   (* unit (Long/parseLong integer)))))))
 
+(defn parse-nodes
+  "Takes a parsed map and merges all the various node specifications together.
+  In particular:
+
+  - If :nodes-file and :nodes are blank, and :node is the default node list,
+    uses the default node list.
+  - Otherwise, merges together :nodes-file, :nodes, and :node into a single
+    list.
+
+  The new parsed map will have a merged nodes list in :nodes, and lose
+  :nodes-file and :node options."
+  [parsed]
+  (let [options       (:options parsed)
+        node          (:node        options)
+        nodes         (:nodes       options)
+        nodes-file    (:nodes-file  options)
+
+        ; If --node is still left at the default
+        default-node? (identical? node default-nodes)
+        ; ... and other options were given...
+        override?     (or nodes nodes-file)
+        ; Then drop the default node list
+        node          (if (and default-node? override?) nil node)
+
+        ; Read nodes-file nodes
+        nodes-file    (when nodes-file
+                        (str/split (slurp nodes-file) #"\s*\n\s*"))
+
+        ; Construct full node list
+        all-nodes     (->> (concat nodes-file
+                                   nodes
+                                   node)
+                           vec)]
+    (assoc parsed :options (-> options
+                               (dissoc :node :nodes-file)
+                               (assoc  :nodes all-nodes)))))
+
 (defn rename-keys
   "Given a map m, and a map of keys to replacement keys, yields m with keys
   renamed."
@@ -175,29 +215,13 @@ Options:\n")
                        :strict-host-key-checking
                        :private-key-path)))))
 
-(defn read-nodes-file
-  "Takes a parsed map. If :nodes-file exists, reads its contents and appends
-  them to :nodes. Drops the default nodes list if it's still there."
-  [parsed]
-  (let [options (:options parsed)]
-    (assoc parsed :options
-           (if-let [f (:nodes-file options)]
-             (let [nodes (:nodes options)
-                   nodes (if (identical? nodes default-nodes)
-                           []
-                           nodes)
-                   nodes (into nodes (str/split (slurp f) #"\s*\n\s*"))]
-               (assoc options :nodes nodes))
-             options))))
-
 (defn test-opt-fn
   "An opt fn for running simple tests. Remaps ssh keys, remaps :node to :nodes,
   reads :nodes-file into :nodes, and parses :concurrency."
   [parsed]
   (-> parsed
-      (rename-options {:node :nodes})
       rename-ssh-options
-      read-nodes-file
+      parse-nodes
       parse-concurrency))
 
 ;; Test runner
