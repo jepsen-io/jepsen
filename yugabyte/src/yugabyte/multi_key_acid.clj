@@ -75,13 +75,13 @@
                                       (sort-by #(second %))))
                  (catch UnavailableException e
                    (info "Not enough replicas - failing")
-                   (assoc op :type :fail :value (.getMessage e)))
+                   (assoc op :type :fail :error (.getMessage e)))
                  (catch ReadTimeoutException e
-                   (assoc op :type :fail :value :timed-out))
+                   (assoc op :type :fail :error :timed-out))
                  (catch NoHostAvailableException e
                    (info "All nodes are down - sleeping 2s")
                    (Thread/sleep 2000)
-                   (assoc op :type :fail :value (.getMessage e))))
+                   (assoc op :type :fail :error (.getMessage e))))
                (try
                  ; TODO - temporarily replaced by single DB call until YugaByteDB supports transaction spanning
                  ; multiple DB calls.
@@ -102,20 +102,20 @@
                                          "END TRANSACTION;"))
                  (assoc op :type :ok)
                  (catch UnavailableException e
-                   (assoc op :type :fail :value (.getMessage e)))
+                   (assoc op :type :fail :error (.getMessage e)))
                  (catch WriteTimeoutException e
-                   (assoc op :type :info :value :timed-out))
+                   (assoc op :type :info :error :timed-out))
                  (catch OperationTimedOutException e
-                   (assoc op :type :info :value :timed-out))
+                   (assoc op :type :info :error :timed-out))
                  (catch NoHostAvailableException e
                    (info "All nodes are down - sleeping 2s")
                    (Thread/sleep 2000)
-                   (assoc op :type :fail :value (.getMessage e)))
+                   (assoc op :type :fail :error (.getMessage e)))
                  (catch DriverException e
                    (if (re-find #"Value write after transaction start|Conflicts with higher priority transaction|Conflicts with committed transaction"
                                 (.getMessage e))
                      ; Definitely failed
-                     (assoc op :type :fail :value (.getMessage e))
+                     (assoc op :type :fail :error (.getMessage e))
                      (throw e)))))))
   (teardown! [this test])
   (close! [this test]
