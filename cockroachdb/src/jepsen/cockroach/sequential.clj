@@ -51,21 +51,21 @@
 (defrecord Client [table-count table-created? client]
   client/Client
 
-  (setup! [this test node]
-    (Thread/sleep 2000)
-    (let [client (c/client node)]
-      (locking table-created?
-        (when (compare-and-set! table-created? false true)
-          (c/with-conn [c client]
-            (c/with-timeout
-              (info "Creating tables" (pr-str (table-names table-count)))
-              (doseq [t (table-names table-count)]
-                (j/execute! c [(str "drop table if exists " t)])
-                (j/execute! c [(str "create table " t
-                                    " (key varchar(255) primary key)")])
-                (info "Created table" t))))))
+  (open! [this test node]
+    (assoc this :client (c/client node)))
 
-      (assoc this :client client)))
+  (setup! [this test]
+    (Thread/sleep 2000)
+    (locking table-created?
+      (when (compare-and-set! table-created? false true)
+        (c/with-conn [c client]
+          (c/with-timeout
+            (info "Creating tables" (pr-str (table-names table-count)))
+            (doseq [t (table-names table-count)]
+              (j/execute! c [(str "drop table if exists " t)])
+              (j/execute! c [(str "create table " t
+                                  " (key varchar(255) primary key)")])
+              (info "Created table" t)))))))
 
   (invoke! [this test op]
     (c/with-exception->op op
@@ -95,14 +95,13 @@
                    (assoc op :type :ok, :value))))))))
 
   (teardown! [this test]
-    (try
-      (c/with-conn [c client]
-        (c/with-timeout
-          (doseq [t (table-names table-count)]
-            (j/execute! c [(str "drop table " t)]))))
+    (c/with-conn [c client]
+      (c/with-timeout
+        (doseq [t (table-names table-count)]
+          (j/execute! c [(str "drop table " t)])))))
 
-      (finally
-        (rc/close! client)))))
+  (close! [this test]
+    (rc/close! client)))
 
 (defn writes
   "We emit sequential integer keys for writes, logging the most recent n keys

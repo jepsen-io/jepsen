@@ -22,21 +22,19 @@
 (defrecord AtomicClient [tbl-created? conn]
   client/Client
 
-  (setup! [this test node]
-    (let [conn (c/client node)]
-      (info node "Connected")
-      ;; Everyone's gotta block until we've made the table.
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          (c/with-conn [c conn]
-            (Thread/sleep 1000)
-            (j/execute! c ["drop table if exists test"])
-            (Thread/sleep 1000)
-            (info node "Creating table")
-            (j/execute! c ["create table test (id int primary key, val
-                           int)"]))))
+  (open! [this test node]
+    (assoc this :conn (c/client node)))
 
-      (assoc this :conn conn)))
+  (setup! [this test]
+    ;; Everyone's gotta block until we've made the table.
+    (locking tbl-created?
+      (when (compare-and-set! tbl-created? false true)
+        (c/with-conn [c conn]
+          (Thread/sleep 1000)
+          (j/execute! c ["drop table if exists test"])
+          (Thread/sleep 1000)
+          (j/execute! c ["create table test (id int primary key, val
+                           int)"])))))
 
   (invoke! [this test op]
     (c/with-idempotent #{:read}
@@ -77,6 +75,9 @@
                   (throw e)))))))))
 
   (teardown! [this test]
+    nil)
+
+  (close! [this test]
     (rc/close! conn)))
 
 (defn test

@@ -86,21 +86,21 @@
                             nodenum]
   client/Client
 
-  (setup! [this test node]
+  (open! [this test node]
     (let [n (if (= auto/jdbc-mode :cdb-cluster)
               (.indexOf (vec (:nodes test)) node)
               1)
           conn (c/client node)]
       (info "Setting up client for node " n " - " (name node))
-
-      (locking table-created?
-        (when (compare-and-set! table-created? false true)
-          (c/with-conn [c conn]
-            (doseq [k independent-keys]
-              (monotonic-create-tables! c k table-count
-                                        (:val-as-pkey? test))))))
-
       (assoc this :conn conn :nodenum n)))
+
+  (setup! [this test]
+    (locking table-created?
+      (when (compare-and-set! table-created? false true)
+        (c/with-conn [c conn]
+          (doseq [k independent-keys]
+            (monotonic-create-tables! c k table-count
+                                      (:val-as-pkey? test)))))))
 
   (invoke! [this test op]
     (let [[k value] (:value op)
@@ -138,8 +138,11 @@
                      (independent/tuple k)
                      (assoc op :type :ok, :value)))))))))
 
-    (teardown! [this test]
-      (rc/close! conn)))
+  (teardown! [this test]
+    nil)
+
+  (close! [this test]
+    (rc/close! conn)))
 
 (defn non-monotonic
   "Given a comparator (e.g. <, >=), a function f, and an ordered sequence of
