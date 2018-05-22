@@ -86,11 +86,12 @@
                (util/timeout max-timeout
                              (throw (RuntimeException.
                                       (str "Connection to " node " timed out")))
-                             (let [spec (db-conn-spec node)
-                                   conn (j/get-connection spec)
-                                   spec' (j/add-connection spec conn)]
-                               (assert spec')
-                               spec')))
+                             (util/retry 0.1
+                               (let [spec (db-conn-spec node)
+                                     conn (j/get-connection spec)
+                                     spec' (j/add-connection spec conn)]
+                                 (assert spec')
+                                 spec'))))
        :close close-conn
        :log? true})))
 

@@ -2,15 +2,15 @@
   "Simulates transfers between bank accounts"
   (:refer-clojure :exclude [test])
   (:require [jepsen [cockroach :as cockroach]
-                    [client :as client]
-                    [checker :as checker]
-                    [generator :as gen]
-                    [independent :as independent]
-                    [reconnect :as rc]
-                    [util :as util :refer [meh]]]
+             [client :as client]
+             [checker :as checker]
+             [generator :as gen]
+             [independent :as independent]
+             [reconnect :as rc]
+             [util :as util :refer [meh]]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.cockroach [client :as c]
-                              [nemesis :as cln]]
+             [nemesis :as cln]]
             [clojure.core.reducers :as r]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer :all]
@@ -19,27 +19,27 @@
 
 (defrecord BankClient [tbl-created? n starting-balance conn]
   client/Client
-  (setup! [this test node]
-    (let [conn (c/client node)]
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          (c/with-conn [c conn]
-            (Thread/sleep 1000)
-            (c/with-txn-retry
-              (j/execute! c ["drop table if exists accounts"]))
-            (Thread/sleep 1000)
-            (info "Creating table")
-            (c/with-txn-retry
-              (j/execute! c ["create table accounts
+  (open! [this test node]
+    (assoc this :conn (c/client node)))
+
+  (setup! [this test]
+    (locking tbl-created?
+      (when (compare-and-set! tbl-created? false true)
+        (c/with-conn [c conn]
+          (Thread/sleep 1000)
+          (c/with-txn-retry
+            (j/execute! c ["drop table if exists accounts"]))
+          (Thread/sleep 1000)
+          (info "Creating table")
+          (c/with-txn-retry
+            (j/execute! c ["create table accounts
                              (id      int not null primary key,
                              balance bigint not null)"]))
-            (dotimes [i n]
-              (Thread/sleep 500)
-              (info "Creating account" i)
-              (c/with-txn-retry
-                (c/insert! c :accounts {:id i :balance starting-balance}))))))
-
-      (assoc this :conn conn)))
+          (dotimes [i n]
+            (Thread/sleep 500)
+            (info "Creating account" i)
+            (c/with-txn-retry
+              (c/insert! c :accounts {:id i :balance starting-balance})))))))
 
   (invoke! [this test op]
     (c/with-exception->op op
@@ -56,14 +56,14 @@
                 (let [{:keys [from to amount]} (:value op)
                       b1 (-> c
                              (c/query
-                               ["select balance from accounts where id = ?"
-                                from] {:row-fn :balance})
+                              ["select balance from accounts where id = ?"
+                               from] {:row-fn :balance})
                              first
                              (- amount))
                       b2 (-> c
                              (c/query
-                               ["select balance from accounts where id = ?" to]
-                               {:row-fn :balance})
+                              ["select balance from accounts where id = ?" to]
+                              {:row-fn :balance})
                              first
                              (+ amount))]
                   (cond
@@ -81,12 +81,12 @@
                         (assoc op :type :ok)))))))))))
 
   (teardown! [this test]
-    (try
-      (c/with-timeout
-        (c/with-conn [c conn]
-          (j/execute! c ["drop table if exists accounts"])))
-      (finally
-        (rc/close! conn)))))
+    (c/with-timeout
+      (c/with-conn [c conn]
+        (j/execute! c ["drop table if exists accounts"]))))
+
+  (close! [this test]
+    (rc/close! conn)))
 
 (defn bank-read
   "Reads the current state of all accounts without any synchronization."
@@ -145,49 +145,49 @@
 (defn bank-test-base
   [opts]
   (cockroach/basic-test
-    (merge
-      {:client      {:client (:client opts)
-                     :during (->> (gen/mix [bank-read bank-diff-transfer])
-                                  (gen/clients)
-                                  (gen/stagger 0))
-                     :final (gen/clients (gen/once bank-read))}
-       :checker     (checker/compose
-                      {:perf    (checker/perf)
-                       :timeline (timeline/html)
-                       :details (bank-checker)})}
-      (dissoc opts :client))))
+   (merge
+    {:client      {:client (:client opts)
+                   :during (->> (gen/mix [bank-read bank-diff-transfer])
+                                (gen/clients))
+
+                   :final (gen/clients (gen/once bank-read))}
+     :checker     (checker/compose
+                   {:perf    (checker/perf)
+                    :timeline (timeline/html)
+                    :details (bank-checker)})}
+    (dissoc opts :client))))
 
 (defn test
   [opts]
   (bank-test-base
-    (merge {:name   "bank"
-            :model  {:n 5 :total 50}
-            :client (BankClient. (atom false) 5 10 nil)}
-           opts)))
+   (merge {:name   "bank"
+           :model  {:n 5 :total 50}
+           :client (BankClient. (atom false) 5 10 nil)}
+          opts)))
 
-; One bank account per table
+                                        ; One bank account per table
 (defrecord MultiBankClient [tbl-created? n starting-balance conn]
   client/Client
-  (setup! [this test node]
-    (let [conn (c/client node)]
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          (c/with-conn [c conn]
-            (dotimes [i n]
-              (Thread/sleep 500)
-              (c/with-txn-retry
-                (j/execute! c [(str "drop table if exists accounts" i)]))
-              (Thread/sleep 500)
-              (info "Creating table " i)
-              (c/with-txn-retry
-                (j/execute! c [(str "create table accounts" i
-                                    " (balance bigint not null)")]))
-              (Thread/sleep 500)
-              (info "Populating account" i)
-              (c/with-txn-retry
-                (c/insert! c (str "accounts" i) {:balance starting-balance}))))))
+  (open! [this test node]
+    (assoc this :conn (c/client node)))
 
-      (assoc this :conn conn)))
+  (setup! [this test]
+    (locking tbl-created?
+      (when (compare-and-set! tbl-created? false true)
+        (c/with-conn [c conn]
+          (dotimes [i n]
+            (Thread/sleep 500)
+            (c/with-txn-retry
+              (j/execute! c [(str "drop table if exists accounts" i)]))
+            (Thread/sleep 500)
+            (info "Creating table " i)
+            (c/with-txn-retry
+              (j/execute! c [(str "create table accounts" i
+                                  " (balance bigint not null)")]))
+            (Thread/sleep 500)
+            (info "Populating account" i)
+            (c/with-txn-retry
+              (c/insert! c (str "accounts" i) {:balance starting-balance})))))))
 
   (invoke! [this test op]
     (c/with-exception->op op
@@ -200,8 +200,8 @@
                 (->> (range n)
                      (mapv (fn [x]
                              (->> (c/query
-                                    c [(str "select balance from accounts" x)]
-                                    {:row-fn :balance})
+                                   c [(str "select balance from accounts" x)]
+                                   {:row-fn :balance})
                                   first)))
                      (assoc op :type :ok, :value))
 
@@ -211,8 +211,8 @@
                       to   (str "accounts" to)
                       b1 (-> c
                              (c/query
-                               [(str "select balance from " from)]
-                               {:row-fn :balance})
+                              [(str "select balance from " from)]
+                              {:row-fn :balance})
                              first
                              (- amount))
                       b2 (-> c
@@ -232,18 +232,18 @@
                             (assoc op :type :ok)))))))))))
 
   (teardown! [this test]
-    (try
-      (c/with-conn [c conn]
-        (c/with-timeout
-          (dotimes [i n]
-            (j/execute! c [(str "drop table if exists accounts" i)]))))
-      (finally
-        (rc/close! conn)))))
+    (c/with-conn [c conn]
+      (c/with-timeout
+        (dotimes [i n]
+          (j/execute! c [(str "drop table if exists accounts" i)])))))
+
+  (close! [this test]
+    (rc/close! conn)))
 
 (defn multitable-test
   [opts]
   (bank-test-base
-    (merge {:name   "bank-multitable"
-            :model  {:n 5 :total 50}
-            :client (MultiBankClient. (atom false) 5 10 nil)}
-           opts)))
+   (merge {:name   "bank-multitable"
+           :model  {:n 5 :total 50}
+           :client (MultiBankClient. (atom false) 5 10 nil)}
+          opts)))

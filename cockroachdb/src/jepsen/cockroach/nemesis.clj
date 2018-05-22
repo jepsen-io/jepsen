@@ -1,7 +1,6 @@
 (ns jepsen.cockroach.nemesis
   "Nemeses for CockroachDB"
   (:require [jepsen
-             [client :as client]
              [control :as c]
              [nemesis :as nemesis]
              [net :as net]
@@ -154,38 +153,38 @@
   "Wraps a nemesis. Before underlying nemesis starts, slows the network by dt
   s. When underlying nemesis resolves, restores network speeds."
   [nem dt]
-  (reify client/Client
-    (setup! [this test node]
+  (reify nemesis/Nemesis
+    (setup! [this test]
       (net/fast! (:net test) test)
-      (client/setup! nem test node)
+      (nemesis/setup! nem test)
       this)
 
     (invoke! [this test op]
       (case (:f op)
         :start (do (net/slow! (:net test) test {:mean (* dt 1000) :variance 1})
-                   (client/invoke! nem test op))
+                   (nemesis/invoke! nem test op))
 
-        :stop (try (client/invoke! nem test op)
+        :stop (try (nemesis/invoke! nem test op)
                    (finally
                      (net/fast! (:net test) test)))
 
-        (client/invoke! nem test op)))
+        (nemesis/invoke! nem test op)))
 
     (teardown! [this test]
       (net/fast! (:net test) test)
-      (client/teardown! nem test))))
+      (nemesis/teardown! nem test))))
 
 (defn restarting
   "Wraps a nemesis. After underlying nemesis has completed :stop, restarts
   nodes."
   [nem]
-  (reify client/Client
-    (setup! [this test node]
-      (client/setup! nem test node)
+  (reify nemesis/Nemesis
+    (setup! [this test]
+      (nemesis/setup! nem test)
       this)
 
     (invoke! [this test op]
-      (let [op' (client/invoke! nem test op)]
+      (let [op' (nemesis/invoke! nem test op)]
         (if (= :stop (:f op))
           (let [stop (c/on-nodes test (fn [test node]
                                         (try
@@ -197,7 +196,7 @@
           op')))
 
     (teardown! [this test]
-      (client/teardown! nem test))))
+      (nemesis/teardown! nem test))))
 
 (defn strobe-time
   "In response to a :start op, strobes the clock between current time and delta
@@ -205,20 +204,20 @@
   nodes."
   [delta period duration]
   (restarting
-    (reify client/Client
-      (setup! [this test _]
-        (auto/reset-clocks! test)
-        this)
+   (reify nemesis/Nemesis
+     (setup! [this test]
+       (auto/reset-clocks! test)
+       this)
 
-      (invoke! [this test op]
-        (assoc op :value
-               (case (:f op)
-                 :start (c/with-test-nodes test
-                          (nt/strobe-time! delta period duration))
-                 :stop nil)))
+     (invoke! [this test op]
+       (assoc op :value
+              (case (:f op)
+                :start (c/with-test-nodes test
+                         (nt/strobe-time! delta period duration))
+                :stop nil)))
 
-      (teardown! [this test]
-        (auto/reset-clocks! test)))))
+     (teardown! [this test]
+       (auto/reset-clocks! test)))))
 
 (defn strobe-skews
   []
@@ -235,25 +234,25 @@
   millisecond precision.  Restarts the db server if it stops."
   [dt]
   (restarting
-    (reify client/Client
-      (setup! [this test _]
-        (auto/reset-clocks! test)
-        this)
+   (reify nemesis/Nemesis
+     (setup! [this test]
+       (auto/reset-clocks! test)
+       this)
 
-      (invoke! [this test op]
-        (assoc op :value
-               (case (:f op)
-                 :start (c/with-test-nodes test
-                          (if (< (rand) 0.5)
-                            (do (c/su (c/exec "/opt/jepsen/bumptime"
-                                              (* 1000 dt)))
-                                dt)
-                            0))
-                 :stop (c/with-test-nodes test
-                         (auto/reset-clock!)))))
+     (invoke! [this test op]
+       (assoc op :value
+              (case (:f op)
+                :start (c/with-test-nodes test
+                         (if (< (rand) 0.5)
+                           (do (c/su (c/exec "/opt/jepsen/bumptime"
+                                             (* 1000 dt)))
+                               dt)
+                           0))
+                :stop (c/with-test-nodes test
+                        (auto/reset-clock!)))))
 
-      (teardown! [this test]
-        (auto/reset-clocks! test)))))
+     (teardown! [this test]
+       (auto/reset-clocks! test)))))
 
 (defn skew
   "A skew nemesis"
@@ -278,8 +277,8 @@
    (split-nemesis nil))
   ([clients]
    (let [already-split (atom {})] ; A map of tables to sets of keys split
-     (reify client/Client
-       (setup! [this test _]
+     (reify nemesis/Nemesis
+       (setup! [this test]
          (split-nemesis (mapv cc/client (:nodes test))))
 
        (invoke! [this test op]
@@ -296,17 +295,17 @@
                          ks       (set/difference ks already)
                          k        (or (first ks)
                                       (return :nothing-to-split))]
-                    (try (cc/split! c table k)
-                         (swap! already-split update table (fnil conj #{}) k)
-                         [:split table k]
-                         (catch org.postgresql.util.PSQLException e
-                           (if (re-find #"range is already split"
-                                        (.getMessage e))
-                             [:already-split table k]
-                             (throw e))))))))
+                        (try (cc/split! c table k)
+                             (swap! already-split update table (fnil conj #{}) k)
+                             [:split table k]
+                             (catch org.postgresql.util.PSQLException e
+                               (if (re-find #"range is already split"
+                                            (.getMessage e))
+                                 [:already-split table k]
+                                 (throw e))))))))
 
-     (teardown! [this test]
-       (mapv rc/close! clients))))))
+       (teardown! [this test]
+         (mapv rc/close! clients))))))
 
 (defn split
   []
