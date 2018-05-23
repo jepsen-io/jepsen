@@ -60,10 +60,11 @@
            :chdir   dir}
           binary
           :zero
-          :--idx          (node-idx test node)
-          :--port_offset  zero-port-offset
-          :--replicas     (:replicas test)
-          :--my           (str node ":" zero-internal-port)
+          :--idx                (node-idx test node)
+          :--port_offset        zero-port-offset
+          :--replicas           (:replicas test)
+          :--rebalance_interval (:rebalance-interval test)
+          :--my                 (str node ":" zero-internal-port)
           (when-not (= node (jepsen/primary test))
             [:--peer (str (jepsen/primary test) ":" zero-internal-port)])))
   :started)
