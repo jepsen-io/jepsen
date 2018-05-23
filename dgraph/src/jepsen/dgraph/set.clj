@@ -18,8 +18,7 @@
     (c/alter-schema! conn (str "type: string @index(exact)"
                                (when (:upsert-schema test) " @upsert")
                                " .\n"
-                               ; TODO: Do we really need to index this?
-                               "value: int @index(int) .\n")))
+                               "value: int .\n")))
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
