@@ -297,7 +297,7 @@
 
         {:valid?           (and (empty? lost) (empty? unexpected))
          :attempt-count    (count attempts)
-         :acknowleged-count (count enqueues)
+         :acknowledged-count (count enqueues)
          :ok-count         (count ok)
          :unexpected-count (count unexpected)
          :duplicated-count (count duplicated)

@@ -48,11 +48,13 @@
             :lost             (multiset/multiset)
             :unexpected       (multiset/multiset)
             :recovered        (multiset/multiset 1)
-            :ok-frac          1
-            :unexpected-frac  0
-            :lost-frac        0
-            :duplicated-frac  0
-            :recovered-frac   1/2})))
+            :attempt-count       2
+            :acknowledged-count  1
+            :ok-count            2
+            :unexpected-count    0
+            :lost-count          0
+            :duplicated-count    0
+            :recovered-count     1})))
 
   (testing "pathological"
     (is (= (check (total-queue) nil nil
@@ -74,11 +76,13 @@
             :unexpected       (multiset/multiset :wtf)
             :recovered        (multiset/multiset)
             :duplicated       (multiset/multiset :dup)
-            :ok-frac          1/3
-            :lost-frac        1/3
-            :unexpected-frac  1/3
-            :duplicated-frac  1/3
-            :recovered-frac   0}))))
+            :acknowledged-count 2
+            :attempt-count    3
+            :ok-count         1
+            :lost-count       1
+            :unexpected-count 1
+            :duplicated-count 1
+            :recovered-count  0}))))
 
 (deftest counter-test
   (testing "empty"
