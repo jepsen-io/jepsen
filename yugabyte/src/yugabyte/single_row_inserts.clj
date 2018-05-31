@@ -126,25 +126,25 @@
                 (cql/insert conn "kv_pairs" (mk-pair (:value op)))
                 (assoc op :type :ok)
                 (catch UnavailableException e
-                  (assoc op :type :fail :value (.getMessage e)))
+                  (assoc op :type :fail :error (.getMessage e)))
                 (catch WriteTimeoutException e
-                  (assoc op :type :info :value :timed-out))
+                  (assoc op :type :info :error :timed-out))
                 (catch NoHostAvailableException e
                   (info "All nodes are down - sleeping 2s")
                   (Thread/sleep 2000)
-                  (assoc op :type :fail :value (.getMessage e))))
+                  (assoc op :type :fail :error (.getMessage e))))
       :read (try (wait-for-recovery 30 conn)
                  (let [value (->> (cql/select conn "kv_pairs"))]
                    (assoc op :type :ok :value value))
                  (catch UnavailableException e
                    (info "Not enough replicas - failing")
-                   (assoc op :type :fail :value (.getMessage e)))
+                   (assoc op :type :fail :error (.getMessage e)))
                  (catch ReadTimeoutException e
-                   (assoc op :type :fail :value :timed-out))
+                   (assoc op :type :fail :error :timed-out))
                  (catch NoHostAvailableException e
                    (info "All nodes are down - sleeping 2s")
                    (Thread/sleep 2000)
-                   (assoc op :type :fail :value (.getMessage e))))))
+                   (assoc op :type :fail :error (.getMessage e))))))
    (teardown! [this test])
    (close! [this test]
     (info "Closing client with conn" conn)

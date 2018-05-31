@@ -47,13 +47,13 @@
                (cql/insert conn table-name {:id id :val val})
                (assoc op :type :ok)
                (catch UnavailableException e
-                 (assoc op :type :fail :value (.getMessage e)))
+                 (assoc op :type :fail :error (.getMessage e)))
                (catch WriteTimeoutException e
-                 (assoc op :type :info :value :timed-out))
+                 (assoc op :type :info :error :timed-out))
                (catch NoHostAvailableException e
                  (info "All nodes are down - sleeping 2s")
                  (Thread/sleep 2000)
-                 (assoc op :type :fail :value (.getMessage e))))
+                 (assoc op :type :fail :error (.getMessage e))))
       :cas (try
              (let [[expected-val new-val] val
                    res (cql/update conn table-name {:val new-val}
@@ -62,25 +62,25 @@
                    ]
                (assoc op :type (if applied :ok :fail)))
              (catch UnavailableException e
-               (assoc op :type :fail :value (.getMessage e)))
+               (assoc op :type :fail :error (.getMessage e)))
              (catch WriteTimeoutException e
-               (assoc op :type :info :value :timed-out))
+               (assoc op :type :info :error :timed-out))
              (catch NoHostAvailableException e
                (info "All nodes are down - sleeping 2s")
                (Thread/sleep 2000)
-               (assoc op :type :fail :value (.getMessage e))))
+               (assoc op :type :fail :error (.getMessage e))))
       :read (try (wait-for-recovery 30 conn)
                  (let [value (->> (cql/select conn table-name (where [[= :id id]])) first :val)]
                    (assoc op :type :ok :value (independent/tuple id value)))
                  (catch UnavailableException e
                    (info "Not enough replicas - failing")
-                   (assoc op :type :fail :value (.getMessage e)))
+                   (assoc op :type :fail :error (.getMessage e)))
                  (catch ReadTimeoutException e
-                   (assoc op :type :fail :value :timed-out))
+                   (assoc op :type :fail :error :timed-out))
                  (catch NoHostAvailableException e
                    (info "All nodes are down - sleeping 2s")
                    (Thread/sleep 2000)
-                   (assoc op :type :fail :value (.getMessage e)))))))
+                   (assoc op :type :fail :error (.getMessage e)))))))
   (teardown! [this test])
   (close! [this test]
     (info "Closing client with conn" conn)
