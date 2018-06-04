@@ -42,21 +42,21 @@
 (defrecord Client [table-count table-created? client]
   client/Client
 
-  (setup! [this test node]
-    (Thread/sleep 2000)
-    (let [client (c/client node)]
-      (locking table-created?
-        (when (compare-and-set! table-created? false true)
-          (c/with-conn [c client]
-            (c/with-timeout
-              (info "Creating tables" (pr-str (table-names table-count)))
-              (doseq [t (table-names table-count)]
-                (j/execute! c [(str "create table " t
-                                    " (id int primary key,
-                                       key int)")])
-                (info "Created table" t))))))
+  (open! [this test node]
+    (assoc this :client (c/client node)))
 
-      (assoc this :client client)))
+  (setup! [this test]
+    (Thread/sleep 2000)
+    (locking table-created?
+      (when (compare-and-set! table-created? false true)
+        (c/with-conn [c client]
+          (c/with-timeout
+            (info "Creating tables" (pr-str (table-names table-count)))
+            (doseq [t (table-names table-count)]
+              (j/execute! c [(str "create table " t
+                                  " (id int primary key,
+                                       key int)")])
+              (info "Created table" t)))))))
 
   (invoke! [this test op]
     (c/with-exception->op op
@@ -82,6 +82,9 @@
                            (assoc op :type :ok, :value))))))))
 
   (teardown! [this test]
+    nil)
+
+  (close! [this test]
     (rc/close! client)))
 
 (defn checker

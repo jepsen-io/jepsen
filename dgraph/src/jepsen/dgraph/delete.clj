@@ -25,12 +25,14 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "key: int @index(int) .\n")))
+    (c/alter-schema! conn (str "key: int @index(int)"
+                               (when (:upsert-schema test) " @upsert")
+                               " .\n")))
 
   (invoke! [this test op]
     (let [[k v] (:value op)]
       (c/with-conflict-as-fail op
-        (c/with-txn [t conn]
+        (c/with-txn test [t conn]
           (case (:f op)
             :read (->> (c/query t (str "{ q(func: eq(key, $key)) {\n"
                                        "  uid\n"

@@ -15,12 +15,14 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "type: string @index(exact) .\n"
-                               "value: int @index(int) .\n")))
+    (c/alter-schema! conn (str "type: string @index(exact)"
+                               (when (:upsert-schema test) " @upsert")
+                               " .\n"
+                               "value: int .\n")))
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
-      (c/with-txn [t conn]
+      (c/with-txn test [t conn]
         (case (:f op)
           :add (let [inserted (c/mutate! t {:type "element",
                                             :value (:value op)})]
@@ -58,21 +60,21 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn "value: [int] .")
-    (c/with-txn [t conn]
+    (c/alter-schema! conn (str "value: [int] .\n"))
+    (c/with-txn test [t conn]
       (deliver uid (first (vals (c/mutate! t {:value -1}))))
       (info "UID is" @uid)))
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
       (case (:f op)
-        :add (let [inserted (c/with-txn [t conn]
+        :add (let [inserted (c/with-txn test [t conn]
                               (c/mutate! t {:uid @uid
                                             :value (:value op)}))]
                (swap! written conj (:value op))
                (assoc op :type :ok, :uid @uid))
 
-        :read (let [r (c/with-txn [t conn]
+        :read (let [r (c/with-txn test [t conn]
                         (let [found (->> (c/query t
                                                   (str "{ q(func: uid($u)) { "
                                                        "uid, value } }")

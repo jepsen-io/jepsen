@@ -85,7 +85,7 @@ construct a new Client, and pass `nil` as the value for `conn`. Remember, our
 initial seed client doesn't have a connection; Jepsen will call `open!` to get
 connected clients later.
 
-```
+```clj
 (defn etcd-test
   "Given an options map from the command-line runner (e.g. :nodes, :ssh,
   :concurrency, ...), constructs a test map."
@@ -204,7 +204,7 @@ key. We can pick any name we like--let's call it "foo" for now.
 ```clj
     (invoke! [this test op]
       (case (:f op)
-        :read (assoc op :type :ok, :value (v/get conn "foo")))))
+        :read (assoc op :type :ok, :value (v/get conn "foo"))))
 ```
 
 We dispatch based on the `:f` field of the operation, and when it's a

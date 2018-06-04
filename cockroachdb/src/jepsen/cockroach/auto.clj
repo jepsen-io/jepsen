@@ -144,12 +144,12 @@
   the tarball."
   [test node]
   (c/su
-    (debian/install [:tcpdump :ntpdate])
-    (cu/ensure-user! cockroach-user)
-    (cu/install-tarball! node (:tarball test) working-path false)
-    (c/exec :mkdir :-p working-path)
-    (c/exec :mkdir :-p log-path)
-    (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path))
+   (debian/install [:tcpdump :ntpdate])
+   (cu/ensure-user! cockroach-user)
+   (cu/install-archive! (:tarball test) working-path false)
+   (c/exec :mkdir :-p working-path)
+   (c/exec :mkdir :-p log-path)
+   (c/exec :chown :-R (str cockroach-user ":" cockroach-user) working-path))
   (install-bumptime!)
   (nt/install!)
   (info node "Cockroach installed"))

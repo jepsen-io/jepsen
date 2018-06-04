@@ -186,7 +186,9 @@
           {:valid? :unknown
            :error  "Set was never read"}
 
-          (let [; The OK set is every read value which we tried to add
+          (let [final-read (core/set final-read)
+
+                ; The OK set is every read value which we tried to add
                 ok          (set/intersection final-read attempts)
 
                 ; Unexpected records are those we *never* attempted.
@@ -199,15 +201,17 @@
                 ; succeeded or not, but we found them in the final set.
                 recovered   (set/difference ok adds)]
 
-            {:valid?          (and (empty? lost) (empty? unexpected))
-             :ok              (util/integer-interval-set-str ok)
-             :lost            (util/integer-interval-set-str lost)
-             :unexpected      (util/integer-interval-set-str unexpected)
-             :recovered       (util/integer-interval-set-str recovered)
-             :ok-frac         (util/fraction (count ok) (count attempts))
-             :unexpected-frac (util/fraction (count unexpected) (count attempts))
-             :lost-frac       (util/fraction (count lost) (count attempts))
-             :recovered-frac  (util/fraction (count recovered) (count attempts))}))))))
+            {:valid?              (and (empty? lost) (empty? unexpected))
+             :attempt-count       (count attempts)
+             :acknowledged-count  (count adds)
+             :ok-count            (count ok)
+             :lost-count          (count lost)
+             :recovered-count     (count recovered)
+             :unexpected-count    (count unexpected)
+             :ok                  (util/integer-interval-set-str ok)
+             :lost                (util/integer-interval-set-str lost)
+             :unexpected          (util/integer-interval-set-str unexpected)
+             :recovered           (util/integer-interval-set-str recovered)}))))))
 
 (defn expand-queue-drain-ops
   "Takes a history. Looks for :drain operations with their value being a
@@ -291,16 +295,18 @@
             ; suceeded or not, but an attempt took place.
             recovered  (multiset/minus ok enqueues)]
 
-        {:valid?          (and (empty? lost) (empty? unexpected))
-         :lost            lost
-         :unexpected      unexpected
-         :duplicated      duplicated
-         :recovered       recovered
-         :ok-frac         (util/fraction (count ok)         (count attempts))
-         :unexpected-frac (util/fraction (count unexpected) (count attempts))
-         :duplicated-frac (util/fraction (count duplicated) (count attempts))
-         :lost-frac       (util/fraction (count lost)       (count attempts))
-         :recovered-frac  (util/fraction (count recovered)  (count attempts))}))))
+        {:valid?           (and (empty? lost) (empty? unexpected))
+         :attempt-count    (count attempts)
+         :acknowledged-count (count enqueues)
+         :ok-count         (count ok)
+         :unexpected-count (count unexpected)
+         :duplicated-count (count duplicated)
+         :lost-count       (count lost)
+         :recovered-count  (count recovered)
+         :lost             lost
+         :unexpected       unexpected
+         :duplicated       duplicated
+         :recovered        recovered}))))
 
 (defn unique-ids
   "Checks that a unique id generator actually emits unique IDs. Expects a

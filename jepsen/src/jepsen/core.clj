@@ -31,16 +31,26 @@
             [jepsen.client :as client]
             [jepsen.nemesis :as nemesis]
             [jepsen.store :as store]
+            [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
-                                 CountDownLatch)))
+                                 CountDownLatch
+                                 TimeUnit)))
 
 (defn synchronize
-  "A synchronization primitive for tests. When invoked, blocks until all
-  nodes have arrived at the same point."
-  [test]
-  (or (= ::no-barrier (:barrier test))
-      (.await ^CyclicBarrier (:barrier test))))
+  "A synchronization primitive for tests. When invoked, blocks until all nodes
+  have arrived at the same point.
+
+  This is often used in IO-heavy DB setup code to ensure all nodes have
+  completed some phase of execution before moving on to the next. However, if
+  an exception is thrown by one of those threads, the call to `synchronize`
+  will deadlock! To avoid this, we include a default timeout of 60 seconds,
+  which can be overridden by passing an alternate timeout in seconds."
+  ([test]
+   (synchronize test 60))
+  ([test timeout-s]
+   (or (= ::no-barrier (:barrier test))
+       (.await ^CyclicBarrier (:barrier test) timeout-s TimeUnit/SECONDS))))
 
 (defn conj-op!
   "Add an operation to a tests's history, and returns the operation."
@@ -85,60 +95,66 @@
      (finally
        (control/on-nodes ~test (partial os/teardown! (:os ~test))))))
 
-(defn setup-primary!
-  "Given a test, sets up the database primary, if the DB supports it."
-  [test]
-  (when (satisfies? db/Primary (:db test))
-    (let [p (primary test)]
-      (control/with-session p (get-in test [:sessions p])
-        (db/setup-primary! (:db test) test p)))))
-
 (defn snarf-logs!
   "Downloads logs for a test."
   [test]
   ; Download logs
-  (when (satisfies? db/LogFiles (:db test))
-    (info "Snarfing log files")
-    (control/on-nodes test
-              (fn [test node]
-                (let [full-paths (db/log-files (:db test) test node)
-                      ; A map of full paths to short paths
-                      paths      (->> full-paths
-                                      (map #(str/split % #"/"))
-                                      util/drop-common-proper-prefix
-                                      (map (partial str/join "/"))
-                                      (zipmap full-paths))]
-                  (doseq [[remote local] paths]
-                    (info "downloading" remote "to" local)
-                    (try
-                      (control/download
-                        remote
-                        (.getCanonicalPath
-                          (store/path! test (name node)
-                                       ; strip leading /
-                                       (str/replace local #"^/" ""))))
-                      (catch java.io.IOException e
-                        (if (= "Pipe closed" (.getMessage e))
-                          (info remote "pipe closed")
-                          (throw e)))
-                      (catch java.lang.IllegalArgumentException e
-                        ; This is a jsch bug where the file is just being
-                        ; created
-                        (info remote "doesn't exist")))))))))
+  (locking snarf-logs!
+    (when (satisfies? db/LogFiles (:db test))
+      (info "Snarfing log files")
+      (control/on-nodes test
+        (fn [test node]
+          (let [full-paths (db/log-files (:db test) test node)
+                ; A map of full paths to short paths
+                paths      (->> full-paths
+                                (map #(str/split % #"/"))
+                                util/drop-common-proper-prefix
+                                (map (partial str/join "/"))
+                                (zipmap full-paths))]
+            (doseq [[remote local] paths]
+              (info "downloading" remote "to" local)
+              (try
+                (control/download
+                  remote
+                  (.getCanonicalPath
+                    (store/path! test (name node)
+                                 ; strip leading /
+                                 (str/replace local #"^/" ""))))
+                (catch java.io.IOException e
+                  (if (= "Pipe closed" (.getMessage e))
+                    (info remote "pipe closed")
+                    (throw e)))
+                (catch java.lang.IllegalArgumentException e
+                  ; This is a jsch bug where the file is just being
+                  ; created
+                  (info remote "doesn't exist"))))))))))
+
+(defmacro with-log-snarfing
+  "Evaluates body and ensures logs are snarfed afterwards. Will also download
+  logs in the event of JVM shutdown, so you can ctrl-c a test and get something
+  useful."
+  [test & body]
+  `(let [^Thread hook# (Thread.
+                         (bound-fn []
+                           (with-thread-name "Jepsen shutdown hook"
+                             (info "Downloading DB logs before JVM shutdown...")
+                             (snarf-logs! ~test)
+                             (store/update-symlinks! ~test))))]
+     (.. (Runtime/getRuntime) (addShutdownHook hook#))
+     (try
+       ~@body
+       (finally
+         (snarf-logs! ~test)
+         (store/update-symlinks! ~test)
+         (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
 
 (defmacro with-db
   "Wraps body in DB setup and teardown."
   [test & body]
   `(try
-     (control/on-nodes ~test (partial db/cycle! (:db ~test)))
-     (setup-primary! ~test)
-
-     ~@body
-     (catch Throwable t#
-       ; Emergency log dump!
-       (snarf-logs! ~test)
-       (store/update-symlinks! ~test)
-       (throw t#))
+     (with-log-snarfing ~test
+       (db/cycle! ~test)
+       ~@body)
      (finally
        (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
 
@@ -163,6 +179,9 @@
     (with-thread-name (str "jepsen " name)
       (try (info "Starting" name)
            (setup-worker! worker)
+           (when (.isInterrupted (Thread/currentThread))
+             (throw (InterruptedException. "Interrupted before running")))
+
            (try (.countDown run-latch)
                 (info "Running" name)
                 (run-worker! worker)
@@ -450,7 +469,7 @@
   (NemesisWorker. test nil (atom false)))
 
 (defn run-case!
-  "Spawns nemesis and clients, runs a single test case, snarf the logs, and
+  "Spawns nemesis and clients, runs a single test case, and
   returns that case's history."
   [test]
   (let [history (atom [])
@@ -475,13 +494,29 @@
       ; Go!
       (run-workers! (cons nemesis clients)))
 
-    ; Download logs
-    (snarf-logs! test)
-
     ; Unregister our history
     (swap! (:active-histories test) disj history)
 
     @history))
+
+(defn analyze!
+  "After running the test and obtaining a history, we perform some
+  post-processing on the history, run the checker, and write the test to disk
+  again."
+  [test]
+  (info "Analyzing...")
+  (let [; Give each op in the history a monotonically increasing index
+        test (assoc test :history (history/index (:history test)))
+
+        ; Run checkers
+        test (assoc test :results (checker/check-safe
+                                    (:checker test)
+                                    test
+                                    (:model test)
+                                    (:history test)))]
+    (info "Analysis complete")
+    (when (:name test) (store/save-2! test))
+    test))
 
 (defn log-results
   "Logs info about the results of a test to stdout, and returns test."
@@ -548,8 +583,8 @@
      the history
     - This generates the final report"
   [test]
-  (try
-    (log-results
+  (tt/with-threadpool
+    (try
       (with-thread-name "jepsen test runner"
         (let [test (assoc test
                           ; Initialization time
@@ -586,7 +621,8 @@
                                (cons :nemesis (range (:concurrency test)))
                                (util/with-relative-time
                                  ; Run a single case
-                                 (let [test (assoc test :history (run-case! test))
+                                 (let [test (assoc test :history
+                                                   (run-case! test))
                                        ; Remove state
                                        test (dissoc test
                                                     :barrier
@@ -594,17 +630,7 @@
                                                     :sessions)]
                                    (info "Run complete, writing")
                                    (when (:name test) (store/save-1! test))
-                                   test))))))))
-              _    (info "Analyzing")
-              ; Give each op in the history a monotonically increasing index
-              test (assoc test :history (history/index (:history test)))
-              test (assoc test :results (checker/check-safe
-                                          (:checker test)
-                                          test
-                                          (:model test)
-                                          (:history test)))]
-
-          (info "Analysis complete")
-          (when (:name test) (store/save-2! test)))))
+                                   (analyze! test)))))))))]
+          (log-results test)))
     (finally
-      (store/stop-logging!))))
+      (store/stop-logging!)))))

@@ -47,14 +47,19 @@
   :value for each operation, and ensure that in each process, those values are
   monotonic."
   (:require [clojure.tools.logging :refer [info]]
+            [clojure.core.reducers :as r]
             [dom-top.core :refer [with-retry]]
             [knossos.op :as op]
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
                     [checker :as checker]
                     [independent :as independent]
-                    [generator :as gen]]
-            [jepsen.checker.timeline :as timeline]))
+                    [generator :as gen]
+                    [util :as util]
+                    [store :as store]]
+            [jepsen.checker.timeline :as timeline]
+            [jepsen.checker.perf :as perf]
+            [gnuplot.core :as g]))
 
 (defrecord Client [conn]
   client/Client
@@ -62,13 +67,15 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "key:   int @index(int) .\n"
+    (c/alter-schema! conn (str "key:   int @index(int)"
+                               (when (:upsert-schema test) " @upsert")
+                               " .\n"
                                "value: int @index(int) .\n")))
 
   (invoke! [this test op]
     (let [[k _] (:value op)]
       (c/with-conflict-as-fail op
-        (c/with-txn [t conn]
+        (c/with-txn test [t conn]
           (case (:f op)
             :inc (let [{:keys [uid value] :or {value 0}}
                        (->> (c/query t "{ q(func: eq(key, $key)) {
@@ -97,30 +104,131 @@
   (close! [this test]
     (c/close! conn)))
 
+(defn non-monotonic-pairs
+  "Given a history, finds pairs of ops on the same process where the value
+  decreases."
+  [history]
+  (->> history
+       (filter op/ok?)
+       (reduce (fn [[last errs] op]
+                 ; Last is a map of process ids to the last
+                 ; operation we saw for that process. Errs is a
+                 ; collection of error maps.
+                 (let [p          (:process op)
+                       value      (:value op)
+                       last-value (-> (last p) :value (or 0))]
+                   (if (<= last-value value)
+                     ; Monotonic
+                     [(assoc last p op) errs]
+                     ; Non-monotonic!
+                     [(assoc last p op)
+                      (conj errs [(last p) op])])))
+               [{} []])
+       second))
+
 (defn checker
   "This checks a single register; we generalize it using independent/checker."
   []
   (reify checker/Checker
     (check [_ test model history opts]
-      (let [errs (->> history
-                      (filter op/ok?)
-                      (reduce (fn [[last errs] op]
-                                ; Last is a map of process ids to the last
-                                ; operation we saw for that process. Errs is a
-                                ; collection of error maps.
-                                (let [p          (:process op)
-                                      value      (:value op)
-                                      last-value (-> (last p) :value (or 0))]
-                                  (if (<= last-value value)
-                                    ; Monotonic
-                                    [(assoc last p op) errs]
-                                    ; Non-monotonic!
-                                    [(assoc last p op)
-                                     (conj errs [(last p) op])])))
-                              [{} []])
-                      second)]
+      (let [errs (non-monotonic-pairs history)]
         {:valid? (empty? errs)
          :non-monotonic errs}))))
+
+(defn merged-windows
+  "Takes a collection of points, and computes [lower, upper] windows of s
+  elements before and after each point, then merges overlapping windows
+  together."
+  [s points]
+  (when (seq points)
+    (let [points (sort points)
+          ; Build up a vector of windows by keeping track of the current lower
+          ; and upper bounds, expanding upper whenever necessary.
+          [windows lower upper]
+          (reduce (fn [[windows lower upper] p]
+                    (let [lower' (- p s)
+                          upper' (+ p s)]
+                      (if (<= upper lower')
+                        ; Start a new window
+                        [(conj windows [lower upper]) lower' upper']
+                        ; Expand this window
+                        [windows lower upper'])))
+                  [[] (- (first points) s) (+ (first points) s)]
+                  points)]
+      (conj windows [lower upper]))))
+
+(defn plot!
+  "Renders a plot of a history to the given file. Takes a test and checker opts
+  to determine the subdirectory to write to."
+  [test opts filename history]
+  (let [series (->> history
+                    (r/filter (comp number? :process))
+                    (r/filter #(= :ok (:type %)))
+                    (group-by :process)
+                    (util/map-vals
+                      (partial mapv (fn [op]
+                                      [(util/nanos->secs (:time op))
+                                       (:value op)]))))
+        colors (perf/qs->colors (keys series))
+        path (.getCanonicalPath
+               (store/path! test (:subdirectory opts)
+                            (str "sequential " filename ".png")))]
+    (try
+      (g/raw-plot!
+        (concat (perf/preamble path)
+                (perf/nemesis-regions history)
+                (perf/nemesis-lines history)
+                [['set 'title (str (:name test) " sequential by process")]
+                 '[set ylabel "register value"]
+                 ['plot (apply g/list
+                               (for [[process points] series]
+                                 ["-"
+                                  'with       'linespoints
+                                  'pointtype  2
+                                  'linetype   (colors process)
+                                  'title      (str process)]))]])
+        (vals series))
+      {:valid? true}
+      (catch java.io.IOException _
+        (throw (IllegalStateException. "Error rendering plot; verify gnuplot is installed and reachable"))))))
+
+(defn plotter
+  "Plots interesting bits of the value as seen by each process history."
+  []
+  (reify checker/Checker
+    (check [this test model history opts]
+      ; Identify interesting regions
+      (let [history (->> history
+                         (r/filter (fn [op]
+                                     (or (op/ok? op)
+                                         (= :nemesis (:process op)))))
+                         (into []))
+            spots (nth (reduce (fn [[i last spots] op]
+                                 (if (= :nemesis (:process op))
+                                   ; Skip nemesis
+                                   [(inc i) last spots]
+                                   ; Figure out if this is a spot
+                                   (let [p  (:process op)
+                                         v  (-> (last p) :value (or 0))
+                                         v' (:value op)]
+                                     [(inc i)
+                                      (assoc last p op)
+                                      (if (<= v v')
+                                        ; Monotonic
+                                        spots
+                                        (conj spots i))])))
+                               [0 {} []]
+                               history)
+                       2)]
+        (->> spots
+             (merged-windows 32)
+             (map-indexed (fn [i [lower upper]]
+                            (->> (subvec history
+                                         (max lower 0)
+                                         (min upper (dec (count history))))
+                                 (plot! test opts i))))
+             dorun))
+      {:valid? true})))
 
 (defn inc-gen  [_ _]
   {:type :invoke, :f :inc, :value (independent/tuple (rand-int 8) nil)})
@@ -134,5 +242,6 @@
    :checker   (independent/checker
                 (checker/compose
                   {:sequential (checker)
+                   :plot       (plotter)
                    :timeline   (timeline/html)}))
    :generator (gen/mix [inc-gen read-gen])})

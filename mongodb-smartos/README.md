@@ -1,10 +1,10 @@
 # mongodb-smartos
 
-A Clojure library designed to ... well, that part is up to you.
+A variant of the MongoDB test designed to run on SmartOS.
 
 ## Usage
 
-FIXME
+`lein test`; edit the test source for alterate tests.
 
 ## License
 

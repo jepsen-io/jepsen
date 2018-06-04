@@ -7,7 +7,8 @@
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [generator :as gen]]))
+                    [generator :as gen]
+                    [independent :as independent]]))
 
 (defrecord Client [conn]
   client/Client
@@ -15,29 +16,34 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn "email: string @index(exact) ."))
+    (c/alter-schema! conn (str "email: string @index(exact)"
+                               (when (:upsert-schema test) " @upsert")
+                               " .")))
 
   (invoke! [this test op]
-    (c/with-conflict-as-fail op
-      (c/with-txn [t conn]
-        (case (:f op)
-          :upsert (let [inserted (c/upsert! t
-                                            :email
-                                            {:email "bob@example.com"})]
-                    (assoc op
-                           :type  (if inserted :ok :fail)
-                           :value (first (vals inserted))))
+    (let [[k v] (:value op)]
+      (c/with-conflict-as-fail op
+        (c/with-txn test [t conn]
+          (case (:f op)
+            :upsert (let [inserted (c/upsert! t
+                                              :email
+                                              {:email (str k)})]
+                      (assoc op
+                             :type  (if inserted :ok :fail)
+                             :value (independent/tuple
+                                      k (first (vals inserted)))))
 
-          :read (->> (str "{\n"
-                          "  q(func: eq(email, \"bob@example.com\")) {\n"
-                          "    uid\n"
-                          "  }\n"
-                          "}")
-                     (c/query t)
-                     :q
-                     (map :uid)
-                     sort
-                     (assoc op :type :ok, :value))))))
+            :read (->> (c/query t (str "{\n"
+                                       "  q(func: eq(email, $email)) {\n"
+                                       "    uid\n"
+                                       "  }\n"
+                                       "}")
+                                {:email (str k)})
+                       :q
+                       (map :uid)
+                       sort
+                       (independent/tuple k)
+                       (assoc op :type :ok, :value)))))))
 
   (teardown! [this test])
 
@@ -65,6 +71,16 @@
   "Stuff you need to build a test!"
   [opts]
   {:client    (Client. nil)
-   :checker   (checker)
-   :generator (gen/phases (gen/each (gen/once {:type :invoke, :f :upsert}))
-                          (gen/each (gen/once {:type :invoke, :f :read})))})
+   :checker   (independent/checker (checker))
+   :generator (independent/concurrent-generator
+                (min (:concurrency opts)
+                     (* 2 (count (:nodes opts))))
+                (range)
+                (fn [k]
+                  ; This is broken because phases inserts a global barrier for
+                  ; all threads at this point. When a thread finishes due to
+                  ; time-limit, it might give up without ever making it to the
+                  ; barrier. That *traps* the other threads on the barrier
+                  ; forever.
+                  (gen/phases (gen/each (gen/once {:type :invoke, :f :upsert}))
+                              (gen/each (gen/once {:type :invoke, :f :read})))))})

@@ -60,6 +60,33 @@
   [n]
   (inc (int (Math/floor (/ n 2)))))
 
+(defn min-by
+  "Finds the minimum element of a collection based on some (f element), which
+  returns Comparables. If `coll` is empty, returns nil."
+  [f coll]
+  (when (seq coll)
+    (reduce (fn [m e]
+              (if (pos? (compare (f m) (f e)))
+                e
+                m))
+            coll)))
+
+(defn max-by
+  "Finds the maximum element of a collection based on some (f element), which
+  returns Comparables. If `coll` is empty, returns nil."
+  [f coll]
+  (when (seq coll)
+    (reduce (fn [m e]
+              (if (neg? (compare (f m) (f e)))
+                e
+                m))
+            coll)))
+
+(defn fast-last
+  "Like last, but O(1) on counted collections."
+  [coll]
+  (nth coll (dec (count coll))))
+
 (defn rand-nth-empty
   "Like rand-nth, but returns nil if the collection is empty."
   [coll]

@@ -94,7 +94,7 @@
    (let [encoded-url (String. (b64/encode (.getBytes url)) "UTF-8")
          dest-file   (str wget-cache-dir "/" encoded-url)]
      (when (:force? opts)
-       (info "Clearing cached copy of " url)
+       (info "Clearing cached copy of" url)
        (exec :rm :-rf dest-file))
      (when-not (exists? dest-file)
        (info "Downloading" url)
@@ -249,3 +249,16 @@
    (info "Stopping" cmd)
    (meh (exec :killall :-9 :-w cmd))
    (meh (exec :rm :-rf pidfile))))
+
+(defn daemon-running?
+  "Given a pidfile, returns true if the pidfile is present and the process it
+  contains is alive, nil if the pidfile is absent, false if it's present and
+  the process doesn't exist.
+
+  Strictly this doesn't mean the process is RUNNING; it could be asleep or a
+  zombie, but you know what I mean. ;-)"
+  [pidfile]
+  (when-let [pid (meh (exec :cat pidfile))]
+    (try (exec :ps :-o "pid=" :-p pid)
+         (catch RuntimeException e
+           false))))

@@ -1,10 +1,10 @@
 (ns jepsen.os.centos
-  "Common tasks for Centos boxes."
+  "Common tasks for CentOS boxes."
   (:use clojure.tools.logging)
   (:require [clojure.set :as set]
             [jepsen.util :refer [meh]]
             [jepsen.os :as os]
-            [jepsen.control :as c :refer [|]]
+            [jepsen.control :as c]
             [jepsen.control.util :as cu]
             [jepsen.net :as net]
             [clojure.string :as str]))
@@ -17,49 +17,59 @@
         hosts'  (->> hosts
                      str/split-lines
                      (map (fn [line]
-                            (if (re-find #"^127\.0\.0\.1\t" line)
-                              (str "127.0.0.1\tlocalhost") ; name)
+                            (if (and (re-find #"^127\.0\.0\.1" line)
+                                     (not (re-find (re-pattern name) line)))
+                              (str line " " name)
                               line)))
                      (str/join "\n"))]
-    (when-not (= hosts hosts')
-      (c/su (c/exec :echo hosts' :> "/etc/hosts")))))
+    (c/su (c/exec :echo hosts' :> "/etc/hosts"))))
 
 (defn time-since-last-update
-  "When did we last run an yum update, in seconds ago"
+  "When did we last run a yum update, in seconds ago"
   []
   (- (Long/parseLong (c/exec :date "+%s"))
-     (Long/parseLong (c/exec :rpm :-qa :--queryformat "%{INSTALLTIME}\n" | :sort :-hr | :head :-n1))))
+     (Long/parseLong (c/exec :stat :-c "%Y" "/var/log/yum.log"))))
 
 (defn update!
-  "yum update."
+  "Yum update."
   []
-  (c/su (c/exec :yum :update)))
+  (c/su (c/exec :yum :-y :update)))
 
 (defn maybe-update!
   "Yum update if we haven't done so recently."
   []
-  (when (< 86400 (time-since-last-update))
-    (update!)))
+  (try (when (< 86400 (time-since-last-update))
+         (update!))
+       (catch Exception e
+         (update!))))
+
+(defmacro dprint [x]
+  `((fn [x#] do
+      x#) ~x))
 
 (defn installed
   "Given a list of centos packages (strings, symbols, keywords, etc), returns
   the set of packages which are installed, as strings."
   [pkgs]
   (let [pkgs (->> pkgs (map name) set)]
-    (->> (c/exec :rpm :-q pkgs (c/lit "||") :true)
+    (->> (c/exec :yum :list :installed)
          str/split-lines
-         (filter #(not (re-matches #".* is not installed" %)))
-         set)))
+         (map (comp first #(str/split %1 #"\s+")))
+         (map (comp second (partial re-find #"(.*)\.[^\-]+")))
+         set
+         ((partial clojure.set/intersection pkgs))
+         dprint)))
 
 (defn uninstall!
   "Removes a package or packages."
   [pkg-or-pkgs]
   (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))
         pkgs (installed pkgs)]
-    (c/su (apply c/exec :yum :remove :--purge :-y pkgs))))
+    (info "Uninstalling" pkgs)
+    (c/su (apply c/exec :yum :-y :remove pkgs))))
 
 (defn installed?
-  "Are the given centos packages, or singular package, installed on the current
+  "Are the given packages, or singular package, installed on the current
   system?"
   [pkg-or-pkgs]
   (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))]
@@ -69,7 +79,15 @@
   "Given a package name, determines the installed version of that package, or
   nil if it is not installed."
   [pkg]
-  (c/exec :rpm :-q :--queryformat "%{version}" (name pkg)))
+  (some->> (c/exec :yum :list :installed)
+           str/split-lines
+           (map (comp first #(str/split %1 #";")))
+           (map (partial re-find #"(.*).[^\-]+"))
+           (filter #(= (second %) (name pkg)))
+           first
+           first
+           (re-find #".*-([^\-]+)")
+           second))
 
 (defn install
   "Ensure the given packages are installed. Can take a flat collection of
@@ -79,11 +97,11 @@
   (if (map? pkgs)
     ; Install specific versions
     (dorun
-      (for [[pkg version] pkgs]
-        (when (not= version (installed-version pkg))
-          (info "Installing" pkg version)
-          (c/exec :yum :install :-y
-                  (str (name pkg) "=" version)))))
+     (for [[pkg version] pkgs]
+       (when (not= version (installed-version pkg))
+         (info "Installing" pkg version)
+         (c/exec :yum :-y :install
+                 (str (name pkg) "-" version)))))
 
     ; Install any version
     (let [pkgs    (set (map name pkgs))
@@ -91,44 +109,26 @@
       (when-not (empty? missing)
         (c/su
           (info "Installing" missing)
-          (apply c/exec :yum :install :-y missing))))))
+          (apply c/exec :yum :-y :install missing))))))
 
-(defn add-key!
-  "Receives an apt key from the given keyserver."
-  [keyserver key]
-  (c/su
-    (c/exec :apt-key :adv
-            :--keyserver keyserver
-            :--recv key)))
-
-(defn add-repo!
-  "Adds an apt repo (and optionally a key from the given keyserver)."
-  ([repo-name apt-line]
-   (add-repo! repo-name apt-line nil nil))
-  ([repo-name apt-line keyserver key]
-   (let [list-file (str "/etc/apt/sources.list.d/" (name repo-name) ".list")]
-     (when-not (cu/exists? list-file)
-       (info "setting up" repo-name "apt repo")
-       (when (or keyserver key)
-         (add-key! keyserver key))
-       (c/exec :echo apt-line :> list-file)
-       (update!)))))
-
-(defn install-jdk8!
-  "Installs an oracle jdk8 via webupd8. Ugh, this is such a PITA."
+(defn install-start-stop-daemon!
+  "Installs start-stop-daemon on centos"
   []
+  (info "Installing start-stop-daemon")
   (c/su
-    (add-repo!
-      "webupd8"
-      "deb http://ppa.launchpad.net/webupd8team/java/ubuntu trusty main"
-      "hkp://keyserver.ubuntu.com:80"
-      "EEA14886")
-    (c/exec :echo "debconf shared/accepted-oracle-license-v1-1 select true" |
-            :debconf-set-selections)
-    (c/exec :echo "debconf shared/accepted-oracle-license-v1-1 seen true" |
-            :debconf-set-selections)
-    (install [:oracle-java8-installer])
-    (install [:oracle-java8-set-default])))
+    (c/exec :wget "http://ftp.de.debian.org/debian/pool/main/d/dpkg/dpkg_1.17.25.tar.xz")
+    (c/exec :tar :-xf :dpkg_1.17.25.tar.xz)
+    (c/exec "bash" "-c" "cd dpkg-1.17.25 && ./configure")
+    (c/exec "bash" "-c" "cd dpkg-1.17.25 && make")
+    (c/exec "bash" "-c" "cp /dpkg-1.17.25/utils/start-stop-daemon /usr/bin/start-stop-daemon")
+    (c/exec "bash" "-c" "rm -f dpkg_1.17.25.tar.xz")))
+
+(defn installed-start-stop-daemon?
+  "Is start-stop-daemon Installed?"
+  []
+  (->> (c/exec :ls :/usr/bin)
+       str/split-lines
+       (some #(if (re-find #"start-stop-daemon" %) true))))
 
 (def os
   (reify os/OS
@@ -143,20 +143,17 @@
         ; Packages!
         (install [:wget
                   :curl
-                  :vim
-                  :man-db
-                  :faketime
-                  :ntpdate
+                  :vim-common
                   :unzip
-                  :iptables
-                  :psmisc
-                  :tar
-                  :bzip2
-                  :libzip2
-                  :iputils-ping
-                  :iproute
                   :rsyslog
-                  :logrotate]))
+                  :iptables
+                  :ncurses-devel
+                  :iproute
+                  :logrotate
+                  :gcc
+                  :gcc-c++]))
+
+      (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
       (c/su (c/exec :systemctl :stop :ntpd))
 

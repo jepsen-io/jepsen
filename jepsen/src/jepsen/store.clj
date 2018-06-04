@@ -234,6 +234,17 @@
         (map (fn [f] [f (delay (load test-name f))]))
         (into {}))))
 
+(defn latest
+  "Loads the latest test"
+  []
+  (when-let [t (->> (tests)
+                    vals
+                    (apply concat)
+                    sort
+                    util/fast-last
+                    val)]
+    @t))
+
 (defn update-symlinks!
   "Creates `latest` symlinks to the given test, if a store directory exists."
   [test]
@@ -267,8 +278,15 @@
 (defn write-history!
   "Writes out history.txt and history.edn files."
   [test]
-  (util/pwrite-history! (path! test "history.txt") (:history test))
-  (util/pwrite-history! (path! test "history.edn") prn (:history test)))
+  (->> [(future
+          (util/with-thread-name "jepsen history.txt"
+            (util/pwrite-history! (path! test "history.txt") (:history test))))
+        (future
+          (util/with-thread-name "jepsen history.edn"
+            (util/pwrite-history! (path! test "history.edn") prn
+                                  (:history test))))]
+       (map deref)
+       dorun))
 
 (defn write-fressian!
   "Write the entire test as a .fressian file"
@@ -292,10 +310,12 @@
   test)
 
 (defn save-2!
-  "Phase 2: after computing results, we re-write the fressian file and also
-  dump results as edn. Returns test."
+  "Phase 2: after computing results, we re-write the fressian file, histories,
+  and also dump results as edn. Returns test."
   [test]
   (->> [(future (util/with-thread-name "jepsen results" (write-results! test)))
+        (future (util/with-thread-name "jepsen history"
+                  (write-history! test)))
         (future (util/with-thread-name "jepsen fressian"
                   (write-fressian! test)))]
        (map deref)

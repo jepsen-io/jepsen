@@ -14,11 +14,15 @@
   (:require [jepsen.util :as util]
             [knossos.history :as history]
             [clojure.core :as c]
+            [clojure.walk :as walk]
+            [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [warn info]]
-            [slingshot.slingshot :refer [throw+]])
+            [slingshot.slingshot :refer [throw+]]
+            [tea-time.core :as tt])
   (:import (java.util.concurrent.atomic AtomicBoolean)
            (java.util.concurrent.locks LockSupport)
-           (java.util.concurrent CyclicBarrier)))
+           (java.util.concurrent BrokenBarrierException
+                                 CyclicBarrier)))
 
 (defprotocol Generator
   (op [gen test process] "Yields an operation to apply."))
@@ -55,7 +59,8 @@
   where n is the test concurrency. Processes map to threads: process mod n is
   the thread ID.
 
-  The set of threads is used where multiple parts of a test must synchronize.")
+  The set of threads is used where multiple parts of a test must synchronize."
+  nil)
 
 (defmacro with-threads
   "Binds *threads* for duration of body. Safety check: asserts threads are
@@ -82,10 +87,62 @@
     (when (integer? thread)
       (nth (:nodes test) (mod thread (count (:nodes test)))))))
 
+;; Define lots of generators! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defmacro defgenerator
+  "Like deftype, but the fields spec is followed by a vector of expressions
+  which are used to print the datatype, and the Generator protocol is implicit.
+  For instance:
+
+      (defgenerator Delay [dt]
+        [(str dt \" seconds\")] ; For pretty-printing
+        (op [this test process] ; Function body
+          ...))
+
+  Inside the print-forms vector, every occurrence of a field name is replaced
+  by (.some-field a-generator), so don't get fancy with let bindings or
+  anything."
+  [name fields print-forms & protocols-and-functions]
+  (let [field-set (set fields)
+        this-sym  (gensym "this")
+        w-sym     (gensym "w")]
+    `(do ; Standard deftype, just insert the generator and drop the print forms
+         (deftype ~name ~fields Generator ~@protocols-and-functions)
+
+         ; For prn/str, we'll generate a defmethod
+         (defmethod print-method ~name
+           [~this-sym ^java.io.writer ~w-sym]
+           (.write ~w-sym
+                   ~(str "(gen/" (.toLowerCase (clojure.core/name name))))
+           ~@(mapcat (fn [field]
+                       ; Rewrite field expression, changing field names to
+                       ; instance variable getters
+                       (let [field (walk/prewalk
+                                     (fn [form]
+                                       (if (field-set form)
+                                         ; This was a field
+                                         (list (symbol (str "." form))
+                                               this-sym)
+                                         ; Something else
+                                         form))
+                                     field)]
+                         ; Spaces between fields
+                         [`(.write ~w-sym " ")
+                          `(print-method ~field ~w-sym)]))
+                 print-forms)
+           (.write ~w-sym ")")))))
+
+(defgenerator GVoid [] []
+  (op [gen test process]))
+
 (def void
   "A generator which terminates immediately"
-  (reify Generator
-    (op [gen test process])))
+  (GVoid.))
+
+(defgenerator FMap [f g]
+  [f g]
+  (op [gen test process]
+      (update (op g test process) :f f)))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,
@@ -93,9 +150,7 @@
   according to `f-map`. Useful for composing generators together for use with a
   composed nemesis."
   [f-map g]
-  (reify Generator
-    (op [gen test process]
-      (update (op g test process) :f f-map))))
+  (FMap. f-map g))
 
 (defn sleep-til-nanos
   "High-resolution sleep; takes a time in nanos, relative to System/nanotime."
@@ -108,18 +163,34 @@
   [dt]
   (sleep-til-nanos (+ dt (System/nanoTime))))
 
+(defgenerator DelayFn [f gen]
+  [f gen]
+  (op [_ test process]
+      (Thread/sleep (* 1000 (f)))
+      (op gen test process)))
+
 (defn delay-fn
   "Every operation from the underlying generator takes (f) seconds longer."
   [f gen]
-  (reify Generator
-    (op [_ test process]
-      (Thread/sleep (* 1000 (f)))
-      (op gen test process))))
+  (DelayFn. f gen))
 
 (defn delay
   "Every operation from the underlying generator takes dt seconds to return."
   [dt gen]
+  (assert (pos? dt))
   (delay-fn (constantly dt) gen))
+
+(defn sleep
+  "Takes dt seconds, and always produces a nil."
+  [dt]
+  (delay dt void))
+
+(defn stagger
+  "Introduces uniform random timing noise with a mean delay of dt seconds for
+  every operation. Delays range from 0 to 2 * dt."
+  [dt gen]
+  (assert (pos? dt))
+  (delay-fn (partial rand (* 2 dt)) gen))
 
 (defn next-tick-nanos
   "Given a period `dt` (in nanos), beginning at some point in time `anchor`
@@ -130,6 +201,17 @@
    (next-tick-nanos anchor dt (util/linear-time-nanos)))
   ([anchor dt now]
    (+ now (- dt (mod (- now anchor) dt)))))
+
+(defgenerator DelayTil
+  [dt precache? anchor gen]
+  [(util/nanos->secs dt) precache? gen]
+  (op [_ test process]
+     (if precache?
+       (let [op (op gen test process)]
+         (sleep-til-nanos (next-tick-nanos anchor dt))
+         op)
+       (do (sleep-til-nanos (next-tick-nanos anchor dt))
+           (op gen test process)))))
 
 (defn delay-til
   "Operations are emitted as close as possible to multiples of dt seconds from
@@ -145,37 +227,25 @@
   ([dt precache? gen]
    (let [anchor (System/nanoTime)
          dt     (util/secs->nanos dt)]
-     (if precache?
-       (reify Generator
-         (op [_ test process]
-           (let [op (op gen test process)]
-             (sleep-til-nanos (next-tick-nanos anchor dt))
-             op)))
-       (reify Generator
-         (op [_ test process]
-           (sleep-til-nanos (next-tick-nanos anchor dt))
-           (op gen test process)))))))
+     (DelayTil. dt precache? anchor gen))))
 
-(defn stagger
-  "Introduces uniform random timing noise with a mean delay of dt seconds for
-  every operation. Delays range from 0 to 2 * dt."
-  [dt gen]
-  (delay-fn (partial rand (* 2 dt)) gen))
-
-(defn sleep
-  "Takes dt seconds, and always produces a nil."
-  [dt]
-  (delay dt void))
+(defgenerator Once [source emitted]
+  [(if (.get emitted) :done :pending) source]
+  (op [gen test process]
+      (when-not (.get emitted)
+        (when-not (.getAndSet emitted true)
+          (op source test process)))))
 
 (defn once
   "Wraps another generator, invoking it only once."
   [source]
-  (let [emitted (AtomicBoolean. false)]
-    (reify Generator
-      (op [gen test process]
-        (when-not (.get emitted)
-          (when-not (.getAndSet emitted true)
-            (op source test process)))))))
+  (Once. source (AtomicBoolean. false)))
+
+(defgenerator Derefer [dgen]
+  [dgen]
+  (op [this test process]
+      (let [gen @dgen]
+        (op gen test process))))
 
 (defn derefer
   "Sometimes you need to build a generator not *now*, but *later*; e.g. because
@@ -187,38 +257,42 @@
 
   Looks up the key to drain only once an operation is requested."
   [dgen]
-  (reify Generator
-    (op [this test process]
-      (op @dgen test process))))
+  (Derefer. dgen))
+
+(defgenerator Log [msg]
+  [msg]
+  (op [gen test process]
+      (info msg)
+      nil))
 
 (defn log*
   "Logs a message every time invoked, and yields nil."
   [msg]
-  (reify Generator
-    (op [gen test process]
-      (info msg)
-      nil)))
+  (Log. msg))
 
 (defn log
   "Logs a message only once, and yields nil."
   [msg]
   (once (log* msg)))
 
+(defgenerator Each [gen-fn processes]
+  ; Sorry, this is a bit of a copout; I don't know how to render this *at all*.
+  [gen-fn]
+  (op [this test process]
+    (if-let [gen (get @processes process)]
+      (op gen test process)
+      (do
+        (swap! processes (fn [processes]
+                           (if (contains? processes process)
+                             processes
+                             (assoc processes process (gen-fn)))))
+        (recur test process)))))
+
 (defn each-
   "Takes a function that yields a generator. Invokes that function to
   create a new generator for each distinct process."
   [gen-fn]
-  (let [processes (atom {})]
-    (reify Generator
-      (op [this test process]
-        (if-let [gen (get @processes process)]
-          (op gen test process)
-          (do
-            (swap! processes (fn [processes]
-                               (if (contains? processes process)
-                                 processes
-                                 (assoc processes process (gen-fn)))))
-            (recur test process)))))))
+  (Each. gen-fn (atom {})))
 
 (defmacro each
   "Takes an expression evaluating to a generator. Captures that expression as a
@@ -228,18 +302,24 @@
   [gen-expr]
   `(each- (fn [] ~gen-expr)))
 
+(defgenerator Seq [elements]
+  ; Don't try to render an infinite sequence
+  [(let [es (take 8 (next @elements))]
+     (if (<= (count es) 8)
+       es
+       (c/concat es ['...])))]
+  (op [this test process]
+    (when-let [gen (first (swap! elements next))]
+      (if-let [op (op gen test process)]
+        op
+        (recur test process)))))
+
 (defn seq
   "Given a sequence of generators, emits one operation from the first, then one
   from the second, then one from the third, etc. If a generator yields nil,
   immediately moves to the next. Yields nil once coll is exhausted."
   [coll]
-  (let [elements (atom (cons nil coll))]
-    (reify Generator
-      (op [this test process]
-        (when-let [gen (first (swap! elements next))]
-          (if-let [op (op gen test process)]
-            op
-            (recur test process)))))))
+  (Seq. (atom (cons nil coll))))
 
 (defn start-stop
   "A generator which emits a start after a t1 second delay, and then a stop
@@ -250,6 +330,11 @@
                (sleep t2)
                {:type :info :f :stop}])))
 
+(defgenerator Mix [gens]
+  [gens]
+  (op [_ test process]
+      (op (rand-nth gens) test process)))
+
 (defn mix
   "A random mixture of operations. Takes a collection of generators and chooses
   between them uniformly. If the collection is empty, generator returns nil."
@@ -257,10 +342,9 @@
   (let [gens (vec gens)]
     (if (empty? gens)
       void
-      (reify Generator
-        (op [_ test process]
-          (op (rand-nth gens) test process))))))
+      (Mix. (vec gens)))))
 
+;; Test-specific generators -- should probably move these to jepsen.tests/*
 (def cas
   "Random cas/read ops for a compare-and-set register over a small field of
   integers."
@@ -306,49 +390,181 @@
           (when (pos? (swap! outstanding dec))
             {:type :invoke :f :dequeue}))))))
 
+(defgenerator Limit [gen remaining]
+  [(dec @remaining) gen]
+  (op [_ test process]
+      (when (pos? (swap! remaining dec))
+        (op gen test process))))
+
 (defn limit
   "Takes a generator and returns a generator which only produces n operations."
   [n gen]
-  (let [life (atom (inc n))]
-    (reify Generator
-      (op [_ test process]
-        (when (pos? (swap! life dec))
-          (op gen test process))))))
+  (Limit. gen (atom (inc n))))
+
+
+; T I M E   L I M I T S
+;
+; Our general approach here is to schedule a task which will interrupt as
+; at the deadline. To figure out who to interrupt, we keep a set of
+; threads currently engaged in this time-limit; the deadline task
+; interrupts every thread in that set.
+;
+; To avoid a race condition where the deadline sees a thread that is
+; currently in the time-limit, that thread returns from the time-limit
+; and goes on to do something else, and we interrupt, it, we have a
+; *lock* on threads which prevents the deadline from killing threads once
+; they're on the way out.
+;
+; Now, the question is: what do we *do* with that interrupt? Our goal is
+; to return nil when we hit the time limit, but we *also* need to play
+; nicely with other potential causes of interrupts--for instance, nested
+; time-limits either enclosing us, or which we enclose.
+;
+; You might *think* that we could return nil on any interrupt, but this
+; might be incorrect. For instance, if we wrap a sequence of time-limited
+; operations, and the first one times out, the *second* one should get a
+; chance to execute--it should return nil, and we should never observe
+; its interruption.
+;
+; If an *enclosing* time limit fires and interrupts us, we have an
+; inverse problem: we might be surrounded by a generator that sees us run
+; out of operations and moves on to a new generator instead. Therefore we
+; *must* propagate interruptions triggered by our enclosing time limits.
+;
+; Essentially, we need a *side channel* to tell us: did *we* interrupt
+; ourselves, or did someone else? To do this, we store a local promise,
+; `interrupted?`, which the deadline task flips to `true` if it's going
+; to interrupt the thread. If we've interrupted ourselves, then we return
+; nil. If not, it might be some enclosing interrupt, which needs to
+; handle it instead; in that case, we rethrow.
+;
+; "Ah, but Kyle!? You exclaim, "What if two time limits fire
+; concurrently, and we are interrupted *while performing* this
+; bookkeeping!"
+;
+; This is a serious problem. You can be interrupted during `finally`. We
+; can't eliminate all concurrent interrupts, but we *can* eliminate our own.
+; We'll set up a *global* lock on the time-limit fn, and use the thread set to
+; make sure no other time-limit can interrupt a worker while the others are
+; triggering.
+(declare time-limit)
+(defgenerator TimeLimit [dt                 ; Time interval
+                         source             ; Underlying generator
+                         deadline           ; End time in micros
+                         threads            ; Atom: set of active threads
+                         interrupted?]      ; Atom: are we being interrupted?
+  [dt source]
+
+  (op [_ test process]
+      (try
+        ; Initialize start time on first run
+        (when (nil? @deadline)
+          (let [d' (+ (tt/linear-time-micros)
+                      (tt/seconds->micros dt))]
+            (when (compare-and-set! deadline nil d')
+              ; We won the CAS to initialize our deadline. Schedule task to
+              ; interrupt active threads later.
+              (tt/at-linear-micros! d' (fn []
+                                         (locking time-limit
+                                           ; Mark ourself as interrupting
+                                           (reset! interrupted? true)
+
+                                           ; Interrupt those threads
+                                           (locking threads
+                                             (doseq [t @threads]
+                                               (.interrupt t)))
+
+                                           ; Wait for interrupt processing to
+                                           ; complete
+                                           (while (pos? (count @threads))
+                                             (Thread/sleep 100))
+
+                                           ; Clean up so future interrupts
+                                           ; aren't trapped in our handler
+                                           (reset! interrupted? false)))))))
+
+        (when (<= (tt/linear-time-micros) @deadline)
+          ; We haven't passed the deadline yet. Register this thread in the
+          ; thread set
+          (try
+            (swap! threads conj (Thread/currentThread))
+            ; Grab an operation from the underlying generator
+            (op source test process)
+            (finally
+              (locking threads
+                (swap! threads disj (Thread/currentThread))))))
+
+        (catch InterruptedException sea-lion
+          ; Okay. SOMEONE interrupted us. We're definitely not executing any
+          ; more. We could have been interrupted FROM the finally block, so
+          ; we need to remove ourselves from the executing set again...
+          (locking threads
+            (swap! threads disj (Thread/currentThread)))
+          (if @interrupted?
+            nil
+            (throw sea-lion)))
+
+        ; Ugh this is SUCH a special case thing but BrokenBarrier is also a
+        ; sort of interrupted exception???
+        (catch BrokenBarrierException sea-lion
+          (locking threads
+            (swap! threads disj (Thread/currentThread)))
+          (if @interrupted?
+            nil
+            (throw sea-lion))))))
 
 (defn time-limit
   "Yields operations from the underlying generator until dt seconds have
   elapsed."
   [dt source]
-  (let [t (atom nil)]
-    (reify Generator
-      (op [_ test process]
-        (when (nil? @t)
-          (compare-and-set! t nil (+ (util/linear-time-nanos)
-                                     (util/secs->nanos dt))))
-        (when (<= (util/linear-time-nanos) @t)
-          (op source test process))))))
+  (TimeLimit. dt source (atom nil) (atom #{}) (atom false)))
+
+(defgenerator Filter [f gen]
+  [f gen]
+  (op [_ test process]
+      (loop []
+        (when-let [op' (op gen test process)]
+          (if (f op')
+            op'
+            (recur))))))
 
 (defn filter
   "Takes a generator and yields a generator which emits only operations
   satisfying `(f op)`."
   [f gen]
-  (reify Generator
-    (op [_ test process]
-      (loop []
-        (when-let [op' (op gen test process)]
-          (if (f op')
-            op'
-            (recur)))))))
+  (Filter. f gen))
+
+(defgenerator On [f source]
+  [f source]
+  (op [gen test process]
+      (when (f (process->thread test process))
+        (binding [*threads* (c/filter f *threads*)]
+          (op source test process)))))
 
 (defn on
   [f source]
   "Forwards operations to source generator iff (f thread) is true. Rebinds
   *threads* appropriately."
-  (reify Generator
-    (op [gen test process]
-      (when (f (process->thread test process))
-        (binding [*threads* (c/filter f *threads*)]
-          (op source test process))))))
+  (On. f source))
+
+(defgenerator Reserve [gens default]
+  [gens default]
+  (op [_ test process]
+      (let [threads (vec *threads*)
+            thread  (process->thread test process)
+            ;_ (info threads thread)
+            ; If our thread is smaller than some upper bound in gens, we've
+            ; found our generator, since both *threads* and gens are ordered.
+            [lower upper gen] (or (some (fn [[lower upper gen :as tuple]]
+                                          (and (< thread (nth threads upper))
+                                               tuple))
+                                        gens)
+                                  ; Default fallback
+                                  [(second (peek gens))
+                                   (count threads)
+                                   default])]
+        (with-threads (subvec threads lower upper)
+          (op gen test process)))))
 
 (defn reserve
   "Takes a series of count, generator pairs, and a final default generator.
@@ -378,34 +594,30 @@
                    second)
         default (last args)]
     (assert default)
-    (reify Generator
-      (op [_ test process]
-        (let [threads (vec *threads*)
-              thread  (process->thread test process)
-              ; If our thread is smaller than some upper bound in gens, we've
-              ; found our generator, since both *threads* and gens are ordered.
-              [lower upper gen] (or (some (fn [[lower upper gen :as tuple]]
-                                            (and (< thread (nth threads upper))
-                                                 tuple))
-                                          gens)
-                                    ; Default fallback
-                                    [(second (peek gens))
-                                     (count threads)
-                                     default])]
-          (with-threads (subvec threads lower upper)
-            (op gen test process)))))))
+    (Reserve. gens default)))
+
+; processes is a map of process to the index of the source they're currently on.
+(defgenerator Concat [sources processes]
+  [sources]
+  (op [gen test process]
+    (let [i (get @processes process 0)]
+      (when (< i (count sources))
+        (let [source (nth sources i)]
+          (if-let [op (op source test process)]
+            op
+            (do (swap! processes (fn [processes]
+                                   (if (= i (get processes process 0))
+                                     ; Good, nobody else has changed us
+                                     (assoc processes process (inc i))
+                                     ; Someone else beat us
+                                     processes)))
+                (recur test process))))))))
 
 (defn concat
   "Takes n generators and yields the first non-nil operation from any, in
   order."
   [& sources]
-  (reify Generator
-    (op [gen test process]
-      (loop [[source & sources] sources]
-        (when source
-          (if-let [op (op source test process)]
-            op
-            (recur sources)))))))
+  (Concat. (vec sources) (atom {})))
 
 (defn nemesis
   "Combines a generator of normal operations and a generator for nemesis
@@ -422,38 +634,42 @@
   ([client-gen]
    (on (complement #{:nemesis}) client-gen)))
 
+(defgenerator Await [f gen state]
+  [f @state gen]
+  (op [_ test process]
+      (when (= @state :waiting)
+        (locking state
+          (when (= @state :waiting)
+            (f)
+            (reset! state :ready))))
+      (op gen test process)))
+
 (defn await
   "Blocks until the given fn returns, then allows [gen] to proceed. If no gen
   is given, yields nil. Only invokes fn once."
   ([f] (await f nil))
   ([f gen]
-   (let [state (atom :waiting)]
-     (reify Generator
-       (op [_ test process]
-         (when (= @state :waiting)
-           (locking state
-             (when (= @state :waiting)
-               (f)
-               (reset! state :ready))))
-         (op gen test process))))))
+   (Await. f gen (atom :waiting))))
+
+(defgenerator Synchronize [gen state]
+  [@state gen]
+  (op [_ test process]
+    (when (not= :clear @state)
+      ; Ensure a barrier exists
+      (compare-and-set! state :fresh
+                        (CyclicBarrier. (count *threads*)
+                                        (partial reset! state :clear)))
+
+      ; Block on barrier
+      (.await ^CyclicBarrier @state))
+    (op gen test process)))
 
 (defn synchronize
   "Blocks until all nodes are blocked awaiting operations from this generator,
   then allows them to proceed. Only synchronizes a single time; subsequent
   operations on this generator proceed freely."
   [gen]
-  (let [state (atom :fresh)]
-    (reify Generator
-      (op [_ test process]
-        (when (not= :clear @state)
-          ; Ensure a barrier exists
-          (compare-and-set! state :fresh
-                            (CyclicBarrier. (count *threads*)
-                                            (partial reset! state :clear)))
-
-          ; Block on barrier
-          (.await ^CyclicBarrier @state))
-        (op gen test process)))))
+  (Synchronize. gen (atom :fresh)))
 
 (defn phases
   "Like concat, but requires that all threads finish the first generator before
@@ -469,7 +685,8 @@
 
 (defn singlethreaded
   "Obtaining an operation from the underlying generator requires an exclusive
-  lock."
+  lock. TODO: is this actually used by anyone? Feels kind of silly given
+  everythng else is concurrency-safe."
   [gen]
   (reify Generator
     (op [this test process]
