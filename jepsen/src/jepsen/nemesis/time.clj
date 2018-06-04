@@ -5,7 +5,8 @@
                     [client :as client]
                     [control :as c]
                     [generator :as gen]
-                    [nemesis :as nemesis]]
+                    [nemesis :as nemesis]
+                    [os :as os]]
             [clojure.java.io :as io])
   (:import (java.io File)))
 
@@ -33,14 +34,20 @@
   (with-open [r (io/reader (io/resource resource))]
     (compile! r bin)))
 
+(defn compile-tools!
+  []
+  (compile-resource! "strobe-time.c" "strobe-time")
+  (compile-resource! "bump-time.c" "bump-time"))
+
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
-  []
+  ([]
   (c/su
     (debian/install [:build-essential])
-
-    (compile-resource! "strobe-time.c" "strobe-time")
-    (compile-resource! "bump-time.c" "bump-time")))
+    (compile-tools!)))
+  ([opts]
+   (os/install-build-dependencies! (:os opts))
+   (compile-tools!)))
 
 (defn reset-time!
   "Resets the local node's clock to NTP. If a test is given, resets time on all
@@ -71,7 +78,7 @@
   []
   (reify nemesis/Nemesis
     (setup! [nem test]
-      (c/with-test-nodes test (install!))
+      (c/with-test-nodes test (install! test))
       (reset-time! test)
       nem)
 
