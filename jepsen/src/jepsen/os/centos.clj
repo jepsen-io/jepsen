@@ -142,6 +142,7 @@
       (c/su
         ; Packages!
         (install [:wget
+                  :gcc
                   :curl
                   :vim-common
                   :unzip
