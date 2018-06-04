@@ -1,5 +1,5 @@
 (ns jepsen.os.centos
-  "Common tasks for CentOS boxex."
+  "Common tasks for CentOS boxes."
   (:use clojure.tools.logging)
   (:require [clojure.set :as set]
             [jepsen.util :refer [meh]]
@@ -154,6 +154,13 @@
 
       (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
+      (c/su (c/exec :systemctl :stop :ntpd))
+
       (meh (net/heal! (:net test) test)))
 
-    (teardown! [_ test node])))
+    (teardown! [_ test node]
+      (info node "tearing down centos")
+      (c/su (c/exec :systemctl :start :ntpd)))
+
+    (install-build-essential! [_]
+      (install [:gcc :gcc-c++ :make :openssl-devel]))))
