@@ -1,5 +1,5 @@
 (ns jepsen.os.centos
-  "Common tasks for CentOS boxex."
+  "Common tasks for CentOS boxes."
   (:use clojure.tools.logging)
   (:require [clojure.set :as set]
             [jepsen.util :refer [meh]]
@@ -143,6 +143,7 @@
         ; Packages!
         (install [:wget
                   :gcc
+                  :gcc-c++
                   :curl
                   :vim-common
                   :unzip
