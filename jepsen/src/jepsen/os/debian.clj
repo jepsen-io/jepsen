@@ -166,5 +166,5 @@
 
     (teardown! [_ test node])
 
-    (install-build-essential! [_]
+    (install-build-dependencies! [_]
       (install [:build-essential]))))

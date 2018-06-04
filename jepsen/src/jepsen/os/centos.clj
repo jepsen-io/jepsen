@@ -162,5 +162,5 @@
       (info node "tearing down centos")
       (c/su (c/exec :systemctl :start :ntpd)))
 
-    (install-build-essential! [_]
+    (install-build-dependencies! [_]
       (install [:gcc :gcc-c++ :make :openssl-devel]))))

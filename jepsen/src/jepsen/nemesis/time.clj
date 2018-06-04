@@ -46,7 +46,7 @@
     (debian/install [:build-essential])
     (compile-tools!)))
   ([opts]
-   (os/install-build-essential! (:os opts))
+   (os/install-build-dependencies! (:os opts))
    (compile-tools!)))
 
 (defn reset-time!
