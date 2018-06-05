@@ -1,6 +1,7 @@
 (ns jepsen.nemesis.time
   "Functions for messing with time and clocks."
   (:require [jepsen.os.debian :as debian]
+            [jepsen.os.centos :as centos]
             [jepsen [util :as util]
                     [client :as client]
                     [control :as c]
@@ -33,12 +34,19 @@
   (with-open [r (io/reader (io/resource resource))]
     (compile! r bin)))
 
+(defn os-class
+  "Determines OS class"
+  [test]
+  (-> (:os test) class .getName (.replaceAll "\\$[^$]*$" ""))
+)
+
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
-  []
+  [test]
   (c/su
-    (debian/install [:build-essential])
-
+    (case (os-class test)
+      "jepsen.os.debian" (debian/install [:build-essential])
+      "jepsen.os.centos" (centos/install [:gcc :gcc-c++ :make :openssl-devel]))
     (compile-resource! "strobe-time.c" "strobe-time")
     (compile-resource! "bump-time.c" "bump-time")))
 
@@ -71,7 +79,9 @@
   []
   (reify nemesis/Nemesis
     (setup! [nem test]
-      (c/with-test-nodes test (install!))
+      (c/with-test-nodes test (install! test))
+      (case (os-class test)
+        "jepsen.os.centos" (c/with-test-nodes test (c/su (c/exec :systemctl :stop :ntpd))))
       (reset-time! test)
       nem)
 
@@ -90,7 +100,9 @@
       op)
 
     (teardown! [_ test]
-      (reset-time! test))))
+      (reset-time! test)
+      (case (os-class test)
+        "jepsen.os.centos" (c/with-test-nodes test (c/su (c/exec :systemctl :start :ntpd)))))))
 
 (defn reset-gen
   "Randomized reset generator. Performs resets on random subsets of the tests'
