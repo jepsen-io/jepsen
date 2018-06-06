@@ -34,21 +34,21 @@
   (with-open [r (io/reader (io/resource resource))]
     (compile! r bin)))
 
-(defn os-class
-  "Determines OS class"
-  [test]
-  (-> (:os test) class .getName (.replaceAll "\\$[^$]*$" ""))
-)
+(defn compile-tools!
+  []
+  (compile-resource! "strobe-time.c" "strobe-time")
+  (compile-resource! "bump-time.c" "bump-time"))
 
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
   [test]
   (c/su
-    (case (os-class test)
-      "jepsen.os.debian" (debian/install [:build-essential])
-      "jepsen.os.centos" (centos/install [:gcc :gcc-c++ :make :openssl-devel]))
-    (compile-resource! "strobe-time.c" "strobe-time")
-    (compile-resource! "bump-time.c" "bump-time")))
+   (try (compile-tools!)
+     (catch Exception e
+       (try (debian/install [:build-essential])
+         (catch Exception e
+           (centos/install [:gcc])))
+       (compile-tools!)))))
 
 (defn reset-time!
   "Resets the local node's clock to NTP. If a test is given, resets time on all
@@ -80,8 +80,9 @@
   (reify nemesis/Nemesis
     (setup! [nem test]
       (c/with-test-nodes test (install! test))
-      (case (os-class test)
-        "jepsen.os.centos" (c/with-test-nodes test (c/su (c/exec :systemctl :stop :ntpd))))
+      ; Try to stop ntpd service in case it is present and running.
+      (try (c/with-test-nodes test (c/su (c/exec :service :ntpd :stop)))
+        (catch Exception e))
       (reset-time! test)
       nem)
 
@@ -100,9 +101,7 @@
       op)
 
     (teardown! [_ test]
-      (reset-time! test)
-      (case (os-class test)
-        "jepsen.os.centos" (c/with-test-nodes test (c/su (c/exec :systemctl :start :ntpd)))))))
+      (reset-time! test))))
 
 (defn reset-gen
   "Randomized reset generator. Performs resets on random subsets of the tests'
