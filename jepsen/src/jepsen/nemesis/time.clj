@@ -41,7 +41,7 @@
 
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
-  [test]
+  []
   (c/su
    (try (compile-tools!)
      (catch Exception e
@@ -79,7 +79,7 @@
   []
   (reify nemesis/Nemesis
     (setup! [nem test]
-      (c/with-test-nodes test (install! test))
+      (c/with-test-nodes test (install!))
       ; Try to stop ntpd service in case it is present and running.
       (try (c/with-test-nodes test (c/su (c/exec :service :ntpd :stop)))
         (catch Exception e))
