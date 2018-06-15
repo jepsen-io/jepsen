@@ -404,7 +404,7 @@
 
 ; T I M E   L I M I T S
 ;
-; Our general approach here is to schedule a task which will interrupt as
+; Our general approach here is to schedule a task which will interrupt
 ; at the deadline. To figure out who to interrupt, we keep a set of
 ; threads currently engaged in this time-limit; the deadline task
 ; interrupts every thread in that set.

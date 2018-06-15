@@ -3,9 +3,11 @@
         clojure.pprint
         clojure.tools.logging)
   (:require [jepsen.generator :as gen]
+            [tea-time.core :as tt]
             [clojure.set :as set]))
 
-(def a-test {:nodes [:a :b :c :d :e]})
+(def nodes [:a :b :c :d :e])
+(def a-test {:nodes nodes})
 
 (defn ops
   "All ops from a generator"
@@ -93,3 +95,57 @@
            [:start :start :nem
             :* :* :* :* :*
             :c :d]))))
+
+
+(deftest time-limit-test
+  (tt/with-threadpool
+    (testing "short delays"
+      (let [ops (ops nodes
+                     (->> (gen/seq (range))
+                          (gen/delay 0.1)
+                          (gen/time-limit 1)))
+            n (* (count nodes) (/ 1 0.1))]
+        (is (<= (* 0.9 n) (count ops) (* 1.1 n)))))
+
+    (testing "long delays"
+      (let [t1  (tt/unix-time)
+            ops (ops nodes
+                     (->> (gen/seq (range))
+                          (gen/delay 1)
+                          (gen/time-limit 0.1)))
+            t2  (tt/unix-time)]
+        (is (= [] ops))
+        (is (< 0.09 (- t2 t1) 0.11))))
+
+    (testing "long inside short"
+      (let [t1  (tt/unix-time)
+            ops (ops nodes
+                     (->> (gen/seq (range))
+                          (gen/delay 0.15)
+                          (gen/time-limit 10)
+                          (gen/time-limit 0.2)))
+            t2  (tt/unix-time)]
+        (is (= (range (count nodes)) (sort ops)))
+        (is (<= 0.19 (- t2 t1) 0.21))))
+
+    (testing "short inside long"
+      (let [t1  (tt/unix-time)
+            ops (->> (gen/seq (range))
+                     (gen/delay 0.15)
+                     (gen/time-limit 0.2)
+                     (gen/time-limit 10)
+                     (ops nodes))
+            t2  (tt/unix-time)]
+        (is (= (range (count nodes)) (sort ops)))
+        (is (<= 0.19 (- t2 t1) 0.21))))
+
+    (testing "around a barrier"
+      (let [t1 (tt/unix-time)
+            ops (->> (gen/phases
+                       (gen/delay 0.1 (gen/each (gen/once :a)))
+                       (gen/delay 1   :b))
+                     (gen/time-limit 0.2)
+                     (ops nodes))
+            t2 (tt/unix-time)]
+        (is (= (repeat (count nodes) :a) ops))
+        (is (<= 0.19 (- t2 t1) 0.21))))))
