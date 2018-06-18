@@ -44,9 +44,9 @@
   []
   (c/su
    (try (compile-tools!)
-     (catch Exception e
+     (catch RuntimeException e
        (try (debian/install [:build-essential])
-         (catch Exception e
+         (catch RuntimeException e
            (centos/install [:gcc])))
        (compile-tools!)))))
 
@@ -82,7 +82,7 @@
       (c/with-test-nodes test (install!))
       ; Try to stop ntpd service in case it is present and running.
       (try (c/with-test-nodes test (c/su (c/exec :service :ntpd :stop)))
-        (catch Exception e))
+        (catch RuntimeException e))
       (reset-time! test)
       nem)
 
