@@ -164,7 +164,4 @@
 
       (meh (net/heal! (:net test) test)))
 
-    (teardown! [_ test node])
-
-    (install-build-essential! [_]
-      (install [:build-essential]))))
+    (teardown! [_ test node])))

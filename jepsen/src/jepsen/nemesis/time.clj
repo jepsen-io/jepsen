@@ -1,12 +1,12 @@
 (ns jepsen.nemesis.time
   "Functions for messing with time and clocks."
   (:require [jepsen.os.debian :as debian]
+            [jepsen.os.centos :as centos]
             [jepsen [util :as util]
                     [client :as client]
                     [control :as c]
                     [generator :as gen]
-                    [nemesis :as nemesis]
-                    [os :as os]]
+                    [nemesis :as nemesis]]
             [clojure.java.io :as io])
   (:import (java.io File)))
 
@@ -41,13 +41,14 @@
 
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
-  ([]
+  []
   (c/su
-    (debian/install [:build-essential])
-    (compile-tools!)))
-  ([opts]
-   (os/install-build-essential! (:os opts))
-   (compile-tools!)))
+   (try (compile-tools!)
+     (catch RuntimeException e
+       (try (debian/install [:build-essential])
+         (catch RuntimeException e
+           (centos/install [:gcc])))
+       (compile-tools!)))))
 
 (defn reset-time!
   "Resets the local node's clock to NTP. If a test is given, resets time on all
@@ -78,7 +79,10 @@
   []
   (reify nemesis/Nemesis
     (setup! [nem test]
-      (c/with-test-nodes test (install! test))
+      (c/with-test-nodes test (install!))
+      ; Try to stop ntpd service in case it is present and running.
+      (try (c/with-test-nodes test (c/su (c/exec :service :ntpd :stop)))
+        (catch RuntimeException e))
       (reset-time! test)
       nem)
 
