@@ -256,7 +256,7 @@
 
             (catch [:type :cluster-failed-to-converge] e
               (when-not (:retry-db-setup test)
-                (throw e))
+                (throw+))
 
               (warn e "Cluster failed to converge")
               (throw (ex-info "Cluster failed to converge"
@@ -266,7 +266,7 @@
 
             (catch RuntimeException e ; Welp
               (when-not (:retry-db-setup test)
-                (throw e))
+                (throw+))
 
               (throw (ex-info "Couldn't get a client"
                               {:type  :jepsen.db/setup-failed
