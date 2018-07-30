@@ -23,8 +23,8 @@
 ;                 :os        debian/os
 ;                 :db        db
 ;                 :client    (mutex)
-;                 :checker   (checker/compose {:html   timeline/html
-;                                              :linear checker/linearizable})
+;                 :checker   (checker/compose {:html   (timeline/html)
+;                                              :linear (checker/linearizable)})
 ;                 :model     (model/mutex)
 ;                 :nemesis   (nemesis/partition-random-halves)
 ;                 :generator (gen/phases
@@ -54,8 +54,8 @@
                  :nemesis    (nemesis/partition-random-halves)
                  :model      (model/unordered-queue)
                  :checker    (checker/compose
-                               {:queue       checker/queue
-                                :total-queue checker/total-queue})
+                               {:queue       (checker/queue)
+                                :total-queue (checker/total-queue)})
                  :generator  (gen/phases
                                (->> (gen/queue)
                                     (gen/delay 1/10)
