@@ -38,6 +38,8 @@
   ; TODO - wait for all masters up instead of sleep for each node.
   (Thread/sleep 5000)
   (start-tserver! node)
+  ; TODO - wait for all tservers up instead of sleep for each node.
+  (Thread/sleep 5000)
 )
 
 (defn stop!
@@ -59,6 +61,7 @@
   (meh (c/exec :rm :-r (c/lit (str "/mnt/d*/yb-data/tserver/*"))))
   (meh (c/exec :mkdir "/mnt/d0/yb-data/master/logs"))
   (meh (c/exec :mkdir "/mnt/d0/yb-data/tserver/logs"))
+  (meh (c/exec :sed :-i "/--placement_uuid/d" "/home/yugabyte/tserver/conf/server.conf"))
 )
 
 (defn db

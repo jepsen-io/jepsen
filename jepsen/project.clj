@@ -9,7 +9,7 @@
                  [org.clojure/tools.cli "0.3.5"]
                  [clj-time "0.11.0"]
                  [jepsen.txn "0.1.0"]
-                 [knossos "0.3.3" :exclusions [org.slf4j/slf4j-log4j12]]
+                 [knossos "0.3.3-yb" :exclusions [org.slf4j/slf4j-log4j12]]
                  [tea-time "1.0.0"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.1"]

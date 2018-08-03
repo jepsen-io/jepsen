@@ -44,7 +44,7 @@
           val  (val (:value op))]
       (case (:f op)
       :write (try
-               (cql/insert conn table-name {:id id :val val})
+               (cql/insert-with-ks conn keyspace table-name {:id id :val val})
                (assoc op :type :ok)
                (catch UnavailableException e
                  (assoc op :type :fail :error (.getMessage e)))
@@ -56,7 +56,7 @@
                  (assoc op :type :fail :error (.getMessage e))))
       :cas (try
              (let [[expected-val new-val] val
-                   res (cql/update conn table-name {:val new-val}
+                   res (cql/update-with-ks conn keyspace table-name {:val new-val}
                                    (only-if [[= :val expected-val]]) (where [[= :id id]]))
                    applied (get (first res) (keyword "[applied]"))
                    ]
@@ -70,7 +70,7 @@
                (Thread/sleep 2000)
                (assoc op :type :fail :error (.getMessage e))))
       :read (try (wait-for-recovery 30 conn)
-                 (let [value (->> (cql/select conn table-name (where [[= :id id]])) first :val)]
+                 (let [value (->> (cql/select-with-ks conn keyspace table-name (where [[= :id id]])) first :val)]
                    (assoc op :type :ok :value (independent/tuple id value)))
                  (catch UnavailableException e
                    (info "Not enough replicas - failing")

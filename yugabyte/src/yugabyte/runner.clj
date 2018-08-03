@@ -25,7 +25,7 @@
 (def opt-spec
   "Additional command line options"
   [
-   (cli/repeated-opt "-t" "--test NAME" "Test(s) to run" [] tests)
+   (cli/repeated-opt "-t" "--test NAME..." "Test(s) to run" [] tests)
 
    [nil "--nemesis NAME"
     (str "Nemesis to use, one of: " (clojure.string/join ", " (keys nemesis/nemeses)))
@@ -58,6 +58,7 @@
                                              test-fn (:test options)]
                                          (let [test (-> options
                                                         (dissoc :test)
+                                                        (assoc :nemesis-name (:nemesis options))
                                                         test-fn
                                                         (log-test i)
                                                         jepsen/run!)]
