@@ -15,6 +15,9 @@
 
 (def master-log-dir  "/home/yugabyte/master/logs")
 (def tserver-log-dir "/home/yugabyte/tserver/logs")
+(def tserver-conf "/home/yugabyte/tserver/conf/server.conf")
+; Upper bound on number of bump time ops per test, needed to estimate max clock skew between servers
+(def max-bump-time-ops-per-test 100)
 
 (def setup-lock (Object.))
 (def keyspace "jepsen_keyspace")
@@ -61,7 +64,7 @@
   (meh (c/exec :rm :-r (c/lit (str "/mnt/d*/yb-data/tserver/*"))))
   (meh (c/exec :mkdir "/mnt/d0/yb-data/master/logs"))
   (meh (c/exec :mkdir "/mnt/d0/yb-data/tserver/logs"))
-  (meh (c/exec :sed :-i "/--placement_uuid/d" "/home/yugabyte/tserver/conf/server.conf"))
+  (meh (c/exec :sed :-i "/--placement_uuid/d" tserver-conf))
 )
 
 (defn db
@@ -71,6 +74,18 @@
     db/DB
    (setup! [_ test node]
            (info node "Setup YugaByteDB " version)
+           (c/exec :sed :-i "/--max_clock_skew_usec/d" tserver-conf)
+           (let [max-skew-ms (test :max-clock-skew-ms)]
+             (if (some? max-skew-ms)
+               (c/exec :echo (str "--max_clock_skew_usec="
+                                  (->> (:max-clock-skew-ms test) (* 1000) (* 2) (* max-bump-time-ops-per-test)))
+                             (c/lit ">>") tserver-conf)
+               (do
+                 ; Sync clocks on all servers since we are not testing clock skew. Try to stop ntpd, because it won't
+                 ; let ntpdate to sync clocks.
+                 (try (c/su (c/exec :service :ntpd :stop))
+                      (catch RuntimeException e))
+                 (c/su (c/exec :ntpdate :-b "pool.ntp.org")))))
            (start! node test))
 
     (teardown! [_ test node]
@@ -80,7 +95,8 @@
     db/LogFiles
     (log-files [_ test node]
                (concat (cu/ls-full master-log-dir)
-                       (cu/ls-full tserver-log-dir)))))
+                       (cu/ls-full tserver-log-dir)
+                       [tserver-conf]))))
 
 (defn yugabyte-test
   [opts]
@@ -108,4 +124,5 @@
           :os      centos/os
           :generator generator
           :nemesis (nemesis/get-nemesis-by-name (:nemesis opts))
+          :max-clock-skew-ms (nemesis/get-nemesis-max-clock-skew-ms opts)
          })))
