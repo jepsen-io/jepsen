@@ -16,6 +16,7 @@
             [yugabyte.core :refer :all]
             )
   (:import (com.datastax.driver.core.exceptions UnavailableException
+                                                OperationTimedOutException
                                                 WriteTimeoutException
                                                 ReadTimeoutException
                                                 NoHostAvailableException)))
@@ -101,11 +102,15 @@
              :lost-frac       (util/fraction (count lost) (count attempts))
              :recovered-frac  (util/fraction (count recovered) (count attempts))}))))))
 
+(def table-name "kv_pairs")
+
 (defrecord CQLRowInsertClient [conn]
   client/Client
   (open! [this test node]
          (info "Opening connection")
-         (assoc this :conn (cassandra/connect (->> test :nodes (map name)) {:protocol-version 3})))
+  (assoc this :conn (cassandra/connect (->> test :nodes (map name))
+                                       {:protocol-version 3
+                                        :retry-policy (retry-policy :no-retry-on-client-timeout)})))
   (setup! [this test]
     (locking setup-lock
       (cql/create-keyspace conn keyspace
@@ -123,24 +128,28 @@
   (invoke! [this test op]
     (case (:f op)
       :write (try
-                (cql/insert conn "kv_pairs" (mk-pair (:value op)))
+                (cql/insert-with-ks conn keyspace table-name (mk-pair (:value op)))
                 (assoc op :type :ok)
                 (catch UnavailableException e
                   (assoc op :type :fail :error (.getMessage e)))
                 (catch WriteTimeoutException e
-                  (assoc op :type :info :error :timed-out))
+                  (assoc op :type :info :error :write-timed-out))
+                (catch OperationTimedOutException e
+                  (assoc op :type :info :error :client-timed-out))
                 (catch NoHostAvailableException e
                   (info "All nodes are down - sleeping 2s")
                   (Thread/sleep 2000)
                   (assoc op :type :fail :error (.getMessage e))))
       :read (try (wait-for-recovery 30 conn)
-                 (let [value (->> (cql/select conn "kv_pairs"))]
+                 (let [value (->> (cql/select-with-ks conn keyspace table-name))]
                    (assoc op :type :ok :value value))
                  (catch UnavailableException e
                    (info "Not enough replicas - failing")
                    (assoc op :type :fail :error (.getMessage e)))
                  (catch ReadTimeoutException e
-                   (assoc op :type :fail :error :timed-out))
+                   (assoc op :type :fail :error :read-timed-out))
+                 (catch OperationTimedOutException e
+                   (assoc op :type :fail :error :client-timed-out))
                  (catch NoHostAvailableException e
                    (info "All nodes are down - sleeping 2s")
                    (Thread/sleep 2000)

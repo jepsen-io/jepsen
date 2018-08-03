@@ -14,6 +14,7 @@
             [yugabyte [core :refer :all]]
             )
   (:import (com.datastax.driver.core.exceptions UnavailableException
+                                                OperationTimedOutException
                                                 WriteTimeoutException
                                                 ReadTimeoutException
                                                 NoHostAvailableException)))
@@ -24,7 +25,8 @@
   client/Client
   (open! [this test node]
     (info "Opening connection to " node)
-    (assoc this :conn (cassandra/connect [node] {:protocol-version 3})))
+    (assoc this :conn (cassandra/connect [node] {:protocol-version 3
+                                                 :retry-policy (retry-policy :no-retry-on-client-timeout)})))
   (setup! [this test]
     (locking setup-lock
       (cql/create-keyspace conn keyspace
@@ -47,9 +49,12 @@
                (cql/insert-with-ks conn keyspace table-name {:id id :val val})
                (assoc op :type :ok)
                (catch UnavailableException e
+                 (info "Got expection during write: " (.getMessage e) (type e))
                  (assoc op :type :fail :error (.getMessage e)))
                (catch WriteTimeoutException e
-                 (assoc op :type :info :error :timed-out))
+                 (assoc op :type :info :error :write-timed-out))
+               (catch OperationTimedOutException e
+                 (assoc op :type :info :error :client-timed-out))
                (catch NoHostAvailableException e
                  (info "All nodes are down - sleeping 2s")
                  (Thread/sleep 2000)
@@ -62,9 +67,12 @@
                    ]
                (assoc op :type (if applied :ok :fail)))
              (catch UnavailableException e
+               (info "Got expection during CAS: " (.getMessage e) (type e))
                (assoc op :type :fail :error (.getMessage e)))
              (catch WriteTimeoutException e
-               (assoc op :type :info :error :timed-out))
+               (assoc op :type :info :error :write-timed-out))
+             (catch OperationTimedOutException e
+               (assoc op :type :info :error :client-timed-out))
              (catch NoHostAvailableException e
                (info "All nodes are down - sleeping 2s")
                (Thread/sleep 2000)
@@ -76,7 +84,9 @@
                    (info "Not enough replicas - failing")
                    (assoc op :type :fail :error (.getMessage e)))
                  (catch ReadTimeoutException e
-                   (assoc op :type :fail :error :timed-out))
+                   (assoc op :type :fail :error :read-timed-out))
+                 (catch OperationTimedOutException e
+                   (assoc op :type :fail :error :client-timed-out))
                  (catch NoHostAvailableException e
                    (info "All nodes are down - sleeping 2s")
                    (Thread/sleep 2000)
