@@ -6,7 +6,8 @@
             [dom-top.core :refer [with-retry]]
             [wall.hack]
             [cheshire.core :as json]
-            [jepsen.client :as jc])
+            [jepsen.client :as jc]
+            [jepsen.dgraph.trace :as t])
   (:import (com.google.protobuf ByteString)
            (io.grpc ManagedChannel
                     ManagedChannelBuilder)
@@ -27,30 +28,34 @@
 (defn open
   "Creates a new DgraphClient for the given node."
   ([node]
-   (open node default-port))
+   (t/with-trace "client.open!"
+     (open node default-port)))
   ([node port]
-   (let [channel (.. (ManagedChannelBuilder/forAddress node port)
-                     (usePlaintext true)
-                     (build))
-         blocking-stub (DgraphGrpc/newBlockingStub channel)]
-     (DgraphClient. [blocking-stub] deadline))))
+   (t/with-trace "client.open!"
+     (let [channel (.. (ManagedChannelBuilder/forAddress node port)
+                       (usePlaintext true)
+                       (build))
+           blocking-stub (DgraphGrpc/newBlockingStub channel)]
+       (DgraphClient. [blocking-stub] deadline)))))
 
 (defn close!
   "Closes a client. Close is asynchronous; resources may be freed some time
   after calling (close! client)."
   [client]
-  (doseq [c (wall.hack/field DgraphClient :clients client)]
-    (.. c getChannel shutdown)))
+  (t/with-trace "client.close!"
+    (doseq [c (wall.hack/field DgraphClient :clients client)]
+      (.. c getChannel shutdown))))
 
 (defn abort-txn!
   "Aborts a transaction object."
   [^DgraphClient$Transaction t]
-  (try (.discard t)
+  (t/with-trace "client.abort-txn!"
+    (try (.discard t)
        (catch io.grpc.StatusRuntimeException e
          (if (re-find #"ABORTED: Transaction has been aborted\. Please retry\."
                       (.getMessage e))
            :aborted
-           (throw e)))))
+           (throw e))))))
 
 (defmacro with-txn
   "Takes a vector of a symbol and a client. Opens a transaction on the client,
@@ -168,16 +173,17 @@
   ??? reasons at the start of the test. Should be idempotent, so... hopefully
   we can retry, at least in this context?"
   [^DgraphClient client & schemata]
-  (with-retry [i 0]
-    (.alter client (.. (DgraphProto$Operation/newBuilder)
-                       (setSchema (str/join "\n" schemata))
-                       build))
-    (catch io.grpc.StatusRuntimeException e
-      (if (and (< i 3)
-               (re-find #"DEADLINE_EXCEEDED" (.getMessage e)))
-        (do (warn "Alter schema failed due to DEADLINE_EXCEEDED, retrying...")
-            (retry (inc i)))
-        (throw e)))))
+  (t/with-trace "client.alter-schema!"
+    (with-retry [i 0]
+      (.alter client (.. (DgraphProto$Operation/newBuilder)
+                         (setSchema (str/join "\n" schemata))
+                         build))
+      (catch io.grpc.StatusRuntimeException e
+        (if (and (< i 3)
+                 (re-find #"DEADLINE_EXCEEDED" (.getMessage e)))
+          (do (warn "Alter schema failed due to DEADLINE_EXCEEDED, retrying...")
+              (retry (inc i)))
+          (throw e))))))
 
 (defn ^DgraphProto$Assigned mutate!*
   "Takes a mutation object and applies it to a transaction. Returns an
@@ -191,7 +197,8 @@
 (defn mutate!
   "Like mutate!*, but returns a map of key names to UID strings."
   [txn mut]
-  (.getUidsMap (mutate!* txn mut)))
+  (t/with-trace "client.mutate"
+    (.getUidsMap (mutate!* txn mut))))
 
 (defn ^DgraphProto$Assigned set-nquads!*
   "Takes a transaction and an n-quads string, and adds those set mutations to
@@ -204,20 +211,28 @@
 (defn set-nquads!
   "Like set-nquads!*, but returns a map of key names to UID strings."
   [txn nquads]
-  (.getUidsMap (set-nquads!* txn nquads)))
+  (t/with-trace "client.set-nquads!"
+    (.getUidsMap (set-nquads!* txn nquads))))
+
+(defn check-str-or-map
+  "If the given value is a string, wraps it in a map with the :uid field."
+  [x]
+  (if (string? x)
+    {:uid x}
+    x))
 
 (defn delete!
   "Deletes a record. Can take either a map (treated as a JSON deletion), or a
   UID string, in which case every outbound edge for the given entity is
   deleted."
   [^DgraphClient$Transaction txn str-or-map]
-  (if (string? str-or-map)
-    (recur txn {:uid str-or-map})
-    (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
-                     (setDeleteJson (-> str-or-map
-                                        json/generate-string
-                                        str->byte-string))
-                     build))))
+  (t/with-trace "client.delete!"
+    (let [target (check-str-or-map str-or-map)]
+      (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
+                       (setDeleteJson (-> target
+                                          json/generate-string
+                                          str->byte-string))
+                       build)))))
 
 (defn graphql-type
   "Takes an object and infers a type in the query language, e.g.
@@ -266,15 +281,17 @@
             \"{ all(func: eq(name, $a)) { uid } }\"
             {:a \"cat\"})"
   ([txn query-str]
-   (query* txn query-str))
+   (t/with-trace "client.query"
+     (query* txn query-str)))
   ([txn query-str vars]
-   (query* txn
-           (str "query all("
-                (->> vars
-                     (map (fn [[k v]] (str "$" (name k) ": " (graphql-type v))))
-                     (str/join ", "))
-                ") " query-str)
-           vars)))
+   (t/with-trace "client.query"
+     (query* txn
+             (str "query all("
+                  (->> vars
+                       (map (fn [[k v]] (str "$" (name k) ": " (graphql-type v))))
+                       (str/join ", "))
+                  ") " query-str)
+             vars))))
 
 (defn schema
   "Retrieves the current schema as JSON"
@@ -319,33 +336,36 @@
 
   Returns nil if upsert did not take place. Returns mutation results otherwise."
   [t pred record]
-  (if-let [pred-value (get record pred)]
-    (let [res (-> (query t (str "{\n"
-                            "  all(func: eq(" (name pred) ", $a)) {\n"
-                            "    uid\n"
-                            "  }\n"
-                            "}")
-                     {:a pred-value}))]
-      ;(info "Query results:" res)
-      (when (empty? (:all res))
-        ;(info "Inserting...")
-        (mutate! t record)))
+  (t/with-trace "client.upsert!"
+    (if-let [pred-value (get record pred)]
+      (let [res (-> (query t (str "{\n"
+                                  "  all(func: eq(" (name pred) ", $a)) {\n"
+                                  "    uid\n"
+                                  "  }\n"
+                                  "}")
+                           {:a pred-value}))]
+                                        ;(info "Query results:" res)
+        (when (empty? (:all res))
+                                        ;(info "Inserting...")
+          (mutate! t record)))
 
-    (throw (IllegalArgumentException.
-             (str "Record " (pr-str record) " has no value for "
-                  (pr-str pred))))))
+      (throw (IllegalArgumentException.
+              (str "Record " (pr-str record) " has no value for "
+                   (pr-str pred)))))))
 
 (defn gen-pred
   "Generates a predicate for a key, given a count of keys, and a prefix."
   [prefix n k]
-  (str prefix "_" (mod (hash k) n)))
+  (t/with-trace "client.gen-pred"
+    (str prefix "_" (mod (hash k) n))))
 
 (defn gen-preds
   "Given a key prefix and a number of keys, generates all predicate names that
   might be used."
   [prefix n]
-  (->> (range n)
-       (map (fn [i] (str prefix "_" i)))))
+  (t/with-trace "client.gen-preds"
+    (->> (range n)
+         (map (fn [i] (str prefix "_" i))))))
 
 (defrecord TxnClient [opts conn]
   jc/Client
