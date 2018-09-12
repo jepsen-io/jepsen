@@ -2,20 +2,22 @@
   (:import (io.opencensus.trace Tracer
                                 Tracing
                                 Span)
+           (io.opencensus.trace.samplers Samplers)
            (io.opencensus.exporter.trace.logging LoggingTraceExporter)))
 
-;; Ok so, this is entirely done with globals, which skeevs me out
-;; cause I haven't been able to guarantee that a tracer can be global. BUT
-;; the docs and examples seeeeeem to imply that it is. Also there's
-;; HOPEFULLY everything works hard to tell without seeing exports
-;; *shakes fist at LoggingTraceExporter* Anyway, if it does work this is
-;; a HELL of a lot simpler than having to pass it tracers everywhere.
-
 (def tracer ^Tracer (Tracing/getTracer))
-;; TODO Why the hecky isn't this logging??
 (def trace-exporter (LoggingTraceExporter/register))
 
-;; TODO TraceConfig
+;; TODO Set a higher sample rate
+#_(def trace-config
+  (let [sampler (Samplers/alwaysSample)
+        config  (Tracing/getTraceConfig)
+        config' (->> config
+                    .getActiveTraceParams
+                    .toBuilder
+                    (.setSampler sampler)
+                    .build)]
+    (.updateActiveTraceParams config')))
 
 (defmacro with-trace
   "Takes a span name and a body and uses this namespace's tracer to
