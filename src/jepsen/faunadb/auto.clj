@@ -18,10 +18,11 @@
     (if (not= (last (str/split-lines mvmnt)) "No data movement is currently in progress.")
       (do
         (Thread/sleep 1000)
+        ; TODO: recur
         (wait-for-replication node)))))
 
 (defn init!
-  "Start faunadb on node."
+  "Sets up cluster on node. Must be called on all nodes in test concurrently."
   [test node replicas]
   (when (= node (jepsen/primary test))
     (info node "initializing FaunaDB cluster")
@@ -47,6 +48,7 @@
   :initialized)
 
 (defn start!
+  "Starts faunadb on node, if it is not already running"
   [test node]
   (if (not= "faunadb stop/waiting"
             (c/exec :initctl :status :faunadb))
@@ -73,6 +75,7 @@
   :stopped)
 
 (def repo-key
+  ; TODO: pull this into a CLI option
   "FaunaDB dpkg repository key."
   "TPwTIfv9rYCBsY9PR2Y31F1X5JEUFIifWopdM3RvdHXaLgjkOl0wPoNp1kif1hJS")
 
@@ -80,6 +83,7 @@
   "Install a particular version of FaunaDB."
   [version]
   (debian/install-jdk8!)
+  ; TODO: c/su cleanup
   (c/su (debian/add-repo! "faunadb"
                           (str/join ["deb [arch=all] https://" repo-key "@repo.fauna.com/enterprise/debian unstable non-free"])))
   (c/su (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
@@ -87,6 +91,8 @@
   (c/su (debian/update!))
   (c/su (debian/install {"faunadb" version})))
 
+; TODO: clarify exactly what modulo logic is going on for logs and replicas.
+; How are clusters laid out?
 (defn log-configuration
   "Configure the transaction log for the current topology."
   [test node replicas]

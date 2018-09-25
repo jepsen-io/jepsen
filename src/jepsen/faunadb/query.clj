@@ -6,6 +6,8 @@
 (def Null
   (Language/Null))
 
+; TODO: Exclude clojure, standardize cases and names, qualify references
+
 (defn v
   [value]
   (Language/Value value))

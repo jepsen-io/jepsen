@@ -19,26 +19,32 @@
   (Field/as Codec/LONG))
 
 (defn client
+  "Constructs a Fauna client"
   [node]
   (.build (doto (FaunaClient/builder)
             (.withEndpoint (str "http://" node ":8443"))
             (.withSecret root-key))))
 
 (defn linearized-client
+  "Constructs a Fauna client for the /linearized endpoint"
   [node]
   (.build (doto (FaunaClient/builder)
             (.withEndpoint (str "http://" node ":8443/linearized"))
             (.withSecret root-key))))
 
+; TODO: make this return a map?
 (defn query
+  "Performs a query on a connection, and returns results"
   [conn expr]
   (.. conn (query expr) (get)))
 
 (defn queryGet
+  "Like query, but fetches a particular field from the results"
   [conn expr field]
   (.get (query conn expr) field))
 
 (defn queryGetAll
+  ; TODO: Rewrite as lazy seq?
   ([conn expr field] (queryGetAll conn expr field []))
   ([conn expr field results] (queryGetAll conn expr field results q/Null))
   ([conn expr field results after]
@@ -48,4 +54,5 @@
         ret (conj results data)]
      (if (= after q/Null)
        ret
+       ; Recursive query
        (queryGetAll conn expr field ret after)))))

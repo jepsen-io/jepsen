@@ -239,6 +239,8 @@
           :nemesis (bump-time offset)
           :clocks true}))
 
+; TODO: I think these were taken from the Cockroach test; do these thresholds
+; actually mean anything for FaunaDB?
 (defn small-skews        [] (skew "small-skews"       0.100))
 (defn subcritical-skews  [] (skew "subcritical-skews" 0.200))
 (defn critical-skews     [] (skew "critical-skews"    0.250))

@@ -1,4 +1,5 @@
 (ns jepsen.fauna
+  ; TODO: rename to faunadb for consistency
   (:require
             [clojure.tools.logging :refer :all]
             [jepsen [cli :as cli]

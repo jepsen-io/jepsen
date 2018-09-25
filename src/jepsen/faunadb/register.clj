@@ -29,6 +29,7 @@
   (Arr (v "data") (v "register")))
 
 (def RegisterField
+  ; TODO: how is this different from the register path?
   (.to (Field/at (into-array String ["data" "register"])) Codec/LONG))
 
 (defrecord AtomicClient [tbl-created? conn]
@@ -39,13 +40,16 @@
   (setup! [this test]
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
+        ; TODO: Factor out hardcoded class names
         (f/query conn (CreateClass (Obj "name" (v "test")))))))
 
   (invoke! [this test op]
+    ; TODO: destructuring bind
     (let [id   (key (:value op))
           val' (val (:value op))]
 
       (case (:f op)
+        ; TODO: formatting cleanup
         :read (let [val (-> conn
                             (f/query
                              (If (Exists (instanceRef id))

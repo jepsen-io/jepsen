@@ -59,6 +59,8 @@
 
       :read
       (->>
+        ; TODO: What's going on here? What's queryGetAll? What's with the
+        ; conj/flatten?
         (f/queryGetAll conn (Match idxRef) ValuesField)
         (mapv (fn [n] (reduce conj [] n)))
         (flatten)
