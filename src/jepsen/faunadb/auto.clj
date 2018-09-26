@@ -42,9 +42,9 @@
               (mapv
                (fn [i]
                  (str/join ["replica-" i]))
-               (range replicas))))
-    (wait-for-replication node)
-    (info node "Replication complete"))
+               (range replicas)))))
+    ;(wait-for-replication node)
+    ;(info node "Replication complete"))
 
   (jepsen/synchronize test 600) ; this is slooooooowwww
   :initialized)
@@ -99,7 +99,7 @@
 (defn kill!
   "Kills FaunaDB on node."
   [test node]
-  (util/meh (c/su (cu/grepkill! "faunadb.yml")))
+  (util/meh (c/su (cu/grepkill! "faunadb.jar")))
   (info node "FaunaDB killed.")
   :killed)
 
@@ -170,7 +170,7 @@
   [test node]
   (if (debian/installed? :faunadb)
     (do
-      (stop! test node)
+      (kill! test node)
       ; (debian/uninstall! :faunadb)
       (c/su
         (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")

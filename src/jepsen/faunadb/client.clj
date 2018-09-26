@@ -45,14 +45,36 @@
 
 (defn queryGetAll
   ; TODO: Rewrite as lazy seq?
-  ([conn expr field] (queryGetAll conn expr field []))
-  ([conn expr field results] (queryGetAll conn expr field results q/Null))
+  ([conn expr field]
+   (queryGetAll conn expr field []))
+  ([conn expr field results]
+   (queryGetAll conn expr field results q/Null))
   ([conn expr field results after]
-   (let [res (query conn (q/Paginate expr after))
-        data (.get res field)
-        after (. res (at (into-array String ["after"])))
-        ret (conj results data)]
+   (warn "Deprecated: queryGetAll")
+   ; Make query request
+   (let [res    (query conn (q/Paginate expr after))
+         ; Extract field
+         data   (.get res field)
+         ; And next page
+         after  (.at res (into-array String ["after"]))
+         ; Add data to results vector
+         ret    (conj results data)]
+     ; If there's nothing more to come, we're done
      (if (= after q/Null)
        ret
        ; Recursive query
        (queryGetAll conn expr field ret after)))))
+
+(defn query-get-all
+  "Performs a query, gets a field from that query, and returns a lazy sequence
+  of paginated results."
+  ([conn expr field]
+   (query-get-all conn expr field q/Null))
+  ([conn expr field after]
+   (lazy-seq
+     (let [res (query conn (q/Paginate expr after))
+           data (.get res field)
+           after (.at res (into-array String ["after"]))]
+       (if (= after q/Null)
+         data
+         (concat data (query-get-all conn expr field after)))))))

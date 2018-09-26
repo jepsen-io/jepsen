@@ -58,14 +58,13 @@
          (assoc op :type :ok))
 
       :read
-      (->>
-        ; TODO: What's going on here? What's queryGetAll? What's with the
-        ; conj/flatten?
-        (f/queryGetAll conn (Match idxRef) ValuesField)
-        (mapv (fn [n] (reduce conj [] n)))
-        (flatten)
-        (set)
-        (assoc op :type :ok, :value))))
+      (do
+        (->>
+          ; TODO: What's going on here? What's queryGetAll? What's with the
+          ; conj/flatten?
+          (f/query-get-all conn (Match idxRef) ValuesField)
+          (into (sorted-set))
+          (assoc op :type :ok, :value)))))
 
   (teardown! [this test])
 
