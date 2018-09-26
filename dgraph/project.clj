@@ -9,7 +9,7 @@
                  [cheshire "5.8.0"]
                  ; Note that we specify manual versions of dgraph deps since
                  ; grpc uses version ranges
-                 [io.dgraph/dgraph4j "1.3.0"
+                 [io.dgraph/dgraph4j "1.6.0"
                   :exclusions [io.grpc/grpc-core
                                io.netty/netty-codec-http2]]
                  [io.grpc/grpc-core "1.10.0"]

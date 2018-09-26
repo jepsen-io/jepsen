@@ -8,14 +8,16 @@
             [cheshire.core :as json]
             [jepsen.client :as jc]
             [jepsen.dgraph.trace :as t])
-  (:import (com.google.protobuf ByteString)
+  (:import (java.util.concurrent TimeUnit)
+           (com.google.protobuf ByteString)
            (io.grpc ManagedChannel
                     ManagedChannelBuilder)
            (io.dgraph DgraphGrpc
+                      DgraphGrpc$DgraphStub
                       DgraphClient
-                      DgraphClient$Transaction
+                      DgraphAsyncClient
+                      Transaction
                       DgraphProto$Assigned
-                      DgraphProto$LinRead$Sequencing
                       DgraphProto$Mutation
                       DgraphProto$Response
                       DgraphProto$Operation
@@ -23,7 +25,8 @@
 
 (def default-port "Default dgraph alpha GRPC port" 9080)
 
-(def deadline "Timeout in seconds" 5)
+;; milliseconds given to the grpc blockingstub as a deadline
+(def deadline 20000)
 
 (defn open
   "Creates a new DgraphClient for the given node."
@@ -35,20 +38,23 @@
      (let [channel (.. (ManagedChannelBuilder/forAddress node port)
                        (usePlaintext true)
                        (build))
-           blocking-stub (DgraphGrpc/newBlockingStub channel)]
-       (DgraphClient. [blocking-stub] deadline)))))
+           stub  (DgraphGrpc/newStub channel)
+           stub  (.withDeadlineAfter stub deadline TimeUnit/MILLISECONDS)
+           stubs (into-array DgraphGrpc$DgraphStub [stub])]
+       (DgraphClient. stubs)))))
 
 (defn close!
   "Closes a client. Close is asynchronous; resources may be freed some time
   after calling (close! client)."
   [client]
   (t/with-trace "client.close!"
-    (doseq [c (wall.hack/field DgraphClient :clients client)]
-      (.. c getChannel shutdown))))
+    (let [async-client (wall.hack/field DgraphClient :asyncClient client)]
+      (doseq [c (wall.hack/field DgraphAsyncClient :stubs async-client)]
+        (.. c getChannel shutdown)))))
 
 (defn abort-txn!
   "Aborts a transaction object."
-  [^DgraphClient$Transaction t]
+  [^Transaction t]
   (t/with-trace "client.abort-txn!"
     (try (.discard t)
        (catch io.grpc.StatusRuntimeException e
@@ -57,18 +63,12 @@
            :aborted
            (throw e))))))
 
+;; TODO Takes options map but is no longer used since client sequencing has been
+;;      removed. need to clean up call sites to stop passing in the test map
 (defmacro with-txn
   "Takes a vector of a symbol and a client. Opens a transaction on the client,
   binds it to that symbol, and evaluates body. Calls commit at the end of
-  the body, or discards the transaction if an exception is thrown. Options are:
-
-    :sequencing - :server or :client (default :server)
-
-  Ex:
-
-      (with-txn {:sequencing :client} [t my-client]
-        (mutate! t ...)
-        (mutate! t ...))
+  the body, or discards the transaction if an exception is thrown.
 
   If you commit or abort the transaction *within* body (e.g. before with-txn
   commits it for you), with-txn will attempt to commit, *not* throw, and return
@@ -76,14 +76,16 @@
   [opts [txn-sym client] & body]
   `(let [~txn-sym (.newTransaction ^DgraphClient ~client)]
      (try
-       (.setSequencing ~txn-sym
-                       (case (:sequencing ~opts :server)
-                          :server DgraphProto$LinRead$Sequencing/SERVER_SIDE
-                          :client DgraphProto$LinRead$Sequencing/CLIENT_SIDE))
        (let [res# (do ~@body)]
          (try (.commit ~txn-sym)
+              ;; if our trasaction aborts when we try to complete it, we
+              ;; want to pass the value back up
+              (catch io.grpc.StatusRuntimeException e#
+                (if (re-find #"ABORTED" (.getMessage e#))
+                  res#
+                  (throw e#)))
+              ;; If the user manually committed or aborted, that's OK.
               (catch io.dgraph.TxnFinishedException e#
-                ; If the user manually committed or aborted, that's OK.
                 nil))
          res#)
        (finally
@@ -157,6 +159,10 @@
               #"This server doesn't serve group id:"
               (assoc ~op :type :fail, :error :server-doesn't-serve-group)
 
+              ;; FIXME For some reason these don't get caught??
+              #"ABORTED"
+              (assoc ~op :type :fail, :error :transaction-aborted)
+
               (throw e#)))
 
           (catch TxnConflictException e#
@@ -188,7 +194,7 @@
 (defn ^DgraphProto$Assigned mutate!*
   "Takes a mutation object and applies it to a transaction. Returns an
   Assigned."
-  [^DgraphClient$Transaction txn mut]
+  [^Transaction txn mut]
   ;(info "Mutate:" mut)
   (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
                    (setSetJson (str->byte-string (json/generate-string mut)))
@@ -203,7 +209,7 @@
 (defn ^DgraphProto$Assigned set-nquads!*
   "Takes a transaction and an n-quads string, and adds those set mutations to
   the transaction."
-  [^DgraphClient$Transaction txn nquads]
+  [^Transaction txn nquads]
   (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
                    (setSetNquads (str->byte-string nquads))
                    build)))
@@ -225,7 +231,7 @@
   "Deletes a record. Can take either a map (treated as a JSON deletion), or a
   UID string, in which case every outbound edge for the given entity is
   deleted."
-  [^DgraphClient$Transaction txn str-or-map]
+  [^Transaction txn str-or-map]
   (t/with-trace "client.delete!"
     (let [target (check-str-or-map str-or-map)]
       (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
@@ -262,10 +268,10 @@
 
       query(txn \"query all($a: string) { all(func: eq(name, $a)) { uid } }\"
             {:a \"cat\"})"
-  ([^DgraphClient$Transaction txn query-str]
+  ([^Transaction txn query-str]
    (json/parse-string (.. txn (query query-str) getJson toStringUtf8)
                       true))
-  ([^DgraphClient$Transaction txn query vars]
+  ([^Transaction txn query vars]
    ;(info "Query (vars:" (pr-str vars) "):" query)
    (let [vars (->> vars
                    (map (fn [[k v]] [(str "$" (name k)) (str v)]))
@@ -388,37 +394,37 @@
       (with-txn test [t conn]
         (->> (:value op)
              (reduce
-               (fn [txn' [f k v :as micro-op]]
-                 (let [kp (gen-pred "key" (:key-predicate-count opts) k)
-                       vp (gen-pred "val" (:value-predicate-count opts) k)]
-                   (case f
-                     :r
-                     (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
-                                             "  " vp "\n"
-                                             "}}")
-                                      {:key k})
-                           reads (:q res)]
-                       (conj txn' [f k (condp = (count reads)
-                                         ; Not found
-                                         0 nil
-                                         ; Found
-                                         1 (get (first reads)
-                                                (keyword vp))
-                                         ; Ummm
-                                         (throw (RuntimeException.
-                                                  (str "Unexpected multiple results for key "
-                                                       (pr-str k) ": "
-                                                       (pr-str reads)))))]))
+              (fn [txn' [f k v :as micro-op]]
+                (let [kp (gen-pred "key" (:key-predicate-count opts) k)
+                      vp (gen-pred "val" (:value-predicate-count opts) k)]
+                  (case f
+                    :r
+                    (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
+                                            "  " vp "\n"
+                                            "}}")
+                                     {:key k})
+                          reads (:q res)]
+                      (conj txn' [f k (condp = (count reads)
+                                        ; Not found
+                                        0 nil
+                                        ; Found
+                                        1 (get (first reads)
+                                               (keyword vp))
+                                        ; Ummm
+                                        (throw (RuntimeException.
+                                                (str "Unexpected multiple results for key "
+                                                     (pr-str k) ": "
+                                                     (pr-str reads)))))]))
 
-                     ; TODO: we should be able to optimize this to do pure
-                     ; inserts and UID-direct writes without the upsert
-                     ; read-write cycle, at least when we know the state
-                     :w (do (if (:blind-insert-on-write? opts)
-                              (mutate! t {(keyword kp) k, (keyword vp) v})
-                              (upsert! t (keyword kp)
-                                       {(keyword kp) k, (keyword vp) v}))
-                            (conj txn' micro-op)))))
-               [])
+                                        ; TODO: we should be able to optimize this to do pure
+                                        ; inserts and UID-direct writes without the upsert
+                                        ; read-write cycle, at least when we know the state
+                    :w (do (if (:blind-insert-on-write? opts)
+                             (mutate! t {(keyword kp) k, (keyword vp) v})
+                             (upsert! t (keyword kp)
+                                      {(keyword kp) k, (keyword vp) v}))
+                           (conj txn' micro-op)))))
+              [])
              (assoc op :type :ok, :value)))))
 
   (teardown! [this test])

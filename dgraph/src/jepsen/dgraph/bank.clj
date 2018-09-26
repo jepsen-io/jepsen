@@ -37,13 +37,13 @@
   "Given a transaction, reads all accounts. If a type predicate is provided,
   finds all accounts where that type predicate is \"account\". Otherwise, finds
   all accounts across all type predicates. Returns a map of keys to amounts."
-  ; All predicates
+  ;; All predicates
   ([t]
    (t/with-trace "read-accounts"
      (->> (c/gen-preds "type" pred-count)
           (map (partial read-accounts t))
           (reduce merge))))
-  ; One predicate in particular
+  ;; One predicate in particular
   ([t type-predicate]
    (t/with-trace "read-accounts "
      (let [q (str "{ q(func: eq(" type-predicate ", $type)) {\n"
@@ -53,7 +53,7 @@
                   "}}")]
        (->> (c/query t q {:type "account"})
             :q
-                                        ;((fn [x] (info :read-val (pr-str x)) x))
+            ;;((fn [x] (info :read-val (pr-str x)) x))
             (map multi-pred-acct->key+amount)
             (into (sorted-map)))))))
 
@@ -70,12 +70,12 @@
                   :q
                   first)]
         (if r
-                                        ; Note that we need :type for new accounts, but don't want to update it
-                                        ; normally.
+          ;; Note that we need :type for new accounts, but don't want to update it
+          ;; normally.
           {:uid    (:uid r)
            :key    (get r (keyword kp))
            :amount (get r (keyword ap))}
-                                        ; Default account object when none exists
+          ;; Default account object when none exists
           {:key     k
            :type    "account"
            :amount  0})))))
@@ -153,7 +153,9 @@
                       (if-let [error (bank/check-op (set (:accounts test))
                                                     (:total-amount test)
                                                     op)]
-                        (assoc op :message (dissoc error :op))
+                        (assoc op
+                               :message (dissoc error :op)
+                               :error :checker-violation)
                         op)))
 
             :transfer (t/with-trace "bank.invoke.transfer"
@@ -180,8 +182,7 @@
   (teardown! [this test])
 
   (close! [this test]
-    (t/with-trace "bank.close"
-      (c/close! conn))))
+    (c/close! conn)))
 
 (defn workload
   "Stuff you need to build a test!"

@@ -8,16 +8,19 @@
 (def tracer ^Tracer (Tracing/getTracer))
 (def trace-exporter (LoggingTraceExporter/register))
 
-;; TODO Set a higher sample rate
-#_(def trace-config
-  (let [sampler (Samplers/alwaysSample)
-        config  (Tracing/getTraceConfig)
-        config' (->> config
-                    .getActiveTraceParams
-                    .toBuilder
-                    (.setSampler sampler)
-                    .build)]
-    (.updateActiveTraceParams config')))
+;; TODO Add a CLI input for choosing between samplers
+(def sampler ^Sampler
+  #_(Samplers/alwaysSample)
+  (Samplers/neverSample))
+
+(def trace-config
+  (let [config (Tracing/getTraceConfig)
+        params (-> config
+                   .getActiveTraceParams
+                   .toBuilder
+                   (.setSampler sampler)
+                   .build)]
+    (.updateActiveTraceParams config params)))
 
 (defmacro with-trace
   "Takes a span name and a body and uses this namespace's tracer to
