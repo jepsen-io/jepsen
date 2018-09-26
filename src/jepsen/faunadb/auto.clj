@@ -47,14 +47,47 @@
   (jepsen/synchronize test)
   :initialized)
 
+(defn status
+  "Systemd status for FaunaDB"
+  []
+  (let [msg (try
+              (c/exec :service :faunadb :status)
+              (catch RuntimeException e
+                (let [m (.getMessage e)]
+                  (if (re-find #"returned non-zero exit status 3" m)
+                    m
+                    (throw e)))))
+        [_ state sub] (re-find #"Active: (\w+) \((\w+)\)\s" msg)]
+    (when-not (and state sub)
+      (throw (RuntimeException. (str "Not sure how to interpret service status:\n"
+                                     msg))))
+    [state sub]))
+
+(defn running?
+  "Is Fauna running?"
+  []
+  (let [[state sub] (status)
+        running? (case state
+                   "active" (case sub
+                              "running" true
+                              nil)
+                   "inactive" (case sub
+                                "dead" false
+                                nil)
+                   nil)]
+    (when (nil? running?)
+      (throw
+        (RuntimeException. (str "Don't know how to interpret status "
+                                state " (" sub ")"))))
+    running?))
+
 (defn start!
   "Starts faunadb on node, if it is not already running"
   [test node]
-  (if (not= "faunadb stop/waiting"
-            (c/exec :initctl :status :faunadb))
+  (if (running?)
     (info node "FaunaDB already running.")
     (do (info node "Starting FaunaDB...")
-        (c/su (c/exec :initctl :start :faunadb))
+        (c/su (c/exec :service :faunadb :start))
         (c/exec
           :bash :-c "while ! netstat -tna | grep 'LISTEN\\>' | grep -q ':8444\\>'; do sleep 0.1; done")
         (info node "FaunaDB started")))
@@ -70,14 +103,9 @@
 (defn stop!
   "Gracefully stops FaunaDB on a node."
   [test node]
-  (c/su (c/exec :initctl :stop :faunadb))
+  (c/su (c/exec :service :faunadb :stop))
   (info node "FaunaDB stopped")
   :stopped)
-
-(def repo-key
-  ; TODO: pull this into a CLI option
-  "FaunaDB dpkg repository key."
-  "TPwTIfv9rYCBsY9PR2Y31F1X5JEUFIifWopdM3RvdHXaLgjkOl0wPoNp1kif1hJS")
 
 (defn install!
   "Install a particular version of FaunaDB."
@@ -85,7 +113,7 @@
   (debian/install-jdk8!)
   ; TODO: c/su cleanup
   (c/su (debian/add-repo! "faunadb"
-                          (str/join ["deb [arch=all] https://" repo-key "@repo.fauna.com/enterprise/debian unstable non-free"])))
+                          "deb [arch=all] https://repo.fauna.com/debian stable non-free"))
   (c/su (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
                 :apt-key :add :-))
   (c/su (debian/update!))
