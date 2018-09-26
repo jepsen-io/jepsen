@@ -13,13 +13,13 @@
             [jepsen.control.util :as cu]))
 
 (defn wait-for-replication
+  "Blocks until local node has completed data movement."
   [node]
   (let [mvmnt (c/exec :faunadb-admin :movement-status)]
-    (if (not= (last (str/split-lines mvmnt)) "No data movement is currently in progress.")
-      (do
-        (Thread/sleep 1000)
-        ; TODO: recur
-        (wait-for-replication node)))))
+    (when (not= (last (str/split-lines mvmnt)) "No data movement is currently in progress.")
+        (info mvmnt)
+        (Thread/sleep 5000)
+        (recur node))))
 
 (defn init!
   "Sets up cluster on node. Must be called on all nodes in test concurrently."
@@ -43,8 +43,10 @@
                (fn [i]
                  (str/join ["replica-" i]))
                (range replicas))))
-    (wait-for-replication node))
-  (jepsen/synchronize test)
+    (wait-for-replication node)
+    (info node "Replication complete"))
+
+  (jepsen/synchronize test 600) ; this is slooooooowwww
   :initialized)
 
 (defn status
@@ -66,6 +68,7 @@
 (defn running?
   "Is Fauna running?"
   []
+  ; I forget how many states systemd has so uhhh let's be conservative
   (let [[state sub] (status)
         running? (case state
                    "active" (case sub
@@ -168,7 +171,7 @@
   (if (debian/installed? :faunadb)
     (do
       (stop! test node)
-      (debian/uninstall! :faunadb)
+      ; (debian/uninstall! :faunadb)
       (c/su
         (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")
         (c/exec :bash :-c "rm -rf /var/log/faunadb/*"))
