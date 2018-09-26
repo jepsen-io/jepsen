@@ -1,4 +1,4 @@
-(defproject jepsen "0.1.10"
+(defproject jepsen "0.1.11-SNAPSHOT"
   :description "Distributed systems testing framework."
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
@@ -6,7 +6,7 @@
                  [org.clojure/data.fressian "0.2.1"]
                  [org.clojure/tools.logging "0.3.1"]
                  [spootnik/unilog "0.7.13"]
-                 [org.clojure/tools.cli "0.3.5"]
+                 [org.clojure/tools.cli "0.4.1"]
                  [clj-time "0.11.0"]
                  [jepsen.txn "0.1.0"]
                  [knossos "0.3.3" :exclusions [org.slf4j/slf4j-log4j12]]
