@@ -1,7 +1,6 @@
 (ns jepsen.faunadb.bank
   "Simulates transfers between bank accounts"
   (:refer-clojure :exclude [test])
-  (:use jepsen.faunadb.query)
   (:import com.faunadb.client.errors.UnavailableException)
   (:import com.faunadb.client.types.Codec)
   (:import com.faunadb.client.types.Field)
@@ -16,23 +15,24 @@
                     [fauna :as fauna]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.faunadb.client :as f]
+            [jepsen.faunadb [client :as f]
+                            [query :as q]]
             [clojure.core.reducers :as r]
+            [clojure.pprint :refer [pprint]]
             [clojure.string :as cstr]
             [clojure.tools.logging :refer :all]
             [knossos.op :as op]))
 
-(def classRef
-  "Accounts class ref"
-  (ClassRef (v "accounts")))
+(def accounts "accounts")
+(def accounts* (q/class accounts))
 
 (def idxRef
   "All Accounts index ref"
-  (IndexRef (v "all_accounts")))
+  (q/index "all_accounts"))
 
 (def balancePath
   "Path to balance data"
-  (Arr (v "data") (v "balance")))
+  ["data" "balance"])
 
 (defn getField
   [value idx codec]
@@ -53,26 +53,30 @@
   "A field extractor for balances"
   (.collect (Field/at (into-array String ["data"])) (Field/as BalancesCodec)))
 
+(pprint (macroexpand `(q/fn [r] [r (q/select balancePath (q/get r))])))
+
 (defn do-index-read
   [conn]
   (f/queryGet
     conn
-    (Map
-      (Paginate (Match idxRef))
-      (Lambda
-        (v "r")
-        (Arr
-          (Var "r")
-          (Select balancePath (Get (Var "r"))))))
+    (q/map
+      (q/paginate (q/match idxRef))
+      (q/fn [r]
+        [r (q/select balancePath (q/get r))]))
     BalancesField))
 
 (defn await-replication
+  ; TODO: what is this doing exactly?
   [conn n]
-  (let [iCnt (count (do-index-read conn))]
+  (let [iCnt (try (count (do-index-read conn))
+                  (catch java.util.concurrent.ExecutionException e
+                    (if (instance? com.faunadb.client.errors.UnavailableException e)
+                      -1
+                      (throw e))))]
     (if (not= n iCnt)
       (do
         (Thread/sleep 1000)
-        (await-replication conn n)))))
+        (recur conn n)))))
 
 (defmacro wrapped-query
   [op & exprs]
@@ -99,43 +103,41 @@
   (setup! [this test]
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
-        (f/query conn (CreateClass (Obj "name" (v "accounts"))))
+        (f/query conn (q/create-class {:name "accounts"}))
         (f/query
           conn
-          (CreateIndex
-            (Obj
-              "name" (v "all_accounts")
-              "source" classRef)))
+          (q/create-index {:name "all_accounts"
+                           :source accounts*}))
 
-        (info (cstr/join ["Creating " n " accounts"]))
+        (info "Creating" n "accounts")
         (f/query
           conn
-          (Do
+          (apply q/do
             (mapv
               (fn [i]
-                (Create (Ref classRef i)
-                        (Obj "data" (Obj "balance" (v starting-balance)))))
+                (q/create (q/ref accounts i)
+                          {:data {:balance starting-balance}}))
               (range n))))))
     (jepsen/synchronize test)
+    ; TODO: oh hellooooo
     (await-replication conn n))
 
   (invoke! [this test op]
     (case (:f op)
       :read
-      (wrapped-query op
+      (wrapped-query
+        op
         (let [n (:value op)]
-          (->>
-            (f/queryGet
-              conn
-              (Obj "data" (Arr
-                (mapv
-                  (fn [i]
-                    (Arr
-                      (Ref classRef i)
-                      (Select balancePath (Get (Ref classRef i)))))
-                (range n))))
-              BalancesField)
-            (assoc op :type :ok, :value))))
+          (->> (f/queryGet
+                 conn
+                 {:data (mapv
+                          (fn [i]
+                            (let [acct (q/ref accounts i)]
+                              [acct
+                               (q/select balancePath (q/get acct))]))
+                          (range n))}
+                 BalancesField)
+               (assoc op :type :ok, :value))))
 
       :index-read
       (wrapped-query op
@@ -147,28 +149,23 @@
         (let [{:keys [from to amount]} (:value op)]
           (f/query
             conn
-            (Do
-              (Let
-                {"a" (Subtract
-                       (Select
-                         balancePath
-                         (Get (Ref classRef from)))
-                       amount)}
-                (If
-                  (Or (LessThan (Var "a") 0))
-                  (Abort "balance would go negative")
-                  (Update
-                    (Ref classRef from)
-                    (Obj "data" (Obj "balance" (Var "a"))))))
-              (Let
-                {"b" (Add
-                       (Select
-                         balancePath
-                         (Get (Ref classRef to)))
-                       amount)}
-                (Update
-                  (Ref classRef to)
-                  (Obj "data" (Obj "balance" (Var "b")))))))
+            (q/do
+              (q/let [a (q/-
+                          (q/select balancePath
+                            (q/get (q/ref accounts from)))
+                          amount)]
+                ; TODO: should this check both balances? why the or?
+                (q/if (q/< a 0)
+                  (q/abort "balance would go negative")
+                  (q/update
+                    (q/ref accounts from)
+                    {:data {:balance a}})))
+              (q/let [b (q/+ (q/select balancePath
+                                       (q/get (q/ref accounts to)))
+                             amount)]
+                (q/update
+                  (q/ref accounts to)
+                  {:data {:balance b}}))))
           (assoc op :type :ok)))))
 
   (teardown! [this test])

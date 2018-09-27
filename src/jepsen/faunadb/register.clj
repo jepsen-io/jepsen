@@ -1,7 +1,6 @@
 (ns jepsen.faunadb.register
   "Simulates updates to a field on an instance"
   (:refer-clojure :exclude [test])
-  (:use jepsen.faunadb.query)
   (:import com.faunadb.client.types.Codec)
   (:import com.faunadb.client.types.Field)
   (:require [jepsen [checker :as checker]
@@ -10,7 +9,8 @@
                     [generator :as gen]
                     [independent :as indy]]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.faunadb.client :as f]
+            [jepsen.faunadb [client :as f]
+                            [query :as q]]
             [clojure.string :as str]
             [clojure.tools.logging :refer :all]
             [knossos.model :as model]))
@@ -22,11 +22,11 @@
 (defn instanceRef
   "The instance under test."
   [id]
-  (Ref (ClassRef (v "test")) id))
+  (q/ref "test" id))
 
 (def register
   "Path to the register."
-  (Arr (v "data") (v "register")))
+  (q/expr ["data" "register"]))
 
 (def RegisterField
   ; TODO: how is this different from the register path?
@@ -40,46 +40,43 @@
   (setup! [this test]
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
-        ; TODO: Factor out hardcoded class names
-        (f/query conn (CreateClass (Obj "name" (v "test")))))))
+        (f/query conn (q/create-class {:name "test"})))))
 
   (invoke! [this test op]
     ; TODO: destructuring bind
-    (let [id   (key (:value op))
-          val' (val (:value op))]
-
+    (let [[id val'] (:value op)
+          id*  (q/ref "test" id)]
       (case (:f op)
-        ; TODO: formatting cleanup
-        :read (let [val (-> conn
-                            (f/query
-                             (If (Exists (instanceRef id))
-                                 (Select register (Get (instanceRef id)))
-                                 Null)))]
-                (assoc op :type :ok :value (indy/tuple id (if (nil? val) nil (.get val f/LongField)))))
+        :read (let [val (f/query conn
+                                 (q/if (q/exists? id*)
+                                   (q/select ["data" "register"]
+                                             (q/get id*))))]
+                (assoc op
+                       :type :ok
+                       :value (indy/tuple id (and val
+                                                  (.get val f/LongField)))))
 
-        :write (do
-                 (-> conn
-                     (f/queryGet
-                      (If (Exists (instanceRef id))
-                        (Update (instanceRef id)
-                                (Obj "data" (Obj "register" val')))
-                        (Create (instanceRef id)
-                                (Obj "data" (Obj "register" val'))))
-                      RegisterField))
-                 (assoc op :type :ok))
+        :write (do (-> conn
+                       (f/queryGet
+                         (q/if (q/exists? id*)
+                           (q/update id* {:data {:register val'}})
+                           (q/create id* {:data {:register val'}}))
+                         RegisterField))
+                   (assoc op :type :ok))
+
         :cas (let [[expected new] val'
-                   cas (f/queryGet conn
-                                (If (Exists (instanceRef id))
-                                    (Let
-                                     {"reg" (Select register (Get (instanceRef id)))}
-                                     (If (Equals (v expected) (Var "reg"))
-                                         (Do
-                                          (Update (instanceRef id)
-                                                  (Obj "data" (Obj "register" new)))
-                                          (v true))
-                                         (v false)))
-                                    (v false))
-                                f/BoolField)]
+                   cas (f/queryGet
+                         conn
+                         (q/if (q/exists? id*)
+                           (q/let [reg (q/select ["data" "register"]
+                                                 (q/get id*))]
+                             (q/if (q/= expected reg)
+                               (q/do
+                                 (q/update id* {:data {:register new}})
+                                 true)
+                               false))
+                           false)
+                         f/BoolField)]
                (assoc op :type (if cas :ok :fail))))))
 
   (teardown! [this test])

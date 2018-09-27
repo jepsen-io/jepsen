@@ -6,3 +6,4 @@ network_admin_http_port: 8444
 network_cluster_name: "fauna"
 network_peer_port: 7500
 network_peer_secure_port: 7501
+log_level: debug

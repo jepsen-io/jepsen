@@ -39,7 +39,11 @@
 
 (def opt-spec
   "Command line options for tools.cli"
-  [(jc/repeated-opt "-t" "--test NAME" "Test(s) to run" [] tests)
+  [[nil "--[no-]strong-read" "Force strict reads by performing dummy writes"
+    :default true]
+   [nil "--wait-for-convergence" "Don't start operations until data movement has completed"
+    :default false]
+  (jc/repeated-opt "-t" "--test NAME" "Test(s) to run" [] tests)
 
   (jc/repeated-opt nil "--nemesis NAME" "Which nemesis to use"
                    [`(jfn/none)]

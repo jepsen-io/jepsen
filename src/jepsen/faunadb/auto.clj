@@ -42,9 +42,10 @@
               (mapv
                (fn [i]
                  (str/join ["replica-" i]))
-               (range replicas)))))
-    ;(wait-for-replication node)
-    ;(info node "Replication complete"))
+               (range replicas))))
+    (when (:wait-for-convergence test)
+      (wait-for-replication node)
+      (info node "Replication complete")))
 
   (jepsen/synchronize test 600) ; this is slooooooowwww
   :initialized)
@@ -59,7 +60,7 @@
                   (if (re-find #"returned non-zero exit status 3" m)
                     m
                     (throw e)))))
-        [_ state sub] (re-find #"Active: (\w+) \((\w+)\)\s" msg)]
+        [_ state sub] (re-find #"Active: (\w+) \(([^\)]+)\)\s" msg)]
     (when-not (and state sub)
       (throw (RuntimeException. (str "Not sure how to interpret service status:\n"
                                      msg))))
@@ -74,6 +75,12 @@
                    "active" (case sub
                               "running" true
                               nil)
+                   "activating" (case sub
+                                  "auto-restart" true
+                                  nil)
+                   "failed"   (case sub
+                                "Result: signal" false
+                                nil)
                    "inactive" (case sub
                                 "dead" false
                                 nil)
@@ -168,11 +175,11 @@
 (defn teardown!
   "Gracefully stops FaunaDB and removes data files"
   [test node]
-  (if (debian/installed? :faunadb)
-    (do
-      (kill! test node)
-      ; (debian/uninstall! :faunadb)
-      (c/su
-        (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")
-        (c/exec :bash :-c "rm -rf /var/log/faunadb/*"))
-      (info node "FaunaDB removed"))))
+  (when (debian/installed? :faunadb)
+    (kill! test node)
+    (stop! test node)
+    ; (debian/uninstall! :faunadb)
+    (c/su
+      (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")
+      (c/exec :bash :-c "rm -rf /var/log/faunadb/*"))
+    (info node "FaunaDB torn down")))

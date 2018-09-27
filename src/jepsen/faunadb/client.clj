@@ -1,11 +1,18 @@
 (ns jepsen.faunadb.client
   "A clojure client for FaunaDB"
-  (:import com.faunadb.client.FaunaClient)
-  (:import com.faunadb.client.types.Codec)
-  (:import com.faunadb.client.types.Field)
-  (:import com.faunadb.client.types.Value)
+  (:import (com.faunadb.client FaunaClient)
+           (com.faunadb.client.types Codec
+                                     Decoder
+                                     Field
+                                     Value
+                                     Value$ObjectV
+                                     Value$ArrayV
+                                     Value$LongV
+                                     Types))
   (:require [clojure.string :as str]
+            [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]
+            [jepsen.util :as util]
             [jepsen.faunadb.query :as q]))
 
 (def root-key
@@ -32,49 +39,42 @@
             (.withEndpoint (str "http://" node ":8443/linearized"))
             (.withSecret root-key))))
 
+(defn decode
+  "Takes a Fauna value and converts it to a nice Clojure value."
+  [^Value x]
+  (condp instance? x
+    Value$ObjectV (->> (.get (Decoder/decode x (Types/hashMapOf Value)))
+                       (reduce (fn [m [k v]]
+                                 (assoc! m (keyword k) (decode v)))
+                               (transient {}))
+                       persistent!)
+    Value$ArrayV  (->> (.get (Decoder/decode x (Types/arrayListOf Value)))
+                       (map decode))
+    Value$LongV   (.get (Decoder/decode x Long))
+    (do (info "Don't know how to decode" (class x) x)
+        x)))
+
 ; TODO: make this return a map?
 (defn query
   "Performs a query on a connection, and returns results"
-  [conn expr]
-  (.. conn (query expr) (get)))
+  [conn e]
+  (.. conn (query (q/expr e)) (get)))
 
 (defn queryGet
   "Like query, but fetches a particular field from the results"
-  [conn expr field]
-  (.get (query conn expr) field))
+  [conn e field]
+  (.get (query conn (q/expr e)) field))
 
-(defn queryGetAll
-  ; TODO: Rewrite as lazy seq?
-  ([conn expr field]
-   (queryGetAll conn expr field []))
-  ([conn expr field results]
-   (queryGetAll conn expr field results q/Null))
-  ([conn expr field results after]
-   (warn "Deprecated: queryGetAll")
-   ; Make query request
-   (let [res    (query conn (q/Paginate expr after))
-         ; Extract field
-         data   (.get res field)
-         ; And next page
-         after  (.at res (into-array String ["after"]))
-         ; Add data to results vector
-         ret    (conj results data)]
-     ; If there's nothing more to come, we're done
-     (if (= after q/Null)
-       ret
-       ; Recursive query
-       (queryGetAll conn expr field ret after)))))
-
-(defn query-get-all
-  "Performs a query, gets a field from that query, and returns a lazy sequence
-  of paginated results."
-  ([conn expr field]
-   (query-get-all conn expr field q/Null))
-  ([conn expr field after]
+(defn query-all
+  "Performs a query for an expression. Paginates expression, performs query,
+  and returns a lazy sequence of the :data from each page of results."
+  ([conn expr]
+   (query-all conn (q/expr expr) q/null))
+  ([conn expr after]
    (lazy-seq
-     (let [res (query conn (q/Paginate expr after))
-           data (.get res field)
+     (let [res (query conn (q/paginate expr after))
+           data (:data (decode res))
            after (.at res (into-array String ["after"]))]
-       (if (= after q/Null)
+       (if (= after q/null)
          data
-         (concat data (query-get-all conn expr field after)))))))
+         (concat data (query-all conn expr after)))))))

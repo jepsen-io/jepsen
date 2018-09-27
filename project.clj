@@ -7,4 +7,5 @@
                  [clj-yaml "0.4.0"]
                  [jepsen "0.1.11-SNAPSHOT"]
                  [com.faunadb/faunadb-java "2.1.1"]
-                 [com.faunadb/faunadb-java-dsl "2.1.1"]])
+                 [com.faunadb/faunadb-java-dsl "2.1.1"]
+                 [riddley "0.1.15"]])

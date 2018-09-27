@@ -1,35 +1,24 @@
 (ns jepsen.faunadb.sets
   "Set test"
   (:refer-clojure :exclude [test])
-  (:use jepsen.faunadb.query)
   (:import com.faunadb.client.types.Codec)
   (:import com.faunadb.client.types.Field)
   (:require [clojure.tools.logging :refer :all]
+            [dom-top.core :as dt]
             [jepsen [client :as client]
                     [checker :as checker]
                     [fauna :as fauna]
                     [generator :as gen]]
-            [jepsen.faunadb.client :as f]))
+            [jepsen.faunadb [client :as f]
+                            [query :as q]]))
 
-(def classRef
-  "Sets class ref"
-  (ClassRef (v "jsets")))
+(def side-effects "side-effects")
+(def elements "elements")
 
-(def idxRef
-  "All sets index ref"
-  (IndexRef (v "all_jsets")))
+(def idx-name "all-elements")
+(def idx (q/index idx-name))
 
-(def valuePath
-  "Path to value data"
-  (Arr (v "data") (v "value")))
-
-(def ValuesField
-  "A field extractor for values"
-  (let [c (Field/as Codec/LONG)
-        f (Field/at (into-array String ["data"]))]
-    (. f (collect c))))
-
-(defrecord SetsClient [tbl-created? conn]
+(defrecord SetsClient [opts tbl-created? conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (f/client node)))
@@ -37,34 +26,53 @@
   (setup! [this test]
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
-        (f/query conn (CreateClass (Obj "name" (v "jsets"))))
-        (f/query
-          conn
-          (CreateIndex
-            (Obj
-              "name" (v "all_jsets")
-              "source" classRef
-              "values" (Arr (Obj "field" valuePath))))))))
+        (dt/with-retry [attempts 5]
+          (f/query conn (q/create-class {:name elements}))
+          (f/query conn (q/create-class {:name side-effects}))
+          (f/query
+            conn
+            (q/create-index
+              {:name   idx-name
+               :source (q/class elements)
+               :values [{:field ["data" "value"]}]}))
+          (catch com.faunadb.client.errors.UnavailableException e
+            (if (< 1 attempts)
+              (do (info "Waiting for cluster ready")
+                  (Thread/sleep 1000)
+                  (retry (dec attempts)))
+              (throw e)))))))
 
   (invoke! [this test op]
-    (case (:f op)
-      :add
-      (let [setVal (:value op)]
-        (f/query
-          conn
-          (Create
-            (Ref classRef (v setVal))
-            (Obj "data" (Obj "value" (v setVal)))))
-         (assoc op :type :ok))
+    (try
+      (case (:f op)
+        :add
+        (let [v (:value op)]
+          (f/query
+            conn
+            (q/create
+              (q/ref elements v)
+              {:data {:value v}}))
+          (assoc op :type :ok))
 
-      :read
-      (do
-        (->>
-          ; TODO: What's going on here? What's queryGetAll? What's with the
-          ; conj/flatten?
-          (f/query-get-all conn (Match idxRef) ValuesField)
-          (into (sorted-set))
-          (assoc op :type :ok, :value)))))
+        :read
+        (->> (f/query-all conn
+                          (if (:strong-read opts)
+                            ; We're gonna do our read, then sneak a write in
+                            ; to force this txn to be strict serializable
+                            (q/let [r (q/match idx)]
+                              (q/create (q/class side-effects) {})
+                              r)
+                            ; Just a regular read
+                            (q/match idx)))
+             (into (sorted-set))
+             (assoc op :type :ok, :value)))
+      (catch java.util.concurrent.ExecutionException e
+        (if-let [c (.getCause e)]
+          (try
+            (throw c)
+            (catch com.faunadb.client.errors.UnavailableException e
+              (assoc op :type :info, :error (.getMessage e))))
+          (throw e)))))
 
   (teardown! [this test])
 
@@ -76,14 +84,14 @@
   (fauna/basic-test
     (merge
       {:name   "set"
-       :client {:client (SetsClient. (atom false) nil)
+       :client {:client (SetsClient. opts (atom false) nil)
                 :during (->> (range)
                           (map (partial array-map
                                         :type :invoke
                                         :f :add
                                         :value))
                           gen/seq
-                          (gen/stagger 1))
+                          (gen/stagger 1/5))
                 :final (gen/once {:type :invoke, :f :read, :value nil})}
        :checker (checker/compose
                   {:perf     (checker/perf)
