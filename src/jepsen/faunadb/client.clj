@@ -58,9 +58,7 @@
 (defn query
   "Performs a query on a connection, and returns results"
   [conn e]
-  (let [r (.. conn (query (q/expr e)) (get))]
-    (info "Response" (pr-str (decode r)))
-    r))
+  (.. conn (query (q/expr e)) (get)))
 
 (defn queryGet
   "Like query, but fetches a particular field from the results"
