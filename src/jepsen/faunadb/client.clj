@@ -49,19 +49,11 @@
   [^Value x]
   (when x
     (condp instance? x
-      Value$ObjectV
-      (let [m (->> (.get (Decoder/decode x (Types/hashMapOf Value)))
-                   (reduce (fn [m [k v]]
-                             (assoc! m (keyword k) (decode v)))
-                           (transient {})))
-            ; For some reason the after key isn't a part of map decoding, at
-            ; least for single-page pagination. I think they might just leave
-            ; it off, but... if you're experimenting with longer pagination
-            ; later, try this. It's what Fauna did for pagination originally.
-            m (if-let [a (.at x (into-array String ["after"]))]
-                (assoc! m :after a)
-                m)]
-        (persistent! m))
+      Value$ObjectV (->> (.get (Decoder/decode x (Types/hashMapOf Value)))
+                         (reduce (fn [m [k v]]
+                                   (assoc! m (keyword k) (decode v)))
+                                 (transient {}))
+                         (persistent! m))
 
       Value$RefV    (Ref. (decode (.orNull (.getDatabase x)))
                           (decode (.orNull (.getClazz x)))
