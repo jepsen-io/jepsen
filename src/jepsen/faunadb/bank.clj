@@ -15,6 +15,7 @@
                     [fauna :as fauna]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
+            [jepsen.tests.bank :as bank]
             [jepsen.faunadb [client :as f]
                             [query :as q]]
             [clojure.core.reducers :as r]
@@ -23,60 +24,42 @@
             [clojure.tools.logging :refer :all]
             [knossos.op :as op]))
 
-(def accounts "accounts")
-(def accounts* (q/class accounts))
+(def accounts-name "accounts")
+(def accounts (q/class accounts-name))
 
-(def idxRef
-  "All Accounts index ref"
-  (q/index "all_accounts"))
+(def idx-name "all_accounts")
+(def idx (q/index idx-name))
 
 (def balancePath
   "Path to balance data"
   ["data" "balance"])
 
-(defn getField
-  [value idx codec]
-  (.get (.. value (at (into-array Integer/TYPE [idx])) (to codec))))
-
-(def BalancesCodec
-  (reify Codec
-    (decode [this value]
-      (Result/success
-        {:ref (. (getField value 0 Codec/REF) getId)
-         :balance (getField value 1 Codec/LONG)}))
-
-    (encode [this v]
-      (Value/from (ImmutableList/of
-                    (:ref v) (:balance v))))))
-
-(def BalancesField
-  "A field extractor for balances"
-  (.collect (Field/at (into-array String ["data"])) (Field/as BalancesCodec)))
-
-(pprint (macroexpand `(q/fn [r] [r (q/select balancePath (q/get r))])))
-
 (defn do-index-read
   [conn]
-  (f/queryGet
-    conn
-    (q/map
-      (q/paginate (q/match idxRef))
-      (q/fn [r]
-        [r (q/select balancePath (q/get r))]))
-    BalancesField))
+  ; TODO: figure out how to iterate over queries containing pagination
+  (->> (f/query conn
+                (q/map
+                  (q/paginate (q/match idx))
+                  (q/fn [r]
+                    [r (q/select ["data" "balance"] (q/get r))])))
+       :data
+       (map (fn [[ref balance]]
+                [(Long/parseLong (:id ref)) balance]))
+       (into {})))
 
 (defn await-replication
   ; TODO: what is this doing exactly?
-  [conn n]
-  (let [iCnt (try (count (do-index-read conn))
+  [conn test]
+  (let [extant (try (set (keys (do-index-read conn)))
                   (catch java.util.concurrent.ExecutionException e
-                    (if (instance? com.faunadb.client.errors.UnavailableException e)
-                      -1
+                    (if (instance? com.faunadb.client.errors.UnavailableException (.getCause e))
+                      (do (info (.getMessage (.getCause e)))
+                          -1)
                       (throw e))))]
-    (if (not= n iCnt)
-      (do
-        (Thread/sleep 1000)
-        (recur conn n)))))
+    (when (not= extant (set (:accounts test)))
+      (info "Waiting for replication: have" extant)
+      (Thread/sleep (rand 5000))
+      (recur conn test))))
 
 (defmacro wrapped-query
   [op & exprs]
@@ -95,7 +78,7 @@
 
         :else (throw e#)))))
 
-(defrecord BankClient [tbl-created? n starting-balance conn]
+(defrecord BankClient [tbl-created? conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (f/client node)))
@@ -107,42 +90,47 @@
         (f/query
           conn
           (q/create-index {:name "all_accounts"
-                           :source accounts*}))
+                           :source accounts}))
 
-        (info "Creating" n "accounts")
+        (info "Creating accounts" (:accounts test))
         (f/query
           conn
-          (apply q/do
-            (mapv
-              (fn [i]
-                (q/create (q/ref accounts i)
-                          {:data {:balance starting-balance}}))
-              (range n))))))
+          (q/do (q/create (q/ref accounts (first (:accounts test)))
+                          {:data {:balance (:total-amount test)}})
+                (apply q/do
+                       (mapv
+                         (fn [acct]
+                           (q/create (q/ref accounts acct)
+                                     {:data {:balance 0}}))
+                         (rest (:accounts test))))))))
+
+    ; TODO: I think this is unnecessary now?
     (jepsen/synchronize test)
     ; TODO: oh hellooooo
-    (await-replication conn n))
+    (await-replication conn test))
 
   (invoke! [this test op]
     (case (:f op)
       :read
       (wrapped-query
         op
-        (let [n (:value op)]
-          (->> (f/queryGet
-                 conn
-                 {:data (mapv
-                          (fn [i]
-                            (let [acct (q/ref accounts i)]
-                              [acct
-                               (q/select balancePath (q/get acct))]))
-                          (range n))}
-                 BalancesField)
-               (assoc op :type :ok, :value))))
+        (->> (f/query conn
+                      {:data (mapv
+                               (fn [i]
+                                 (let [acct (q/ref accounts i)]
+                                   [acct
+                                    (q/select balancePath (q/get acct))]))
+                               (:accounts test))})
+             :data
+             (map (fn [[ref balance]] [(Long/parseLong (:id ref)) balance]))
+             (into {})
+             (assoc op :type :ok, :value)))
 
+      ; TODO: bring back indexed reads
       :index-read
       (wrapped-query op
-        (->> (do-index-read conn)
-          (assoc op :type :ok, :value)))
+                     (->> (do-index-read conn)
+                          (assoc op :type :ok, :value)))
 
       :transfer
       (wrapped-query op
@@ -150,11 +138,9 @@
           (f/query
             conn
             (q/do
-              (q/let [a (q/-
-                          (q/select balancePath
-                            (q/get (q/ref accounts from)))
-                          amount)]
-                ; TODO: should this check both balances? why the or?
+              (q/let [a (q/- (q/select balancePath
+                                       (q/get (q/ref accounts from)))
+                             amount)]
                 (q/if (q/< a 0)
                   (q/abort "balance would go negative")
                   (q/update
@@ -173,92 +159,24 @@
   (close! [this test]
     (.close conn)))
 
-(defn bank-read
-  "Reads the current state of all accounts without the index"
-  [test _]
-  (let [n (-> test :client :n)]
-    {:type  :invoke,
-     :f     :read,
-     :value n}))
-
-(defn bank-index-read
-  "Reads the current state of all accounts through the index"
-  [test _]
-  (let [n (-> test :client :n)]
-    {:type  :invoke,
-     :f     :index-read,
-     :value n}))
-
-(defn bank-transfer
-  "Transfers a random amount between two randomly selected accounts."
-  [test process]
-  (let [n (-> test :client :n)]
-    {:type  :invoke
-     :f     :transfer
-     :value {:from   (rand-int n)
-             :to     (rand-int n)
-             :amount (+ 1 (rand-int 5))}}))
-
-(def bank-diff-transfer
-  "Like transfer, but only transfers between *different* accounts."
-  (gen/filter (fn [op] (not= (-> op :value :from)
-                             (-> op :value :to)))
-              bank-transfer))
-
-(defn balance-check
-  [model op]
-  (let [balances (mapv :balance (:value op))]
-    (cond (not= (:n model) (count balances))
-          {:type     :wrong-n
-           :expected (:n model)
-           :found    (count balances)
-           :op       op}
-
-          (not= (:total model)
-                (reduce + balances))
-          {:type     :wrong-total
-           :expected (:total model)
-           :found    (reduce + balances)
-           :op       op}
-
-          (some neg? balances)
-          {:type     :negative-value
-           :found    balances
-           :op       op})))
-
-(defn bank-checker
-  "Balances must all be non-negative and sum to the model's total."
-  []
-  (reify checker/Checker
-    (check [this test model history opts]
-      (let [bad-reads (->> history
-                        (r/filter op/ok?)
-                        (r/filter #(not= :transfer (:f %)))
-                        (r/map (fn [op] (balance-check model op)))
-                        (r/filter identity)
-                        (into []))]
-        {:valid? (empty? bad-reads)
-         :bad-reads bad-reads}))))
-
 (defn bank-test-base
   [opts]
-  (fauna/basic-test
-    (merge
-      {:client {:client (:client opts)
-                :during (->> (gen/mix [bank-read bank-index-read bank-diff-transfer])
-                          (gen/clients))
-                :final (->> (gen/seq [(gen/once bank-read) (gen/once bank-index-read)])
-                         (gen/clients))}
-       :checker (checker/compose
-                  {:perf    (checker/perf)
-                   :timeline (timeline/html)
-                   :details (bank-checker)})}
-      (dissoc opts :client))))
+  (let [workload (bank/test)]
+    (fauna/basic-test
+      (merge
+        (dissoc workload :generator)
+        {:client {:client (:client opts)
+                  :during (gen/clients (:generator workload))
+                  :final  (gen/clients nil)}
+         :checker (checker/compose
+                    {:perf     (checker/perf)
+                     :timeline (timeline/html)
+                     :details  (:checker workload)})}
+        (dissoc opts :client)))))
 
 (defn test
   [opts]
   (bank-test-base
     (merge {:name   "bank"
-            :model  {:n 5 :total 50}
-            :client (BankClient. (atom false) 5 10 nil)}
+            :client (BankClient. (atom false) nil)}
            opts)))

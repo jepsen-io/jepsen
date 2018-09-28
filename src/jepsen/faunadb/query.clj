@@ -54,7 +54,10 @@
 (defn class
   "Takes a string name"
   [class-name]
-  (Language/Class (expr class-name)))
+  (if (c/instance? Expr class-name)
+    ; Pass through classes as-is
+    class-name
+    (Language/Class (expr class-name))))
 
 (defn ref
   "Takes a string class name and a string id in that class; constructs a
@@ -145,12 +148,8 @@
   [ref params]
   (Language/Create ref (expr params)))
 
-
 (defn paginate
   "Paginates an expression. If `after` is provided, provides the page after."
-  ([e] (Language/Paginate (expr e))))
-
-(defn paginate
   ([e] (Language/Paginate (expr e)))
   ([e a] (if (c/= null a) ; note: this is clojure if
            (paginate e)

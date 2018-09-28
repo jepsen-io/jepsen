@@ -57,15 +57,14 @@
                                                   (.get val f/LongField)))))
 
         :write (do (-> conn
-                       (f/queryGet
+                       (f/query
                          (q/if (q/exists? id*)
                            (q/update id* {:data {:register val'}})
-                           (q/create id* {:data {:register val'}}))
-                         RegisterField))
+                           (q/create id* {:data {:register val'}}))))
                    (assoc op :type :ok))
 
         :cas (let [[expected new] val'
-                   cas (f/queryGet
+                   cas (f/query
                          conn
                          (q/if (q/exists? id*)
                            (q/let [reg (q/select ["data" "register"]
@@ -75,8 +74,7 @@
                                  (q/update id* {:data {:register new}})
                                  true)
                                false))
-                           false)
-                         f/BoolField)]
+                           false))]
                (assoc op :type (if cas :ok :fail))))))
 
   (teardown! [this test])

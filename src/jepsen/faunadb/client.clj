@@ -7,7 +7,10 @@
                                      Value
                                      Value$ObjectV
                                      Value$ArrayV
+                                     Value$RefV
                                      Value$LongV
+                                     Value$StringV
+                                     Value$BooleanV
                                      Types))
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -39,31 +42,41 @@
             (.withEndpoint (str "http://" node ":8443/linearized"))
             (.withSecret root-key))))
 
+(defrecord Ref [db class id])
+
 (defn decode
   "Takes a Fauna value and converts it to a nice Clojure value."
   [^Value x]
-  (condp instance? x
-    Value$ObjectV (->> (.get (Decoder/decode x (Types/hashMapOf Value)))
-                       (reduce (fn [m [k v]]
-                                 (assoc! m (keyword k) (decode v)))
-                               (transient {}))
-                       persistent!)
-    Value$ArrayV  (->> (.get (Decoder/decode x (Types/arrayListOf Value)))
-                       (map decode))
-    Value$LongV   (.get (Decoder/decode x Long))
-    (do (info "Don't know how to decode" (class x) x)
-        x)))
+  (when x
+    (condp instance? x
+      Value$ObjectV (->> (.get (Decoder/decode x (Types/hashMapOf Value)))
+                         (reduce (fn [m [k v]]
+                                   (assoc! m (keyword k) (decode v)))
+                                 (transient {}))
+                         persistent!)
+      Value$RefV    (Ref. (decode (.orNull (.getDatabase x)))
+                          (decode (.orNull (.getClazz x)))
+                          (.getId x))
+      Value$ArrayV  (->> (.get (Decoder/decode x (Types/arrayListOf Value)))
+                         (map decode))
+      Value$LongV    (.get (Decoder/decode x Long))
+      Value$BooleanV (.get (Decoder/decode x Boolean))
+      Value$StringV  (.get (Decoder/decode x String))
+      (do (info "Don't know how to decode" (class x) x)
+          x))))
 
 ; TODO: make this return a map?
 (defn query
   "Performs a query on a connection, and returns results"
   [conn e]
-  (.. conn (query (q/expr e)) (get)))
+  (decode (.. conn (query (q/expr e)) (get))))
 
 (defn queryGet
   "Like query, but fetches a particular field from the results"
   [conn e field]
-  (.get (query conn (q/expr e)) field))
+  (let [r (query conn e)]
+    (info :result (with-out-str (pprint r)))
+    r))
 
 (defn query-all
   "Performs a query for an expression. Paginates expression, performs query,
