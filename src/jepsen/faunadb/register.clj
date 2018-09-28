@@ -19,19 +19,6 @@
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defn instanceRef
-  "The instance under test."
-  [id]
-  (q/ref "test" id))
-
-(def register
-  "Path to the register."
-  (q/expr ["data" "register"]))
-
-(def RegisterField
-  ; TODO: how is this different from the register path?
-  (.to (Field/at (into-array String ["data" "register"])) Codec/LONG))
-
 (defrecord AtomicClient [tbl-created? conn]
   client/Client
   (open! [this test node]
@@ -47,14 +34,13 @@
     (let [[id val'] (:value op)
           id*  (q/ref "test" id)]
       (case (:f op)
-        :read (let [val (f/query conn
+        :read (let [v (f/query conn
                                  (q/if (q/exists? id*)
                                    (q/select ["data" "register"]
                                              (q/get id*))))]
                 (assoc op
                        :type :ok
-                       :value (indy/tuple id (and val
-                                                  (.get val f/LongField)))))
+                       :value (indy/tuple id v)))
 
         :write (do (-> conn
                        (f/query

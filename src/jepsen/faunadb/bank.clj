@@ -30,10 +30,6 @@
 (def idx-name "all_accounts")
 (def idx (q/index idx-name))
 
-(def balancePath
-  "Path to balance data"
-  ["data" "balance"])
-
 (defn do-index-read
   [conn]
   ; TODO: figure out how to iterate over queries containing pagination
@@ -46,20 +42,6 @@
        (map (fn [[ref balance]]
                 [(Long/parseLong (:id ref)) balance]))
        (into {})))
-
-(defn await-replication
-  ; TODO: what is this doing exactly?
-  [conn test]
-  (let [extant (try (set (keys (do-index-read conn)))
-                  (catch java.util.concurrent.ExecutionException e
-                    (if (instance? com.faunadb.client.errors.UnavailableException (.getCause e))
-                      (do (info (.getMessage (.getCause e)))
-                          -1)
-                      (throw e))))]
-    (when (not= extant (set (:accounts test)))
-      (info "Waiting for replication: have" extant)
-      (Thread/sleep (rand 5000))
-      (recur conn test))))
 
 (defmacro wrapped-query
   [op & exprs]
@@ -87,11 +69,6 @@
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
         (f/query conn (q/create-class {:name "accounts"}))
-        (f/query
-          conn
-          (q/create-index {:name "all_accounts"
-                           :source accounts}))
-
         (info "Creating accounts" (:accounts test))
         (f/query
           conn
@@ -102,12 +79,7 @@
                          (fn [acct]
                            (q/create (q/ref accounts acct)
                                      {:data {:balance 0}}))
-                         (rest (:accounts test))))))))
-
-    ; TODO: I think this is unnecessary now?
-    (jepsen/synchronize test)
-    ; TODO: oh hellooooo
-    (await-replication conn test))
+                         (rest (:accounts test)))))))))
 
   (invoke! [this test op]
     (case (:f op)
@@ -119,18 +91,13 @@
                                (fn [i]
                                  (let [acct (q/ref accounts i)]
                                    [acct
-                                    (q/select balancePath (q/get acct))]))
+                                    (q/select ["data" "balance"]
+                                              (q/get acct))]))
                                (:accounts test))})
              :data
              (map (fn [[ref balance]] [(Long/parseLong (:id ref)) balance]))
              (into {})
              (assoc op :type :ok, :value)))
-
-      ; TODO: bring back indexed reads
-      :index-read
-      (wrapped-query op
-                     (->> (do-index-read conn)
-                          (assoc op :type :ok, :value)))
 
       :transfer
       (wrapped-query op
@@ -138,7 +105,7 @@
           (f/query
             conn
             (q/do
-              (q/let [a (q/- (q/select balancePath
+              (q/let [a (q/- (q/select ["data" "balance"]
                                        (q/get (q/ref accounts from)))
                              amount)]
                 (q/if (q/< a 0)
@@ -146,7 +113,7 @@
                   (q/update
                     (q/ref accounts from)
                     {:data {:balance a}})))
-              (q/let [b (q/+ (q/select balancePath
+              (q/let [b (q/+ (q/select ["data" "balance"]
                                        (q/get (q/ref accounts to)))
                              amount)]
                 (q/update
@@ -159,6 +126,15 @@
   (close! [this test]
     (.close conn)))
 
+; TODO: index reads variant
+; We're not creating this index in the individual client because I want to avoid
+; the possibility that index updates are introducing an unnecessary
+; synchronization point.
+        ;(f/query
+        ;  conn
+        ;  (q/create-index {:name "all_accounts"
+        ;                   :source accounts}))
+
 (defn bank-test-base
   [opts]
   (let [workload (bank/test)]
@@ -166,7 +142,9 @@
       (merge
         (dissoc workload :generator)
         {:client {:client (:client opts)
-                  :during (gen/clients (:generator workload))
+                  :during (->> (:generator workload)
+                               (gen/delay 1/10)
+                               (gen/clients))
                   :final  (gen/clients nil)}
          :checker (checker/compose
                     {:perf     (checker/perf)
