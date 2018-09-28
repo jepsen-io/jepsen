@@ -112,8 +112,7 @@
    [nil "--replicas COUNT" "How many replicas of data should dgraph store?"
     :default 3
     :parse-fn parse-long
-    ;:validate [pos? "Must be a positive integer"]
-    ]
+    :validate [pos? "Must be a positive integer"]]
    [nil "--rebalance-interval TIME" "How long before automatic rebalances"
     :default "10s"]
    [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
