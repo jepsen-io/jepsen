@@ -86,7 +86,7 @@
       (for [[pkg version] pkgs]
         (when (not= version (installed-version pkg))
           (info "Installing" pkg version)
-          (c/exec :apt-get :install :-y :--force-yes
+          (c/exec :env "DEBIAN_FRONTEND=noninteractive" :apt-get :install :-y :--force-yes
                   (str (name pkg) "=" version)))))
 
     ; Install any version
@@ -95,7 +95,8 @@
       (when-not (empty? missing)
         (c/su
           (info "Installing" missing)
-          (apply c/exec :apt-get :install :-y :--force-yes missing))))))
+          (apply c/exec :env "DEBIAN_FRONTEND=noninteractive"
+                 :apt-get :install :-y :--force-yes missing))))))
 
 (defn add-key!
   "Receives an apt key from the given keyserver."
