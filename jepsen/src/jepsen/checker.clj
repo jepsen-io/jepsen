@@ -354,13 +354,13 @@
       :max-stable-latency"
   [elements]
   (let [rs                (mapv set-full-element-results elements)
-        attempt-count     (count rs)
         outcomes          (group-by :outcome rs)
         stable-latencies  (keep :stable-latency rs)
         lost-latencies    (keep :lost-latency rs)
         m {:valid?             (cond (< 0 (count (:lost outcomes)))   false
                                      (= 0 (count (:stable outcomes))) :unknown
                                      true                             true)
+           :attempt-count      (count rs)
            :stable-count       (count (:stable outcomes))
            :lost-count         (count (:lost outcomes))
            :lost               (map :element (:lost outcomes))

@@ -226,12 +226,13 @@
   ; Helper fn to check a history
   (let [c (fn [h] (check (set-full) nil nil (history h) {}))]
     (testing "never read"
-      (is (= {:lost []
-              :lost-count 0
-              :never-read [0]
+      (is (= {:lost             []
+              :attempt-count    1
+              :lost-count       0
+              :never-read       [0]
               :never-read-count 1
-              :stable-count 0
-              :valid? :unknown}
+              :stable-count     0
+              :valid?           :unknown}
              (c [(invoke-op 0 :add 0)
                  (ok-op 0 :add 0)]))))
 
@@ -242,6 +243,7 @@
           r-  (ok-op 1 :read #{})]
       (testing "never confirmed, never read"
         (is (= {:valid?           :unknown
+                :attempt-count    1
                 :lost             []
                 :lost-count       0
                 :never-read       [0]
@@ -249,8 +251,9 @@
                 :stable-count     0}
                (c [a r r-]))))
       (testing "successful read either concurrently or after"
-        (is (= {:valid? true
-                :lost []
+        (is (= {:valid?           true
+                :attempt-count    1
+                :lost             []
                 :lost-count       0
                 :never-read       []
                 :never-read-count 0
@@ -265,6 +268,7 @@
 
       (testing "Absent read after"
         (is (= {:valid?           false
+                :attempt-count    1
                 :lost             [0]
                 :lost-count       1
                 :never-read       []
@@ -275,6 +279,7 @@
 
     (testing "Absent read concurrently"
         (is (= {:valid?           :unknown
+                :attempt-count    1
                 :lost             []
                 :lost-count       0
                 :never-read       [0]
@@ -302,6 +307,7 @@
           r3'01 (ok-op      3 :read #{0 1})]
       (testing "write, present, missing"
         (is (= {:valid? false
+                :attempt-count 2
                 :lost [0 1]
                 :lost-count 2
                 :never-read []
@@ -314,6 +320,7 @@
                (c [a0 a1 r2 r2'1 a0' a1' r2 r2'01 r2 r2'0 r2 r2']))))
       (testing "write, flutter, stable/lost"
         (is (= {:valid? false
+                :attempt-count 2
                 :lost [0]
                 :lost-count 1
                 :never-read []
