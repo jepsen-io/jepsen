@@ -7,7 +7,8 @@
             [clojure.set :as set]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
-            [jepsen.util :as util :refer [meh fraction]]
+            [potemkin :refer [definterface+]]
+            [jepsen.util :as util :refer [meh fraction map-kv]]
             [jepsen.store :as store]
             [jepsen.checker.perf :as perf]
             [multiset.core :as multiset]
@@ -212,6 +213,238 @@
              :lost                (util/integer-interval-set-str lost)
              :unexpected          (util/integer-interval-set-str unexpected)
              :recovered           (util/integer-interval-set-str recovered)}))))))
+
+
+(definterface+ ISetFullElement
+  (set-full-add [element-state op])
+  (set-full-read-present [element-state inv op])
+  (set-full-read-absent  [element-state inv op]))
+
+; Tracks the state of each element for set-full analysis
+;
+; We're looking for a few key points here:
+;
+; The add time is inferred from either the add *or* the first read to observe
+; the op, whichever finishes first.
+;
+; To find the *stable time*, we need to know the most recent missing
+; invocation. If we have any successful read invocation *after* it, then we know
+; the record was stable.
+;
+; To find the *lost time*, we need to know the most recent observed invocation.
+; If we have any lost invocation *more* recent than that, then we know that the
+; record was lost.
+(defrecord SetFullElement [element
+                           known
+                           last-present
+                           last-absent]
+  ISetFullElement
+  (set-full-add [this op]
+    (condp = (:type op)
+      ; Record the completion of the add op
+      :ok (assoc this :known (or known op))
+      this))
+
+  (set-full-read-present [this iop op]
+    (assoc this
+           :known (or known op)
+
+           :last-present
+           (if (or (nil? last-present)
+                   (< (:index last-present) (:index iop)))
+             iop
+             last-present)))
+
+  (set-full-read-absent [this iop op]
+    (if (or (nil? last-absent)
+            (< (:index last-absent) (:index iop)))
+      (assoc this :last-absent iop)
+      this)))
+
+(defn set-full-element
+  "Given an add invocation, constructs a new set element state record to track
+  that element"
+  [op]
+  (map->SetFullElement {:element (:value op)}))
+
+(defn set-full-element-results
+  "Takes a SetFullElement and computes a map of final results from it:
+
+      :element         The element itself
+      :outcome         :stable, :lost, :never-read
+      :lost-latency
+      :stable-latency"
+  [e]
+  (let [known        (:known e)
+        known-time   (:time (:known e))
+        last-present (:last-present e)
+        last-absent (:last-absent e)
+
+        stable?     (boolean
+                      (and last-present
+                           (< (:index last-absent -1)
+                              (:index last-present))))
+        ; Note that there exists an asymmetry here: if a read concurrent with
+        ; the add of an element e observes e, then we know e exists. However, a
+        ; concurrent read which *fails* to observe e could have linearized
+        ; before the add. We check the concurrency windows to make sure the
+        ; last lost operation didn't overlap with the known complete time; if
+        ; the most recent failed read was also *concurrent* with the add, we
+        ; call that never-read, rather than lost.
+        lost?       (boolean
+                      (and last-absent
+                           (< (:index last-present -1)
+                              (:index last-absent))
+                           (< (:index (:known e))
+                              (:index last-absent))))
+        never-read  (not (or stable? lost?))
+
+        ; TODO: 0 isn't really right; we'd need to track the first present
+        ; invocations to get these times.
+        ; TODO: We should also be smarter about
+        ; getting the first absent invocation
+        ; *after* the most recent present invocation
+        stable-time (when stable?
+                      (if last-absent (inc (:time last-absent)) 0))
+        lost-time   (when lost?
+                      (if last-present (inc (:time last-present)) 0))
+
+        stable-latency (when stable? (max 0 (- stable-time  known-time)))
+        lost-latency   (when lost?   (max 0 (- lost-time    known-time)))]
+    {:element (:element e)
+     :outcome (cond stable?     :stable
+                    lost?       :lost
+                    never-read  :never-read)
+     :stable-latency stable-latency
+     :lost-latency   lost-latency}))
+
+(defn frequency-distribution
+  "Computes a map of percentiles (0--1, not 0--100, we're not monsters) of a
+  collection of numbers, taken at percentiles `points`. If the collection is
+  empty, returns nil."
+  [points c]
+  (let [sorted (sort c)]
+    (when (seq sorted)
+      (let [n (clojure.core/count sorted)
+            extract (fn [point]
+                      (let [idx (min (dec n) (int (Math/floor (* n point))))]
+                        (nth sorted idx)))]
+        (->> points (map extract) (zipmap points) (into (sorted-map)))))))
+
+(defn set-full-results
+  "Takes a collection of SetFullElements and computes aggregate results:
+
+      :attempt-count
+      :stable-count
+      :lost-count
+      :never-read-count
+      :min-stable-latency
+      :max-stable-latency
+      :min-lost-latency
+      :max-stable-latency"
+  [elements]
+  (let [rs                (mapv set-full-element-results elements)
+        attempt-count     (count rs)
+        outcomes          (group-by :outcome rs)
+        stable-latencies  (keep :stable-latency rs)
+        lost-latencies    (keep :lost-latency rs)
+        m {:valid?             (cond (< 0 (count (:lost outcomes)))   false
+                                     (= 0 (count (:stable outcomes))) :unknown
+                                     true                             true)
+           :stable-count       (count (:stable outcomes))
+           :lost-count         (count (:lost outcomes))
+           :lost               (map :element (:lost outcomes))
+           :never-read-count   (count (:never-read outcomes))
+           :never-read         (map :element (:never-read outcomes))}
+        points [0 0.5 0.95 0.99 1]
+        m (if (seq stable-latencies)
+            (assoc m :stable-latencies
+                   (frequency-distribution points stable-latencies))
+            m)
+        m (if (seq lost-latencies)
+            (assoc m :lost-latencies
+                   (frequency-distribution points lost-latencies))
+            m)]
+    m))
+
+; TODO: assert every value is a set
+
+(defn set-full
+  "A more rigorous set analysis. We allow :add operations which add a single
+  element, and :reads which return all elements present at that time. For each
+  element, we construct a timeline like so:
+
+      [nonexistent] ... [created] ... [present] ... [absent] ... [present] ...
+
+  For each element:
+
+  The *add* is the operation which added that element.
+
+  The *known time* is the completion time of the add, or first read, whichever
+  is earlier.
+
+  The *stable time* is the time after which every read which begins observes
+  the element. If every read beginning after the add time observes
+  the element, the stable time is the add time. If the final read fails to
+  observe the element, the stable time is nil.
+
+  A *stable element* is one which has a stable time.
+
+  The *lost time* is the time after which no operation observes that element.
+  If the most final read observes the element, the lost time is nil.
+
+  A *lost element* is one which has a lost time.
+
+  An element can be either stable or lost, but not both.
+
+  The *first read latency* is 0 if the first read invoked after the add time
+  observes the element. If the element is never observed, it is nil. Otherwise,
+  the first read delay is the time from the completion of the write to the
+  invocation of the first read.
+
+  The *stable latency* is the time between the add time and the stable time, or
+  0, whichever is greater."
+  []
+  (reify Checker
+    (check [this test model history opts]
+      ; Build up a map of elements to element states. We track the current set
+      ; of ongoing reads as well, so we can map completions back to
+      ; invocations.
+      (->> history
+           (reduce (fn red [[elements reads] op]
+                     (let [v (:value op)
+                           p (:process op)]
+                       (condp = (:f op)
+                         :add
+                         (if (= :invoke (:type op))
+                           ; Track a new element
+                           [(assoc elements v (set-full-element op))
+                            reads]
+                           ; Oh good, it completed
+                           [(update elements v set-full-add op) reads])
+
+                         :read
+                         (condp = (:type op)
+                           :invoke [elements (assoc reads p op)]
+                           :fail   [elements (dissoc reads p op)]
+                           :info   [elements reads]
+                           :ok
+                           (do (assert (set? v))
+                               ; We read stuff! Update every element
+                               (let [inv (get reads (:process op))]
+                                 [(map-kv (fn update-all [[element state]]
+                                            [element
+                                             (if (contains? v element)
+                                               (set-full-read-present
+                                                 state inv op)
+                                               (set-full-read-absent
+                                                 state inv op))])
+                                          elements)
+                                  reads]))))))
+                   [{} {}])
+           first
+           vals
+           set-full-results))))
 
 (defn expand-queue-drain-ops
   "Takes a history. Looks for :drain operations with their value being a
