@@ -53,10 +53,10 @@
                          (reduce (fn [m [k v]]
                                    (assoc! m (keyword k) (decode v)))
                                  (transient {}))
-                         (persistent! m))
+                         (persistent!))
 
-      Value$RefV    (Ref. (decode (.orNull (.getDatabase x)))
-                          (decode (.orNull (.getClazz x)))
+      Value$RefV    (Ref. (decode (.orElse (.getDatabase x) nil))
+                          (decode (.orElse (.getClazz x) nil))
                           (.getId x))
       Value$ArrayV  (->> (.get (Decoder/decode x (Types/arrayListOf Value)))
                          (map decode))
@@ -66,18 +66,15 @@
       (do (info "Don't know how to decode" (class x) x)
           x))))
 
-; TODO: make this return a map?
 (defn query
   "Performs a query on a connection, and returns results"
   [conn e]
   (decode (.. conn (query (q/expr e)) (get))))
 
-(defn queryGet
-  "Like query, but fetches a particular field from the results"
-  [conn e field]
-  (let [r (query conn e)]
-    (info :result (with-out-str (pprint r)))
-    r))
+(defn now
+  "Queries FaunaDB for the current time."
+  [conn]
+  (query conn (q/time "now")))
 
 (defn query-all
   "Performs a query for an expression. Paginates expression, performs query,
@@ -85,12 +82,11 @@
   ([conn expr]
    (query-all conn (q/expr expr) q/null))
   ([conn expr after]
+   (info :query-all-after after)
    (lazy-seq
-     (let [res   (query conn (q/paginate expr after))
-           data  (:data res)
-           after (:after res)]
+     (let [res   (.. conn (query (q/paginate expr after)) (get))
+           data  (:data (decode res))
+           after (.at res (into-array String ["after"]))]
        (if (= after q/null)
          data
          (concat data (query-all conn expr after)))))))
-
-

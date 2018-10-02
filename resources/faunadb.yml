@@ -7,3 +7,4 @@ network_cluster_name: "fauna"
 network_peer_port: 7500
 network_peer_secure_port: 7501
 log_level: debug
+log_rotate_size_mb: 131072 # 128GB

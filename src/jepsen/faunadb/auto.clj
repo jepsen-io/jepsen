@@ -27,7 +27,7 @@
   (when (= node (jepsen/primary test))
     (info node "initializing FaunaDB cluster")
     (c/exec :faunadb-admin :init))
-  (jepsen/synchronize test)
+  (jepsen/synchronize test 300)
 
   (when (not= node (jepsen/primary test))
     (info node "joining FaunaDB cluster")

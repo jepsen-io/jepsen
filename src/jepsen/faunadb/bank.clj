@@ -6,7 +6,6 @@
   (:import com.faunadb.client.types.Field)
   (:import com.faunadb.client.types.Result)
   (:import com.faunadb.client.types.Value)
-  (:import com.google.common.collect.ImmutableList)
   (:import java.io.IOException)
   (:import java.util.concurrent.ExecutionException)
   (:require [jepsen [client :as client]

@@ -1,14 +1,13 @@
 (ns jepsen.faunadb.sets
   "Set test"
   (:refer-clojure :exclude [test])
-  (:import com.faunadb.client.types.Codec)
-  (:import com.faunadb.client.types.Field)
   (:require [clojure.tools.logging :refer :all]
             [dom-top.core :as dt]
             [jepsen [client :as client]
                     [checker :as checker]
                     [fauna :as fauna]
                     [generator :as gen]]
+            [jepsen.checker.timeline :as timeline]
             [jepsen.faunadb [client :as f]
                             [query :as q]]))
 
@@ -79,21 +78,34 @@
   (close! [this test]
     (.close conn)))
 
+(defn adds
+  "Set adds"
+  []
+  (->> (range)
+       (map (partial array-map
+                     :type :invoke
+                     :f :add
+                     :value))
+       gen/seq))
+
+(defn reads
+  "Set reads"
+  []
+  {:type :invoke, :f :read, :value nil})
+
 (defn test
   [opts]
   (fauna/basic-test
     (merge
       {:name   "set"
        :client {:client (SetsClient. opts (atom false) nil)
-                :during (->> (range)
-                          (map (partial array-map
-                                        :type :invoke
-                                        :f :add
-                                        :value))
-                          gen/seq
-                          (gen/stagger 1/5))
+                :during (->> (let [a (adds), r (reads)]
+                               (gen/mix [a a r]))
+                             (gen/stagger 1/5))
                 :final (gen/once {:type :invoke, :f :read, :value nil})}
        :checker (checker/compose
                   {:perf     (checker/perf)
-                   :details  (checker/set)})}
+                   :set-full (checker/set-full)
+                   :set      (checker/set)
+                   :timeline (timeline/html)})}
       opts)))

@@ -133,6 +133,16 @@
 
 ; Functions
 
+(defn at
+  "Perform the given query at the given timestamp."
+  [ts, e]
+  (Language/At (expr ts) (expr e)))
+
+(defn time
+  "Construct a timestamp"
+  [e]
+  (Language/Time (expr e)))
+
 (defn create-class
   "Creates a class, given a configuration object."
   [p]
