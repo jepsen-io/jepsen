@@ -363,9 +363,9 @@
            :attempt-count      (count rs)
            :stable-count       (count (:stable outcomes))
            :lost-count         (count (:lost outcomes))
-           :lost               (map :element (:lost outcomes))
+           :lost               (sort (map :element (:lost outcomes)))
            :never-read-count   (count (:never-read outcomes))
-           :never-read         (map :element (:never-read outcomes))}
+           :never-read         (sort (map :element (:never-read outcomes)))}
         points [0 0.5 0.95 0.99 1]
         m (if (seq stable-latencies)
             (assoc m :stable-latencies
