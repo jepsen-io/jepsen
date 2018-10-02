@@ -203,7 +203,7 @@
                               type (rand-nth [:ok :ok :ok :ok :ok
                                               :fail :info :info])]
                           [{:process proc, :type :invoke, :f f, :time time}
-                           {:process proc, :type type,    :f f, :time 
+                           {:process proc, :type type,    :f f, :time
                             (+ time latency)}])))
               (take 10000)
               vec)
@@ -218,7 +218,7 @@
       1 [(assoc (first h) :time 0)]
       (reduce (fn [h op]
                 (conj h (assoc op :time (+ (:time (peek h))
-                                           1000))))
+                                           1000000))))
               [(assoc (first h) :time 0)]
               (rest h)))))
 
@@ -240,7 +240,15 @@
           r   (invoke-op 1 :read nil)
           r+  (ok-op 1 :read #{0})
           r-  (ok-op 1 :read #{})]
-      (testing "Successful read either concurrently or after"
+      (testing "never confirmed, never read"
+        (is (= {:valid?           :unknown
+                :lost             []
+                :lost-count       0
+                :never-read       [0]
+                :never-read-count 1
+                :stable-count     0}
+               (c [a r r-]))))
+      (testing "successful read either concurrently or after"
         (is (= {:valid? true
                 :lost []
                 :lost-count       0
@@ -299,8 +307,8 @@
                 :never-read []
                 :never-read-count 0
                 :stable-count 0
-                :lost-latencies {0 3001, 0.5 4001, 0.95 4001, 0.99 4001,
-                                 1 4001}}
+                :lost-latencies {0 3, 0.5 4, 0.95 4, 0.99 4,
+                                 1 4}}
                ; We write a0 and a1 concurrently, reading 1 before a1
                ; completes. Then we read both, 0, then nothing.
                (c [a0 a1 r2 r2'1 a0' a1' r2 r2'01 r2 r2'0 r2 r2']))))
@@ -313,13 +321,13 @@
                 :stable-count 1
                 ; We know 0 is done at time 1000, but it goes missing after
                 ; 6000.
-                :lost-latencies {0 5001, 0.5 5001, 0.95 5001,
-                                  0.99 5001, 1 5001}
+                :lost-latencies {0 5, 0.5 5, 0.95 5,
+                                  0.99 5, 1 5}
                 ; 1 is known at time 4 (not 5! The read sees it before the
                 ; write completes). It is missing at 6000, and recovered at
                 ; 7000.
-                :stable-latencies {0 2001, 0.5 2001, 0.95 2001,
-                                   0.99 2001, 1 2001}}
+                :stable-latencies {0 2, 0.5 2, 0.95 2,
+                                   0.99 2, 1 2}}
                ; We write a0, then a1, reading 1 before a1 completes, then just
                ; 0 and 1 concurrently, but 1 starting later. This is a recovery
                ; of 1, but 0 should be lost, because there's no time after

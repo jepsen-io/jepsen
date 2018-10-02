@@ -284,15 +284,21 @@
                       (and last-present
                            (< (:index last-absent -1)
                               (:index last-present))))
-        ; Note that there exists an asymmetry here: if a read concurrent with
-        ; the add of an element e observes e, then we know e exists. However, a
-        ; concurrent read which *fails* to observe e could have linearized
-        ; before the add. We check the concurrency windows to make sure the
-        ; last lost operation didn't overlap with the known complete time; if
-        ; the most recent failed read was also *concurrent* with the add, we
-        ; call that never-read, rather than lost.
+        ; Note that there exist two asymmetries here.
+        ; First, an element has to be known in order for its absence to mean
+        ; anything. If it is never confirmed nor observed, it's ok for it not
+        ; to exist. We check to make sure the element is actually known.
+
+        ; Second, if a read concurrent with the add of an element e observes e,
+        ; then we know e exists. However, a concurrent read which *fails* to
+        ; observe e could have linearized before the add. We check the
+        ; concurrency windows to make sure the last lost operation didn't
+        ; overlap with the known complete time; if the most recent failed read
+        ; was also *concurrent* with the add, we call that never-read, rather
+        ; than lost.
         lost?       (boolean
-                      (and last-absent
+                      (and known
+                           last-absent
                            (< (:index last-present -1)
                               (:index last-absent))
                            (< (:index (:known e))
@@ -309,8 +315,12 @@
         lost-time   (when lost?
                       (if last-present (inc (:time last-present)) 0))
 
-        stable-latency (when stable? (max 0 (- stable-time  known-time)))
-        lost-latency   (when lost?   (max 0 (- lost-time    known-time)))]
+        stable-latency (when stable?
+                         (-> stable-time (- known-time) (max 0)
+                             util/nanos->ms long))
+        lost-latency   (when lost?
+                         (-> lost-time (- known-time) (max 0)
+                             util/nanos->ms long))]
     {:element (:element e)
      :outcome (cond stable?     :stable
                     lost?       :lost
