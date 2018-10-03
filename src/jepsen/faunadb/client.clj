@@ -9,6 +9,7 @@
                                      Value$ArrayV
                                      Value$RefV
                                      Value$LongV
+                                     Value$DoubleV
                                      Value$StringV
                                      Value$BooleanV
                                      Types))
@@ -61,15 +62,38 @@
       Value$ArrayV  (->> (.get (Decoder/decode x (Types/arrayListOf Value)))
                          (map decode))
       Value$LongV    (.get (Decoder/decode x Long))
+      Value$DoubleV  (.get (Decoder/decode x Double))
       Value$BooleanV (.get (Decoder/decode x Boolean))
       Value$StringV  (.get (Decoder/decode x String))
       (do (info "Don't know how to decode" (class x) x)
           x))))
 
-(defn query
-  "Performs a query on a connection, and returns results"
+(defn query*
+  "Raw version of query; doesn't decode results."
   [conn e]
-  (decode (.. conn (query (q/expr e)) (get))))
+  (try
+    ; Basically every exception thrown by the client is
+    ; concurrentexecutionexception. This makes error handling awkward because
+    ; you can't catch error types any more. We can work around that by throwing
+    ; the cause, but then the stacktrace is just from the internal netty
+    ; executor and tells us nothing about what code actually hit the exception.
+    ; I don't have a good solution to this (pattern-matching catch expressions
+    ; which can examine causes?).
+    ;
+    ; So... a compromise: for Jepsen's purposes we don't care much about Netty
+    ; internals, so we're going to *replace* the original cause stacktrace with
+    ; the CEE's stacktrace, which at least tells you where in Jepsen's code
+    ; things went wrong.
+    (.. conn (query (q/expr e)) (get))
+    (catch java.util.concurrent.ExecutionException e
+      (let [cause (.getCause e)]
+        (.setStackTrace cause (.getStackTrace e))
+        (throw cause)))))
+
+(defn query
+  "Performs a query on a connection, and returns results."
+  [conn e]
+  (decode (query* conn e)))
 
 (defn now
   "Queries FaunaDB for the current time."
@@ -84,7 +108,7 @@
   ([conn expr after]
    (info :query-all-after after)
    (lazy-seq
-     (let [res   (.. conn (query (q/paginate expr after)) (get))
+     (let [res   (query* conn (q/paginate expr after))
            data  (:data (decode res))
            after (.at res (into-array String ["after"]))]
        (if (= after q/null)

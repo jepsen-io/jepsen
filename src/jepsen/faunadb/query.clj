@@ -84,6 +84,14 @@
   ([x & xs]
    (Language/Do (c/map expr (c/cons x xs)))))
 
+(defn do*
+  "Like do, but takes a seq of exprs, rather than varargs."
+  [exprs]
+  (c/condp c/= (c/count exprs)
+    0 null
+    1 (expr (c/first exprs))
+    (Language/Do (c/map expr exprs))))
+
 (defmacro fn
   "Macro for lambda creation. Takes an arg vector [x], followed by a body.
   Wraps body in an implicit Do, if multiple body forms are provided. Instances
@@ -131,6 +139,11 @@
   ([c t e]
    (Language/If (expr c) (expr t) (expr e))))
 
+(defn when
+  "Single-tailed if + do"
+  ([c & ts]
+   (jepsen.faunadb.query/if c (do* ts))))
+
 ; Functions
 
 (defn at
@@ -163,7 +176,7 @@
   ([e] (Language/Paginate (expr e)))
   ([e a] (if (c/= null a) ; note: this is clojure if
            (paginate e)
-           (.after (paginate e) a))))
+           (.after (paginate e) (expr a)))))
 
 (defn match
   [e]
@@ -204,6 +217,10 @@
 (defn +
   [& exprs]
   (Language/Add (c/map expr exprs)))
+
+(defn not
+  [e]
+  (Language/Not (expr e)))
 
 (defn or
   [& exprs]
