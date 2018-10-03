@@ -100,17 +100,51 @@
   [conn]
   (query conn (q/time "now")))
 
-(defn query-all
+(defn query-all-naive
   "Performs a query for an expression. Paginates expression, performs query,
-  and returns a lazy sequence of the :data from each page of results."
+  and returns a lazy sequence of the :data from each page of results. This is
+  the naive approach used by e.g. the JS drivers; not transactional."
   ([conn expr]
-   (query-all conn (q/expr expr) q/null))
+   (query-all-naive conn (q/expr expr) q/null))
   ([conn expr after]
-   (info :query-all-after after)
    (lazy-seq
      (let [res   (query* conn (q/paginate expr after))
            data  (:data (decode res))
            after (.at res (into-array String ["after"]))]
        (if (= after q/null)
          data
-         (concat data (query-all conn expr after)))))))
+         (concat data (query-all-naive conn expr after)))))))
+
+(defn query-all
+  "Performs a query for an expression. Paginates results, performs query, and
+  returns a lazy sequence of the :data from each page of results. This is a
+  transactional variant which should be correctly isolated."
+  ([conn expr]
+   (query-all conn (q/expr expr) q/null))
+  ([conn expr after]
+   (query-all conn (q/expr expr) after nil))
+  ([conn expr after time]
+   (lazy-seq
+     ; If we don't have a time, we're going to wrap the expression in an array
+     ; and include the current time; then we'll extract that and use it for
+     ; future times. If we *do* have a time, then we'll use it as the time for
+     ; the query.
+     (let [expr'         (q/paginate expr after)
+           expr'         (if time
+                          (q/at time expr')
+                          [(q/time "now") expr'])
+           _            (info :expr expr')
+           res          (query* conn expr')
+           [time page]  (if time
+                          ; We did a plain paginated query
+                          [time res]
+                          ; We've got an array of [time, page]
+                          (let [pair (.get (Decoder/decode
+                                             res (Types/arrayListOf Value)))]
+                            pair))
+           _            (info :time time :page page)
+           after        (.at page (into-array String ["after"]))
+           data         (:data (decode page))]
+       (if (= after q/null)
+         data
+         (concat data (query-all conn expr after time)))))))

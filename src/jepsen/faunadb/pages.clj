@@ -146,14 +146,16 @@
 
 (defn test
   [opts]
-  (let [zero 0
-        adds (->> (range)
-                  (map inc)
-                  (map (fn [i]
+  (let [zero        0
+        n           10000
+        group-size  4
+        adds (->> (range (- n) n)
+                  shuffle
+                  (partition group-size)
+                  (map (fn [group]
                          {:type  :invoke
                           :f     :add
-                          :value (shuffle [(- zero i)
-                                           (+ zero i)])}))
+                          :value group}))
                    (gen/seq))
         reads {:type :invoke, :f :read, :value nil}]
     (fauna/basic-test

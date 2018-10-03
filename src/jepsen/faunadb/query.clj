@@ -173,10 +173,14 @@
 
 (defn paginate
   "Paginates an expression. If `after` is provided, provides the page after."
-  ([e] (Language/Paginate (expr e)))
-  ([e a] (if (c/= null a) ; note: this is clojure if
-           (paginate e)
-           (.after (paginate e) (expr a)))))
+  ([e] (paginate e null))
+  ([e a]
+   (c/let [p (Language/Paginate (expr e))
+           p (.size p (c/int 1024))
+           p (if (c/= null a)
+               p
+               (.after p (expr a)))]
+     p)))
 
 (defn match
   [e]
