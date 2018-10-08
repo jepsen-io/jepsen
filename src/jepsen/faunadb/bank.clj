@@ -61,7 +61,7 @@
         (assoc ~op :type :fail, :error :negative)
         (throw e#)))))
 
-(defrecord BankClient [tbl-created? conn]
+(defrecord BankClient [conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (f/client node)))
@@ -127,6 +127,37 @@
   (close! [this test]
     (.close conn)))
 
+; Like BankClient, but performs reads using an index instead.
+(defrecord IndexClient [bank-client conn]
+  client/Client
+  (open! [this test node]
+    (let [b (client/open! bank-client test node)]
+      (assoc this :bank-client b :conn (:conn b))))
+
+  (setup! [this test]
+    (client/setup! bank-client test)
+    (f/query conn
+             (q/when (q/not (q/exists? idx))
+               (q/create-index {:name idx-name
+                                :source accounts
+                                :values [{:field ["ref"]}
+                                         {:field ["data" "balance"]}]}))))
+
+  (invoke! [this test op]
+    (if (= :read (:f op))
+      (wrapped-query op
+        (->> (f/query-all conn (q/match idx))
+             (assoc op :type :ok, :value)))
+
+      (invoke! bank-client test op)))
+
+
+  (teardown! [this test]
+    (teardown! bank-client test))
+
+  (close! [this test]
+    (.close bank-client test)))
+
 ; TODO: index reads variant
 ; We're not creating this index in the individual client because I want to avoid
 ; the possibility that index updates are introducing an unnecessary
@@ -157,5 +188,12 @@
   [opts]
   (bank-test-base
     (merge {:name   "bank"
-            :client (BankClient. (atom false) nil)}
+            :client (BankClient. nil)}
+           opts)))
+
+(def index-test
+  [opts]
+  (bank-test-base
+    (merge {:name   "bank index"
+            :client (IndexClient. (BankClient. nil) nil)}
            opts)))

@@ -19,10 +19,11 @@
 
 (def tests
   "A map of test names to test constructors."
-  {"sets"     sets/test
-   "register" register/test
-   "bank"     bank/test
-   "pages"    pages/test})
+  {"sets"       sets/test
+   "register"   register/test
+   "bank"       bank/test
+   "bank-index" bank/index-test
+   "pages"      pages/test})
 
 (def nemeses
   "Supported nemeses"
