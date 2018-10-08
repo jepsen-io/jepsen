@@ -46,18 +46,19 @@
   [op & exprs]
   `(try
     ~@exprs
-    (catch ExecutionException e#
-      (cond
-        (instance? UnavailableException (.getCause e#))
-        (assoc ~op :type :fail, :error [:unavailable (.. e# (getCause) (getMessage))])
+    (catch UnavailableException e#
+      (assoc ~op :type :fail, :error [:unavailable (.getMessage e#)]))
 
-        (instance? IOException (.getCause e#))
-        (assoc ~op :type :fail, :error [:io (.. e# (getCause) (getMessage))])
+    (catch java.util.concurrent.TimeoutException e#
+      (assoc ~op :type :info, :error [:timeout (.getMessage e#)]))
 
-        (= (.. e# (getCause) (getMessage)) "transaction aborted: balance would go negative")
+    (catch IOException e#
+      (assoc ~op :type :info, :error [:io (.getMessage e#)]))
+
+    (catch com.faunadb.client.errors.BadRequestException e#
+      (if (= (.getMessage e#) "transaction aborted: balance would go negative")
         (assoc ~op :type :fail, :error :negative)
-
-        :else (throw e#)))))
+        (throw e#)))))
 
 (defrecord BankClient [tbl-created? conn]
   client/Client
