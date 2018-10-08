@@ -129,9 +129,9 @@
     (debian/update!)
     (debian/install {"faunadb" version})
     (when-let [k (:datadog-api-key test)]
-      (info (c/exec (str "DD_API_KEY=" k)
+      (c/exec (str "DD_API_KEY=" k)
               :bash :-c
-              (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\""))))))
+              (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\"")))))
 
 ; TODO: clarify exactly what modulo logic is going on for logs and replicas.
 ; How are clusters laid out?
@@ -183,7 +183,6 @@
               :network_listen_address node
               :storage_transaction_log_nodes (log-configuration test node replicas)}
              (when (:datadog-api-key test)
-               (info "enabling stats")
                {:stats_host "localhost"
                 :stats_port 8125})))
             :> "/etc/faunadb.yml")))
