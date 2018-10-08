@@ -158,11 +158,15 @@
   (info "Configuring" node)
   (c/su
     ; Systemd init file
-   (c/exec :echo (-> "faunadb.conf"
-                     io/resource
-                     slurp)
-           :> "/etc/init/faunadb.conf")
-   (c/exec :systemctl :daemon-reload)
+   ;(c/exec :echo (-> "faunadb.conf"
+   ;                  io/resource
+   ;                  slurp)
+   ;        :> "/etc/init/faunadb.conf")
+   ;(c/exec :systemctl :daemon-reload)
+
+   ; Defaults
+   (c/exec :echo (-> "faunadb.defaults" io/resource slurp)
+           :> "/etc/default/faunadb")
 
    ; Fauna config
    (c/exec :echo

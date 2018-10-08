@@ -1,0 +1,1 @@
+MAX_HEAP_SIZE="1G"
