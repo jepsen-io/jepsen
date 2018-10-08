@@ -12,7 +12,8 @@
                                      Value$DoubleV
                                      Value$StringV
                                      Value$BooleanV
-                                     Types))
+                                     Types)
+           (org.asynchttpclient Dsl))
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]
@@ -32,9 +33,16 @@
 (defn client
   "Constructs a Fauna client"
   [node]
-  (.build (doto (FaunaClient/builder)
-            (.withEndpoint (str "http://" node ":8443"))
-            (.withSecret root-key))))
+  (.build
+    (doto (FaunaClient/builder)
+      (.withHttpClient
+        (Dsl/asyncHttpClient
+          (.. (Dsl/config)
+              ; By default this chooses cores * 2 and blows out process limits
+              (setIoThreadsCount 1)
+              (build))))
+      (.withEndpoint (str "http://" node ":8443"))
+      (.withSecret root-key))))
 
 (defn linearized-client
   "Constructs a Fauna client for the /linearized endpoint"

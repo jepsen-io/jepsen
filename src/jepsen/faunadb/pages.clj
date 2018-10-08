@@ -51,7 +51,6 @@
         :add (do (f/query conn
                           (q/do*
                             (map (fn [v]
-                                   (info "Inserting" v)
                                    (q/create (q/ref elements v)
                                              {:data {:value v}}))
                                  (:value op))))

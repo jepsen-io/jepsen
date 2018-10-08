@@ -176,7 +176,7 @@
   ([e] (paginate e null))
   ([e a]
    (c/let [p (Language/Paginate (expr e))
-           p (.size p (c/int 1024))
+           ; p (.size p (c/int 1024))
            p (if (c/= null a)
                p
                (.after p (expr a)))]
