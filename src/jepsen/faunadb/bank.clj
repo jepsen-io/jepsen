@@ -12,6 +12,7 @@
                     [checker :as checker]
                     [core :as jepsen]
                     [fauna :as fauna]
+                    [util :as util]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.tests.bank :as bank]
@@ -69,17 +70,11 @@
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
         (f/query conn (q/create-class {:name "accounts"}))
-        (info "Creating accounts" (:accounts test))
+        (info "Creating initial account")
         (f/query
           conn
-          (q/do (q/create (q/ref accounts (first (:accounts test)))
-                          {:data {:balance (:total-amount test)}})
-                (apply q/do
-                       (mapv
-                         (fn [acct]
-                           (q/create (q/ref accounts acct)
-                                     {:data {:balance 0}}))
-                         (rest (:accounts test)))))))))
+          (q/create (q/ref accounts (first (:accounts test)))
+                    {:data {:balance (:total-amount test)}})))))
 
   (invoke! [this test op]
     (case (:f op)
@@ -90,12 +85,13 @@
                       {:data (mapv
                                (fn [i]
                                  (let [acct (q/ref accounts i)]
-                                   [acct
-                                    (q/select ["data" "balance"]
-                                              (q/get acct))]))
+                                   (q/when (q/exists? acct)
+                                     [i (q/select ["data" "balance"]
+                                                  (q/get acct))])))
                                (:accounts test))})
              :data
-             (map (fn [[ref balance]] [(Long/parseLong (:id ref)) balance]))
+             (remove nil?)
+             (map vec)
              (into {})
              (assoc op :type :ok, :value)))
 
@@ -105,20 +101,25 @@
           (f/query
             conn
             (q/do
-              (q/let [a (q/- (q/select ["data" "balance"]
-                                       (q/get (q/ref accounts from)))
+              (q/let [a (q/- (q/if (q/exists? (q/ref accounts from))
+                               (q/select ["data" "balance"]
+                                         (q/get (q/ref accounts from)))
+                               0)
                              amount)]
-                (q/if (q/< a 0)
-                  (q/abort "balance would go negative")
+                (q/cond
+                  (q/< a 0) (q/abort "balance would go negative")
+                  (q/= a 0) (q/delete (q/ref accounts from))
                   (q/update
                     (q/ref accounts from)
                     {:data {:balance a}})))
-              (q/let [b (q/+ (q/select ["data" "balance"]
-                                       (q/get (q/ref accounts to)))
-                             amount)]
-                (q/update
-                  (q/ref accounts to)
-                  {:data {:balance b}}))))
+              (q/if (q/exists? (q/ref accounts to))
+                (q/let [b (q/+ (q/select ["data" "balance"]
+                                         (q/get (q/ref accounts to)))
+                               amount)]
+                  (q/update (q/ref accounts to)
+                            {:data {:balance b}}))
+                (q/create (q/ref accounts to)
+                          {:data {:balance amount}}))))
           (assoc op :type :ok)))))
 
   (teardown! [this test])

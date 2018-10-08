@@ -31,7 +31,7 @@
                                (c/map (c/fn [[k v]] [(c/name k) (expr v)]))
                                (c/into {})
                                (Language/Obj))
-    (c/sequential? x)   (Language/Arr (c/map expr x))
+    (c/sequential? x)   (Language/Arr (c/mapv expr x))
     (c/string? x)       (Language/Value x)
     (c/number? x)       (Language/Value x)
     (c/true? x)         (Language/Value x)
@@ -72,7 +72,7 @@
 
 (defn array
   [& vs]
-  (Language/Arr (c/map expr vs)))
+  (Language/Arr (c/mapv expr vs)))
 
 ; Syntax
 
@@ -82,7 +82,7 @@
   ([] null)
   ([x] (expr x))
   ([x & xs]
-   (Language/Do (c/map expr (c/cons x xs)))))
+   (Language/Do (c/mapv expr (c/cons x xs)))))
 
 (defn do*
   "Like do, but takes a seq of exprs, rather than varargs."
@@ -90,7 +90,7 @@
   (c/condp c/= (c/count exprs)
     0 null
     1 (expr (c/first exprs))
-    (Language/Do (c/map expr exprs))))
+    (Language/Do (c/mapv expr exprs))))
 
 (defmacro fn
   "Macro for lambda creation. Takes an arg vector [x], followed by a body.
@@ -143,6 +143,17 @@
   "Single-tailed if + do"
   ([c & ts]
    (jepsen.faunadb.query/if c (do* ts))))
+
+(defn cond
+  "Multi-tailed if. Like clojure cond, but also supports an odd arity, in which
+  case the final clause is the default."
+  [& clauses]
+  (c/condp c/= (c/count clauses)
+    0 null
+    1 (expr (c/first clauses))
+    (jepsen.faunadb.query/if (expr (c/first clauses))
+      (expr (c/second clauses))
+      (c/apply cond (c/next (c/next clauses))))))
 
 ; Functions
 
@@ -216,11 +227,11 @@
 
 (defn -
   [& exprs]
-  (Language/Subtract (c/map expr exprs)))
+  (Language/Subtract (c/mapv expr exprs)))
 
 (defn +
   [& exprs]
-  (Language/Add (c/map expr exprs)))
+  (Language/Add (c/mapv expr exprs)))
 
 (defn not
   [e]
@@ -228,12 +239,12 @@
 
 (defn or
   [& exprs]
-  (Language/Or (c/map expr exprs)))
+  (Language/Or (c/mapv expr exprs)))
 
 (defn <
   [& exprs]
-  (Language/LT (c/map expr exprs)))
+  (Language/LT (c/mapv expr exprs)))
 
 (defn =
   [& exprs]
-  (Language/Equals (c/map expr exprs)))
+  (Language/Equals (c/mapv expr exprs)))
