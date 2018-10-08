@@ -20,7 +20,7 @@
   (reify db/DB
     (setup! [_ test node]
       (let [width (min replicas (count (:nodes test)))]
-        (auto/install! version)
+        (auto/install! test version)
         (auto/configure! test node width)
         (auto/start! test node)
         (auto/init! test node width)))

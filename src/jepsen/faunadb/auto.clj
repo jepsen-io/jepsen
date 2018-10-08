@@ -119,15 +119,19 @@
 
 (defn install!
   "Install a particular version of FaunaDB."
-  [version]
-  (debian/install-jdk8!)
-  ; TODO: c/su cleanup
-  (c/su (debian/add-repo! "faunadb"
-                          "deb [arch=all] https://repo.fauna.com/debian stable non-free"))
-  (c/su (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
-                :apt-key :add :-))
-  (c/su (debian/update!))
-  (c/su (debian/install {"faunadb" version})))
+  [test version]
+  (c/su
+    (debian/install-jdk8!)
+    (debian/add-repo! "faunadb"
+                      "deb [arch=all] https://repo.fauna.com/debian stable non-free")
+    (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
+            :apt-key :add :-)
+    (debian/update!)
+    (debian/install {"faunadb" version})
+    (when-let [k (:datadog-api-key test)]
+      (info (c/exec (str "DD_API_KEY=" k)
+              :bash :-c
+              (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\""))))))
 
 ; TODO: clarify exactly what modulo logic is going on for logs and replicas.
 ; How are clusters laid out?
@@ -153,10 +157,14 @@
   [test node replicas]
   (info "Configuring" node)
   (c/su
+    ; Systemd init file
    (c/exec :echo (-> "faunadb.conf"
                      io/resource
                      slurp)
            :> "/etc/init/faunadb.conf")
+   (c/exec :systemctl :daemon-reload)
+
+   ; Fauna config
    (c/exec :echo
            (yaml/generate-string
             (merge
@@ -169,7 +177,11 @@
               :network_datacenter_name (str/join ["replica-" (replica test node replicas)])
               :network_host_id node
               :network_listen_address node
-              :storage_transaction_log_nodes (log-configuration test node replicas)}))
+              :storage_transaction_log_nodes (log-configuration test node replicas)}
+             (when (:datadog-api-key test)
+               (info "enabling stats")
+               {:stats_host "localhost"
+                :stats_port 8125})))
             :> "/etc/faunadb.yml")))
 
 (defn teardown!

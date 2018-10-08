@@ -44,6 +44,7 @@
     :default true]
    [nil "--wait-for-convergence" "Don't start operations until data movement has completed"
     :default false]
+   [nil "--datadog-api-key KEY" "If provided, sets up Fauna's integrated datadog stats"]
   (jc/repeated-opt "-t" "--test NAME" "Test(s) to run" [] tests)
 
   (jc/repeated-opt nil "--nemesis NAME" "Which nemesis to use"

@@ -36,6 +36,7 @@
                (q/when (q/not (q/exists? idx))
                  (q/create-index {:name   idx-name
                                   :source elements
+                                  ; :partitions 1
                                   :values [{:field ["data" "value"]}]})))
       (catch com.faunadb.client.errors.UnavailableException e
         (if (< 1 attempts)
