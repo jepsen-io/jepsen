@@ -233,6 +233,13 @@
          data
          (concat data (query-all conn expr after time)))))))
 
+(defn upsert-by-ref
+  "Takes a ref and an instance map; constructs an expr which creates the ref
+  with that data if it does not already exist."
+  [r data]
+  (q/when (q/not (q/exists? r))
+    (q/create r data)))
+
 (defn maybe-at
   "Useful for comparing the results of regular queries to At(...) queries. This
   takes a test, used to determine whether to use an At query, a Fauna client,

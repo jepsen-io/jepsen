@@ -75,6 +75,15 @@
         (f/query conn (q/when (q/not (q/exists? acct))
                         (q/create acct
                                   {:data {:balance (:total-amount test)}}))))
+      (when-not (:fixed-instances test)
+        (f/trace
+        ; Create remaining accounts up front
+        (f/query conn
+                 (q/do*
+                   (map (fn [acct]
+                          (let [acct (q/ref accounts acct)]
+                            (f/upsert-by-ref acct {:data {:balance 0}})))
+                        (rest (:accounts test)))))))
       (catch com.faunadb.client.errors.UnavailableException e
         (if (< 1 tries)
           (do (info "Waiting for cluster ready")
@@ -115,10 +124,15 @@
                              amount)]
                 (q/cond
                   (q/< a 0) (q/abort "balance would go negative")
-                  (q/= a 0) (q/delete (q/ref accounts from))
+
+                  ; If we're using fixed instances, write 0 instead of deleting
+                  (and (q/= a 0) (not (:fixed-instances test)))
+                  (q/delete (q/ref accounts from))
+
                   (q/update
                     (q/ref accounts from)
                     {:data {:balance a}})))
+
               (q/if (q/exists? (q/ref accounts to))
                 (q/let [b (q/+ (q/select ["data" "balance"]
                                          (q/get (q/ref accounts to)))

@@ -45,6 +45,8 @@
     :default true]
    [nil "--at-query" "Use At queries for certain operations, rather than just reading."
     :default false]
+   [nil "--fixed-instances" "Don't create and destroy instances dynamically."
+    :default false]
    [nil "--wait-for-convergence" "Don't start operations until data movement has completed"
     :default false]
    [nil "--datadog-api-key KEY" "If provided, sets up Fauna's integrated datadog stats"]
