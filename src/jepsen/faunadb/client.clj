@@ -88,6 +88,7 @@
     (cond
       (get x "at")      (list 'at (json->data (get x "at"))
                               (json->data (get x "expr")))
+      (get x "do")      (cons 'do (json->data (get x "do")))
       (get x "exists")  (list 'exists (json->data (get x "exists")))
       (get x "get")     (list 'get (json->data (get x "get")))
       (get x "if")      (list 'if (json->data (get x "if"))
@@ -95,12 +96,13 @@
                               (json->data (get x "else")))
       (get x "let")     (list 'let (json->data (get x "let"))
                               (json->data (get x "in")))
-      (get x "object")  (json->data (get x "object"))
+      (get x "not")     (list 'not (json->data (get x "not")))
+      (get x "object")  (util/map-vals json->data (get x "object"))
       (get x "select")  (list 'select (json->data (get x "select"))
                               (json->data (get x "from")))
       (get x "time")    (list 'time (json->data (get x "time")))
       (get x "var")     (list 'var (json->data (get x "var")))
-      true              (util/map-vals json->data x))
+      true              x)
 
     (vector? x) (mapv json->data x)
     true        x))
@@ -217,7 +219,6 @@
            expr'         (if time
                           (q/at time expr')
                           [(q/time "now") expr'])
-           _            (info :expr expr')
            res          (query* conn expr')
            [time page]  (if time
                           ; We did a plain paginated query
@@ -226,7 +227,6 @@
                           (let [pair (.get (Decoder/decode
                                              res (Types/arrayListOf Value)))]
                             pair))
-           _            (info :time time :page page)
            after        (.at page (into-array String ["after"]))
            data         (:data (decode page))]
        (if (= after q/null)

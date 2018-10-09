@@ -69,21 +69,20 @@
 
   (setup! [this test]
     (dt/with-retry [tries 5]
+      ; Create class
       (f/query conn (q/when (q/not (q/exists? accounts))
                       (q/create-class {:name accounts-name})))
-      (let [acct (q/ref accounts (first (:accounts test)))]
-        (f/query conn (q/when (q/not (q/exists? acct))
-                        (q/create acct
-                                  {:data {:balance (:total-amount test)}}))))
-      (when-not (:fixed-instances test)
-        (f/trace
+      ; And initial account
+      (f/query conn (f/upsert-by-ref (q/ref accounts (first (:accounts test)))
+                                     {:data {:balance (:total-amount test)}}))
+      (when (:fixed-instances test)
         ; Create remaining accounts up front
         (f/query conn
                  (q/do*
                    (map (fn [acct]
                           (let [acct (q/ref accounts acct)]
                             (f/upsert-by-ref acct {:data {:balance 0}})))
-                        (rest (:accounts test)))))))
+                        (rest (:accounts test))))))
       (catch com.faunadb.client.errors.UnavailableException e
         (if (< 1 tries)
           (do (info "Waiting for cluster ready")
