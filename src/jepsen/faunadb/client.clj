@@ -10,13 +10,21 @@
                                      Value$RefV
                                      Value$LongV
                                      Value$DoubleV
+                                     Value$TimeV
                                      Value$StringV
                                      Value$BooleanV
                                      Types)
+           (com.faunadb.client.query Language
+                                     Expr)
+           (com.faunadb.client.query Fn$Unescaped
+                                     Fn$UnescapedObject
+                                     Fn$UnescapedArray)
+           (com.fasterxml.jackson.databind.node NullNode)
            (org.asynchttpclient Dsl))
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [clojure.tools.logging :refer :all]
+            [clojure.tools.logging :refer [warn info]]
+            [wall.hack]
             [jepsen.util :as util]
             [jepsen.faunadb.query :as q]))
 
@@ -51,6 +59,57 @@
             (.withEndpoint (str "http://" node ":8443/linearized"))
             (.withSecret root-key))))
 
+
+(defn expr->json
+  "Massage expressions back into something approximating json"
+  [x]
+  (if-not (instance? Expr x)
+    x
+    (let [j (wall.hack/method com.faunadb.client.query.Expr
+                                :toJson
+                                []
+                                x)]
+      (condp instance? j
+        java.util.Map   (->> j
+                             (map (fn [[k v]] [k (expr->json v)]))
+                             (into (sorted-map)))
+        java.util.List  (mapv (fn [v] (expr->json v)) j)
+        NullNode        nil
+        String          j
+        Long            j
+        (do (info "Don't know how to translate" (class j))
+            j)))))
+
+(defn json->data
+  "Turn JSON-style structs into a human-readable AST"
+  [x]
+  (cond
+    (map? x)
+    (cond
+      (get x "at")      (list 'at (json->data (get x "at"))
+                              (json->data (get x "expr")))
+      (get x "exists")  (list 'exists (json->data (get x "exists")))
+      (get x "get")     (list 'get (json->data (get x "get")))
+      (get x "if")      (list 'if (json->data (get x "if"))
+                              (json->data (get x "then"))
+                              (json->data (get x "else")))
+      (get x "let")     (list 'let (json->data (get x "let"))
+                              (json->data (get x "in")))
+      (get x "object")  (json->data (get x "object"))
+      (get x "select")  (list 'select (json->data (get x "select"))
+                              (json->data (get x "from")))
+      (get x "time")    (list 'time (json->data (get x "time")))
+      (get x "var")     (list 'var (json->data (get x "var")))
+      true              (util/map-vals json->data x))
+
+    (vector? x) (mapv json->data x)
+    true        x))
+
+(defn expr->data
+  "Massage expressions back into something approximating json."
+  [x]
+  (-> x expr->json json->data))
+
 (defrecord Ref [db class id])
 
 (defn decode
@@ -73,8 +132,16 @@
       Value$DoubleV  (.get (Decoder/decode x Double))
       Value$BooleanV (.get (Decoder/decode x Boolean))
       Value$StringV  (.get (Decoder/decode x String))
+      Value$TimeV    x
       (do (info "Don't know how to decode" (class x) x)
           x))))
+
+(def ^:dynamic *trace*
+  "Flag for tracing"
+  false)
+
+(defmacro trace [& body]
+  `(binding [*trace* true] ~@body))
 
 (defn query*
   "Raw version of query; doesn't decode results."
@@ -92,10 +159,19 @@
     ; internals, so we're going to *replace* the original cause stacktrace with
     ; the CEE's stacktrace, which at least tells you where in Jepsen's code
     ; things went wrong.
-    (.. conn (query (q/expr e)) (get))
-    (catch java.util.concurrent.ExecutionException e
-      (let [cause (.getCause e)]
-        (.setStackTrace cause (.getStackTrace e))
+    (let [r (.. conn (query (q/expr e)) (get))]
+      (when *trace*
+        (info "Query"
+              (str/trimr (with-out-str (prn) (pprint (expr->data (q/expr e)))))
+              (str/trimr (with-out-str (prn) (pprint (decode r))))))
+      r)
+    (catch java.util.concurrent.ExecutionException err
+      (let [cause (.getCause err)]
+        (when *trace*
+          (info "Query"
+                (str/trimr (with-out-str (prn) (pprint (expr->data (q/expr e)))))
+                "\nThrew:" (.getClass cause) (.getMessage cause)))
+        (.setStackTrace cause (.getStackTrace err))
         (throw cause)))))
 
 (defn query
@@ -156,3 +232,22 @@
        (if (= after q/null)
          data
          (concat data (query-all conn expr after time)))))))
+
+(defn maybe-at
+  "Useful for comparing the results of regular queries to At(...) queries. This
+  takes a test, used to determine whether to use an At query, a Fauna client,
+  and a query expression. If (:at-query test) is true, rewrites the query to
+  use a recent timestamp using (At expr). Otherwise, returns expr.
+
+  We have two methods for recent timestamps. One is to make a query for (now)
+  and use it; this gives us a timestamp which is older. Another is to embed the
+  now in a let binding. We select at random."
+  [test conn expr]
+  (if-not (:at-query test)
+    (q/expr expr)
+    (if (< 0.5 (rand))
+      (let [t (now conn)]
+        (q/at t (q/expr expr)))
+      (q/let [internal-maybe-at-ts (q/time "now")]
+        (q/at internal-maybe-at-ts
+              (q/expr expr))))))

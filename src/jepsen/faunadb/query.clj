@@ -1,9 +1,14 @@
 (ns jepsen.faunadb.query
   "A nice clojure interface for FaunaDB-JVM"
   (:refer-clojure :only [defn defmacro])
-  (:require [clojure.core :as c])
+  (:require [clojure.core :as c]
+            wall.hack
+            [clojure.tools.logging :refer [info warn]])
   (:import (com.faunadb.client.query Language
-                                     Expr)))
+                                     Expr)
+           (com.faunadb.client.query Fn$Unescaped
+                                     Fn$UnescapedObject
+                                     Fn$UnescapedArray)))
 
 (def null
   (Language/Null))

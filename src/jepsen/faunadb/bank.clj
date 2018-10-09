@@ -18,6 +18,7 @@
             [jepsen.tests.bank :as bank]
             [jepsen.faunadb [client :as f]
                             [query :as q]]
+            [dom-top.core :as dt]
             [clojure.core.reducers :as r]
             [clojure.pprint :refer [pprint]]
             [clojure.string :as cstr]
@@ -67,14 +68,19 @@
     (assoc this :conn (f/client node)))
 
   (setup! [this test]
-    (locking tbl-created?
-      (when (compare-and-set! tbl-created? false true)
-        (f/query conn (q/create-class {:name "accounts"}))
-        (info "Creating initial account")
-        (f/query
-          conn
-          (q/create (q/ref accounts (first (:accounts test)))
-                    {:data {:balance (:total-amount test)}})))))
+    (dt/with-retry [tries 5]
+      (f/query conn (q/when (q/not (q/exists? accounts))
+                      (q/create-class {:name accounts-name})))
+      (let [acct (q/ref accounts (first (:accounts test)))]
+        (f/query conn (q/when (q/not (q/exists? acct))
+                        (q/create acct
+                                  {:data {:balance (:total-amount test)}}))))
+      (catch com.faunadb.client.errors.UnavailableException e
+        (if (< 1 tries)
+          (do (info "Waiting for cluster ready")
+              (Thread/sleep 1000)
+              (retry (dec tries)))
+          (throw e)))))
 
   (invoke! [this test op]
     (case (:f op)
@@ -82,13 +88,14 @@
       (wrapped-query
         op
         (->> (f/query conn
-                      {:data (mapv
-                               (fn [i]
-                                 (let [acct (q/ref accounts i)]
-                                   (q/when (q/exists? acct)
-                                     [i (q/select ["data" "balance"]
-                                                  (q/get acct))])))
-                               (:accounts test))})
+                      (f/maybe-at test conn
+                                  {:data (mapv
+                                           (fn [i]
+                                             (let [acct (q/ref accounts i)]
+                                               (q/when (q/exists? acct)
+                                                 [i (q/select ["data" "balance"]
+                                                              (q/get acct))])))
+                                           (:accounts test))}))
              :data
              (remove nil?)
              (map vec)
@@ -147,16 +154,18 @@
     (if (= :read (:f op))
       (wrapped-query op
         (->> (f/query-all conn (q/match idx))
+             (map (fn [[ref balance]] [(Long/parseLong (:id ref)) balance]))
+             (into (sorted-map))
              (assoc op :type :ok, :value)))
 
-      (invoke! bank-client test op)))
+      (client/invoke! bank-client test op)))
 
 
   (teardown! [this test]
-    (teardown! bank-client test))
+    (client/teardown! bank-client test))
 
   (close! [this test]
-    (.close bank-client test)))
+    (client/close! bank-client test)))
 
 ; TODO: index reads variant
 ; We're not creating this index in the individual client because I want to avoid
@@ -191,7 +200,9 @@
             :client (BankClient. nil)}
            opts)))
 
-(def index-test
+(defn index-test
+  "A variant of the test which uses an index instead of directly fetching
+  individual accounts."
   [opts]
   (bank-test-base
     (merge {:name   "bank index"
