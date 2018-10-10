@@ -40,10 +40,18 @@
   [opts]
   (merge
     tests/noop-test
-    {:name    (str "faunadb"
-                   (str ":" (:name opts))
-                   (str ":" (:name (:nemesis opts))))
-     :os      debian/os ;; NB. requires Ubuntu 14.04 LTS
+    {:name    (str "fauna"
+                   " " (:name opts)
+                   (when (:strong-read opts)
+                     " strong-read")
+                   (when (:at-query opts)
+                     " at-query")
+                   (when (:fixed-instances opts)
+                     " fixed-instances")
+                   (when (:serialized-indices opts)
+                     " serialized-indices")
+                   " nemesis:" (:name (:nemesis opts)))
+     :os      debian/os
      :db      (db "2.5.4-0")
      :client  (:client (:client opts))
      :nemesis (:nemesis (:nemesis opts))

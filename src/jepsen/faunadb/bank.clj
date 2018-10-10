@@ -62,33 +62,36 @@
         (assoc ~op :type :fail, :error :negative)
         (throw e#)))))
 
+(defn create-class!
+  "Creates the class for accounts"
+  [test conn]
+  (f/query conn (q/when (q/not (q/exists? accounts))
+                  (q/create-class {:name accounts-name}))))
+
+(defn create-accounts!
+  "Creates the initial accounts for a test"
+  [test conn]
+  ; And initial account
+  (f/query conn (f/upsert-by-ref (q/ref accounts (first (:accounts test)))
+                                 {:data {:balance (:total-amount test)}}))
+  (when (:fixed-instances test)
+    ; Create remaining accounts up front
+    (f/query conn
+             (q/do*
+               (map (fn [acct]
+                      (let [acct (q/ref accounts acct)]
+                        (f/upsert-by-ref acct {:data {:balance 0}})))
+                    (rest (:accounts test)))))))
+
 (defrecord BankClient [conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (f/client node)))
 
   (setup! [this test]
-    (dt/with-retry [tries 5]
-      ; Create class
-      (f/query conn (q/when (q/not (q/exists? accounts))
-                      (q/create-class {:name accounts-name})))
-      ; And initial account
-      (f/query conn (f/upsert-by-ref (q/ref accounts (first (:accounts test)))
-                                     {:data {:balance (:total-amount test)}}))
-      (when (:fixed-instances test)
-        ; Create remaining accounts up front
-        (f/query conn
-                 (q/do*
-                   (map (fn [acct]
-                          (let [acct (q/ref accounts acct)]
-                            (f/upsert-by-ref acct {:data {:balance 0}})))
-                        (rest (:accounts test))))))
-      (catch com.faunadb.client.errors.UnavailableException e
-        (if (< 1 tries)
-          (do (info "Waiting for cluster ready")
-              (Thread/sleep 1000)
-              (retry (dec tries)))
-          (throw e)))))
+    (f/with-retry
+      (create-class! test conn)
+      (create-accounts! test conn)))
 
   (invoke! [this test op]
     (case (:f op)
@@ -125,7 +128,7 @@
                   (q/< a 0) (q/abort "balance would go negative")
 
                   ; If we're using fixed instances, write 0 instead of deleting
-                  (and (q/= a 0) (not (:fixed-instances test)))
+                  (q/and (q/= a 0) (not (:fixed-instances test)))
                   (q/delete (q/ref accounts from))
 
                   (q/update
@@ -155,13 +158,17 @@
       (assoc this :bank-client b :conn (:conn b))))
 
   (setup! [this test]
-    (client/setup! bank-client test)
-    (f/query conn
-             (q/when (q/not (q/exists? idx))
-               (q/create-index {:name idx-name
-                                :source accounts
-                                :values [{:field ["ref"]}
-                                         {:field ["data" "balance"]}]}))))
+    (f/with-retry
+      (client/setup! bank-client test)
+      (f/query conn
+               (q/when (q/not (q/exists? idx))
+                 (q/create-index {:name idx-name
+                                  :source accounts
+                                  :serialized (boolean (:serialized-indices test))
+                                  :values [{:field ["ref"]}
+                                           {:field ["data" "balance"]}]})))
+      (locking test
+        (f/wait-for-index conn idx))))
 
   (invoke! [this test op]
     (if (= :read (:f op))

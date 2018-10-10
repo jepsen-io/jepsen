@@ -24,6 +24,8 @@
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [warn info]]
+            [slingshot.slingshot :refer [try+ throw+]]
+            [dom-top.core :as dt]
             [wall.hack]
             [jepsen.util :as util]
             [jepsen.faunadb.query :as q]))
@@ -258,3 +260,35 @@
       (q/let [internal-maybe-at-ts (q/time "now")]
         (q/at internal-maybe-at-ts
               (q/expr expr))))))
+
+(defmacro with-retry
+  "Useful for setup; retries requests when the cluster is unavailable. I'm not
+  convinced UnavailableException is actually a definite failure, so just to be
+  safe you should probably make the body idempotent."
+  [& body]
+  `(dt/with-retry [tries# 5]
+    ~@body
+    (catch com.faunadb.client.errors.UnavailableException e#
+      (if (< 1 tries#)
+        (do (info "Waiting for cluster ready")
+            (Thread/sleep 1000)
+            (~'retry (dec tries#)))
+        (throw e#)))))
+
+(defn wait-for-index
+  "Waits for the `active` flag on the given index ref. Times out after 1000
+  seconds by default. Timeout is in milliseconds."
+  ([conn index]
+   (wait-for-index conn index 1000000))
+  ([conn index timeout]
+   (util/timeout timeout
+                 (throw+ {:type :timeout})
+                 (loop []
+                   (let [res (query conn (q/get index))]
+                     (if (:active res)
+                       nil
+                       (do
+                         (info "Waiting for index" (expr->data index))
+                               ;(str "\n" (with-out-str (pprint res))))
+                         (Thread/sleep 5000)
+                         (recur))))))))

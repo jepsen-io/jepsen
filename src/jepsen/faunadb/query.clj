@@ -246,6 +246,10 @@
   [& exprs]
   (Language/Or (c/mapv expr exprs)))
 
+(defn and
+  [& exprs]
+  (Language/And (c/mapv expr exprs)))
+
 (defn <
   [& exprs]
   (Language/LT (c/mapv expr exprs)))
