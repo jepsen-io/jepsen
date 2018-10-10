@@ -17,29 +17,23 @@
 (def idx-name "all-elements")
 (def idx (q/index idx-name))
 
-(defrecord SetsClient [opts tbl-created? conn]
+(defrecord SetsClient [opts conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (f/client node)))
 
   (setup! [this test]
-    (locking tbl-created?
-      (when (compare-and-set! tbl-created? false true)
-        (dt/with-retry [attempts 5]
-          (f/query conn (q/create-class {:name elements}))
-          (f/query conn (q/create-class {:name side-effects}))
-          (f/query
-            conn
-            (q/create-index
-              {:name   idx-name
-               :source (q/class elements)
-               :values [{:field ["data" "value"]}]}))
-          (catch com.faunadb.client.errors.UnavailableException e
-            (if (< 1 attempts)
-              (do (info "Waiting for cluster ready")
-                  (Thread/sleep 1000)
-                  (retry (dec attempts)))
-              (throw e)))))))
+    (f/with-retry
+      (f/query conn
+               (q/do (f/upsert-class {:name elements})
+                     (f/upsert-class {:name side-effects})))
+      (f/query conn
+               (f/upsert-index
+                 {:name       idx-name
+                  :source     (q/class elements)
+                  :serialized (boolean (:serialized-indices test))
+                  :values     [{:field ["data" "value"]}]}))
+      (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
     (try
@@ -59,7 +53,8 @@
                             ; We're gonna do our read, then sneak a write in
                             ; to force this txn to be strict serializable
                             (q/let [r (q/match idx)]
-                              (q/create (q/class side-effects) {})
+                              (q/at (q/time "now")
+                                (q/create (q/class side-effects) {}))
                               r)
                             ; Just a regular read
                             (q/match idx)))
@@ -98,7 +93,7 @@
   (fauna/basic-test
     (merge
       {:name   "set"
-       :client {:client (SetsClient. opts (atom false) nil)
+       :client {:client (SetsClient. opts nil)
                 :during (->> (let [a (adds), r (reads)]
                                (gen/mix [a a r]))
                              (gen/stagger 1/5))
@@ -106,6 +101,6 @@
        :checker (checker/compose
                   {:perf     (checker/perf)
                    :set-full (checker/set-full)
-                   :set      (checker/set)
-                   :timeline (timeline/html)})}
+                   ;:timeline (timeline/html)
+                   :set      (checker/set)})}
       opts)))

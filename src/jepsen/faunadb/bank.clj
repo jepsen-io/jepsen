@@ -167,8 +167,7 @@
                                   :serialized (boolean (:serialized-indices test))
                                   :values [{:field ["ref"]}
                                            {:field ["data" "balance"]}]})))
-      (locking test
-        (f/wait-for-index conn idx))))
+        (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
     (if (= :read (:f op))

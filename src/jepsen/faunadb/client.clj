@@ -242,6 +242,18 @@
   (q/when (q/not (q/exists? r))
     (q/create r data)))
 
+(defn upsert-class
+  "Query expr to upsert a class. Takes a class map."
+  [cm]
+  (q/when (q/not (q/exists? (q/class (:name cm))))
+    (q/create-class cm)))
+
+(defn upsert-index
+  "Query expression to upsert an index. Takes an index map."
+  [im]
+  (q/when (q/not (q/exists? (q/index (:name im))))
+    (q/create-index im)))
+
 (defn maybe-at
   "Useful for comparing the results of regular queries to At(...) queries. This
   takes a test, used to determine whether to use an At query, a Fauna client,
@@ -276,19 +288,26 @@
         (throw e#)))))
 
 (defn wait-for-index
-  "Waits for the `active` flag on the given index ref. Times out after 1000
-  seconds by default. Timeout is in milliseconds."
+  "Waits for the `active` flag on the given index ref. Times out after 2000
+  seconds by default. Timeout is in milliseconds. Concurrent calls with the
+  same index name block, to avoid having a bunch of clients spam the DB polling
+  for activation."
   ([conn index]
-   (wait-for-index conn index 1000000))
+   (wait-for-index conn index 2000000)) ; oh my god how does this take so long
   ([conn index timeout]
-   (util/timeout timeout
-                 (throw+ {:type :timeout})
-                 (loop []
-                   (let [res (query conn (q/get index))]
-                     (if (:active res)
-                       nil
-                       (do
-                         (info "Waiting for index" (expr->data index))
-                               ;(str "\n" (with-out-str (pprint res))))
-                         (Thread/sleep 5000)
-                         (recur))))))))
+   ; this is probably bad and I should probably feel bad, but the interning/GC
+   ; logic is *right there*...
+   (info "sync on" (pr-str (expr->data index)))
+   (locking (.intern (str "jepsen.faunadb.query/wait-for-index/"
+                          (pr-str (expr->data index))))
+     (util/timeout timeout
+                   (throw+ {:type :timeout})
+                   (loop []
+                     (let [res (query conn (q/get index))]
+                       (if (:active res)
+                         nil
+                         (do
+                           (info "Waiting for index" (expr->data index))
+                             ; (str "\n" (with-out-str (pprint res))))
+                           (Thread/sleep 10000)
+                           (recur)))))))))
