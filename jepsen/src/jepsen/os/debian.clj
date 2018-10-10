@@ -146,7 +146,8 @@
 
       (c/su
         ; Packages!
-        (install [:wget
+        (install [:apt-transport-https
+                  :wget
                   :curl
                   :vim
                   :man-db
