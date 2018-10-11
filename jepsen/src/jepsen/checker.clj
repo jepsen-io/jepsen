@@ -344,17 +344,9 @@
         (->> points (map extract) (zipmap points) (into (sorted-map)))))))
 
 (defn set-full-results
-  "Takes a collection of SetFullElements and computes aggregate results:
-
-      :attempt-count
-      :stable-count
-      :lost-count
-      :never-read-count
-      :min-stable-latency
-      :max-stable-latency
-      :min-lost-latency
-      :max-stable-latency"
-  [elements]
+  "Takes options from set-full, and a collection of SetFullElements. Computes
+  agggregate results; see set-full for details."
+  [opts elements]
   (let [rs                (mapv set-full-element-results elements)
         outcomes          (group-by :outcome rs)
         stale             (->> (:stable outcomes)
@@ -367,6 +359,8 @@
         lost-latencies    (keep :lost-latency rs)
         m {:valid?             (cond (< 0 (count (:lost outcomes)))   false
                                      (= 0 (count (:stable outcomes))) :unknown
+                                     (and (:linearizable? opts)
+                                          (< 0 (count stale)))        false
                                      true                             true)
            :attempt-count      (count rs)
            :stable-count       (count (:stable outcomes))
@@ -424,8 +418,47 @@
   invocation of the first read.
 
   The *stable latency* is the time between the add time and the stable time, or
-  0, whichever is greater."
-  []
+  0, whichever is greater.
+
+  Options are:
+
+      :linearizable?    If true, we expect this set to be linearizable, and
+                        stale reads result in an invalid result.
+
+  Computes aggregate results:
+
+      :valid?               False if there were any lost elements.
+                            :unknown if there were no lost *or* stale elements;
+                            e.g. if the test never inserted anything, every
+                            insert crashed, etc. For :linearizable? tests,
+                            false if there were lost *or* stale elements.
+      :attempt-count        Number of attempted inserts
+      :stable-count         Number of elements which had a time after which
+                            they were always found
+      :lost                 Elements which had a time after which
+                            they were never found
+      :lost-count           Number of lost elements
+      :never-read           Elements where no read began after the time when
+                            that element was known to have been inserted.
+                            Includes elements which were never known to have
+                            been inserted.
+      :never-read-count     Number of elements never read
+      :stale                Elements which failed to appear in a read beginning
+                            after we knew the operation completed.
+      :stale-count          Number of stale elements.
+      :worst-stale          Detailed description of stale elements with the
+                            highest stable latencies; e.g. which ones took the
+                            longest to show up.
+      :stable-latencies     Map of quantiles to latencies, in milliseconds, it
+                            took for elements to become stable. 0 indicates the
+                            element was linearizable.
+      :lost-latencies       Map of quantiles to latencies, in milliseconds, it
+                            took for elements to become lost. 0 indicates the
+                            element was known to be inserted, but never
+                            observed."
+  ([]
+   (set-full {:linearizable? false}))
+  ([checker-opts]
   (reify Checker
     (check [this test model history opts]
       ; Build up a map of elements to element states. We track the current set
@@ -465,7 +498,7 @@
                    [{} {}])
            first
            vals
-           set-full-results))))
+           (set-full-results checker-opts))))))
 
 (defn expand-queue-drain-ops
   "Takes a history. Looks for :drain operations with their value being a
