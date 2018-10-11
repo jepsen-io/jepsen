@@ -28,22 +28,15 @@
     (assoc this :conn (f/client node)))
 
   (setup! [this test]
-    (dt/with-retry [attempts 5]
-      (f/query conn
-               (q/when (q/not (q/exists? elements))
-                 (q/create-class {:name elements-name})))
-      (f/query conn
-               (q/when (q/not (q/exists? idx))
-                 (q/create-index {:name   idx-name
-                                  :source elements
-                                  ; :partitions 1
-                                  :values [{:field ["data" "value"]}]})))
-      (catch com.faunadb.client.errors.UnavailableException e
-        (if (< 1 attempts)
-          (do (info "Waiting for cluster ready")
-              (Thread/sleep 1000)
-              (retry (dec attempts)))
-          (throw e)))))
+    (f/with-retry
+      (f/query conn (f/upsert-class {:name elements-name}))
+      (f/query conn (f/upsert-index {:name   idx-name
+                                     :source elements
+                                     :serialized (boolean
+                                                   (:serialized-indices test))
+                                     ; :partitions 1
+                                     :values [{:field ["data" "value"]}]}))
+      (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
     (try

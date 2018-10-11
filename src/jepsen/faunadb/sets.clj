@@ -94,13 +94,13 @@
     (merge
       {:name   "set"
        :client {:client (SetsClient. opts nil)
-                :during (->> (let [a (adds), r (reads)]
-                               (gen/mix [a a r]))
+                :during (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
+                                          (reads))
                              (gen/stagger 1/5))
                 :final (gen/once {:type :invoke, :f :read, :value nil})}
        :checker (checker/compose
                   {:perf     (checker/perf)
-                   :set-full (checker/set-full)
+                   :set-full (checker/set-full {:linearizable? true})
                    ;:timeline (timeline/html)
                    :set      (checker/set)})}
       opts)))
