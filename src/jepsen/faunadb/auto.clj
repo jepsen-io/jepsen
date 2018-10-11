@@ -119,7 +119,7 @@
 
 (defn install!
   "Install a particular version of FaunaDB."
-  [test version]
+  [test]
   (c/su
     (debian/install-jdk8!)
     (debian/add-repo! "faunadb"
@@ -127,7 +127,7 @@
     (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
             :apt-key :add :-)
     (debian/update!)
-    (debian/install {"faunadb" version})
+    (debian/install {"faunadb" (str (:version test) "-0")})
     (when-let [k (:datadog-api-key test)]
       (c/exec (str "DD_API_KEY=" k)
               :bash :-c

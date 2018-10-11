@@ -15,12 +15,12 @@
   3)
 
 (defn db
-  "FaunaDB for a particular version."
-  [version]
+  "FaunaDB DB"
+  []
   (reify db/DB
     (setup! [_ test node]
       (let [width (min replicas (count (:nodes test)))]
-        (auto/install! test version)
+        (auto/install! test)
         (auto/configure! test node width)
         (auto/start! test node)
         (auto/init! test node width)))
@@ -52,7 +52,7 @@
                      " serialized-indices")
                    " nemesis:" (:name (:nemesis opts)))
      :os      debian/os
-     :db      (db "2.5.4-0")
+     :db      (db)
      :client  (:client (:client opts))
      :nemesis (:nemesis (:nemesis opts))
      :generator (gen/phases

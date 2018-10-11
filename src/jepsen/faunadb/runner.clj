@@ -51,6 +51,8 @@
     :default false]
    [nil "--wait-for-convergence" "Don't start operations until data movement has completed"
     :default false]
+   [nil "--version STRING" "Version of FaunaDB to install"
+    :default "2.5.5"]
    [nil "--datadog-api-key KEY" "If provided, sets up Fauna's integrated datadog stats"]
   (jc/repeated-opt "-t" "--test NAME" "Test(s) to run" [] tests)
 
