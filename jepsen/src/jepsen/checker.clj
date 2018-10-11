@@ -321,12 +321,14 @@
         lost-latency   (when lost?
                          (-> lost-time (- known-time) (max 0)
                              util/nanos->ms long))]
-    {:element (:element e)
-     :outcome (cond stable?     :stable
-                    lost?       :lost
-                    never-read  :never-read)
-     :stable-latency stable-latency
-     :lost-latency   lost-latency}))
+    {:element         (:element e)
+     :outcome         (cond stable?     :stable
+                            lost?       :lost
+                      never-read  :never-read)
+     :stable-latency  stable-latency
+     :lost-latency    lost-latency
+     :known           known
+     :last-absent     last-absent}))
 
 (defn frequency-distribution
   "Computes a map of percentiles (0--1, not 0--100, we're not monsters) of a
@@ -355,6 +357,12 @@
   [elements]
   (let [rs                (mapv set-full-element-results elements)
         outcomes          (group-by :outcome rs)
+        stale             (->> (:stable outcomes)
+                               (filter (comp pos? :stable-latency)))
+        worst-stale       (->> stale
+                               (sort-by :stable-latency)
+                               reverse
+                               (take 8))
         stable-latencies  (keep :stable-latency rs)
         lost-latencies    (keep :lost-latency rs)
         m {:valid?             (cond (< 0 (count (:lost outcomes)))   false
@@ -365,7 +373,10 @@
            :lost-count         (count (:lost outcomes))
            :lost               (sort (map :element (:lost outcomes)))
            :never-read-count   (count (:never-read outcomes))
-           :never-read         (sort (map :element (:never-read outcomes)))}
+           :never-read         (sort (map :element (:never-read outcomes)))
+           :stale-count        (count stale)
+           :stale              (sort (map :element stale))
+           :worst-stale        worst-stale}
         points [0 0.5 0.95 0.99 1]
         m (if (seq stable-latencies)
             (assoc m :stable-latencies
