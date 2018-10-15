@@ -199,8 +199,11 @@
      p)))
 
 (defn match
-  [e]
-  (Language/Match (expr e)))
+  "Matches everything in an index, or everything matching the given term"
+  ([index]
+   (Language/Match (expr index)))
+  ([index term]
+   (Language/Match (expr index) (expr term))))
 
 (defn for-each
   [c l]
@@ -229,6 +232,25 @@
 (defn select
   [path e]
   (Language/Select (expr path) (expr e)))
+
+(defn union*
+  "Set union"
+  [sets]
+  (Language/Union (c/mapv expr sets)))
+
+(defn union
+  [& sets]
+  (union* sets))
+
+(defn intersection*
+  "Set intersection"
+  [sets]
+  (Language/Intersection (c/mapv expr sets)))
+
+(defn intersection
+  [& sets]
+  (intersection* sets))
+
 
 (defn -
   [& exprs]

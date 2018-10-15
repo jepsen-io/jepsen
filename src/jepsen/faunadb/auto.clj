@@ -8,6 +8,7 @@
                     [client :as client]
                     [util :as util]
                     [control :as c :refer [|]]]
+            [jepsen.control.net :as cn]
             [jepsen.faunadb.client :as f]
             [jepsen.os.debian :as debian]
             [jepsen.control.util :as cu]))
@@ -54,7 +55,7 @@
   "Systemd status for FaunaDB"
   []
   (let [msg (try
-              (c/exec :service :faunadb :status)
+              (c/su (c/exec :service :faunadb :status))
               (catch RuntimeException e
                 (let [m (.getMessage e)]
                   (if (re-find #"returned non-zero exit status 3" m)
@@ -157,35 +158,29 @@
   [test node replicas]
   (info "Configuring" node)
   (c/su
-    ; Systemd init file
-   ;(c/exec :echo (-> "faunadb.conf"
-   ;                  io/resource
-   ;                  slurp)
-   ;        :> "/etc/init/faunadb.conf")
-   ;(c/exec :systemctl :daemon-reload)
+    (let [ip (cn/local-ip)]
+      ; Defaults
+      (c/exec :echo (-> "faunadb.defaults" io/resource slurp)
+              :> "/etc/default/faunadb")
 
-   ; Defaults
-   (c/exec :echo (-> "faunadb.defaults" io/resource slurp)
-           :> "/etc/default/faunadb")
-
-   ; Fauna config
-   (c/exec :echo
-           (yaml/generate-string
-            (merge
-             (yaml/parse-string (-> "faunadb.yml"
-                                    io/resource
-                                    slurp))
-             {:auth_root_key f/root-key
-              :network_coordinator_http_address node
-              :network_broadcast_address node
-              :network_datacenter_name (str/join ["replica-" (replica test node replicas)])
-              :network_host_id node
-              :network_listen_address node
-              :storage_transaction_log_nodes (log-configuration test node replicas)}
-             (when (:datadog-api-key test)
-               {:stats_host "localhost"
-                :stats_port 8125})))
-            :> "/etc/faunadb.yml")))
+      ; Fauna config
+      (c/exec :echo
+              (yaml/generate-string
+                (merge
+                  (yaml/parse-string (-> "faunadb.yml"
+                                         io/resource
+                                         slurp))
+                  {:auth_root_key                  f/root-key
+                   :network_coordinator_http_address ip
+                   :network_broadcast_address      node
+                   :network_datacenter_name        (str/join ["replica-" (replica test node replicas)])
+                   :network_host_id                node
+                   :network_listen_address         ip
+                   :storage_transaction_log_nodes  (log-configuration test node replicas)}
+                  (when (:datadog-api-key test)
+                    {:stats_host "localhost"
+                     :stats_port 8125})))
+              :> "/etc/faunadb.yml"))))
 
 (defn teardown!
   "Gracefully stops FaunaDB and removes data files"

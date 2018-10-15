@@ -12,6 +12,7 @@
             [jepsen.nemesis.time :as nt]
             [jepsen.fauna :as fauna]
             [jepsen.faunadb [bank :as bank]
+                            [g2 :as g2]
                             [register :as register]
                             [sets :as sets]
                             [pages :as pages]
@@ -23,6 +24,7 @@
    "register"   register/test
    "bank"       bank/test
    "bank-index" bank/index-test
+   "g2"         g2/test
    "pages"      pages/test})
 
 (def nemeses

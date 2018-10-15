@@ -14,12 +14,14 @@
                                      Value$StringV
                                      Value$BooleanV
                                      Types)
+           (com.faunadb.client.errors UnavailableException)
            (com.faunadb.client.query Language
                                      Expr)
            (com.faunadb.client.query Fn$Unescaped
                                      Fn$UnescapedObject
                                      Fn$UnescapedArray)
            (com.fasterxml.jackson.databind.node NullNode)
+           (java.io IOException)
            (org.asynchttpclient Dsl))
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -287,6 +289,24 @@
             (~'retry (dec tries#)))
         (throw e#)))))
 
+(defmacro with-errors
+  "Takes an operation, a set of idempotent operation :fs, and a body. Evaluates
+  body; catches common Fauna exceptions and maps them to appropriate :fail or
+  :info results."
+  [op idempotent & body]
+  `(let [type# (if (~idempotent (:f ~op)) :fail :info)]
+     (try
+       ~@body
+       (catch UnavailableException e#
+         (assoc ~op :type ~type, :error [:unavailable (.getMessage e#)]))
+
+       (catch java.util.concurrent.TimeoutException e#
+         (assoc ~op :type ~type, :error [:timeout (.getMessage e#)]))
+
+       (catch IOException e#
+         (assoc ~op :type ~type, :error [:io (.getMessage e#)])))))
+
+
 (defn wait-for-index
   "Waits for the `active` flag on the given index ref. Times out after 2000
   seconds by default. Timeout is in milliseconds. Concurrent calls with the
@@ -297,7 +317,6 @@
   ([conn index timeout]
    ; this is probably bad and I should probably feel bad, but the interning/GC
    ; logic is *right there*...
-   (info "sync on" (pr-str (expr->data index)))
    (locking (.intern (str "jepsen.faunadb.query/wait-for-index/"
                           (pr-str (expr->data index))))
      (util/timeout timeout
