@@ -298,13 +298,13 @@
      (try
        ~@body
        (catch UnavailableException e#
-         (assoc ~op :type ~type, :error [:unavailable (.getMessage e#)]))
+         (assoc ~op :type type#, :error [:unavailable (.getMessage e#)]))
 
        (catch java.util.concurrent.TimeoutException e#
-         (assoc ~op :type ~type, :error [:timeout (.getMessage e#)]))
+         (assoc ~op :type type#, :error [:timeout (.getMessage e#)]))
 
        (catch IOException e#
-         (assoc ~op :type ~type, :error [:io (.getMessage e#)])))))
+         (assoc ~op :type type#, :error [:io (.getMessage e#)])))))
 
 
 (defn wait-for-index
