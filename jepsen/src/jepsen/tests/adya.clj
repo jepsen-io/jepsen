@@ -1,4 +1,4 @@
-(ns jepsen.adya
+(ns jepsen.tests.adya
   "Generators and checkers for tests of Adya's proscribed behaviors for
   weakly-consistent systems. See http://pmg.csail.mit.edu/papers/adya-phd.pdf"
   (:require [jepsen [client :as client]
