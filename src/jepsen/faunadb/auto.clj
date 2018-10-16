@@ -4,6 +4,8 @@
             [clojure.tools.logging :refer :all]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.edn :as edn]
+            [clojure.pprint :refer [pprint]]
             [jepsen [core :as jepsen]
                     [client :as client]
                     [util :as util]
@@ -12,6 +14,69 @@
             [jepsen.faunadb.client :as f]
             [jepsen.os.debian :as debian]
             [jepsen.control.util :as cu]))
+
+(def data-dir
+  "Where does FaunaDB store data files?"
+  "/var/lib/faunadb")
+
+(def log-dir
+  "Directory for fauna logs"
+  "/var/log/faunadb")
+
+; FaunaDB setup is really slow, and we haven't been able to get tests to launch
+; in under 8 minutes or so. To work around that, we're gonna do something kinda
+; ugly: cache the data files from a clean cluster in a local directory, and
+; copy them into place to speed up initial convergence.
+
+(def cache-dir
+  "A directory used to cache the database state"
+  "/tmp/jepsen/faunadb-cache")
+
+(def cache-equivalency-keys
+  "What keys from a test define whether two caches are equivalent?"
+  [:version
+   :nodes
+   :replicas])
+
+(defn cache-equivalent?
+  "Are two tests equivalent for purposes of the cache?"
+  [test-1 test-2]
+  (let [a (select-keys test-1 cache-equivalency-keys)
+        b (select-keys test-2 cache-equivalency-keys)]
+    (info "cache equivalent?" a b)
+    (= a b)))
+
+(defn cached-test
+  "Returns the test map cached on the current node, or nil if no cache exists."
+  []
+  (try (edn/read-string (c/exec :cat (str cache-dir "/test.edn")))
+       (catch RuntimeException e)))
+
+(defn cache-valid?
+  "Do we have a cache that would work for this test?"
+  [test]
+  (cache-equivalent? test (cached-test)))
+
+(defn build-cache!
+  "Builds a cached copy of the database state by tarring up all the files in
+  /var/lib/faunadb, and adding our test map. Wipes out any existing cache."
+  [test]
+  (info "Building FaunaDB data cache")
+  (c/su
+    (c/exec :rm :-rf cache-dir)
+    (c/exec :mkdir :-p cache-dir)
+    (c/exec :cp :-a data-dir (str cache-dir "/data"))
+    (c/exec :echo (with-out-str
+                    (pprint (select-keys test cache-equivalency-keys)))
+            :> (str cache-dir "/test.edn"))))
+
+(defn unpack-cache!
+  "Replaces Fauna's data files with the cache"
+  []
+  (info "Unpacking cached FaunaDB data files")
+  (c/su
+    (c/exec :rm :-rf data-dir)
+    (c/exec :cp :-a (str cache-dir "/data") data-dir)))
 
 (defn replicas
   "Returns a list of all the replicas for a given test, e.g. \"replica-0\",
@@ -143,21 +208,20 @@
   (c/su
     (info "Installing JDK")
     (debian/install-jdk8!)
-    (info node "Adding repo")
-    (debian/add-repo! "faunadb"
-                      "deb [arch=all] https://repo.fauna.com/debian stable non-free")
-    (info node "Adding apt key")
+    (info "Adding apt key")
     (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
             :apt-key :add :-)
-    (info node "Debian update")
-    (debian/update!)
-    (info node "Install faunadb")
+    (info "Adding repo")
+    (debian/add-repo! "faunadb"
+                      "deb [arch=all] https://repo.fauna.com/debian stable non-free")
+    (info "Install faunadb")
     (debian/install {"faunadb" (str (:version test) "-0")})
-    (info node "Datadog install")
     (when-let [k (:datadog-api-key test)]
-      (c/exec (str "DD_API_KEY=" k)
-              :bash :-c
-              (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\"")))))
+      (when-not (debian/installed? :datadog-agent)
+        (info "Datadog install")
+        (c/exec (str "DD_API_KEY=" k)
+                :bash :-c
+                (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\""))))))
 
 (defn log-configuration
   "Configure the transaction log for the current topology."
@@ -204,6 +268,7 @@
     (stop! test node)
     ; (debian/uninstall! :faunadb)
     (c/su
-      (c/exec :bash :-c "rm -rf /var/lib/faunadb/*")
-      (c/exec :bash :-c "rm -rf /var/log/faunadb/*"))
+      (c/exec :rm :-rf
+              (c/lit (str data-dir "/*"))
+              (c/lit (str log-dir "/*"))))
     (info node "FaunaDB torn down")))

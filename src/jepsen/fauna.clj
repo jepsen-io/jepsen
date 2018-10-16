@@ -17,8 +17,15 @@
     (setup! [_ test node]
       (auto/install! test)
       (auto/configure! test node)
-      (auto/start! test node)
-      (auto/init! test node))
+      (if (auto/cache-valid? test)
+        (auto/unpack-cache!)
+        ; We have to go through the whole setup process, then we'll build a
+        ; cache for next time
+        (do (auto/start! test node)
+            (auto/init! test node)
+            (auto/stop! test node)
+            (auto/build-cache! test)))
+      (auto/start! test node))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
