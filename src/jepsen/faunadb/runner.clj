@@ -43,7 +43,11 @@
 
 (def opt-spec
   "Command line options for tools.cli"
-  [[nil "--[no-]strong-read" "Force strict reads by performing dummy writes"
+  [["-r" "--replicas NUM" "Number of replicas"
+    :default 3
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "Must be a positive integer"]]
+   [nil "--[no-]strong-read" "Force strict reads by performing dummy writes"
     :default true]
    [nil "--at-query" "Use At queries for certain operations, rather than just reading."
     :default false]
@@ -91,6 +95,16 @@
                [[] #{}])
        first))
 
+(defn validate-replicas
+  "Check that we have enough nodes to support a given replica count"
+  [parsed]
+  (let [opts (:options parsed)]
+    (if (< (count (:nodes opts)) (:replicas opts))
+      (update parsed :errors conj
+              (str "Fewer replicas (" (:replicas opts) ") than nodes ("
+                   (:nodes opts)))
+      parsed)))
+
 (defn test-cmd
   []
   {"test" {:opt-spec (into jc/test-opt-spec opt-spec)
@@ -99,7 +113,8 @@
                          jc/test-opt-fn
                          (jc/rename-options {:nemesis   :nemeses
                                              :nemesis2  :nemeses2
-                                             :test      :test-fns})))
+                                             :test      :test-fns})
+                         validate-replicas))
            :usage (jc/test-usage)
            :run (fn [{:keys [options]}]
                   (pprint options)
@@ -113,7 +128,6 @@
                                    (dissoc :test-fns :nemeses :nemeses2)
                                    (assoc :nemesis nemesis)
                                    test-fn
-                                   log-test
                                    jepsen/run!)]
                       (when-not (:valid? (:results test))
                         (System/exit 1)))))}})

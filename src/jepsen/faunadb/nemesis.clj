@@ -15,10 +15,10 @@
             [clojure.tools.logging :refer :all]))
 
 ;; duration between interruptions
-(def nemesis-delay 5) ; seconds
+(def nemesis-delay 60) ; seconds
 
 ;; duration of an interruption
-(def nemesis-duration 5) ; seconds
+(def nemesis-duration 60) ; seconds
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
@@ -116,10 +116,10 @@
 ; random partitions
 (defn parts
   []
-  {:name "parts"
-   :generator (nemesis-single-gen)
-   :nemesis (nemesis/partition-random-halves)
-   :clocks false})
+  (merge (nemesis-single-gen)
+         {:name "parts"
+          :nemesis (nemesis/partition-random-halves)
+          :clocks false}))
 
 ;; start/stop server
 (defn startstop

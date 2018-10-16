@@ -251,7 +251,6 @@
   [& sets]
   (intersection* sets))
 
-
 (defn -
   [& exprs]
   (Language/Subtract (c/mapv expr exprs)))

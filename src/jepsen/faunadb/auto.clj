@@ -13,6 +13,27 @@
             [jepsen.os.debian :as debian]
             [jepsen.control.util :as cu]))
 
+(defn replicas
+  "Returns a list of all the replicas for a given test, e.g. \"replica-0\",
+  \"replica-1\", ..."
+  [test]
+  (->> test :replicas range (map (partial str "replica-"))))
+
+(defn replica
+  "Returns the index of the replica to which the node belongs. Tests have a
+  :replica key, which indicates the number of replicas we would like to have."
+  [test node]
+  (let [replicas (:replicas test)]
+    (str "replica-"
+         (if (= 1 replicas)
+           0
+           (mod (.indexOf (:nodes test) node) replicas)))))
+
+(defn nodes-by-replica
+  "Constructs a map of replica names to the nodes in each replica."
+  [test]
+  (->> test :nodes (group-by (partial replica test))))
+
 (defn wait-for-replication
   "Blocks until local node has completed data movement."
   [node]
@@ -24,7 +45,7 @@
 
 (defn init!
   "Sets up cluster on node. Must be called on all nodes in test concurrently."
-  [test node replicas]
+  [test node]
   (when (= node (jepsen/primary test))
     (info node "initializing FaunaDB cluster")
     (c/exec :faunadb-admin :init))
@@ -36,14 +57,11 @@
   (jepsen/synchronize test)
 
   (when (= node (jepsen/primary test))
-    (info node (str/join ["creating " replicas " replicas"]))
-    (if (not= 1 replicas)
+    (info node (str/join ["creating " (:replicas test) " replicas"]))
+    (when (< 1 (:replicas test))
       (c/exec :faunadb-admin
               :update-replication
-              (mapv
-               (fn [i]
-                 (str/join ["replica-" i]))
-               (range replicas))))
+              (replicas test)))
     (when (:wait-for-convergence test)
       (wait-for-replication node)
       (info node "Replication complete")))
@@ -121,41 +139,37 @@
 (defn install!
   "Install a particular version of FaunaDB."
   [test]
+  (info "Installing faunadb")
   (c/su
+    (info "Installing JDK")
     (debian/install-jdk8!)
+    (info node "Adding repo")
     (debian/add-repo! "faunadb"
                       "deb [arch=all] https://repo.fauna.com/debian stable non-free")
+    (info node "Adding apt key")
     (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
             :apt-key :add :-)
+    (info node "Debian update")
     (debian/update!)
+    (info node "Install faunadb")
     (debian/install {"faunadb" (str (:version test) "-0")})
+    (info node "Datadog install")
     (when-let [k (:datadog-api-key test)]
       (c/exec (str "DD_API_KEY=" k)
               :bash :-c
               (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\"")))))
 
-; TODO: clarify exactly what modulo logic is going on for logs and replicas.
-; How are clusters laid out?
 (defn log-configuration
   "Configure the transaction log for the current topology."
-  [test node replicas]
-  (if (= 1 replicas)
+  [test node]
+  ; TODO: why don't we provide multiple nodes when there's only one replica?
+  (if (= 1 (:replicas test))
     [[(jepsen/primary test)]]
-    (vals
-     (group-by (fn [n]
-                 (mod (+ 1 (.indexOf (:nodes test) n)) replicas))
-               (:nodes test)))))
-
-(defn replica
-  "Returns the index of the replica to which the node belongs."
-  [test node replicas]
-  (if (= 1 replicas)
-    0
-    (mod (.indexOf (:nodes test) node) replicas)))
+    (vals (nodes-by-replica test))))
 
 (defn configure!
   "Configure FaunaDB."
-  [test node replicas]
+  [test node]
   (info "Configuring" node)
   (c/su
     (let [ip (cn/local-ip)]
@@ -173,10 +187,10 @@
                   {:auth_root_key                  f/root-key
                    :network_coordinator_http_address ip
                    :network_broadcast_address      node
-                   :network_datacenter_name        (str/join ["replica-" (replica test node replicas)])
+                   :network_datacenter_name        (replica test node)
                    :network_host_id                node
                    :network_listen_address         ip
-                   :storage_transaction_log_nodes  (log-configuration test node replicas)}
+                   :storage_transaction_log_nodes  (log-configuration test node)}
                   (when (:datadog-api-key test)
                     {:stats_host "localhost"
                      :stats_port 8125})))

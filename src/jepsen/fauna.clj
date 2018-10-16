@@ -10,20 +10,15 @@
             [jepsen.os.debian :as debian]
             [jepsen.faunadb.auto :as auto]))
 
-(def replicas
-  "The number of replicas in the FaunaDB cluster."
-  3)
-
 (defn db
   "FaunaDB DB"
   []
   (reify db/DB
     (setup! [_ test node]
-      (let [width (min replicas (count (:nodes test)))]
-        (auto/install! test)
-        (auto/configure! test node width)
-        (auto/start! test node)
-        (auto/init! test node width)))
+      (auto/install! test)
+      (auto/configure! test node)
+      (auto/start! test node)
+      (auto/init! test node))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
