@@ -15,10 +15,10 @@
             [clojure.tools.logging :refer :all]))
 
 ;; duration between interruptions
-(def nemesis-delay 60) ; seconds
+(def nemesis-delay 10) ; seconds
 
 ;; duration of an interruption
-(def nemesis-duration 60) ; seconds
+(def nemesis-duration 120) ; seconds
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
@@ -113,13 +113,68 @@
           :nemesis nemesis/noop
           :clocks false}))
 
-; random partitions
+; random half partitions
 (defn parts
   []
   (merge (nemesis-single-gen)
          {:name "parts"
           :nemesis (nemesis/partition-random-halves)
           :clocks false}))
+
+;; majorities ring
+(defn majring
+  []
+  (merge (nemesis-single-gen)
+         {:name "majring"
+          :nemesis (nemesis/partition-majorities-ring)
+          :clocks false}))
+
+(defn single-node-partition-start
+  "A generator for a network partition start operation, which isolates a single
+  node from all other nodes."
+  [test process]
+  {:type  :info
+   :f     :start
+   :value (->> test :nodes nemesis/split-one nemesis/complete-grudge)
+   :partition-type :single-node})
+
+(defn intra-replica-partition-start
+  "A generator for a network partition start operation, which creates a
+  partition inside a single replica. Nodes from other replicas have
+  uninterrupted connectivity to nodes in the affected replica."
+  [test process]
+  (let [[replica nodes] (rand-nth (vec (auto/nodes-by-replica test)))
+        grudge (-> nodes shuffle nemesis/bisect nemesis/complete-grudge)]
+    {:type :info
+     :f :start
+     :value grudge
+     :partition-type [:intra-replica replica]}))
+
+(defn inter-replica-partition-start
+  "A generator for a network partition start operation, which creates a
+  partition between replicas, diving a single replica from the others."
+  [test process]
+  (let [grudge (->> test
+                    auto/nodes-by-replica ; Map of replicas to groups of nodes
+                    vals            ; List of groups of nodes
+                    shuffle         ; List of groups of nodes
+                    nemesis/bisect  ; [majority list of groups, minority]
+                    (map flatten)   ; [majority nodes, minority nodes]
+                    nemesis/complete-grudge)] ; Grudge
+    {:type :info, :f :start, :value grudge, :partition-type :inter-replica}))
+
+(defn partitions
+  "An assortment of network partitions"
+  []
+  {:during (gen/seq (cycle [(gen/sleep nemesis-delay)
+                            (gen/mix [intra-replica-partition-start
+                                      inter-replica-partition-start
+                                      single-node-partition-start
+                                      ])
+                            (gen/sleep nemesis-duration)
+                            {:type :info, :f :stop}]))
+   :nemesis (nemesis/partitioner nil)
+   :final (gen/once {:type :info, :f :stop})})
 
 ;; start/stop server
 (defn startstop
@@ -137,14 +192,6 @@
           :nemesis (nemesis/node-start-stopper (comp (partial take n) shuffle)
                                               auto/kill!
                                               auto/start!)
-          :clocks false}))
-
-;; majorities ring
-(defn majring
-  []
-  (merge (nemesis-single-gen)
-         {:name "majring"
-          :nemesis (nemesis/partition-majorities-ring)
           :clocks false}))
 
 (defn slowing

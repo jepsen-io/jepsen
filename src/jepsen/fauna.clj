@@ -17,6 +17,8 @@
     (setup! [_ test node]
       (auto/install! test)
       (auto/configure! test node)
+      (when (:clear-cache test)
+        (auto/clear-cache!))
       (if (auto/cache-valid? test)
         (auto/unpack-cache!)
         ; We have to go through the whole setup process, then we'll build a

@@ -57,13 +57,20 @@
   [test]
   (cache-equivalent? test (cached-test)))
 
+(defn clear-cache!
+  "Wipe out the cache on this node"
+  []
+  (info "Clearing FaunaDB data cache")
+  (c/su
+    (c/exec :rm :-rf cache-dir)))
+
 (defn build-cache!
   "Builds a cached copy of the database state by tarring up all the files in
   /var/lib/faunadb, and adding our test map. Wipes out any existing cache."
   [test]
   (info "Building FaunaDB data cache")
+  (clear-cache!)
   (c/su
-    (c/exec :rm :-rf cache-dir)
     (c/exec :mkdir :-p cache-dir)
     (c/exec :cp :-a data-dir (str cache-dir "/data"))
     (c/exec :echo (with-out-str
@@ -224,12 +231,22 @@
                 (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\""))))))
 
 (defn log-configuration
-  "Configure the transaction log for the current topology."
+  "Configuration for the transaction log for the current topology."
   [test node]
   ; TODO: why don't we provide multiple nodes when there's only one replica?
   (if (= 1 (:replicas test))
     [[(jepsen/primary test)]]
-    (vals (nodes-by-replica test))))
+    ; We want a collection of log partitions; each partition is a list of
+    ; nodes. Each partition should have one node from each replica. We build up
+    ; partitions incrementally by pulling nodes off of the set of replicas.
+    (loop [partitions []
+           replicas (vals (nodes-by-replica test))]
+      (if (some empty? replicas)
+        ; We're out of nodes to assign
+        partitions
+        ; Make a new partition with the first node from each replica
+        (recur (conj partitions (map first replicas))
+               (map next replicas))))))
 
 (defn configure!
   "Configure FaunaDB."

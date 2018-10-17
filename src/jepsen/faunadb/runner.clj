@@ -31,6 +31,7 @@
   "Supported nemeses"
   {"none"              `(jfn/none)
    "parts"             `(jfn/parts)
+   "partitions"        `(jfn/partitions)
    "majority-ring"     `(jfn/majring)
    "strobe-skews"      `(jfn/strobe-skews)
    "small-skews"       `(jfn/small-skews)
@@ -43,7 +44,9 @@
 
 (def opt-spec
   "Command line options for tools.cli"
-  [["-r" "--replicas NUM" "Number of replicas"
+  [[nil "--clear-cache" "Clear the fast-startup cache and force a rebuild of the cluster"
+    :default false]
+   ["-r" "--replicas NUM" "Number of replicas"
     :default 3
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be a positive integer"]]
