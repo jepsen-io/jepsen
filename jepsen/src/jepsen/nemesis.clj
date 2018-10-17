@@ -94,23 +94,26 @@
 
 (defn partitioner
   "Responds to a :start operation by cutting network links as defined by
-  (grudge nodes), and responds to :stop by healing the network."
-  [grudge]
-  (reify Nemesis
-    (setup! [this test]
-      (net/heal! (:net test) test)
-      this)
+  (grudge nodes), and responds to :stop by healing the network. The grudge to
+  apply is either taken from the :value of a :start op, or if that is nil, by
+  calling (grudge (:nodes test))"
+  ([] (partitioner nil))
+  ([grudge]
+   (reify Nemesis
+     (setup! [this test]
+       (net/heal! (:net test) test)
+       this)
 
-    (invoke! [this test op]
-      (case (:f op)
-        :start (let [grudge (grudge (:nodes test))]
-                 (net/drop-all! test grudge)
-                 (assoc op :value [:isolated grudge]))
-        :stop  (do (net/heal! (:net test) test)
-                   (assoc op :value :network-healed))))
+     (invoke! [this test op]
+       (case (:f op)
+         :start (let [grudge (or (:value op) (grudge (:nodes test)))]
+                  (net/drop-all! test grudge)
+                  (assoc op :value [:isolated grudge]))
+         :stop  (do (net/heal! (:net test) test)
+                    (assoc op :value :network-healed))))
 
-    (teardown! [this test]
-      (net/heal! (:net test) test))))
+     (teardown! [this test]
+       (net/heal! (:net test) test)))))
 
 (defn partition-halves
   "Responds to a :start operation by cutting the network into two halves--first
