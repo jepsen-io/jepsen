@@ -36,7 +36,7 @@
       (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
-    (try
+    (f/with-errors op #{:read}
       (case (:f op)
         :add
         (let [v (:value op)]
@@ -59,14 +59,7 @@
                             ; Just a regular read
                             (q/match idx)))
              (into (sorted-set))
-             (assoc op :type :ok, :value)))
-      (catch java.util.concurrent.ExecutionException e
-        (if-let [c (.getCause e)]
-          (try
-            (throw c)
-            (catch com.faunadb.client.errors.UnavailableException e
-              (assoc op :type :info, :error (.getMessage e))))
-          (throw e)))))
+             (assoc op :type :ok, :value)))))
 
   (teardown! [this test])
 

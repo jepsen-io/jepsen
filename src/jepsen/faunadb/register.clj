@@ -70,24 +70,25 @@
 
 (defn register-test-base
   [opts]
-  (fauna/basic-test
-   (merge
-    {:client {:client (:client opts)
-              :during (indy/concurrent-generator
-                       10
-                       (range)
-                       (fn [k]
-                         (->> (gen/reserve 5 (gen/mix [w cas cas]) r)
-                              (gen/delay-til 1/2)
-                              (gen/stagger 0.1)
-                              (gen/limit 100))))}
-     :checker (checker/compose
-               {:perf    (checker/perf)
-                :details (indy/checker
-                          (checker/compose
-                           {:timeline     (timeline/html)
-                            :linearizable (checker/linearizable)}))})}
-    (dissoc opts :client))))
+  (let [n (count (:nodes opts))]
+    (fauna/basic-test
+      (merge
+        {:client {:client (:client opts)
+                  :during (indy/concurrent-generator
+                            (* 2 n)
+                            (range)
+                            (fn [k]
+                              (->> (gen/reserve n (gen/mix [w cas cas]) r)
+                                   (gen/delay-til 1/2)
+                                   (gen/stagger 0.1)
+                                   (gen/limit 100))))}
+         :checker (checker/compose
+                    {:perf    (checker/perf)
+                     :details (indy/checker
+                                (checker/compose
+                                  {:timeline     (timeline/html)
+                                   :linearizable (checker/linearizable)}))})}
+        (dissoc opts :client)))))
 
 (defn test
   [opts]
