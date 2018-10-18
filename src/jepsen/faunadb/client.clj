@@ -43,26 +43,26 @@
   (Field/as Codec/LONG))
 
 (defn client
-  "Constructs a Fauna client"
-  [node]
-  (.build
-    (doto (FaunaClient/builder)
-      (.withHttpClient
-        (Dsl/asyncHttpClient
-          (.. (Dsl/config)
-              ; By default this chooses cores * 2 and blows out process limits
-              (setIoThreadsCount 1)
-              (build))))
-      (.withEndpoint (str "http://" node ":8443"))
-      (.withSecret root-key))))
+  "Constructs a Fauna client for the given node. If a path, like
+  \"/linearized\", is provided, makes requests to that path instead of /."
+  ([node]
+   (client node ""))
+  ([node path]
+   (.build
+     (doto (FaunaClient/builder)
+       (.withHttpClient
+         (Dsl/asyncHttpClient
+           (.. (Dsl/config)
+               ; By default this chooses cores * 2 and blows out process limits
+               (setIoThreadsCount 1)
+               (build))))
+       (.withEndpoint (str "http://" node ":8443" path))
+       (.withSecret root-key)))))
 
 (defn linearized-client
   "Constructs a Fauna client for the /linearized endpoint"
   [node]
-  (.build (doto (FaunaClient/builder)
-            (.withEndpoint (str "http://" node ":8443/linearized"))
-            (.withSecret root-key))))
-
+  (client node "/linearized"))
 
 (defn expr->json
   "Massage expressions back into something approximating json"
