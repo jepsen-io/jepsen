@@ -465,6 +465,7 @@
       ; of ongoing reads as well, so we can map completions back to
       ; invocations.
       (->> history
+           (r/filter (comp number? :process)) ; Ignore the nemesis
            (reduce (fn red [[elements reads] op]
                      (let [v (:value op)
                            p (:process op)]
