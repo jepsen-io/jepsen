@@ -18,7 +18,7 @@
 (def nemesis-delay 10) ; seconds
 
 ;; duration of an interruption
-(def nemesis-duration 120) ; seconds
+(def nemesis-duration 100) ; seconds
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 

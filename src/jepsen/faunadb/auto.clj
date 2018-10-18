@@ -138,7 +138,7 @@
       (wait-for-replication node)
       (info node "Replication complete")))
 
-  (jepsen/synchronize test 600) ; this is slooooooowwww
+  (jepsen/synchronize test 1200) ; this is slooooooowwww
   :initialized)
 
 (defn status

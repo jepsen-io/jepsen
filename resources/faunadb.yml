@@ -11,6 +11,9 @@ stats_host: localhost
 stats_port: 8125
 log_level: debug
 
+# Speed up timeouts?
+network_round_trip_time_ms: 50
+
 # Speeds up time to indexes being active, maybe? It's hard to tell
 # accelerate_indexes: false
 
