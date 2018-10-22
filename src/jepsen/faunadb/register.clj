@@ -30,38 +30,38 @@
         (f/query conn (q/create-class {:name "test"})))))
 
   (invoke! [this test op]
-    ; TODO: destructuring bind
-    (let [[id val'] (:value op)
-          id*  (q/ref "test" id)]
-      (case (:f op)
-        :read (let [v (f/query conn
+    (f/with-errors op #{:read}
+      (let [[id val'] (:value op)
+            id*  (q/ref "test" id)]
+        (case (:f op)
+          :read (let [v (f/query conn
                                  (q/if (q/exists? id*)
                                    (q/select ["data" "register"]
                                              (q/get id*))))]
-                (assoc op
-                       :type :ok
-                       :value (indy/tuple id v)))
+                  (assoc op
+                         :type :ok
+                         :value (indy/tuple id v)))
 
-        :write (do (-> conn
-                       (f/query
-                         (q/if (q/exists? id*)
-                           (q/update id* {:data {:register val'}})
-                           (q/create id* {:data {:register val'}}))))
-                   (assoc op :type :ok))
+          :write (do (-> conn
+                         (f/query
+                           (q/if (q/exists? id*)
+                             (q/update id* {:data {:register val'}})
+                             (q/create id* {:data {:register val'}}))))
+                     (assoc op :type :ok))
 
-        :cas (let [[expected new] val'
-                   cas (f/query
-                         conn
-                         (q/if (q/exists? id*)
-                           (q/let [reg (q/select ["data" "register"]
-                                                 (q/get id*))]
-                             (q/if (q/= expected reg)
-                               (q/do
-                                 (q/update id* {:data {:register new}})
-                                 true)
-                               false))
-                           false))]
-               (assoc op :type (if cas :ok :fail))))))
+          :cas (let [[expected new] val'
+                     cas (f/query
+                           conn
+                           (q/if (q/exists? id*)
+                             (q/let [reg (q/select ["data" "register"]
+                                                   (q/get id*))]
+                               (q/if (q/= expected reg)
+                                 (q/do
+                                   (q/update id* {:data {:register new}})
+                                   true)
+                                 false))
+                             false))]
+                 (assoc op :type (if cas :ok :fail)))))))
 
   (teardown! [this test])
 

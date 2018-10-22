@@ -8,7 +8,8 @@
              [reconnect :as rc]
              [util :as util :refer [letr]]]
             [jepsen.nemesis.time :as nt]
-            [jepsen.faunadb.auto :as auto]
+            [jepsen.faunadb [auto :as auto]
+                            [topology :as topo]]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -143,7 +144,8 @@
   partition inside a single replica. Nodes from other replicas have
   uninterrupted connectivity to nodes in the affected replica."
   [test process]
-  (let [[replica nodes] (rand-nth (vec (auto/nodes-by-replica test)))
+  (let [[replica nodes] (rand-nth (vec (topo/nodes-by-replica
+                                         @(:topology test))))
         grudge (-> nodes shuffle nemesis/bisect nemesis/complete-grudge)]
     {:type :info
      :f :start
@@ -154,8 +156,8 @@
   "A generator for a network partition start operation, which creates a
   partition between replicas, diving a single replica from the others."
   [test process]
-  (let [grudge (->> test
-                    auto/nodes-by-replica ; Map of replicas to groups of nodes
+  (let [grudge (->> @(:topology test)
+                    topo/nodes-by-replica ; Map of replicas to groups of nodes
                     vals            ; List of groups of nodes
                     shuffle         ; List of groups of nodes
                     nemesis/bisect  ; [majority list of groups, minority]
@@ -166,7 +168,8 @@
 (defn partitions
   "An assortment of network partitions"
   []
-  {:during (gen/seq (cycle [(gen/sleep nemesis-delay)
+  {:clocks false
+   :during (gen/seq (cycle [(gen/sleep nemesis-delay)
                             (gen/mix [intra-replica-partition-start
                                       inter-replica-partition-start
                                       single-node-partition-start
@@ -174,7 +177,7 @@
                             (gen/sleep nemesis-duration)
                             {:type :info, :f :stop}]))
    :nemesis (nemesis/partitioner nil)
-   :final (gen/once {:type :info, :f :stop})})
+   :final   (gen/once {:type :info, :f :stop})})
 
 ;; start/stop server
 (defn startstop
@@ -295,3 +298,79 @@
                                 (update :nemesis slowing 0.5)))
 (defn huge-skews         [] (-> (skew "huge-skews" 5)
                                 (update :nemesis slowing 5)))
+
+(defn some-status
+  "Returns the status of the cluster from some node in the test. Tries to
+  choose one randomly."
+  [test]
+  (->> (c/on-nodes test (fn [test node] (auto/status)))
+       vals
+       (remove nil?)
+       vec
+       rand-nth))
+
+(defn node-op
+  "A generator for a random node transition."
+  [test process]
+  (rand-nth (vec (topo/ops test))))
+
+(defn membership-nemesis
+  "Adds and removes nodes from the cluster."
+  []
+  (reify nemesis/Nemesis
+    (setup! [this test] this)
+
+    (invoke! [this test op]
+      ; (auto/refresh-topology! test)
+      (let [v    (:value op)
+            topo @(:topology test)
+            topo' (topo/apply-op topo op)
+            res (case (:f op)
+                  :remove-log-node
+                  (c/on-nodes test
+                              (fn [test node]
+                                (auto/configure! test topo' node)
+                                ;(locking topo'
+                                ; Stagger these so we have a chance to see
+                                ; something interesting happen. Doing them
+                                ; serially takes for evvvvver
+                                (Thread/sleep (rand-int 10000))
+                                (auto/stop! test node)
+                                (auto/start! test node)
+                                :reconfigured))
+
+                  :add-node (c/on-nodes test [(:node v)]
+                                        (fn [test node]
+                                          (auto/configure! test topo' node)
+                                          (auto/start! test node)
+                                          (auto/join! (:join v))
+                                          (info :status (auto/status))
+                                          :added))
+
+                  :remove-node
+                  (c/on-nodes test [(->> (:nodes topo)
+                                         (map :node)
+                                         (remove #{v}) ; Can't remove self
+                                         vec
+                                         rand-nth)]
+                              (fn [test local-node]
+                                (auto/remove-node! v)
+                                (info :status (auto/status))
+                                :removed)))]
+
+        ; Go ahead and update the new topology
+        (reset! (:topology test) topo')
+        ; Asynchronously refresh topology in case it's out of sync
+        (future (auto/refresh-topology! test))
+
+        (assoc op :value res)))
+
+    (teardown! [this test])))
+
+(defn membership
+  "A nemesis package which randomly permutes the set of nodes in the cluster."
+  []
+  {:clocks  false
+   :nemesis (membership-nemesis)
+   :during  (gen/stagger 5 node-op)
+   :final   nil})

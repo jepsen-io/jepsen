@@ -6,6 +6,7 @@
             [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojure.java.io :as io]
+            [unilog.config :as unilog]
             [jepsen [cli :as jc]
                     [core :as jepsen]
                     [web :as web]]
@@ -33,6 +34,7 @@
    "parts"             `(jfn/parts)
    "partitions"        `(jfn/partitions)
    "majority-ring"     `(jfn/majring)
+   "membership"        `(jfn/membership)
    "strobe-skews"      `(jfn/strobe-skews)
    "small-skews"       `(jfn/small-skews)
    "subcritical-skews" `(jfn/subcritical-skews)
@@ -137,6 +139,9 @@
 
 (defn -main
   [& args]
+  ; Don't log every http error plz
+  (unilog/start-logging! {:level     :info
+                          :overrides {"com.faunadb.common.Connection" :error}})
   (jc/run! (merge (jc/serve-cmd)
                   (test-cmd))
            args))

@@ -1,14 +1,15 @@
 (ns jepsen.fauna
   ; TODO: rename to faunadb for consistency
-  (:require
-            [clojure.tools.logging :refer :all]
+  (:require [clojure.tools.logging :refer :all]
+            [clojure.pprint :refer [pprint]]
             [jepsen [cli :as cli]
              [core :as jepsen]
              [db :as db]
              [generator :as gen]
              [tests :as tests]]
             [jepsen.os.debian :as debian]
-            [jepsen.faunadb.auto :as auto]))
+            [jepsen.faunadb [auto :as auto]
+                            [topology :as topo]]))
 
 (defn db
   "FaunaDB DB"
@@ -16,7 +17,7 @@
   (reify db/DB
     (setup! [_ test node]
       (auto/install! test)
-      (auto/configure! test node)
+      (auto/configure! test @(:topology test) node)
       (when (:clear-cache test)
         (auto/clear-cache!))
       (if (auto/cache-valid? test)
@@ -66,5 +67,11 @@
                   (gen/log "Nemesis terminating")
                   (gen/nemesis (:final (:nemesis opts)))
                   ; Final client
-                  (gen/clients (:final (:client opts))))}
+                  (gen/clients (:final (:client opts))))
+     :nonserializable-keys [:topology]
+     ; An atom with the current cluster topology, which is a collection of
+     ; maps, one per active node, with each node having keys:
+     ; :node      The node name
+     ; :replica   The replica this node belongs to
+     :topology (atom (topo/initial-topology opts))}
     (dissoc opts :name :client :nemesis)))

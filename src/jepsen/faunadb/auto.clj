@@ -6,12 +6,14 @@
             [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.pprint :refer [pprint]]
+            [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [core :as jepsen]
                     [client :as client]
                     [util :as util]
                     [control :as c :refer [|]]]
             [jepsen.control.net :as cn]
-            [jepsen.faunadb.client :as f]
+            [jepsen.faunadb [client :as f]
+                            [topology :as topo]]
             [jepsen.os.debian :as debian]
             [jepsen.control.util :as cu]))
 
@@ -85,27 +87,6 @@
     (c/exec :rm :-rf data-dir)
     (c/exec :cp :-a (str cache-dir "/data") data-dir)))
 
-(defn replicas
-  "Returns a list of all the replicas for a given test, e.g. \"replica-0\",
-  \"replica-1\", ..."
-  [test]
-  (->> test :replicas range (map (partial str "replica-"))))
-
-(defn replica
-  "Returns the index of the replica to which the node belongs. Tests have a
-  :replica key, which indicates the number of replicas we would like to have."
-  [test node]
-  (let [replicas (:replicas test)]
-    (str "replica-"
-         (if (= 1 replicas)
-           0
-           (mod (.indexOf (:nodes test) node) replicas)))))
-
-(defn nodes-by-replica
-  "Constructs a map of replica names to the nodes in each replica."
-  [test]
-  (->> test :nodes (group-by (partial replica test))))
-
 (defn wait-for-replication
   "Blocks until local node has completed data movement."
   [node]
@@ -114,6 +95,13 @@
         (info mvmnt)
         (Thread/sleep 5000)
         (recur node))))
+
+(defn join!
+  "Joins this node to the given target node."
+  [target]
+  (c/su
+    (info "joining FaunaDB node" target)
+    (c/exec :faunadb-admin :join target)))
 
 (defn init!
   "Sets up cluster on node. Must be called on all nodes in test concurrently."
@@ -124,16 +112,16 @@
   (jepsen/synchronize test 300)
 
   (when (not= node (jepsen/primary test))
-    (info node "joining FaunaDB cluster")
+    (join! (jepsen/primary test))
     (c/exec :faunadb-admin :join (jepsen/primary test)))
   (jepsen/synchronize test)
 
   (when (= node (jepsen/primary test))
     (info node (str/join ["creating " (:replicas test) " replicas"]))
-    (when (< 1 (:replicas test))
+    (when (< 1 (:replica-count @(:topology test)))
       (c/exec :faunadb-admin
               :update-replication
-              (replicas test)))
+              (topo/replicas @(:topology test))))
     (when (:wait-for-convergence test)
       (wait-for-replication node)
       (info node "Replication complete")))
@@ -141,7 +129,21 @@
   (jepsen/synchronize test 1200) ; this is slooooooowwww
   :initialized)
 
-(defn status
+(defn host-id
+  "The internal Fauna host ID for the given node, or the local node"
+  ([]
+   (c/su (c/exec :faunadb-admin :show-identity)))
+  ([node]
+   (c/su (c/exec :faunadb-admin :host-id node))))
+
+(defn remove-node!
+  "Removes a node from the cluster. Takes a node name and looks up its host
+  ID."
+  [node]
+  (info "Removing" node "from cluster")
+  (c/su (c/exec :faunadb-admin :remove (c/exec :faunadb-admin :host-id node))))
+
+(defn systemd-status
   "Systemd status for FaunaDB"
   []
   (let [msg (try
@@ -161,7 +163,7 @@
   "Is Fauna running?"
   []
   ; I forget how many states systemd has so uhhh let's be conservative
-  (let [[state sub] (status)
+  (let [[state sub] (systemd-status)
         running? (case state
                    "active" (case sub
                               "running" true
@@ -181,6 +183,94 @@
         (RuntimeException. (str "Don't know how to interpret status "
                                 state " (" sub ")"))))
     running?))
+
+(defn status
+  "FaunaDB admin status: a collection of nodes, each of which is a map of
+
+  :replica      e.g. replica-1
+  :status       e.g. :up
+  :state        e.g. :live
+  :worker-id    e.g. 515
+  :log-segment  e.g. Segment-1
+  :address      Node name, e.g. n1
+  :owns         String (for now) fraction
+  :goal         String (for now) fraction
+  :host-id      Unique internal identifier, e.g. 0e7a7ec4-94d4-444f-af0f...
+
+  `nil`, if FaunaDB isn't running."
+  []
+  (when (running?)
+    (->> (c/su (c/exec :faunadb-admin :status))
+         str/split-lines
+         (reduce
+           (fn [[state replica replicas] line]
+             ; Blank lines put is in a ready-for-dc state
+             (if (re-find #"\A\s*\Z" line)
+               [:ready nil replicas]
+
+               (case state
+                 :fresh (if (re-find #"\ALoaded configuration" line)
+                          [:ready nil replicas]
+                          (throw+ {:type :parse-error, :state state, :line line}))
+                 :ready (let [[m replica] (re-find #"\ADatacenter: ([^ ]+?) " line)]
+                          (when-not replica
+                            (throw+
+                              {:type :parse-error, :state state, :line line}))
+                          [:=== replica replicas])
+                 :===   (if (re-find #"\A===+\Z" line)
+                          [:headers replica replicas]
+                          (throw+ {:type :parse-error :state state, :line line}))
+                 :headers (let [split (-> line
+                                          ; This is the cleanest way I can
+                                          ; figure out to deal with the presence
+                                          ; of a space in this field, but no
+                                          ; other field name
+                                          (str/replace "Log Segment" "LogSegment")
+                                          (str/split #"\s+"))]
+                            (if (= split ["Status" "State" "WorkerID"
+                                          "LogSegment" "Address" "Owns" "Goal"
+                                          "HostID"])
+                              [:node replica replicas]
+                              (throw+ {:type :parse-error,
+                                       :state state,
+                                       :line line})))
+                 :node    [:node replica
+                           (conj replicas
+                                 (-> [:status :state :worker-id :log-segment
+                                      :address :owns :goal :host-id]
+                                     (zipmap (str/split line #"\s+"))
+                                     (update :status keyword)
+                                     (update :state keyword)
+                                     (update :worker-id #(Long/parseLong %))
+                                     (assoc :replica replica)))])))
+           [:fresh nil []])
+         last)))
+
+(defn status->topology
+  "Converts a status map to a topology."
+  [status]
+  {:replica-count (count (distinct (map :replica status)))
+   :nodes         (->> status
+                       (remove #(= :removed (:state %)))
+                       (mapv (fn [node]
+                          {:node (:address node)
+                           :state (condp = (:state node)
+                                    :live     :active
+                                    :removed  :removed
+                                    (:state node))
+                           :replica (:replica node)}))
+                        status)})
+
+(defn refresh-topology!
+  "Reloads the topology based on what some randomly selected node thinks it
+  is. Oh, this could go so wrong."
+  [test]
+  (info "Refreshing topology")
+  (let [topo (promise)]
+    (future (c/on-nodes test (fn [test node]
+                               (deliver topo (status->topology (status))))))
+    (reset! (:topology test) @topo)
+    (info "New topology is" (with-out-str (pprint @topo)))))
 
 (defn start!
   "Starts faunadb on node, if it is not already running"
@@ -204,8 +294,8 @@
 (defn stop!
   "Gracefully stops FaunaDB on a node."
   [test node]
+  (info node "Stopping FaunaDB")
   (c/su (c/exec :service :faunadb :stop))
-  (info node "FaunaDB stopped")
   :stopped)
 
 (defn install!
@@ -230,33 +320,19 @@
                 :bash :-c
                 (c/lit "\"$(curl -L https://raw.githubusercontent.com/DataDog/datadog-agent/master/cmd/agent/install_script.sh)\""))))))
 
-(defn log-configuration
-  "Configuration for the transaction log for the current topology."
-  [test node]
-  ; TODO: why don't we provide multiple nodes when there's only one replica?
-  (if (= 1 (:replicas test))
-    [[(jepsen/primary test)]]
-    ; We want a collection of log partitions; each partition is a list of
-    ; nodes. Each partition should have one node from each replica. We build up
-    ; partitions incrementally by pulling nodes off of the set of replicas.
-    (loop [partitions []
-           replicas (vals (nodes-by-replica test))]
-      (if (some empty? replicas)
-        ; We're out of nodes to assign
-        partitions
-        ; Make a new partition with the first node from each replica
-        (recur (conj partitions (map first replicas))
-               (map next replicas))))))
-
 (defn configure!
   "Configure FaunaDB."
-  [test node]
+  [test topo node]
   (info "Configuring" node)
   (c/su
     (let [ip (cn/local-ip)]
       ; Defaults
       (c/exec :echo (-> "faunadb.defaults" io/resource slurp)
               :> "/etc/default/faunadb")
+
+      (info :topo topo)
+      (info :replica (topo/replica topo node))
+      (info :log (topo/log-configuration topo))
 
       ; Fauna config
       (c/exec :echo
@@ -268,10 +344,11 @@
                   {:auth_root_key                  f/root-key
                    :network_coordinator_http_address ip
                    :network_broadcast_address      node
-                   :network_datacenter_name        (replica test node)
+                   :network_datacenter_name        (topo/replica topo node)
                    :network_host_id                node
                    :network_listen_address         ip
-                   :storage_transaction_log_nodes  (log-configuration test node)}
+                   :storage_transaction_log_nodes  (topo/log-configuration
+                                                     topo)}
                   (when (:datadog-api-key test)
                     {:stats_host "localhost"
                      :stats_port 8125})))
