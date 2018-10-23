@@ -7,6 +7,7 @@
             [clojure.edn :as edn]
             [clojure.pprint :refer [pprint]]
             [slingshot.slingshot :refer [try+ throw+]]
+            [dom-top.core :refer [with-retry]]
             [jepsen [core :as jepsen]
                     [client :as client]
                     [util :as util]
@@ -15,7 +16,8 @@
             [jepsen.faunadb [client :as f]
                             [topology :as topo]]
             [jepsen.os.debian :as debian]
-            [jepsen.control.util :as cu]))
+            [jepsen.control.util :as cu])
+  (:import (java.util.concurrent CountDownLatch)))
 
 (def data-dir
   "Where does FaunaDB store data files?"
@@ -136,13 +138,6 @@
   ([node]
    (c/su (c/exec :faunadb-admin :host-id node))))
 
-(defn remove-node!
-  "Removes a node from the cluster. Takes a node name and looks up its host
-  ID."
-  [node]
-  (info "Removing" node "from cluster")
-  (c/su (c/exec :faunadb-admin :remove (c/exec :faunadb-admin :host-id node))))
-
 (defn systemd-status
   "Systemd status for FaunaDB"
   []
@@ -171,6 +166,9 @@
                    "activating" (case sub
                                   "auto-restart" true
                                   nil)
+                   "deactivating" (case sub
+                                    "stop-sigterm" false
+                                    nil)
                    "failed"   (case sub
                                 "Result: signal" false
                                 nil)
@@ -183,6 +181,11 @@
         (RuntimeException. (str "Don't know how to interpret status "
                                 state " (" sub ")"))))
     running?))
+
+(defn parse-percent
+  "Takes a string like 34.2% and returns 0.342"
+  [s]
+  (/ (Double/parseDouble (subs s 0 (dec (.length s)))) 100))
 
 (defn status
   "FaunaDB admin status: a collection of nodes, each of which is a map of
@@ -241,36 +244,80 @@
                                      (zipmap (str/split line #"\s+"))
                                      (update :status keyword)
                                      (update :state keyword)
+                                     (update :owns parse-percent)
+                                     (update :goal parse-percent)
                                      (update :worker-id #(Long/parseLong %))
                                      (assoc :replica replica)))])))
            [:fresh nil []])
          last)))
 
+(defn wait-for-node-removal
+  "Blocks until the given node is no longer a part of the cluster."
+  [node]
+  (with-retry []
+    (when-let [n (first (filter #(= node (:address %)) (status)))]
+      (info "Waiting for" node "to leave cluster:" (pr-str n))
+      (Thread/sleep 5000)
+      (retry))
+    (catch RuntimeException e
+      (info "Couldn't get faunadb status:" e)
+      (Thread/sleep 5000)
+      (retry))))
+
+(defn remove-node!
+  "Removes a node from the cluster. Takes a node name and looks up its host
+  ID. Returns a delay which waits for the node to actually leave."
+  [node]
+  (info "Removing" node "from cluster")
+  (c/su (c/exec :faunadb-admin :remove (c/exec :faunadb-admin :host-id node)))
+  (delay (wait-for-node-removal node)))
+
 (defn status->topology
   "Converts a status map to a topology."
   [status]
+  (assert status)
+  (info "Status is" (with-out-str (pprint status)))
   {:replica-count (count (distinct (map :replica status)))
    :nodes         (->> status
                        (remove #(= :removed (:state %)))
                        (mapv (fn [node]
-                          {:node (:address node)
-                           :state (condp = (:state node)
-                                    :live     :active
-                                    :removed  :removed
-                                    (:state node))
-                           :replica (:replica node)}))
-                        status)})
+                               {:node (:address node)
+                                :state (condp = (:state node)
+                                         :live     :active
+                                         :removed  :removed
+                                         (:state node))
+                                :replica (:replica node)
+                                :log-part (if (= "none" (:log-segment node))
+                                            nil
+                                            (-> (re-find #"(\d+)$"
+                                                         (:log-segment node))
+                                                (get 1)
+                                                (Long/parseLong)))})))})
 
 (defn refresh-topology!
   "Reloads the topology based on what some randomly selected node thinks it
   is. Oh, this could go so wrong."
   [test]
   (info "Refreshing topology")
-  (let [topo (promise)]
-    (future (c/on-nodes test (fn [test node]
-                               (deliver topo (status->topology (status))))))
-    (reset! (:topology test) @topo)
-    (info "New topology is" (with-out-str (pprint @topo)))))
+  (let [s (promise)]
+    (future
+      (try
+        (let [latch (CountDownLatch. (count (:nodes test)))]
+          (c/on-nodes test (fn [test node]
+                             (when-let [status (status)]
+                               (deliver s status))
+                             ; Wait for everyone to have had a chance to read
+                             ; their node's status. If nobody got a status, we
+                             ; fill in nil, and that lets the caller move on.
+                             (.countDown latch)
+                             (deliver s nil))))
+        (catch Throwable t
+          (warn t "Thrown during topology refresh")))
+    (if-let [status @s]
+      (let [topology (status->topology status)]
+        (reset! (:topology test) topology)
+        (info "New topology is" (with-out-str (pprint topology))))
+      (info "Couldn't update topology; no node returned a status.")))))
 
 (defn start!
   "Starts faunadb on node, if it is not already running"
@@ -297,6 +344,14 @@
   (info node "Stopping FaunaDB")
   (c/su (c/exec :service :faunadb :stop))
   :stopped)
+
+(defn delete-data-files!
+  "Erases FaunaDB data files on a node, but leaves logs intact."
+  []
+  (info "Deleting data files")
+  (c/su
+    (c/exec :rm :-rf
+            (c/lit (str data-dir "/*")))))
 
 (defn install!
   "Install a particular version of FaunaDB."
@@ -330,10 +385,6 @@
       (c/exec :echo (-> "faunadb.defaults" io/resource slurp)
               :> "/etc/default/faunadb")
 
-      (info :topo topo)
-      (info :replica (topo/replica topo node))
-      (info :log (topo/log-configuration topo))
-
       ; Fauna config
       (c/exec :echo
               (yaml/generate-string
@@ -361,8 +412,6 @@
     (kill! test node)
     (stop! test node)
     ; (debian/uninstall! :faunadb)
-    (c/su
-      (c/exec :rm :-rf
-              (c/lit (str data-dir "/*"))
-              (c/lit (str log-dir "/*"))))
+    (delete-data-files!)
+    (c/su (c/exec :rm :-rf (c/lit (str log-dir "/*"))))
     (info node "FaunaDB torn down")))

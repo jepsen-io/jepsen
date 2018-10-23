@@ -1,7 +1,8 @@
 (ns jepsen.faunadb.topology
   "Working with FaunaDB topologies: the assignment of nodes to replicas, and
   log nodes."
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [jepsen.util :refer [rand-nth-empty]]))
 
 (defn replica-name
   "Constructs a replica name for a given replica number."
@@ -89,10 +90,10 @@
   [topo]
   (range (inc (reduce max 0 (keep :log-part (:nodes topo))))))
 
-(defn smallest-log-parts
+(defn smallest-log-part
   "Returns the smallest log part in the given topology."
   [topo]
-  (apply min-key (frequencies :log-part (:nodes topo))
+  (apply min-key (frequencies (map :log-part (:nodes topo)))
          (log-parts topo)))
 
 (defn log-configuration
@@ -110,12 +111,13 @@
   "Given a test and a topology, constructs a set of all the add operations that
   we could apply."
   [test topo]
-  (let [active (mapv :node (:nodes topo))]
-    (map (fn [node] {:type  :info
-                     :f     :add-node
-                     :value {:node node
-                             :join (rand-nth active)}})
-         (set/difference (set (:nodes test)) (set active)))))
+  (let [active (mapv :node (:nodes (only-active topo)))]
+    (when (seq active)
+      (map (fn [node] {:type  :info
+                       :f     :add-node
+                       :value {:node node
+                               :join (rand-nth active)}})
+           (set/difference (set (:nodes test)) (set active))))))
 
 (defn remove-ops
   "All node remove operations we could currently execute."
@@ -123,11 +125,11 @@
   (->> topo
        only-active
        ; You can only remove nodes which aren't participating in the log
-       (remove :log-part)
        :nodes
+       (remove :log-part)
        (map (fn [node] {:type :info, :f :remove-node, :value (:node node)}))))
 
-(def min-log-part-threshold
+(def min-log-part-node-count
   "What's the smallest log partition we'll tolerate? I think shrinking to 1
   might break Fauna"
   2)
@@ -140,7 +142,7 @@
        (filter :log-part)
        (group-by :log-part)
        (mapcat (fn [[part nodes]]
-                 (when (< min-log-part-threshold (count nodes))
+                 (when (< min-log-part-node-count (count nodes))
                    (map :node nodes))))
        (map (fn [node]
               {:type :info, :f :remove-log-node, :value node}))))
@@ -154,6 +156,22 @@
    (concat (add-ops test topo)
            (remove-log-node-ops test topo)
            (remove-ops test topo))))
+
+(defn rand-op
+  "A random op on the given test and topology. If no topology is given, uses
+  the test's current topology."
+  ([test]
+   (ops test @(:topology test)))
+  ([test topo]
+   ; We do this because there might be lots of remove-log-node ops we could
+   ; execute, relative to a small number of remove-node ops, and we want a more
+   ; even distribution of *types* of operations.
+   (->> [(add-ops test topo)
+        (remove-ops test topo)
+        (remove-log-node-ops test topo)]
+        (keep rand-nth-empty)
+        shuffle
+        first)))
 
 (defn apply-op
   "Given a topology and a topology transition operation like {:type :info, :f

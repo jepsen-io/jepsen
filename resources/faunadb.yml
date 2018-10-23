@@ -9,7 +9,7 @@ network_peer_secure_port: 7501
 log_rotate_size_mb: 131072 # 128GB
 stats_host: localhost
 stats_port: 8125
-log_level: debug
+#log_level: debug
 
 # Speed up timeouts?
 network_round_trip_time_ms: 50

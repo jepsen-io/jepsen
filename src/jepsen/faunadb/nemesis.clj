@@ -309,12 +309,25 @@
        vec
        rand-nth))
 
-(defn node-op
-  "A generator for a random node transition."
-  [test process]
-  (rand-nth (vec (topo/ops test))))
+(defn with-refresh
+  "Wraps generator in a generator that refreshes the topology before generating
+  an op."
+  [gen]
+  (reify gen/Generator
+    (op [this test process]
+      (auto/refresh-topology! test)
+      (gen/op gen test process))))
 
-(defn membership-nemesis
+(defn topo-op
+  "A generator for a random topology transition."
+  [test process]
+  (let [topo @(:topology test)]
+    (or (topo/rand-op test topo)
+        (do (info "No topology transitions possible for\n"
+                  (with-out-str (pprint topo)))
+            nil))))
+
+(defn topo-nemesis
   "Adds and removes nodes from the cluster."
   []
   (reify nemesis/Nemesis
@@ -325,45 +338,54 @@
       (let [v    (:value op)
             topo @(:topology test)
             topo' (topo/apply-op topo op)
+            _   (info "Target topology:\n" (with-out-str (pprint topo')))
             res (case (:f op)
                   :remove-log-node
-                  (c/on-nodes test
-                              (fn [test node]
-                                (auto/configure! test topo' node)
-                                ;(locking topo'
-                                ; Stagger these so we have a chance to see
-                                ; something interesting happen. Doing them
-                                ; serially takes for evvvvver
-                                (Thread/sleep (rand-int 10000))
-                                (auto/stop! test node)
-                                (auto/start! test node)
-                                :reconfigured))
+                  (do (info "New log configuration will be"
+                            (topo/log-configuration topo'))
+                      (c/on-nodes test (map :node (:nodes topo))
+                                  (fn [test node]
+                                    (auto/configure! test topo' node)
+                                    (locking topo'
+                                      ; Stagger these so we have a chance to see
+                                      ; something interesting happen. Doing them
+                                      ; serially takes for evvvvver
+                                      ; (Thread/sleep (rand-int 10000))
+                                      (auto/stop! test node)
+                                      (auto/start! test node))
+                                    :reconfigured)))
 
-                  :add-node (c/on-nodes test [(:node v)]
+                  :add-node (c/on-nodes test
                                         (fn [test node]
                                           (auto/configure! test topo' node)
-                                          (auto/start! test node)
-                                          (auto/join! (:join v))
-                                          (info :status (auto/status))
-                                          :added))
+                                          (when (= node (:node v))
+                                            (auto/start! test node)
+                                            (auto/join! (:join v))
+                                            (info :status (auto/status))
+                                            :added)))
 
                   :remove-node
-                  (c/on-nodes test [(->> (:nodes topo)
-                                         (map :node)
-                                         (remove #{v}) ; Can't remove self
-                                         vec
-                                         rand-nth)]
-                              (fn [test local-node]
-                                (auto/remove-node! v)
-                                (info :status (auto/status))
-                                :removed)))]
+                  (do ; Fauna suggests that the official way of removing
+                      ; nodes--doing it while the node is up and running--is
+                      ; something that nobody may have tested before. We're
+                      ; going to try stopping the node THEN removing it.
+                      (c/on-nodes test [v] (fn [test node]
+                                             (auto/stop! test node)
+                                             (auto/delete-data-files!)))
+                      (c/on-nodes test [(->> (:nodes topo)
+                                             (map :node)
+                                             (remove #{v}) ; Can't remove self
+                                             vec
+                                             rand-nth)]
+                                  (fn [test local-node]
+                                    @(auto/remove-node! v)
+                                    (auto/stop! test v)
+                                    (info :status (auto/status))))
+                      :removed))]
 
         ; Go ahead and update the new topology
         (reset! (:topology test) topo')
-        ; Asynchronously refresh topology in case it's out of sync
-        (future (auto/refresh-topology! test))
-
-        (assoc op :value res)))
+        op))
 
     (teardown! [this test])))
 
@@ -371,6 +393,6 @@
   "A nemesis package which randomly permutes the set of nodes in the cluster."
   []
   {:clocks  false
-   :nemesis (membership-nemesis)
-   :during  (gen/stagger 5 node-op)
+   :nemesis (topo-nemesis)
+   :during  (gen/stagger 5 topo-op)
    :final   nil})

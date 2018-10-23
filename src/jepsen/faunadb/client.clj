@@ -304,8 +304,19 @@
          (assoc ~op :type type#, :error [:timeout (.getMessage e#)]))
 
        (catch IOException e#
-         (assoc ~op :type type#, :error [:io (.getMessage e#)])))))
+         (assoc ~op :type type#, :error [:io (.getMessage e#)]))
 
+       (catch com.faunadb.client.errors.InternalException e#
+         (condp re-find (.getMessage e#)
+           #"fauna\.repo\.UninitializedException"
+           (assoc ~op :type :fail, :error :repo-uninitialized)
+
+           #"Transaction Coordinator is shut down"
+           (assoc ~op :type :fail, :error :transaction-coordinator-shut-down)
+
+           (assoc ~op
+                  :type type#
+                  :error [:internal-exception (.getMessage e#)]))))))
 
 (defn wait-for-index
   "Waits for the `active` flag on the given index ref. Times out after 2000
