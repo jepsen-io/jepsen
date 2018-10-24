@@ -7,12 +7,15 @@
             [dom-top.core :refer [assert+ with-retry]]
             [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [db       :as db]
-                    [control  :as c]
-                    [core     :as jepsen]
-                    [util     :refer [meh]]]
+             [control  :as c]
+             [core     :as jepsen]
+             [util     :refer [meh]]]
             [jepsen.control.util :as cu]
-            [jepsen.dgraph.client :as dc])
-  (:import (java.util.concurrent CyclicBarrier)))
+            [jepsen.os.debian :as debian]
+            [jepsen.dgraph.client :as dc]
+            [clojure.java.io :as io])
+  (:import (java.util.concurrent CyclicBarrier)
+           (java.io File)))
 
 ; Local paths
 (def dir "/opt/dgraph")
@@ -128,6 +131,38 @@
   (c/su (cu/stop-daemon! ratel-pidfile))
   :stopped)
 
+(defn install-bumptime!
+  "Install time adjusting binary"
+  []
+  (c/su
+   (debian/install [:build-essential])
+   ;; Write out resource to file
+   (let [tmp-file (File/createTempFile "jepsen-bumptime" ".c")]
+     (try
+       (with-open [r (io/reader (io/resource "bump-time.c"))]
+         (io/copy r tmp-file))
+       ;; Upload
+       (c/exec :mkdir :-p "/opt/jepsen")
+       (c/exec :chmod "a+rwx" "/opt/jepsen")
+       (c/upload (.getCanonicalPath tmp-file) "/opt/jepsen/bumptime.c")
+       (c/cd "/opt/jepsen"
+             (c/exec :gcc "bumptime.c")
+             (c/exec :mv "a.out" "bumptime"))
+       (finally
+         (.delete tmp-file))))))
+
+(def ntpserver "ntp.ubuntu.com")
+
+(defn reset-clock!
+  "Reset clock on this host. Logs output."
+  []
+  (info c/*host* "clock reset:" (c/su (c/exec :ntpdate :-b ntpserver))))
+
+(defn reset-clocks!
+  "Reset all clocks on all nodes in a test"
+  [test]
+  (c/with-test-nodes test (reset-clock!)))
+
 (def http-opts
   "Default clj-http options"
   {:socket-timeout 1000
@@ -228,6 +263,8 @@
                        (:version test) "/dgraph-linux-amd64.tar.gz"))
               dir
               (:force-download test)))
+
+          (install-bumptime!)
 
           (when (= node (jepsen/primary test))
             (start-zero! test node)

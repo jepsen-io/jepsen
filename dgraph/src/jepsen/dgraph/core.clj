@@ -42,7 +42,13 @@
     :fix-alpha?
     :partition-halves?
     :partition-ring?
-    :move-tablet?})
+    :move-tablet?
+    :skew-clock?})
+
+(def skew-specs
+  #{:small
+    :big
+    :huge})
 
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
@@ -145,6 +151,11 @@
                (str "Should be a comma-separated list of failure types. A failure type "
                     (.toLowerCase (cli/one-of nemesis-specs))
                     ". Or, you can use 'none' to indicate no failures.")]]
+   [nil "--skew SPEC" "Set the duration of clock skews"
+    :parse-fn keyword
+    :default :small
+    :assoc-fn (fn [m k v] (update m :nemesis assoc :skew v))
+    :validate [skew-specs (.toLowerCase (cli/one-of skew-specs))]]
    ["-f" "--force-download" "Ignore the package cache; download again."
     :default false]
    [nil "--upsert-schema"

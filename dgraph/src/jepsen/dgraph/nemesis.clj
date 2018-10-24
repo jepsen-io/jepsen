@@ -4,6 +4,7 @@
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as c]
                     [generator :as gen]
+                    [net :as net]
                     [util :as util]
                     [nemesis :as nemesis]]
             [jepsen.control.util :as cu]
@@ -75,6 +76,58 @@
 
     (teardown! [this test])))
 
+(defn slowing
+  "FIXME Causing a lot of issues within and between tests. Seems to not be ending
+         cleanly."
+  [nem dt]
+  (reify nemesis/Nemesis
+    (setup! [this test]
+      (net/fast! (:net test) test)
+      (nemesis/setup! nem test)
+      this)
+
+    (invoke! [this test op]
+      (case (:f op)
+        :start (do (net/slow! (:net test) test {:mean (* dt 1000) :variance 1})
+                   (nemesis/invoke! nem test op))
+
+        :stop (try (nemesis/invoke! nem test op)
+                   (finally
+                     (net/fast! (:net test) test)))))
+
+    (teardown! [this test])))
+
+(defn bump-time
+  "On randomly selected nodes, adjust the system clock by dt seconds.  Uses
+  millisecond precision."
+  [dt]
+  (reify nemesis/Nemesis
+    (setup! [this test]
+      (s/reset-clocks! test)
+      this)
+
+    (invoke! [this test op]
+      (assoc op :value
+             (case (:f op)
+               :start (c/with-test-nodes test
+                        (if (< (rand) 0.5)
+                          (do (c/su (c/exec "/opt/jepsen/bumptime"
+                                            (* 1000 dt)))
+                              dt)
+                          0))
+               :stop (c/with-test-nodes test
+                       (s/reset-clock!)))))
+
+    (teardown! [this test]
+      (s/reset-clocks! test))))
+
+(defn skew
+  [{:keys [skew] :as opts}]
+  (case skew
+    :small (bump-time 0.250)
+    :big   (bump-time 2)
+    :huge  (bump-time 7.5)))
+
 (defn full-nemesis
   "Can kill and restart all processes and initiate network partitions."
   [opts]
@@ -88,7 +141,9 @@
      {:start-partition-halves  :start
       :stop-partition-halves   :stop} (nemesis/partition-random-halves)
      {:start-partition-ring    :start
-      :stop-partition-ring     :stop} (nemesis/partition-majorities-ring)}))
+      :stop-partition-ring     :stop} (nemesis/partition-majorities-ring)
+     {:start-skew :start
+      :stop-skew  :stop} (skew opts)}))
 
 (defn op
   "Construct a nemesis op"
@@ -113,6 +168,8 @@
         (when (:partition-ring? opts)
           [(gen/seq (cycle (map op [:start-partition-ring
                                     :stop-partition-ring])))])
+        (when (:skew-clock? opts)
+          [(gen/seq (cycle (map op [:start-skew :stop-skew])))])
         (when (:move-tablet? opts)
           [(op :move-tablet)])]
        (apply concat)
@@ -126,6 +183,7 @@
    :generator (full-generator opts)
    :final-generator (->> [(when (:partition-halves opts) :stop-partition-halves)
                           (when (:partition-ring opts)   :stop-partition-ring)
+                          (when (:skew-clock? opts)      :stop-skew)
                           (when (:kill-zero?  opts)      :restart-zero)
                           (when (:kill-alpha? opts)      :restart-alpha)]
                          (remove nil?)
