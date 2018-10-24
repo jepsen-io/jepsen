@@ -76,27 +76,6 @@
 
     (teardown! [this test])))
 
-(defn slowing
-  "FIXME Causing a lot of issues within and between tests. Seems to not be ending
-         cleanly."
-  [nem dt]
-  (reify nemesis/Nemesis
-    (setup! [this test]
-      (net/fast! (:net test) test)
-      (nemesis/setup! nem test)
-      this)
-
-    (invoke! [this test op]
-      (case (:f op)
-        :start (do (net/slow! (:net test) test {:mean (* dt 1000) :variance 1})
-                   (nemesis/invoke! nem test op))
-
-        :stop (try (nemesis/invoke! nem test op)
-                   (finally
-                     (net/fast! (:net test) test)))))
-
-    (teardown! [this test])))
-
 (defn bump-time
   "On randomly selected nodes, adjust the system clock by dt seconds.  Uses
   millisecond precision."
