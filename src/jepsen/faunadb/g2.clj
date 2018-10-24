@@ -58,10 +58,10 @@
     (f/with-errors op #{}
       (let [[k [a-id b-id]] (:value op)
             id (or a-id b-id)
-            res (f/query conn (q/when (q/not
-                                        (q/or (q/exists? (q/match a-index k))
-                                              (q/exists? (q/match b-index k))))
-                                (q/create (q/ref (if a-id a b) id)
+            class (if a-id a b)             ; Class we insert to
+            index (if a-id b-index a-index) ; Index we check for conflict
+            res (f/query conn (q/when (q/not (q/exists? (q/match index k)))
+                                (q/create (q/ref class id)
                                           {:data {:key k}})))]
         (assoc op :type (if res :ok :fail)))))
 
