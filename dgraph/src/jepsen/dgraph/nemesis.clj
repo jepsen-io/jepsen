@@ -103,9 +103,10 @@
 (defn skew
   [{:keys [skew] :as opts}]
   (case skew
-    :small (bump-time 0.250)
+    :huge  (bump-time 7.5)
     :big   (bump-time 2)
-    :huge  (bump-time 7.5)))
+    :small (bump-time 0.250)
+    (bump-time 0)))
 
 (defn full-nemesis
   "Can kill and restart all processes and initiate network partitions."
