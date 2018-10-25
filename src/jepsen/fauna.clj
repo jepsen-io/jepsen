@@ -45,7 +45,8 @@
   [opts]
   (merge
     tests/noop-test
-    {:name    (str "fauna"
+    {:name    (str "fauna "
+                   (:version opts)
                    " " (:name opts)
                    (when (:strong-read opts)
                      " strong-read")

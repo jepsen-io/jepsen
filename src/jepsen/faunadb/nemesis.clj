@@ -16,10 +16,10 @@
             [clojure.tools.logging :refer :all]))
 
 ;; duration between interruptions
-(def nemesis-delay 10) ; seconds
+(def nemesis-delay 5) ; seconds
 
 ;; duration of an interruption
-(def nemesis-duration 100) ; seconds
+(def nemesis-duration 30) ; seconds
 
 ;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
 
