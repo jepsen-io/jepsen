@@ -188,14 +188,20 @@
   (Language/Create ref (expr params)))
 
 (defn paginate
-  "Paginates an expression. If `after` is provided, provides the page after."
-  ([e] (paginate e null))
-  ([e a]
+  "Paginates an expression. Options are:
+
+      :before - Fetch the page before this one
+      :after  - Fetch the page after this one
+      :ts     - Fetch at this timestamp
+      :size   - Return this many elements per page"
+  ([e] (paginate e {}))
+  ([e opts]
+   (c/assert (c/map? opts))
    (c/let [p (Language/Paginate (expr e))
-           ; p (.size p (c/int 1024))
-           p (if (c/= null a)
-               p
-               (.after p (expr a)))]
+           p (c/if-let [s (:size opts)]   (.size p    (c/int s))  p)
+           p (c/if-let [a (:after opts)]  (.after p   (expr a))   p)
+           p (c/if-let [b (:before opts)] (.before p  (expr b))   p)
+           p (c/if-let [t (:ts opts)]     (.ts p      (expr t))   p)]
      p)))
 
 (defn match

@@ -31,19 +31,6 @@
 (def idx-name "all_accounts")
 (def idx (q/index idx-name))
 
-(defn do-index-read
-  [conn]
-  ; TODO: figure out how to iterate over queries containing pagination
-  (->> (f/query conn
-                (q/map
-                  (q/paginate (q/match idx))
-                  (q/fn [r]
-                    [r (q/select ["data" "balance"] (q/get r))])))
-       :data
-       (map (fn [[ref balance]]
-                [(Long/parseLong (:id ref)) balance]))
-       (into {})))
-
 (defmacro wrapped-query
   [op & exprs]
   `(try
@@ -185,15 +172,6 @@
 
   (close! [this test]
     (client/close! bank-client test)))
-
-; TODO: index reads variant
-; We're not creating this index in the individual client because I want to avoid
-; the possibility that index updates are introducing an unnecessary
-; synchronization point.
-        ;(f/query
-        ;  conn
-        ;  (q/create-index {:name "all_accounts"
-        ;                   :source accounts}))
 
 (defn bank-test-base
   [opts]

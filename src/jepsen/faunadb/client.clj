@@ -198,7 +198,7 @@
    (query-all-naive conn (q/expr expr) q/null))
   ([conn expr after]
    (lazy-seq
-     (let [res   (query* conn (q/paginate expr after))
+     (let [res   (query* conn (q/paginate expr {:after after}))
            data  (:data (decode res))
            after (.at res (into-array String ["after"]))]
        (if (= after q/null)
@@ -208,18 +208,27 @@
 (defn query-all
   "Performs a query for an expression. Paginates results, performs query, and
   returns a lazy sequence of the :data from each page of results. This is a
-  transactional variant which should be correctly isolated."
+  transactional variant which should be correctly isolated.
+
+  Options:
+
+  :at     - A timestamp for reads; if none is provided, will query at the
+            current time, and re-use the same time for later pages.
+  :size   - Number of results per page"
   ([conn expr]
-   (query-all conn (q/expr expr) q/null))
-  ([conn expr after]
-   (query-all conn (q/expr expr) after nil))
-  ([conn expr after time]
+   (query-all conn expr {}))
+  ([conn expr opts]
    (lazy-seq
      ; If we don't have a time, we're going to wrap the expression in an array
      ; and include the current time; then we'll extract that and use it for
      ; future times. If we *do* have a time, then we'll use it as the time for
      ; the query.
-     (let [expr'         (q/paginate expr after)
+     (let [expr          (q/expr expr)
+           after         (:after opts)
+           time          (:ts opts)
+           size          (:size opts)
+           expr'         (q/paginate expr {:after after
+                                           :size  size})
            expr'         (if time
                           (q/at time expr')
                           [(q/time "now") expr'])
@@ -235,7 +244,9 @@
            data         (:data (decode page))]
        (if (= after q/null)
          data
-         (concat data (query-all conn expr after time)))))))
+         (concat data (query-all conn expr {:after after
+                                            :ts    time
+                                            :size  size})))))))
 
 (defn upsert-by-ref
   "Takes a ref and an instance map; constructs an expr which creates the ref

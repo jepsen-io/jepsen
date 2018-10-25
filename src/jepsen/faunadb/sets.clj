@@ -57,7 +57,8 @@
                                 (q/create (q/class side-effects) {}))
                               r)
                             ; Just a regular read
-                            (q/match idx)))
+                            (q/match idx))
+                          {:size 1024})
              (into (sorted-set))
              (assoc op :type :ok, :value)))))
 
