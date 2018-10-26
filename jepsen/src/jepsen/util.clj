@@ -10,6 +10,7 @@
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :refer [bounded-future]]
+            [fipp.edn :as fipp]
             [knossos.history :as history])
   (:import (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
@@ -301,7 +302,7 @@
      (nanos->ms (- (System/nanoTime) t0#))))
 
 (defn pprint-str [x]
-  (with-out-str (pprint x)))
+  (with-out-str (fipp/pprint x {:width 78})))
 
 (defn spy [x]
   (info (pprint-str x))
