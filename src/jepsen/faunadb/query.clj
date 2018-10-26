@@ -8,7 +8,9 @@
                                      Expr)
            (com.faunadb.client.query Fn$Unescaped
                                      Fn$UnescapedObject
-                                     Fn$UnescapedArray)))
+                                     Fn$UnescapedArray)
+           (com.faunadb.client.types Value$TimeV)
+           (java.time Instant)))
 
 (def null
   (Language/Null))
@@ -28,10 +30,12 @@
   - Sequentials become Arrays
   - Strings, Numbers, etc become Values
   - Nil becomes Null
+  - Instants become TimeVs
   "
   [x]
   (c/cond
-    (c/instance? Expr x) x
+    (c/instance? Expr x)    x
+    (c/instance? Instant x) (Value$TimeV. x)
     (c/map? x)          (c/->> x
                                (c/map (c/fn [[k v]] [(c/name k) (expr v)]))
                                (c/into {})

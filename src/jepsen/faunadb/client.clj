@@ -22,6 +22,7 @@
                                      Fn$UnescapedArray)
            (com.fasterxml.jackson.databind.node NullNode)
            (java.io IOException)
+           (java.time Instant)
            (org.asynchttpclient Dsl))
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -138,7 +139,7 @@
       Value$DoubleV  (.get (Decoder/decode x Double))
       Value$BooleanV (.get (Decoder/decode x Boolean))
       Value$StringV  (.get (Decoder/decode x String))
-      Value$TimeV    x
+      Value$TimeV    (.get (Decoder/decode x Instant))
       (do (info "Don't know how to decode" (class x) x)
           x))))
 
@@ -267,21 +268,40 @@
   (q/when (q/not (q/exists? (q/index (:name im))))
     (q/create-index im)))
 
+(defn jitter-time
+  "Jitters an Instant timestamp by +/- jitter milliseconds (default 10 s)"
+  ([t]
+   (jitter-time t 10000))
+  ([^Instant t jitter]
+   (.plusMillis t (- (rand-int (* 2 jitter)) jitter))))
+
 (defn maybe-at
   "Useful for comparing the results of regular queries to At(...) queries. This
   takes a test, used to determine whether to use an At query, a Fauna client,
   and a query expression. If (:at-query test) is true, rewrites the query to
   use a recent timestamp using (At expr). Otherwise, returns expr.
 
-  We have two methods for recent timestamps. One is to make a query for (now)
-  and use it; this gives us a timestamp which is older. Another is to embed the
-  now in a let binding. We select at random."
+  We have two methods for recent timestamps.
+
+  - To test a very recent timestamp, we get the current time and bind it in a
+  Let.
+
+  - Another option is to perform a separate query for the current time, and
+  then to make a second query with that timestamp. We apply a randomized
+  jitter.
+
+  We select between these methods at random."
   [test conn expr]
   (if-not (:at-query test)
+    ; Default case, don't wrap in an `at`
     (q/expr expr)
-    (if (< 0.5 (rand))
-      (let [t (now conn)]
-        (q/at t (q/expr expr)))
+
+    (condp < (rand)
+      ; Separate query
+      0.5 (let [t (jitter-time (now conn))]
+            (q/at t (q/expr expr)))
+
+      ; Single query
       (q/let [internal-maybe-at-ts (q/time "now")]
         (q/at internal-maybe-at-ts
               (q/expr expr))))))

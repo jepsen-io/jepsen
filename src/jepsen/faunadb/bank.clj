@@ -68,7 +68,12 @@
                (map (fn [acct]
                       (let [acct (q/ref accounts acct)]
                         (f/upsert-by-ref acct {:data {:balance 0}})))
-                    (rest (:accounts test)))))))
+                    (rest (:accounts test))))))
+
+  (when (:at-query test)
+    ; We're going to introduce 10 seconds of jitter here, so let's wait 10
+    ; seconds to make sure we don't query before the beginning of time
+    (Thread/sleep 10000)))
 
 (defrecord BankClient [conn]
   client/Client

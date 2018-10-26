@@ -20,7 +20,7 @@
 (defrecord SetsClient [opts conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (f/client node)))
+    (assoc this :conn (f/linearized-client node)))
 
   (setup! [this test]
     (f/with-retry
@@ -88,13 +88,16 @@
     (merge
       {:name   "set"
        :client {:client (SetsClient. opts nil)
-                :during (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
-                                          (reads))
+                ; Normally you'd want to reserve some threads for reads, but
+                ; I've found that with inserts, faunaDB reads grind to a halt,
+                ; so we're going to intentionally let reads starve writes so
+                ; they have a chance of completing.
+                :during (->> (gen/mix [(adds) (reads)])
                              (gen/stagger 1/5))
                 :final (gen/once {:type :invoke, :f :read, :value nil})}
        :checker (checker/compose
                   {:perf     (checker/perf)
                    :set-full (checker/set-full {:linearizable? true})
                    ;:timeline (timeline/html)
-                   :set      (checker/set)})}
+                   })}
       opts)))
