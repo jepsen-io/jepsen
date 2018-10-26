@@ -191,7 +191,7 @@
                   :final  (gen/clients nil)}
          :checker (checker/compose
                     {:perf     (checker/perf)
-                     :timeline (timeline/html)
+                     ;:timeline (timeline/html)
                      :details  (:checker workload)})}
         (dissoc opts :client)))))
 
