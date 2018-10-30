@@ -80,19 +80,21 @@
 
                   :create-tabby-let
                   (f/query conn
-                           (q/let [tabbies-0 (q/at (q/time "now")
-                                                   (match "tabby"))
-                                   tabby (create {:type "tabby"
-                                                  :name (:value op)})
-                                   tabbies-1 (q/at (q/time "now")
-                                                   (match "tabby"))]
-                             ; Note that we permute this object literal in the
-                             ; opposite order to the let binding, so that we
-                             ; ensure we're checking let correctness, not
-                             ; object literals.
-                             {:tabbies-1 tabbies-1
-                              :tabby tabby
-                              :tabbies-0 tabbies-0}))
+                           ; This is neat: temporal queries which happen to be
+                           ; at the current txn timestamp observe mutability.
+                           (q/let [t (q/time "now")]
+                             (q/let [tabbies-0 (q/at t (match "tabby"))
+                                     tabby     (create {:type "tabby"
+                                                        :name (:value op)})
+                                     tabbies-1 (q/at t (match "tabby"))]
+                               ; Note that we permute this object literal in the
+                               ; opposite order to the let binding, so that we
+                               ; ensure we're checking let correctness, not
+                               ; object literals.
+                               {:t t
+                                :tabbies-1 tabbies-1
+                                :tabby tabby
+                                :tabbies-0 tabbies-0})))
 
                   :create-tabby-obj
                   (map-keys {:c :tabbies-0
