@@ -80,10 +80,12 @@
 
                   :create-tabby-let
                   (f/query conn
-                           (q/let [tabbies-0 (match "tabby")
+                           (q/let [tabbies-0 (q/at (q/time "now")
+                                                   (match "tabby"))
                                    tabby (create {:type "tabby"
                                                   :name (:value op)})
-                                   tabbies-1 (match "tabby")]
+                                   tabbies-1 (q/at (q/time "now")
+                                                   (match "tabby"))]
                              ; Note that we permute this object literal in the
                              ; opposite order to the let binding, so that we
                              ; ensure we're checking let correctness, not
