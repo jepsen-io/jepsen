@@ -367,6 +367,7 @@
     (debian/add-repo! "faunadb"
                       "deb [arch=all] https://repo.fauna.com/debian stable non-free")
     (info "Install faunadb")
+    (assert (:version test))
     (debian/install {"faunadb" (str (:version test) "-0")})
     (when-let [k (:datadog-api-key test)]
       (when-not (debian/installed? :datadog-agent)

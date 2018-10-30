@@ -17,6 +17,7 @@
                             [register :as register]
                             [sets :as sets]
                             [pages :as pages]
+                            [internal :as internal]
                             [nemesis :as jfn]]))
 
 (def tests
@@ -26,6 +27,7 @@
    "bank"       bank/test
    "bank-index" bank/index-test
    "g2"         g2/test
+   "internal"   internal/test
    "pages"      pages/test})
 
 (def nemeses

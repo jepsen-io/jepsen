@@ -223,9 +223,18 @@
   [c l]
   (Language/Map (expr c) (expr l)))
 
+(defn foreach
+  "For each element in c, call (l c) for side effects"
+  [c l]
+  (Language/Foreach (expr c) (expr l)))
+
 (defn exists?
   [r]
   (Language/Exists (expr r)))
+
+(defn non-empty?
+  [coll]
+  (Language/IsNonEmpty (expr coll)))
 
 (defn delete
   [r]
