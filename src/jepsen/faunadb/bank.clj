@@ -33,21 +33,13 @@
 
 (defmacro wrapped-query
   [op & exprs]
-  `(try
-    ~@exprs
-    (catch UnavailableException e#
-      (assoc ~op :type :fail, :error [:unavailable (.getMessage e#)]))
-
-    (catch java.util.concurrent.TimeoutException e#
-      (assoc ~op :type :info, :error [:timeout (.getMessage e#)]))
-
-    (catch IOException e#
-      (assoc ~op :type :info, :error [:io (.getMessage e#)]))
-
-    (catch com.faunadb.client.errors.BadRequestException e#
-      (if (= (.getMessage e#) "transaction aborted: balance would go negative")
-        (assoc ~op :type :fail, :error :negative)
-        (throw e#)))))
+  `(f/with-errors
+     (try
+       ~@exprs
+       (catch com.faunadb.client.errors.BadRequestException e#
+         (if (= (.getMessage e#) "transaction aborted: balance would go negative")
+           (assoc ~op :type :fail, :error :negative)
+           (throw e#))))))
 
 (defn create-class!
   "Creates the class for accounts"

@@ -334,7 +334,6 @@
     (setup! [this test] this)
 
     (invoke! [this test op]
-      ; (auto/refresh-topology! test)
       (let [v    (:value op)
             topo @(:topology test)
             topo' (topo/apply-op topo op)
@@ -346,23 +345,23 @@
                       (c/on-nodes test (map :node (:nodes topo))
                                   (fn [test node]
                                     (auto/configure! test topo' node)
-                                    (locking topo'
+                                    ;(locking topo'
                                       ; Stagger these so we have a chance to see
                                       ; something interesting happen. Doing them
                                       ; serially takes for evvvvver
                                       ; (Thread/sleep (rand-int 10000))
                                       (auto/stop! test node)
-                                      (auto/start! test node))
-                                    :reconfigured)))
+                                      (auto/start! test node)))
+                      [:removed-log-node v])
 
-                  :add-node (c/on-nodes test
+                  :add-node (do (c/on-nodes test (map :node (:nodes topo'))
                                         (fn [test node]
                                           (auto/configure! test topo' node)
                                           (when (= node (:node v))
                                             (auto/start! test node)
                                             (auto/join! (:join v))
-                                            (info :status (auto/status))
-                                            :added)))
+                                            (info :status (auto/status)))))
+                                [:added v])
 
                   :remove-node
                   (do ; Fauna suggests that the official way of removing
@@ -370,7 +369,7 @@
                       ; something that nobody may have tested before. We're
                       ; going to try stopping the node THEN removing it.
                       (c/on-nodes test [v] (fn [test node]
-                                             (auto/stop! test node)
+                                             (auto/kill! test node)
                                              (auto/delete-data-files!)))
                       (c/on-nodes test [(->> (:nodes topo)
                                              (map :node)
@@ -379,20 +378,20 @@
                                              rand-nth)]
                                   (fn [test local-node]
                                     @(auto/remove-node! v)
-                                    (auto/stop! test v)
                                     (info :status (auto/status))))
-                      :removed))]
+                      [:removed v]))]
 
         ; Go ahead and update the new topology
         (reset! (:topology test) topo')
-        op))
+        (assoc op :value res)))
 
     (teardown! [this test])))
 
-(defn membership
+(defn topology
   "A nemesis package which randomly permutes the set of nodes in the cluster."
   []
   {:clocks  false
    :nemesis (topo-nemesis)
-   :during  (gen/stagger 5 topo-op)
+   :during  (->> topo-op
+                 with-refresh)
    :final   nil})

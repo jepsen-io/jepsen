@@ -36,7 +36,7 @@
    "parts"             `(jfn/parts)
    "partitions"        `(jfn/partitions)
    "majority-ring"     `(jfn/majring)
-   "membership"        `(jfn/membership)
+   "topology"          `(jfn/topology)
    "strobe-skews"      `(jfn/strobe-skews)
    "small-skews"       `(jfn/small-skews)
    "subcritical-skews" `(jfn/subcritical-skews)

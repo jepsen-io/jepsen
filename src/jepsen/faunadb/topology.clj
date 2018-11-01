@@ -72,8 +72,8 @@
   (:replica (get-node topo node)))
 
 (defn nodes-by-replica
-  "Given a topology, constructs a map of replica names to the nodes in that
-  replica."
+  "Given a topology, constructs a map of replica names to the node names in
+  that replica."
   [topo]
   (->> topo :nodes (map :node) (group-by (partial replica topo))))
 
@@ -111,7 +111,7 @@
   "Given a test and a topology, constructs a set of all the add operations that
   we could apply."
   [test topo]
-  (let [active (mapv :node (:nodes (only-active topo)))]
+  (let [active (mapv :node (:nodes topo))]
     (when (seq active)
       (map (fn [node] {:type  :info
                        :f     :add-node
@@ -122,12 +122,24 @@
 (defn remove-ops
   "All node remove operations we could currently execute."
   [test topo]
-  (->> topo
-       only-active
-       ; You can only remove nodes which aren't participating in the log
-       :nodes
-       (remove :log-part)
-       (map (fn [node] {:type :info, :f :remove-node, :value (:node node)}))))
+  (let [topo (only-active topo)
+        ; You can only remove nodes which aren't participating in the log
+        without-log-part (->> topo
+                              :nodes
+                              (remove :log-part)
+                              (map :node)
+                              set)
+        ; We need to make sure not to empty a replica
+        with-enough-nodes-in-replica (->> (nodes-by-replica topo)
+                                          vals
+                                          (filter #(< 1 (count %)))
+                                          (reduce concat)
+                                          set)
+        ; Candidates for removal
+        candidates (set/intersection without-log-part
+                                     with-enough-nodes-in-replica)]
+    (map (fn [node] {:type :info, :f :remove-node, :value node})
+         candidates)))
 
 (def min-log-part-node-count
   "What's the smallest log partition we'll tolerate? I think shrinking to 1
@@ -137,7 +149,7 @@
 (defn remove-log-node-ops
   "All possible operations for removing a node from the log topology."
   [test topo]
-  (->> (only-active topo)
+  (->> topo
        :nodes
        (filter :log-part)
        (group-by :log-part)

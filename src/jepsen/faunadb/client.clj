@@ -347,7 +347,12 @@
 
            (assoc ~op
                   :type type#
-                  :error [:internal-exception (.getMessage e#)]))))))
+                  :error [:internal-exception (.getMessage e#)])))
+
+       (catch com.faunadb.client.errors.UnknownException e#
+         (condp re-find (.getMessage e#)
+           #"operator error: No configured replica for key"
+           (assoc ~op :type :fail, :error :no-configured-replica))))))
 
 (defn wait-for-index
   "Waits for the `active` flag on the given index ref. Times out after 2000

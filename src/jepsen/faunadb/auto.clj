@@ -47,7 +47,6 @@
   [test-1 test-2]
   (let [a (select-keys test-1 cache-equivalency-keys)
         b (select-keys test-2 cache-equivalency-keys)]
-    (info "cache equivalent?" a b)
     (= a b)))
 
 (defn cached-test
@@ -215,7 +214,7 @@
                  :fresh (if (re-find #"\ALoaded configuration" line)
                           [:ready nil replicas]
                           (throw+ {:type :parse-error, :state state, :line line}))
-                 :ready (let [[m replica] (re-find #"\ADatacenter: ([^ ]+?) " line)]
+                 :ready (let [[m _ replica] (re-find #"\A(Replica|Datacenter): ([^ ]+?) " line)]
                           (when-not replica
                             (throw+
                               {:type :parse-error, :state state, :line line}))
@@ -256,7 +255,7 @@
   [node]
   (with-retry []
     (when-let [n (first (filter #(= node (:address %)) (status)))]
-      (info "Waiting for" node "to leave cluster:" (pr-str n))
+      (info "Waiting for" node "to leave cluster:" (pr-str (:owns n)))
       (Thread/sleep 5000)
       (retry))
     (catch RuntimeException e
@@ -276,7 +275,7 @@
   "Converts a status map to a topology."
   [status]
   (assert status)
-  (info "Status is" (with-out-str (pprint status)))
+  ; (info "Status is" (with-out-str (pprint status)))
   {:replica-count (count (distinct (map :replica status)))
    :nodes         (->> status
                        (remove #(= :removed (:state %)))
@@ -312,12 +311,14 @@
                              (.countDown latch)
                              (deliver s nil))))
         (catch Throwable t
-          (warn t "Thrown during topology refresh")))
+          ; We expect this to occur during reboots and such
+          ; (warn t "Thrown during topology refresh")))
+          )))
     (if-let [status @s]
       (let [topology (status->topology status)]
         (reset! (:topology test) topology)
         (info "New topology is" (with-out-str (pprint topology))))
-      (info "Couldn't update topology; no node returned a status.")))))
+      (info "Couldn't update topology; no node returned a status."))))
 
 (defn start!
   "Starts faunadb on node, if it is not already running"
@@ -365,7 +366,7 @@
             :apt-key :add :-)
     (info "Adding repo")
     (debian/add-repo! "faunadb"
-                      "deb [arch=all] https://repo.fauna.com/debian stable non-free")
+                      "deb [arch=all] https://repo.fauna.com/debian unstable non-free")
     (info "Install faunadb")
     (assert (:version test))
     (debian/install {"faunadb" (str (:version test) "-0")})
