@@ -498,6 +498,11 @@
   [f m]
   (into {} (r/map f m)))
 
+(defn map-keys
+  "Maps keys in a map."
+  [f m]
+  (map-kv (fn [[k v]] [(f k) v]) m))
+
 (defn map-vals
   "Maps values in a map."
   [f m]
