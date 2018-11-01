@@ -18,6 +18,7 @@
                           Path)
            (java.nio.file.attribute FileAttribute
                                     PosixFilePermissions)
+           (java.time Instant)
            (org.fressian.handlers WriteHandler ReadHandler)
            (multiset.core MultiSet)))
 
@@ -64,7 +65,13 @@
        {"multiset" (reify WriteHandler
                      (write [_ w set]
                        (.writeTag     w "multiset" 1)
-                       (.writeObject  w (multiset/multiplicities set))))}}
+                       (.writeObject  w (multiset/multiplicities set))))}
+
+      java.time.Instant
+      {"instant" (reify WriteHandler
+                   (write [_ w instant]
+                     (.writeTag w "instant" 1)
+                     (.writeObject w (.toString instant))))}}
 
       (merge fress/clojure-write-handlers)
       fress/associative-lookup
@@ -105,7 +112,11 @@
        "multiset" (reify ReadHandler
                     (read [_ rdr tag component-count]
                       (multiset/multiplicities->multiset
-                        (.readObject rdr))))}
+                        (.readObject rdr))))
+
+       "instant" (reify ReadHandler
+                   (read [_ rdr tag component-count]
+                     (Instant/parse (.readObject rdr))))}
 
       (merge fress/clojure-read-handlers)
       fress/associative-lookup))
