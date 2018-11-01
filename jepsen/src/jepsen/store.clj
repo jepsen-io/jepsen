@@ -256,19 +256,33 @@
                     val)]
     @t))
 
-(defn update-symlinks!
-  "Creates `latest` symlinks to the given test, if a store directory exists."
+(defn update-symlink!
+  "Takes a test and a symlink path. Creates a symlink from that path to the
+  test directory, if it exists."
+  [test dest]
+  (when (.exists (path test))
+    (let [src  (.toPath (path test))
+          dest (.. FileSystems
+                   getDefault
+                   (getPath base-dir (into-array dest)))]
+      (Files/deleteIfExists dest)
+      (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
+                                (make-array FileAttribute 0)))))
+
+(defn update-current-symlink!
+  "Creates a `current` symlink to the currently running test, if a store
+  directory exists."
   [test]
-  (doseq [dest [["latest"] [(:name test) "latest"]]]
-    ; did you just tell me to go fuck myself
-    (when (.exists (path test))
-      (let [src  (.toPath (path test))
-            dest (.. FileSystems
-                     getDefault
-                     (getPath base-dir (into-array dest)))]
-        (Files/deleteIfExists dest)
-        (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
-                                  (make-array FileAttribute 0))))))
+  (update-symlink! test ["current"]))
+
+(defn update-symlinks!
+  "Creates `latest` and `current` symlinks to the given test, if a store
+  directory exists."
+  [test]
+  (doseq [dest [["current"]
+                ["latest"]
+                [(:name test) "latest"]]]
+    (update-symlink! test dest)))
 
 (defmacro with-out-file
   "Binds stdout to a file for the duration of body."
@@ -339,7 +353,8 @@
    :pattern "%p\t[%t] %c: %m%n"})
 
 (defn start-logging!
-  "Starts logging to a file in the test's directory."
+  "Starts logging to a file in the test's directory. Also updates current
+  symlink."
   [test]
   (unilog/start-logging!
     {:level   "info"
@@ -348,7 +363,8 @@
                  {:appender :file
                   :encoder :pattern
                   :pattern "%d{ISO8601}{GMT}\t%p\t[%t] %c: %m%n"
-                  :file (.getCanonicalPath (path! test "jepsen.log"))}]}))
+                  :file (.getCanonicalPath (path! test "jepsen.log"))}]})
+  (update-current-symlink! test))
 
 (defn stop-logging!
   "Resets logging to console only."
