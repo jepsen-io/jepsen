@@ -7,9 +7,10 @@
             [dom-top.core :refer [assert+ with-retry]]
             [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [db       :as db]
-             [control  :as c]
-             [core     :as jepsen]
-             [util     :refer [meh]]]
+                    [control  :as c]
+                    [core     :as jepsen]
+                    [util     :refer [meh]]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.dgraph.client :as dc]
@@ -131,38 +132,6 @@
   (c/su (cu/stop-daemon! ratel-pidfile))
   :stopped)
 
-(defn install-bumptime!
-  "Install time adjusting binary"
-  []
-  (c/su
-   (debian/install [:build-essential])
-   ;; Write out resource to file
-   (let [tmp-file (File/createTempFile "jepsen-bumptime" ".c")]
-     (try
-       (with-open [r (io/reader (io/resource "bump-time.c"))]
-         (io/copy r tmp-file))
-       ;; Upload
-       (c/exec :mkdir :-p "/opt/jepsen")
-       (c/exec :chmod "a+rwx" "/opt/jepsen")
-       (c/upload (.getCanonicalPath tmp-file) "/opt/jepsen/bumptime.c")
-       (c/cd "/opt/jepsen"
-             (c/exec :gcc "bumptime.c")
-             (c/exec :mv "a.out" "bumptime"))
-       (finally
-         (.delete tmp-file))))))
-
-(def ntpserver "ntp.ubuntu.com")
-
-(defn reset-clock!
-  "Reset clock on this host. Logs output."
-  []
-  (info c/*host* "clock reset:" (c/su (c/exec :ntpdate :-b ntpserver))))
-
-(defn reset-clocks!
-  "Reset all clocks on all nodes in a test"
-  [test]
-  (c/with-test-nodes test (reset-clock!)))
-
 (def http-opts
   "Default clj-http options"
   {:socket-timeout 1000
@@ -264,7 +233,7 @@
               dir
               (:force-download test)))
 
-          (install-bumptime!)
+          (nt/install!)
 
           (when (= node (jepsen/primary test))
             (start-zero! test node)

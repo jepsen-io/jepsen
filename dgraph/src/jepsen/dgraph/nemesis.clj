@@ -7,6 +7,7 @@
                     [net :as net]
                     [util :as util]
                     [nemesis :as nemesis]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
             [jepsen.dgraph [support :as s]]))
 
@@ -82,7 +83,7 @@
   [dt]
   (reify nemesis/Nemesis
     (setup! [this test]
-      (s/reset-clocks! test)
+      (nt/reset-time! test)
       this)
 
     (invoke! [this test op]
@@ -90,22 +91,22 @@
              (case (:f op)
                :start (c/with-test-nodes test
                         (if (< (rand) 0.5)
-                          (do (c/su (c/exec "/opt/jepsen/bumptime"
-                                            (* 1000 dt)))
+                          (do (nt/bump-time! dt)
                               dt)
                           0))
                :stop (c/with-test-nodes test
-                       (s/reset-clock!)))))
+                       (nt/reset-time!)))))
 
     (teardown! [this test]
-      (s/reset-clocks! test))))
+      (nt/reset-time! test))))
 
 (defn skew
   [{:keys [skew] :as opts}]
   (case skew
-    :huge  (bump-time 7.5)
-    :big   (bump-time 2)
-    :small (bump-time 0.250)
+    :huge  (bump-time 7500)
+    :big   (bump-time 2000)
+    :small (bump-time 250)
+    :tiny  (bump-time 100)
     (bump-time 0)))
 
 (defn full-nemesis

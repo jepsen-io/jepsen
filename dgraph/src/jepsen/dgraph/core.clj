@@ -46,7 +46,8 @@
     :skew-clock?})
 
 (def skew-specs
-  #{:small
+  #{:tiny
+    :small
     :big
     :huge})
 
