@@ -26,7 +26,7 @@
 (def default-port "Default dgraph alpha GRPC port" 9080)
 
 ;; milliseconds given to the grpc blockingstub as a deadline
-(def deadline 20000)
+(def deadline 30000)
 
 (defn open
   "Creates a new DgraphClient for the given node."

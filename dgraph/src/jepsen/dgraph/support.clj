@@ -10,9 +10,13 @@
                     [control  :as c]
                     [core     :as jepsen]
                     [util     :refer [meh]]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
-            [jepsen.dgraph.client :as dc])
-  (:import (java.util.concurrent CyclicBarrier)))
+            [jepsen.os.debian :as debian]
+            [jepsen.dgraph.client :as dc]
+            [clojure.java.io :as io])
+  (:import (java.util.concurrent CyclicBarrier)
+           (java.io File)))
 
 ; Local paths
 (def dir "/opt/dgraph")
@@ -228,6 +232,8 @@
                        (:version test) "/dgraph-linux-amd64.tar.gz"))
               dir
               (:force-download test)))
+
+          (nt/install!)
 
           (when (= node (jepsen/primary test))
             (start-zero! test node)
