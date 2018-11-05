@@ -281,6 +281,10 @@
   and a query expression. If (:at-query test) is true, rewrites the query to
   use a recent timestamp using (At expr). Otherwise, returns expr.
 
+  In both cases, the shape of the query changes; instead of returning
+  expr-results, it returns a tuple of [ts, expr-results]. If this test does not
+  use at queries, ts will be `nil`.
+
   We have two methods for recent timestamps.
 
   - To test a very recent timestamp, we get the current time and bind it in a
@@ -294,17 +298,17 @@
   [test conn expr]
   (if-not (:at-query test)
     ; Default case, don't wrap in an `at`
-    (q/expr expr)
+    (q/expr [nil expr])
 
     (condp < (rand)
       ; Separate query
       0.5 (let [t (jitter-time (now conn))]
-            (q/at t (q/expr expr)))
+            [t (q/at t (q/expr expr))])
 
       ; Single query
       (q/let [internal-maybe-at-ts (q/time "now")]
-        (q/at internal-maybe-at-ts
-              (q/expr expr))))))
+        [internal-maybe-at-ts (q/at internal-maybe-at-ts
+                                    (q/expr expr))]))))
 
 (defmacro with-retry
   "Useful for setup; retries requests when the cluster is unavailable. I'm not

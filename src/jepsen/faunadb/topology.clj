@@ -31,7 +31,8 @@
                     ; (0 0 0 1 1 1 2 2 2 3)
                     ; => (map #(mod % 3) (range 10))
                     ; (0 1 2 0 1 2 0 1 2 0)
-                    :log-part (quot i (:replicas test))
+                    ; Log parts are now optional as of 2.6.0
+                    ; :log-part (quot i (:replicas test))
                     :replica (replica-name (mod i (:replicas test)))})))})
 
 ; Node accessors
@@ -124,11 +125,12 @@
   [test topo]
   (let [topo (only-active topo)
         ; You can only remove nodes which aren't participating in the log
-        without-log-part (->> topo
-                              :nodes
-                              (remove :log-part)
-                              (map :node)
-                              set)
+        ; 2.6.0 and higher don't require log config
+        ;without-log-part (->> topo
+        ;                     :nodes
+        ;                     (remove :log-part)
+        ;                     (map :node)
+        ;                     set)
         ; We need to make sure not to empty a replica
         with-enough-nodes-in-replica (->> (nodes-by-replica topo)
                                           vals
@@ -136,8 +138,10 @@
                                           (reduce concat)
                                           set)
         ; Candidates for removal
-        candidates (set/intersection without-log-part
-                                     with-enough-nodes-in-replica)]
+        ; 2.6.0: don't need log config
+        ; candidates (set/intersection without-log-part
+        ;                             with-enough-nodes-in-replica)]
+        candidates with-enough-nodes-in-replica]
     (map (fn [node] {:type :info, :f :remove-node, :value node})
          candidates)))
 
@@ -179,8 +183,9 @@
    ; execute, relative to a small number of remove-node ops, and we want a more
    ; even distribution of *types* of operations.
    (->> [(add-ops test topo)
-        (remove-ops test topo)
-        (remove-log-node-ops test topo)]
+         (remove-ops test topo)]
+        ; 2.6.0+ don't require manual log config
+        ; (remove-log-node-ops test topo)]
         (keep rand-nth-empty)
         shuffle
         first)))

@@ -124,15 +124,33 @@
   you'd expect. Body is evaluated in an implicit do."
   [bindings & body]
   (c/let [bindings (c/partition 2 bindings)
-          ; Fauna Let takes a map of string variable names to Exprs
-          fauna-bindings (c/->> bindings
-                                (c/map (c/fn [[sym e]]
-                                         [(c/name sym) `(expr ~e)]))
-                                (c/into (c/array-map)))
-          ; And within body, we want to bind binding symbols to Vars.
+          ; Each binding is now a pair like [x (q/get ...)]. We're going to
+          ; emit a faunadb Let binding, but with instances of `x` replaced by
+          ; `(variable "x")`, both in our body, AND in all later RHS bindings.
+          ;
+          ; To do this lexically, we're going to construct a series of Clojure
+          ; let bindings (flattened, e.g. a x b y), which we'll wrap around the
+          ; body. We'll also wrap RHS expressions in the Fauna bindings with
+          ; let bindings *up* to that point.
           let-bindings (c/mapcat (c/fn [[sym _]]
                                    [sym `(variable ~(c/name sym))])
-                                 bindings)]
+                                 bindings)
+
+          ; Fauna Let takes a map of string variable names to Exprs. Note that
+          ; in each RHS, we're going to wrap the expr in a clojure let binding
+          ; which replaces instances of lexical variables with the appropriate
+          ; `(variable x)` form.
+          fauna-bindings
+          (c/->> bindings
+                 (c/map-indexed (c/fn [i [sym e]]
+                                  ; Take the variable bindings that have been
+                                  ; established at this point
+                                  (c/let [bs (c/take (c/* 2 i) let-bindings)]
+                                    ; And construct our pair of string to expr
+                                    [(c/name sym)
+                                     ; Make sure the RHS observes past bindings
+                                     `(c/let [~@bs] (expr ~e))])))
+                 (c/into (c/array-map)))]
     `(. (Language/Let ~fauna-bindings)
         (in (c/let [~@let-bindings]
               (jepsen.faunadb.query/do ~@body))))))

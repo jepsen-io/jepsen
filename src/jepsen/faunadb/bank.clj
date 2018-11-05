@@ -33,7 +33,7 @@
 
 (defmacro wrapped-query
   [op & exprs]
-  `(f/with-errors
+  `(f/with-errors ~op #{:read}
      (try
        ~@exprs
        (catch com.faunadb.client.errors.BadRequestException e#
@@ -82,20 +82,22 @@
       :read
       (wrapped-query
         op
-        (->> (f/query conn
-                      (f/maybe-at test conn
-                                  {:data (mapv
-                                           (fn [i]
-                                             (let [acct (q/ref accounts i)]
-                                               (q/when (q/exists? acct)
-                                                 [i (q/select ["data" "balance"]
-                                                              (q/get acct))])))
-                                           (:accounts test))}))
-             :data
-             (remove nil?)
-             (map vec)
-             (into {})
-             (assoc op :type :ok, :value)))
+        (let [[ts res] (f/query
+                         conn
+                         (f/maybe-at test conn
+                                     (mapv
+                                       (fn [i]
+                                         (let [acct (q/ref accounts i)]
+                                           (q/when (q/exists? acct)
+                                             [i (q/select ["data" "balance"]
+                                                          (q/get acct))])))
+                                       (:accounts test))))
+              ; Convert read array of [acct, bal] pairs to a map.
+              res (->> res
+                       (remove nil?)
+                       (map vec)
+                       (into {}))]
+          (assoc op :type :ok, :value res, :ts ts)))
 
       :transfer
       (wrapped-query op

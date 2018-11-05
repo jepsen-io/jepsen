@@ -15,6 +15,7 @@
             [jepsen.faunadb [bank :as bank]
                             [g2 :as g2]
                             [register :as register]
+                            [monotonic :as monotonic]
                             [sets :as sets]
                             [pages :as pages]
                             [internal :as internal]
@@ -28,6 +29,7 @@
    "bank-index" bank/index-test
    "g2"         g2/test
    "internal"   internal/test
+   "monotonic"  monotonic/test
    "pages"      pages/test})
 
 (def nemeses

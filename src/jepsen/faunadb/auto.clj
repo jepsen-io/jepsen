@@ -335,7 +335,10 @@
 (defn kill!
   "Kills FaunaDB on node."
   [test node]
-  (util/meh (c/su (cu/grepkill! "faunadb.jar")))
+  (c/su
+    (util/meh (cu/grepkill! "faunadb.jar"))
+    ; Don't restart!
+    (c/exec :service :faunadb :stop))
   (info node "FaunaDB killed.")
   :killed)
 
@@ -367,7 +370,6 @@
     (info "Adding repo")
     (debian/add-repo! "faunadb"
                       "deb [arch=all] https://repo.fauna.com/debian unstable non-free")
-    (info "Install faunadb")
     (assert (:version test))
     (debian/install {"faunadb" (str (:version test) "-0")})
     (when-let [k (:datadog-api-key test)]
@@ -399,9 +401,10 @@
                    :network_broadcast_address      node
                    :network_datacenter_name        (topo/replica topo node)
                    :network_host_id                node
-                   :network_listen_address         ip
-                   :storage_transaction_log_nodes  (topo/log-configuration
-                                                     topo)}
+                   :network_listen_address         ip}
+                   ; 2.6.0 and higher don't require manual log config
+                   ;:storage_transaction_log_nodes  (topo/log-configuration
+                   ;                                  topo)}
                   (when (:datadog-api-key test)
                     {:stats_host "localhost"
                      :stats_port 8125})))
