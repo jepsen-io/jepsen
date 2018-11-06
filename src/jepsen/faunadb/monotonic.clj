@@ -167,6 +167,107 @@
         {:valid? (empty? errs)
          :errors errs}))))
 
+(defn merged-windows
+  "Takes a collection of points, and computes [lower, upper] windows of s
+  elements before and after each point, then merges overlapping windows
+  together.
+
+  s determines the size of the window, in... points, I think?"
+  [s points]
+  (when (seq points)
+    (let [points (sort points)
+          ; Build up a vector of windows by keeping track of the current lower
+          ; and upper bounds, expanding upper whenever necessary.
+          [windows lower upper]
+          (reduce (fn [[windows lower upper] p]
+                    (let [lower' (- p s)
+                          upper' (+ p s)]
+                      (if (<= upper lower')
+                        ; Start a new window
+                        [(conj windows [lower upper]) lower' upper']
+                        ; Expand this window
+                        [windows lower upper'])))
+                  [[] (- (first points) s) (+ (first points) s)]
+                  points)]
+      (conj windows [lower upper]))))
+
+(defn plot!
+  "Renders a plot of a history to the given file. Takes a test and checker opts
+  to determine the subdirectory to write to."
+  [test opts filename history]
+  (let [series (->> history
+                    (r/filter (comp number? :process))
+                    (r/filter #(= :ok (:type %)))
+                    (group-by :process)
+                    (util/map-vals
+                      (partial mapv (fn [op]
+                                      [(util/nanos->secs (:time op))
+                                       (:value op)]))))
+        colors (perf/qs->colors (keys series))
+        path (.getCanonicalPath
+               (store/path! test (:subdirectory opts)
+                            (str "sequential " filename ".png")))]
+    (try
+      (g/raw-plot!
+        (concat (perf/preamble path)
+                (perf/nemesis-regions history)
+                (perf/nemesis-lines history)
+                [['set 'title (str (:name test) " sequential by process")]
+                 '[set ylabel "register value"]
+                 ['plot (apply g/list
+                               (for [[process points] series]
+                                 ["-"
+                                  'with       'linespoints
+                                  'pointtype  2
+                                  'linetype   (colors process)
+                                  'title      (str process)]))]])
+        (vals series))
+      {:valid? true}
+      (catch java.io.IOException _
+        (throw (IllegalStateException. "Error rendering plot; verify gnuplot is installed and reachable"))))))
+
+(defn ts-value-plotter
+  "Plots interesting bits of the value as seen by each process history."
+  []
+  (reify checker/Checker
+    (check [this test model history opts]
+      ; Identify interesting regions
+      (let [; Set aside nemesis operations so we can plot them later
+            nemesis-history (r/filter (comp #{:nemesis} :process) history)
+            ; Extract temporal reads and sort by timestamp
+            history (->> history
+                         (r/filter (fn [op]
+                                     (or (and (op/ok? op)
+                                              (= :read-at (:f op)))
+                                         (= :nemesis (:process op)))))
+                         (into [])
+                         (sort-by (comp first :value)))
+            extractor (comp second :value)
+            spots (nth (reduce (fn [[i last spots] op]
+                                 ; Figure out if this is a spot
+                                 (let [p  (:process op)
+                                       v  (some-> (last p) extractor)
+                                       v' (extractor op)]
+                                   [(inc i)
+                                    (assoc last p op)
+                                    (if (or (nil? v) (<= 0 (compare v v')))
+                                      ; Monotonic
+                                      spots
+                                      ; Non-monotonic
+                                      (conj spots i))]))
+                               [0 {} []]
+                               history)
+                       2)]
+        (->> spots
+             (merged-windows 32)
+             (map-indexed (fn [i [lower upper]]
+                            (->> (subvec history
+                                         (max lower 0)
+                                         (min upper (dec (count history))))
+                                 (plot! test opts i))))
+             dorun))
+      {:valid? true})))
+
 (defn inc-gen
   [_ _]
   {:type :invoke, :f :inc, :value nil})
@@ -187,5 +288,6 @@
             :checker (checker/compose
                        {:perf (checker/perf)
                         :monotonic (checker)
+												:timestamp-value-plot (plotter)
                         :timestamp-value (timestamp-value-checker)})}
            opts)))
