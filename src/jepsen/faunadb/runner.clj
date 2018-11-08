@@ -60,6 +60,10 @@
     :default true]
    [nil "--at-query" "Use At queries for certain operations, rather than just reading."
     :default false]
+   [nil "--at-query-jitter MS" "Time to jitter at queries, in milliseconds."
+    :default 10000
+    :parse-fn #(Long/parseLong %)
+    :validate [(complement neg?) "Must be a positive integer"]]
    [nil "--fixed-instances" "Don't create and destroy instances dynamically."
     :default false]
    [nil "--serialized-indices" "Use strict serializable indexes"

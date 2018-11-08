@@ -52,6 +52,8 @@
                      " strong-read")
                    (when (:at-query opts)
                      " at-query")
+                   (when-let [j (:at-query-jitter opts)]
+                     (str " jitter " j))
                    (when (:fixed-instances opts)
                      " fixed-instances")
                    (when (:serialized-indices opts)

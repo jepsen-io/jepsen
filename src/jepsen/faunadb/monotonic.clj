@@ -40,7 +40,9 @@
             [jepsen.checker.perf :as perf]
             [gnuplot.core :as g]
             [jepsen.faunadb [query :as q]
-                            [client :as f]]))
+                            [client :as f]])
+  (:import (java.time Instant)
+           (java.time.temporal ChronoUnit)))
 
 (def registers-name "registers")
 (def registers (q/class registers-name))
@@ -57,39 +59,45 @@
       (f/query conn (f/upsert-class {:name registers-name}))))
 
   (invoke! [this test op]
-    (f/with-errors op #{:read-at :read}
-      (let [v   (:value op)
-            r   (q/ref registers k)
-            res (case (:f op)
-                  :inc
-                  (f/query conn
-                           [(q/time "now")
-                            (q/if (q/exists? r)
-                              ; Record exists, increment
-                              (q/let [v  (q/select ["data" "value"] (q/get r))
-                                      v' (q/+ v 1)]
-                                (q/update r {:data {:value v'}})
-                                v')
-                              ; Record doesn't exist, init to 1
-                              (q/do (q/create r {:data {:value 1}})
-                                    1))])
+    (try
+      (f/with-errors op #{:read-at :read}
+        (let [v   (:value op)
+              r   (q/ref registers k)
+              [t v] (case (:f op)
+                      :inc
+                      (f/query conn
+                               [(q/time "now")
+                                (q/if (q/exists? r)
+                                  ; Record exists, increment
+                                  (q/let [v  (q/select ["data" "value"] (q/get r))
+                                          v' (q/+ v 1)]
+                                    (q/update r {:data {:value v'}})
+                                    v')
+                                  ; Record doesn't exist, init to 1
+                                  (q/do (q/create r {:data {:value 1}})
+                                        1))])
 
-                  :read    (f/query conn
-                                    [(q/time "now")
-                                     (q/if (q/exists? r)
-                                       (q/select ["data" "value"] (q/get r))
-                                       0)])
+                      :read    (f/query conn
+                                        [(q/time "now")
+                                         (q/if (q/exists? r)
+                                           (q/select ["data" "value"] (q/get r))
+                                           0)])
 
-                  :read-at (let [ts (or (first v)
-                                        (f/jitter-time (f/now conn)))]
-                               (f/query conn
-                                        [ts
-                                         (q/at ts
-                                               (if (q/exists? r)
-                                                 (q/select ["data" "value"]
-                                                           (q/get r))
-                                                 0))])))]
-        (assoc op :type :ok, :value res))))
+                      :read-at (let [ts (or (first v)
+                                            (f/jitter-time
+                                              (f/now conn)
+                                              (:at-query-jitter test)))]
+                                   (f/query conn
+                                            [ts
+                                             (q/at ts
+                                                   (q/if (q/exists? r)
+                                                     (q/select ["data" "value"]
+                                                               (q/get r))
+                                                     0))])))
+              t (str t)]
+          (assoc op :type :ok, :value [t v])))
+      (catch com.faunadb.client.errors.NotFoundException e
+        (assoc op :type :fail, :error :not-found))))
 
   (teardown! [this test])
 
@@ -143,7 +151,6 @@
   "Given a history, and a function of an operation that extracts a comparable
   value, finds pairs of ops where that value decreases."
   [extractor history]
-  (info history)
   (->> history
        (partition 2 1)
        (keep (fn [[op1 op2 :as pair]]
@@ -191,18 +198,28 @@
                   points)]
       (conj windows [lower upper]))))
 
-(defn plot!
-  "Renders a plot of a history to the given file. Takes a test and checker opts
-  to determine the subdirectory to write to."
+(defn timestamp-value-plot!
+  "Renders a plot of the value of a register over different timestamps. Takes a
+  test and checker opts to determine the subdirectory to write to."
   [test opts filename history]
-  (let [series (->> history
+  (let [t0     (-> test :start-time .getMillis Instant/ofEpochMilli)
+        series (->> history
                     (r/filter (comp number? :process))
                     (r/filter #(= :ok (:type %)))
                     (group-by :process)
                     (util/map-vals
                       (partial mapv (fn [op]
-                                      [(util/nanos->secs (:time op))
-                                       (:value op)]))))
+                                      [; Convert fauna timestamp to seconds
+                                       ; since start of test
+                                       (let [t (-> (:value op)
+                                                   first
+                                                   (Instant/parse))
+                                             dt (-> t0
+                                                    (.until t ChronoUnit/NANOS)
+                                                    (util/nanos->secs))]
+                                         dt)
+                                       ; Observed value
+                                       (second (:value op))]))))
         colors (perf/qs->colors (keys series))
         path (.getCanonicalPath
                (store/path! test (:subdirectory opts)
@@ -214,6 +231,7 @@
                 (perf/nemesis-lines history)
                 [['set 'title (str (:name test) " sequential by process")]
                  '[set ylabel "register value"]
+                 '[set xlabel "faunadb timestamp"]
                  ['plot (apply g/list
                                (for [[process points] series]
                                  ["-"
@@ -226,7 +244,7 @@
       (catch java.io.IOException _
         (throw (IllegalStateException. "Error rendering plot; verify gnuplot is installed and reachable"))))))
 
-(defn ts-value-plotter
+(defn timestamp-value-plotter
   "Plots interesting bits of the value as seen by each process history."
   []
   (reify checker/Checker
@@ -236,12 +254,11 @@
             nemesis-history (r/filter (comp #{:nemesis} :process) history)
             ; Extract temporal reads and sort by timestamp
             history (->> history
-                         (r/filter (fn [op]
-                                     (or (and (op/ok? op)
-                                              (= :read-at (:f op)))
-                                         (= :nemesis (:process op)))))
+                         (r/filter op/ok?)
+                         (r/filter (comp #{:read-at} :f))
                          (into [])
-                         (sort-by (comp first :value)))
+                         (sort-by (comp first :value))
+                         vec)
             extractor (comp second :value)
             spots (nth (reduce (fn [[i last spots] op]
                                  ; Figure out if this is a spot
@@ -264,9 +281,25 @@
                             (->> (subvec history
                                          (max lower 0)
                                          (min upper (dec (count history))))
-                                 (plot! test opts i))))
+                                 (timestamp-value-plot! test opts i))))
              dorun))
       {:valid? true})))
+
+(defn not-found-checker
+  "We do explicit existence checks before all reads, and should never observe a
+  not-found result. Let's make sure of that."
+  []
+  (reify checker/Checker
+    (check [_ test model history opts]
+      (let [errs (->> history
+                      (r/filter op/fail?)
+                      (r/filter (comp #{:not-found} :error))
+                      (into []))]
+        {:valid? (empty? errs)
+         :invoke-count (->> history (r/filter op/invoke?) (into []) count)
+         :error-count (count errs)
+         :first  (first errs)
+         :last   (peek errs)}))))
 
 (defn inc-gen
   [_ _]
@@ -288,6 +321,7 @@
             :checker (checker/compose
                        {:perf (checker/perf)
                         :monotonic (checker)
-												:timestamp-value-plot (plotter)
+                        :not-found (not-found-checker)
+												:timestamp-value-plot (timestamp-value-plotter)
                         :timestamp-value (timestamp-value-checker)})}
            opts)))
