@@ -72,10 +72,10 @@
                                   (q/let [v  (q/select ["data" "value"] (q/get r))
                                           v' (q/+ v 1)]
                                     (q/update r {:data {:value v'}})
-                                    v')
+                                    v)
                                   ; Record doesn't exist, init to 1
                                   (q/do (q/create r {:data {:value 1}})
-                                        1))])
+                                        0))])
 
                       :read    (f/query conn
                                         [(q/time "now")
