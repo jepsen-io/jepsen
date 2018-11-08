@@ -161,7 +161,7 @@
 
 (defn timestamp-value-checker
   "Checks a single register to ensure that the relationship between timestamps
-  and register values is monotonic."
+  and register values is globally monotonic."
   []
   (reify checker/Checker
     (check [_ test model history opts]
@@ -170,7 +170,7 @@
                       (r/filter (comp #{:read-at :inc} :f))
                       (into [])
                       (sort-by (comp first :value))
-                      (non-monotonic-pairs-by-process (comp second :value)))]
+                      (non-monotonic-pairs (comp second :value)))]
         {:valid? (empty? errs)
          :errors errs}))))
 
