@@ -22,7 +22,7 @@
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
-      (c/with-txn test [t conn]
+      (c/with-txn [t conn]
         (case (:f op)
           :add (let [inserted (c/mutate! t {:type "element",
                                             :value (:value op)})]
@@ -61,20 +61,20 @@
 
   (setup! [this test]
     (c/alter-schema! conn (str "value: [int] .\n"))
-    (c/with-txn test [t conn]
+    (c/with-txn [t conn]
       (deliver uid (first (vals (c/mutate! t {:value -1}))))
       (info "UID is" @uid)))
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
       (case (:f op)
-        :add (let [inserted (c/with-txn test [t conn]
+        :add (let [inserted (c/with-txn [t conn]
                               (c/mutate! t {:uid @uid
                                             :value (:value op)}))]
                (swap! written conj (:value op))
                (assoc op :type :ok, :uid @uid))
 
-        :read (let [r (c/with-txn test [t conn]
+        :read (let [r (c/with-txn [t conn]
                         (let [found (->> (c/query t
                                                   (str "{ q(func: uid($u)) { "
                                                        "uid, value } }")

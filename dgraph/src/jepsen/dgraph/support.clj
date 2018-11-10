@@ -79,7 +79,7 @@
   detect which version of the option name to use from the help in order to test
   different builds."
   []
-  (let [usage (c/exec (str dir "/" binary) :server :--help)
+  (let [usage (c/exec (str dir "/" binary) :alpha :--help)
         opt (re-find #"(--(lru|memory)_mb)" usage)]
     (assert+ opt RuntimeException
              (str "Not sure whether to use --lru_mb or --memory_mb with "
@@ -95,8 +95,10 @@
            :pidfile alpha-pidfile
            :chdir   dir}
           binary
-          :server
+          :alpha
           (lru-opt)
+          (when (:dgraph-jaeger-connector test) [:--jaeger-connector (:dgraph-jaeger-connector test)])
+          (when (:dgraph-jaeger-agent test) [:--jaeger-agent (:dgraph-jaeger-agent test)])
           :--idx        (node-idx test node)
           :--my         (str node ":" alpha-internal-port)
           :--zero       (str node ":" zero-internal-port)))

@@ -17,6 +17,7 @@
                  [clj-wallhack "1.0.1"]
                  [io.opencensus/opencensus-api  "0.15.1"]
                  [io.opencensus/opencensus-impl "0.15.1"]
+                 [io.opencensus/opencensus-exporter-trace-jaeger "0.17.0"]
                  [io.opencensus/opencensus-exporter-trace-logging "0.15.1"]]
   :main jepsen.dgraph.core
   :profiles {:uberjar {:aot :all}})

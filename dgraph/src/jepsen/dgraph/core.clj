@@ -19,7 +19,8 @@
                            [set :as set]
                            [support :as s]
                            [types :as types]
-                           [upsert :as upsert]]))
+                           [upsert :as upsert]
+                           [trace  :as t]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
@@ -73,7 +74,8 @@
                                (gen/log "Waiting for recovery.")
                                (gen/sleep (:final-recovery-time opts))
                                (gen/clients (:final-generator workload)))
-                   gen)]
+                   gen)
+        tracing  (t/init-tracing! (:tracing opts))]
     (merge tests/noop-test
            opts
            (dissoc workload :final-generator)
@@ -127,7 +129,10 @@
     :parse-fn parse-long
     :validate [(complement neg?) "Must be a non-negative number"]]
    [nil "--retry-db-setup" "Work around Dgraph cluster convergence bugs by retrying the setup process"
-    :default false]])
+    :default false]
+   [nil "--tracing URL" "Enables tracing by providing an endpoint to export traces."]
+   [nil "--dgraph-jaeger-connector CONNECTOR" "Jaeger connector URL to pass to dgraph on startup."]
+   [nil "--dgraph-jaeger-agent AGENT" "Jaeger agent URL to pass to dgraph on startup."]])
 
 (def single-test-opts
   "Additional command line options for single tests"
