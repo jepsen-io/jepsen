@@ -6,45 +6,51 @@
            (io.opencensus.exporter.trace.logging LoggingTraceExporter)
            (io.opencensus.exporter.trace.jaeger JaegerTraceExporter)))
 
-(def tracer         (atom nil))
-(def trace-exporter (atom nil))
-(def sampler        (atom nil))
-(def trace-config   (atom nil))
+(defn sampler
+  "Enables sampling if a tracing service is provided."
+  [enable?]
+  (if enable?
+    (Samplers/alwaysSample)
+    (Samplers/neverSample)))
 
-(defn get-trace-config []
+(defn config [sampler]
   (let [config (Tracing/getTraceConfig)
         params (-> config
                    .getActiveTraceParams
                    .toBuilder
-                   (.setSampler @sampler)
+                   (.setSampler sampler)
                    .build)]
     (.updateActiveTraceParams config params)))
 
-(defn init-tracing!
-  [{:keys [tracing]}]
-  (reset! tracer         (Tracing/getTracer))
+(defn exporter
+  "When tracing is enabled, registers an exporter to the given jaeger
+  service."
+  [endpoint]
+  (when endpoint
+    (JaegerTraceExporter/createAndRegister endpoint "jepsen")))
 
-  ;; Connect to the jaeger service to export spans
-  (reset! trace-exporter (when tracing
-                           (JaegerTraceExporter/createAndRegister tracing "jepsen")))
-
-  ;; If there's nowhere to send traces don't trace
-  (reset! sampler        (if tracing
-                           (Samplers/alwaysSample)
-                           (Samplers/neverSample)))
-  (reset! trace-config   (get-trace-config)))
+(defn tracing [endpoint]
+  (let [sampler (sampler endpoint)]
+    {:endpoint endpoint
+     :sampler sampler
+     :config (config sampler)
+     :exporter (exporter endpoint)}))
 
 (defmacro with-trace
-  "Takes a span name and a body and uses this namespace's tracer to
-  wrap the body in a span."
+  "Takes a test map, span name, and a body and wraps the
+  body in a tracing span."
   [name & body]
-  `(let [span# (-> @tracer (.spanBuilder ~name) .startScopedSpan)]
+  `(let [span# (-> (Tracing/getTracer)
+                   (.spanBuilder ~name)
+                   .startScopedSpan)]
      (try
        ~@body
        (finally (.close span#)))))
 
-(defn context []
-  (let [span (.getCurrentSpan @tracer)
+(defn context
+  "Takes a test map and returns the context map for the current trace."
+  []
+  (let [span (.getCurrentSpan (Tracing/getTracer))
         context (.getContext span)]
     {:span-id  (-> context .getSpanId .toString)
      :trace-id (-> context .getTraceId .toString)}))

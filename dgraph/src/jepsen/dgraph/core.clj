@@ -75,7 +75,7 @@
                                (gen/sleep (:final-recovery-time opts))
                                (gen/clients (:final-generator workload)))
                    gen)
-        tracing  (t/init-tracing! (:tracing opts))]
+        tracing (t/tracing (:tracing opts))]
     (merge tests/noop-test
            opts
            (dissoc workload :final-generator)
@@ -95,7 +95,8 @@
             :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
                           {:perf     (checker/perf)
-                           :workload (:checker workload)})})))
+                           :workload (:checker workload)})
+            :tracing tracing})))
 
 (defn parse-long [x] (Long/parseLong x))
 
