@@ -97,8 +97,10 @@
           binary
           :alpha
           (lru-opt)
-          (when (:dgraph-jaeger-connector test) [:--jaeger-connector (:dgraph-jaeger-connector test)])
-          (when (:dgraph-jaeger-agent test) [:--jaeger-agent (:dgraph-jaeger-agent test)])
+          (when (:dgraph-jaeger-connector test)
+            [:--jaeger.connector (:dgraph-jaeger-connector test)])
+          (when (:dgraph-jaeger-agent test)
+            [:--jaeger.agent (:dgraph-jaeger-agent test)])
           :--idx        (node-idx test node)
           :--my         (str node ":" alpha-internal-port)
           :--zero       (str node ":" zero-internal-port)))
