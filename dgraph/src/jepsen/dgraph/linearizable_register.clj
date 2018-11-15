@@ -46,7 +46,7 @@
       (c/with-unavailable-backoff
         (read-info->fail
           (c/with-conflict-as-fail op
-            (c/with-txn test [t conn]
+            (c/with-txn [t conn]
               (case (:f op)
                 :read (assoc op
                              :type  :ok
@@ -102,7 +102,7 @@
       (c/with-unavailable-backoff
         (read-info->fail
           (c/with-conflict-as-fail op
-            (c/with-txn test [t conn]
+            (c/with-txn [t conn]
               (case (:f op)
                 :read (assoc op
                              :type :ok
