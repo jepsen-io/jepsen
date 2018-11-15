@@ -129,7 +129,7 @@
 
       ;; Insert initial value
       (try
-        (c/with-txn test [t conn]
+        (c/with-txn [t conn]
           (let [k (first (:accounts test))
                 tp (keyword (c/gen-pred "type"    pred-count k))
                 kp (keyword (c/gen-pred "key"     pred-count k))
@@ -144,7 +144,7 @@
   (invoke! [this test op]
     (t/with-trace "bank.invoke"
       (c/with-conflict-as-fail op
-        (c/with-txn test [t conn]
+        (c/with-txn [t conn]
           (case (:f op)
             :read (t/with-trace "bank.invoke.read"
                     (let [op (assoc op
@@ -153,9 +153,11 @@
                       (if-let [error (bank/check-op (set (:accounts test))
                                                     (:total-amount test)
                                                     op)]
-                        (assoc op
-                               :message (dissoc error :op)
-                               :error :checker-violation)
+                        (let [message (merge error (t/context))
+                              message (dissoc message :op)]
+                          (assoc op
+                                 :message message
+                                 :error :checker-violation))
                         op)))
 
             :transfer (t/with-trace "bank.invoke.transfer"

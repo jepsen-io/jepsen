@@ -10,9 +10,13 @@
                     [control  :as c]
                     [core     :as jepsen]
                     [util     :refer [meh]]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
-            [jepsen.dgraph.client :as dc])
-  (:import (java.util.concurrent CyclicBarrier)))
+            [jepsen.os.debian :as debian]
+            [jepsen.dgraph.client :as dc]
+            [clojure.java.io :as io])
+  (:import (java.util.concurrent CyclicBarrier)
+           (java.io File)))
 
 ; Local paths
 (def dir "/opt/dgraph")
@@ -75,7 +79,7 @@
   detect which version of the option name to use from the help in order to test
   different builds."
   []
-  (let [usage (c/exec (str dir "/" binary) :server :--help)
+  (let [usage (c/exec (str dir "/" binary) :alpha :--help)
         opt (re-find #"(--(lru|memory)_mb)" usage)]
     (assert+ opt RuntimeException
              (str "Not sure whether to use --lru_mb or --memory_mb with "
@@ -91,8 +95,12 @@
            :pidfile alpha-pidfile
            :chdir   dir}
           binary
-          :server
+          :alpha
           (lru-opt)
+          (when (:dgraph-jaeger-connector test)
+            [:--jaeger.connector (:dgraph-jaeger-connector test)])
+          (when (:dgraph-jaeger-agent test)
+            [:--jaeger.agent (:dgraph-jaeger-agent test)])
           :--idx        (node-idx test node)
           :--my         (str node ":" alpha-internal-port)
           :--zero       (str node ":" zero-internal-port)))
@@ -228,6 +236,8 @@
                        (:version test) "/dgraph-linux-amd64.tar.gz"))
               dir
               (:force-download test)))
+
+          (nt/install!)
 
           (when (= node (jepsen/primary test))
             (start-zero! test node)
