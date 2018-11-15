@@ -226,6 +226,9 @@
   the `jepsen.control` session to the given node, so you can just call `(c/exec
   ...)`.
 
+  The targeter can take either (targeter test nodes) or, if that fails,
+  (targeter nodes).
+
   Re-selects a fresh node (or nodes) for each start--if targeter returns nil,
   skips the start. The return values from the start and stop fns will become
   the :values of the returned :info operations from the nemesis, e.g.:
@@ -240,12 +243,17 @@
         (locking nodes
           (assoc op :type :info, :value
                  (case (:f op)
-                   :start (if-let [ns (-> test :nodes targeter util/coll)]
-                            (if (compare-and-set! nodes nil ns)
-                              (c/on-many ns (start! test c/*host*))
-                              (str "nemesis already disrupting "
-                                   (pr-str @nodes)))
-                            :no-target)
+                   :start (let [ns (:nodes test)
+                                ns (try (targeter test ns)
+                                        (catch clojure.lang.ArityException e
+                                          (targeter ns)))
+                                ns (util/coll ns)]
+                            (if ns
+                              (if (compare-and-set! nodes nil ns)
+                                (c/on-many ns (start! test c/*host*))
+                                (str "nemesis already disrupting "
+                                     (pr-str @nodes)))
+                              :no-target))
                    :stop (if-let [ns @nodes]
                            (let [value (c/on-many ns (stop! test c/*host*))]
                              (reset! nodes nil)
