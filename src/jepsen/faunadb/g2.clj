@@ -6,7 +6,6 @@
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [core :as jepsen]
-                    [fauna :as fauna]
                     [util :as util :refer [meh]]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
@@ -70,14 +69,8 @@
   (close! [this test]
     (.close conn)))
 
-(defn test
+(defn workload
   [opts]
-  (fauna/basic-test
-    (merge
-      {:name "set"
-       :client {:client (G2Client. nil)
-                :during (adya/g2-gen)}
-       :checker (checker/compose
-                  {:perf (checker/perf)
-                   :g2 (adya/g2-checker)})}
-      opts)))
+  {:client (G2Client. nil)
+   :checker (adya/g2-checker)
+   :generator (adya/g2-gen)})

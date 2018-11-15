@@ -11,7 +11,6 @@
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [core :as jepsen]
-                    [fauna :as fauna]
                     [util :as util]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
@@ -172,35 +171,16 @@
   (close! [this test]
     (client/close! bank-client test)))
 
-(defn bank-test-base
+(defn workload
+  "A basic bank workload"
   [opts]
-  (let [workload (bank/test)]
-    (fauna/basic-test
-      (merge
-        (dissoc workload :generator)
-        {:client {:client (:client opts)
-                  :during (->> (:generator workload)
-                               (gen/delay 1/10)
-                               (gen/clients))
-                  :final  (gen/clients nil)}
-         :checker (checker/compose
-                    {:perf     (checker/perf)
-                     ;:timeline (timeline/html)
-                     :details  (:checker workload)})}
-        (dissoc opts :client)))))
+  (-> (bank/test)
+      (assoc :client (BankClient. nil))
+      (update :generator (partial gen/delay 1/10))))
 
-(defn test
+(defn index-workload
+  "A version which uses indices for reads"
   [opts]
-  (bank-test-base
-    (merge {:name   "bank"
-            :client (BankClient. nil)}
-           opts)))
-
-(defn index-test
-  "A variant of the test which uses an index instead of directly fetching
-  individual accounts."
-  [opts]
-  (bank-test-base
-    (merge {:name   "bank index"
-            :client (IndexClient. (BankClient. nil) nil)}
-           opts)))
+  (-> (bank/test)
+      (assoc :client (BankClient. nil))
+      (update :generator (partial gen/delay 1/10))))

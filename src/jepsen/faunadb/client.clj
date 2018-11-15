@@ -339,7 +339,10 @@
          (assoc ~op :type type#, :error [:timeout (.getMessage e#)]))
 
        (catch IOException e#
-         (assoc ~op :type type#, :error [:io (.getMessage e#)]))
+         (condp re-find (.getMessage e#)
+           #"Connection refused"
+           (assoc ~op :type :fail, :error :connection-refused)
+           (assoc ~op :type type#, :error [:io (.getMessage e#)])))
 
        (catch com.faunadb.client.errors.InternalException e#
          (condp re-find (.getMessage e#)

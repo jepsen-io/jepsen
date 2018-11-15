@@ -1,7 +1,8 @@
 (ns jepsen.faunadb.pages
-  "Verifies the transactional isolation of pagination by inserting pairs of
-  [-x, x], and concurrently performing reads of every element in the
-  collection. We expect to find that for every x, -x exists, and vice versa."
+  "Verifies the transactional isolation of pagination by inserting groups of
+  elements together like [1, 5, -15, 23], then concurrently performing reads of
+  every element in the collection. We expect to find that for every element of
+  a group, all the other elements exist."
   (:refer-clojure :exclude [test])
   (:require [clojure.tools.logging :refer :all]
             [clojure.set :as set]
@@ -10,7 +11,6 @@
             [knossos.op :as op]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [fauna :as fauna]
                     [generator :as gen]]
             [jepsen.faunadb [query :as q]
                             [client :as f]]))
@@ -137,7 +137,7 @@
         {:valid? (not (seq errs))
          :errors errs}))))
 
-(defn test
+(defn workload
   [opts]
   (let [zero        0
         n           10000
@@ -151,13 +151,7 @@
                           :value group}))
                    (gen/seq))
         reads {:type :invoke, :f :read, :value nil}]
-    (fauna/basic-test
-      (merge
-        {:name "pages"
-         :client {:client (PagesClient. nil)
-                  :during (->> (gen/mix [adds adds adds adds reads])
-                               (gen/stagger 1/5))}
-         :checker (checker/compose
-                    {:perf  (checker/perf)
-                     :pages (checker)})}
-        opts))))
+    {:client    (PagesClient. nil)
+     :generator (->> (gen/mix [adds adds adds adds reads])
+                     (gen/stagger 1/5))
+     :checker   (checker)}))

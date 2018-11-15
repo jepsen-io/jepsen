@@ -32,7 +32,6 @@
             [knossos.op :as op]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [fauna :as fauna]
                     [generator :as gen]
                     [independent :as independent]
                     [util :as util]
@@ -313,15 +312,12 @@
   [_ _]
   {:type :invoke, :f :read-at :value [nil nil]})
 
-(defn test
+(defn workload
   [opts]
-  (fauna/basic-test
-    (merge {:client {:client (Client. nil)
-                     :during (->> (gen/mix [inc-gen read-gen read-at-gen]))}
-            :checker (checker/compose
-                       {:perf (checker/perf)
-                        :monotonic (checker)
-                        :not-found (not-found-checker)
-												:timestamp-value-plot (timestamp-value-plotter)
-                        :timestamp-value (timestamp-value-checker)})}
-           opts)))
+  {:client    (Client. nil)
+   :generator (->> (gen/mix [inc-gen read-gen read-at-gen]))
+   :checker (checker/compose
+              {:monotonic (checker)
+               :not-found (not-found-checker)
+               :timestamp-value-plot (timestamp-value-plotter)
+               :timestamp-value (timestamp-value-checker)})})

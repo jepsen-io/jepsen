@@ -5,7 +5,6 @@
   (:import com.faunadb.client.types.Field)
   (:require [jepsen [checker :as checker]
                     [client :as client]
-                    [fauna :as fauna]
                     [generator :as gen]
                     [independent :as indy]]
             [jepsen.checker.timeline :as timeline]
@@ -68,33 +67,20 @@
   (close! [this test]
     (.close conn)))
 
-(defn register-test-base
+(defn workload
   [opts]
   (let [n (count (:nodes opts))]
-    (fauna/basic-test
-      (merge
-        {:client {:client (:client opts)
-                  :during (indy/concurrent-generator
-                            (* 2 n)
-                            (range)
-                            (fn [k]
-                              (->> (gen/reserve n (gen/mix [w cas cas]) r)
-                                   (gen/delay-til 1/2)
-                                   (gen/stagger 0.1)
-                                   (gen/limit 100))))}
-         :checker (checker/compose
-                    {:perf    (checker/perf)
-                     :details (indy/checker
-                                (checker/compose
-                                  {:timeline     (timeline/html)
-                                   :linearizable (checker/linearizable)}))})}
-        (dissoc opts :client)))))
-
-(defn test
-  [opts]
-  (register-test-base
-   (merge {:name "register"
-           :model (model/cas-register 0)
-           :client (AtomicClient. (atom false) nil)}
-          opts)))
-
+    {:client    (AtomicClient. (atom false) nil)
+     :model     (model/cas-register 0)
+     :generator (indy/concurrent-generator
+                  (* 2 n)
+                  (range)
+                  (fn [k]
+                    (->> (gen/reserve n (gen/mix [w cas cas]) r)
+                         (gen/delay-til 1/2)
+                         (gen/stagger 0.1)
+                         (gen/limit 100))))
+     :checker (indy/checker
+                (checker/compose
+                  {:timeline     (timeline/html)
+                   :linearizable (checker/linearizable)}))}))

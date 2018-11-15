@@ -7,7 +7,6 @@
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [core :as jepsen]
-                    [fauna :as fauna]
                     [util :as util :refer [map-keys]]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
@@ -228,14 +227,8 @@
               create-tabby-arr
               create-tabby-obj])))
 
-(defn test
+(defn workload
   [opts]
-  (fauna/basic-test
-    (merge
-      {:name     "internal"
-       :client   {:client (InternalClient. nil)
-                  :during (gen/stagger 1/10 (gen))}
-       :checker (checker/compose
-                  {:internal  (checker)
-                   :perf      (checker/perf)})}
-      opts)))
+  {:client    (InternalClient. nil)
+   :generator (gen/stagger 1/10 (gen))
+   :checker (checker)})

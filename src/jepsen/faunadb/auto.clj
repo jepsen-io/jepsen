@@ -10,6 +10,7 @@
             [dom-top.core :refer [with-retry]]
             [jepsen [core :as jepsen]
                     [client :as client]
+				            [db :as db]
                     [util :as util]
                     [control :as c :refer [|]]]
             [jepsen.control.net :as cn]
@@ -420,3 +421,32 @@
     (delete-data-files!)
     (c/su (c/exec :rm :-rf (c/lit (str log-dir "/*"))))
     (info node "FaunaDB torn down")))
+
+(defn db
+  "FaunaDB DB"
+  []
+  (reify db/DB
+    (setup! [_ test node]
+      (install! test)
+      (configure! test @(:topology test) node)
+      (when (:clear-cache test)
+        (clear-cache!))
+      (if (cache-valid? test)
+        (unpack-cache!)
+        ; We have to go through the whole setup process, then we'll build a
+        ; cache for next time
+        (do (start! test node)
+            (init! test node)
+            (stop! test node)
+            (build-cache! test)))
+      (start! test node))
+
+    (teardown! [_ test node]
+      (info node "tearing down FaunaDB")
+      (teardown! test node))
+
+    db/LogFiles
+    (log-files [_ test node]
+      ["/var/log/faunadb/core.log"
+       "/var/log/faunadb/query.log"
+       "/var/log/faunadb/exception.log"])))

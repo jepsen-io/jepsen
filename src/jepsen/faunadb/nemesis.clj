@@ -135,7 +135,7 @@
   node from all other nodes."
   [test process]
   {:type  :info
-   :f     :start
+   :f     :start-partition
    :value (->> test :nodes nemesis/split-one nemesis/complete-grudge)
    :partition-type :single-node})
 
@@ -148,7 +148,7 @@
                                          @(:topology test))))
         grudge (-> nodes shuffle nemesis/bisect nemesis/complete-grudge)]
     {:type :info
-     :f :start
+     :f :start-partition
      :value grudge
      :partition-type [:intra-replica replica]}))
 
@@ -163,7 +163,8 @@
                     nemesis/bisect  ; [majority list of groups, minority]
                     (map flatten)   ; [majority nodes, minority nodes]
                     nemesis/complete-grudge)] ; Grudge
-    {:type :info, :f :start, :value grudge, :partition-type :inter-replica}))
+    {:type :info, :f :start-partition, :value grudge,
+     :partition-type :inter-replica}))
 
 (defn partitions
   "An assortment of network partitions"
@@ -387,6 +388,15 @@
 
     (teardown! [this test])))
 
+(defn killer
+  "A nemesis for killing and restarting nodes."
+  []
+  (nemesis/node-start-stopper
+    (fn [test nodes]
+      (->> test :topology deref :nodes (map :node) util/random-nonempty-subset))
+    auto/kill!
+    auto/start!))
+
 (defn topology
   "A nemesis package which randomly permutes the set of nodes in the cluster."
   []
@@ -395,3 +405,50 @@
    :during  (->> topo-op
                  with-refresh)
    :final   nil})
+
+(defn full-nemesis
+  "Merges together all failure modes into a single nemesis."
+  []
+  (nemesis/compose
+    {{:kill             :start
+      :restart          :stop}  (killer)
+     {:start-partition  :start
+      :stop-partition   :stop}  (nemesis/partitioner nil)
+     #{:add-node :remove-node}  (topo-nemesis)}))
+
+(defn op
+  "Construct a nemesis op with the given f and no value."
+  [f]
+  {:type :info, :f f, :value nil})
+
+(defn full-generator
+  "Takes nemesis options and constructs a generator for the nemesis operations
+  specified in (:nemesis test); e.g. process kills and partitions."
+  [n]
+  (->> (cond-> []
+         (:kill n)
+         (conj (op :kill) (op :restart))
+
+         (:inter-replica-partition n)
+         (conj inter-replica-partition-start (op :stop-partition))
+
+         (:intra-replica-partition n)
+         (conj intra-replica-partition-start (op :stop-partition))
+
+         (:single-node-partition n)
+         (conj single-node-partition-start (op :stop-partition))
+
+         (:topology n)  (conj (with-refresh topo-op)))
+       gen/mix
+       (gen/stagger (:interval n))))
+
+(defn nemesis
+  "Composite nemesis and generator"
+  [opts]
+  {:nemesis         (full-nemesis)
+   :generator       (full-generator opts)
+   :final-generator (->> [(when (:kill opts) :restart)]
+                         (remove nil?)
+                         (map op)
+                         gen/seq
+                         (gen/delay 5))})

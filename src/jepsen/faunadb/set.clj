@@ -1,11 +1,10 @@
-(ns jepsen.faunadb.sets
+(ns jepsen.faunadb.set
   "Set test"
   (:refer-clojure :exclude [test])
   (:require [clojure.tools.logging :refer :all]
             [dom-top.core :as dt]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [fauna :as fauna]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.faunadb [client :as f]
@@ -17,7 +16,7 @@
 (def idx-name "all-elements")
 (def idx (q/index idx-name))
 
-(defrecord SetsClient [opts conn]
+(defrecord SetClient [opts conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (f/linearized-client node)))
@@ -82,22 +81,14 @@
   []
   {:type :invoke, :f :read, :value nil})
 
-(defn test
+(defn workload
   [opts]
-  (fauna/basic-test
-    (merge
-      {:name   "set"
-       :client {:client (SetsClient. opts nil)
-                ; Normally you'd want to reserve some threads for reads, but
-                ; I've found that with inserts, faunaDB reads grind to a halt,
-                ; so we're going to intentionally let reads starve writes so
-                ; they have a chance of completing.
-                :during (->> (gen/mix [(adds) (reads)])
-                             (gen/stagger 1/5))
-                :final (gen/once {:type :invoke, :f :read, :value nil})}
-       :checker (checker/compose
-                  {:perf     (checker/perf)
-                   :set-full (checker/set-full {:linearizable? true})
-                   ;:timeline (timeline/html)
-                   })}
-      opts)))
+  {:client (SetClient. opts nil)
+   ; Normally you'd want to reserve some threads for reads, but
+   ; I've found that with inserts, faunaDB reads grind to a halt,
+   ; so we're going to intentionally let reads starve writes so
+   ; they have a chance of completing.
+   :generator (->> (gen/mix [(adds) (reads)])
+                   (gen/stagger 1/5))
+   :final-generator (gen/once {:type :invoke, :f :read, :value nil})
+   :checker (checker/set-full {:linearizable? true})})
