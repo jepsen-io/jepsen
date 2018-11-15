@@ -16,11 +16,15 @@ services:
       - n3
       - n4
       - n5
+    networks:
+      - jepsen
   node:
     container_name: jepsen-node
     build: ./node
     env_file: ./secret/node.env
     privileged: true
+    networks:
+      - jepsen
   n1:
     extends: node
     container_name: jepsen-n1
