@@ -97,8 +97,8 @@
           binary
           :alpha
           (lru-opt)
-          (when (:dgraph-jaeger-connector test)
-            [:--jaeger.connector (:dgraph-jaeger-connector test)])
+          (when (:dgraph-jaeger-collector test)
+            [:--jaeger.collector (:dgraph-jaeger-collector test)])
           (when (:dgraph-jaeger-agent test)
             [:--jaeger.agent (:dgraph-jaeger-agent test)])
           :--idx        (node-idx test node)
