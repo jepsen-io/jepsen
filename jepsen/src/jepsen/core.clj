@@ -183,10 +183,12 @@
              (throw (InterruptedException. "Interrupted before running")))
 
            (try (.countDown run-latch)
+                (.await run-latch)
                 (info "Running" name)
                 (run-worker! worker)
                 ; Normal termination
                 (.countDown teardown-latch)
+                (.await teardown-latch)
                 (try (info "Stopping" name)
                      (teardown-worker! worker)
                      nil
@@ -200,6 +202,7 @@
                   (abort! worker)
                   (Thread/interrupted) ; Clear our interrupt state
                   (.countDown teardown-latch)
+                  (.await teardown-latch)
                   (try (info "Stopping" name)
                        (teardown-worker! worker)
                        t
@@ -213,6 +216,7 @@
              (abort! worker)
              (Thread/interrupted) ; Clear our interrupt state
              (.countDown teardown-latch)
+             (.await teardown-latch)
              (try (info "Stopping" name)
                   (teardown-worker! worker)
                   t
