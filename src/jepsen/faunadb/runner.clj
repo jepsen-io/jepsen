@@ -211,6 +211,14 @@
    [nil "--version STRING" "Version of FaunaDB to install"
     :default "2.5.5"]])
 
+(def test-all-opts
+  "Command line options for testing everything"
+  [["-w" "--workload NAME"
+    "Test workload to run. If omitted, runs all workloads"
+    :parse-fn keyword
+    :default nil
+    :validate [workloads (jc/one-of workloads)]]])
+
 (def single-test-opts
   "Command line options for single tests"
   [[nil "--strong-read" "Force strict reads by performing dummy writes"
@@ -249,13 +257,16 @@
   "A command that runs a whole suite of tests in one go."
   []
   {"test-all"
-   {:opt-spec (into jc/test-opt-spec cli-opts)
+   {:opt-spec (concat jc/test-opt-spec cli-opts test-all-opts)
     :opt-fn   jc/test-opt-fn
     :usage    "TODO"
     :run      (fn [{:keys [options]}]
                 (info "CLI options:\n" (with-out-str (pprint options)))
-                (let [tests (for [nemesis   all-nemeses
-                                  workload  (all-workload-options)
+                (let [w         (:workload options)
+                      workloads (cond->> (all-workload-options)
+                                  w (filter (comp #{w} :workload)))
+                      tests (for [nemesis   all-nemeses
+                                  workload  workloads
                                   i         (range (:test-count options))]
                               (do
                               (-> options
