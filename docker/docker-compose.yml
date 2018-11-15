@@ -1,4 +1,6 @@
 version: '2'
+networks:
+  jepsen:
 services:
   control:
     container_name: jepsen-control
