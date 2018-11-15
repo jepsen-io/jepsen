@@ -20,19 +20,20 @@
                    .toBuilder
                    (.setSampler sampler)
                    .build)]
-    (.updateActiveTraceParams config params)))
+    (.updateActiveTraceParams config params)
+    true))
 
 (defn exporter
   "When tracing is enabled, registers an exporter to the given jaeger
   service."
   [endpoint]
   (when endpoint
-    (JaegerTraceExporter/createAndRegister endpoint "jepsen")))
+    (JaegerTraceExporter/createAndRegister endpoint "jepsen")
+    "jaeger"))
 
 (defn tracing [endpoint]
   (let [sampler (sampler endpoint)]
     {:endpoint endpoint
-     :sampler sampler
      :config (config sampler)
      :exporter (exporter endpoint)}))
 
