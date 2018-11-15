@@ -131,7 +131,7 @@
     :validate [(complement neg?) "Must be a non-negative number"]]
    [nil "--retry-db-setup" "Work around Dgraph cluster convergence bugs by retrying the setup process"
     :default false]
-   [nil "--tracing URL" "Enables tracing by providing an endpoint to export traces."]
+   [nil "--tracing URL" "Enables tracing by providing an endpoint to export traces. Jaeger example: http://host.docker.internal:14268/api/traces"]
    [nil "--dgraph-jaeger-connector CONNECTOR" "Jaeger connector URL to pass to dgraph on startup."]
    [nil "--dgraph-jaeger-agent AGENT" "Jaeger agent URL to pass to dgraph on startup."]])
 
