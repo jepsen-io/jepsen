@@ -91,4 +91,8 @@
    :generator (->> (gen/mix [(adds) (reads)])
                    (gen/stagger 1/5))
    :final-generator (gen/once {:type :invoke, :f :read, :value nil})
-   :checker (checker/set-full {:linearizable? true})})
+   ; We expect SI for regular index queries, serializable for rw queries, and
+   ; linearizability with rw serialized indices.
+   :checker (checker/set-full
+              {:linearizable? (and (:strong-read opts)
+                                   (:serialized-indices opts))})})
