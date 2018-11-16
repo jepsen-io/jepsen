@@ -39,7 +39,7 @@
       (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
-    (try
+    (f/with-errors op #{:read}
       (case (:f op)
         :add (do (f/query conn
                           (q/do*
@@ -54,9 +54,7 @@
                                 ; iteration bug
                                 -10000000)
                    vec
-                   (assoc op :type :ok, :value)))
-      (catch com.faunadb.client.errors.UnavailableException e
-        (assoc op :type :info, :error (.getMessage e)))))
+                   (assoc op :type :ok, :value)))))
 
   (teardown! [this test])
 

@@ -335,6 +335,9 @@
        (catch UnavailableException e#
          (assoc ~op :type type#, :error [:unavailable (.getMessage e#)]))
 
+       (catch java.net.ConnectException e#
+         (assoc ~op :type :fail, :error [:connect (.getMessage e#)]))
+
        (catch java.util.concurrent.TimeoutException e#
          (assoc ~op :type type#, :error [:timeout (.getMessage e#)]))
 
