@@ -1,6 +1,4 @@
 version: '2'
-networks:
-  jepsen:
 services:
   control:
     container_name: jepsen-control
@@ -16,15 +14,11 @@ services:
       - n3
       - n4
       - n5
-    networks:
-      - jepsen
   node:
     container_name: jepsen-node
     build: ./node
     env_file: ./secret/node.env
     privileged: true
-    networks:
-      - jepsen
   n1:
     extends: node
     container_name: jepsen-n1
@@ -45,3 +39,17 @@ services:
     extends: node
     container_name: jepsen-n5
     hostname: n5
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    hostname: jaeger
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "9411:9411"
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
