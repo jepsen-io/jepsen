@@ -97,6 +97,8 @@
           binary
           :alpha
           (lru-opt)
+          :--expose_trace
+          :--v 2
           (when (:dgraph-jaeger-collector test)
             [:--jaeger.collector (:dgraph-jaeger-collector test)])
           (when (:dgraph-jaeger-agent test)
