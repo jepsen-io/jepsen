@@ -310,6 +310,7 @@
                              ; their node's status. If nobody got a status, we
                              ; fill in nil, and that lets the caller move on.
                              (.countDown latch)
+                             (.await latch)
                              (deliver s nil))))
         (catch Throwable t
           ; We expect this to occur during reboots and such
