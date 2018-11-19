@@ -336,5 +336,5 @@
   "Starts an http server with the given httpkit options."
   ([options]
    (let [s (server/run-server app options)]
-     (info "Web server running.")
+     (info "I'll see YOU after the function")
      s)))
