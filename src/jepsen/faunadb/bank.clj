@@ -96,7 +96,7 @@
                        (remove nil?)
                        (map vec)
                        (into {}))]
-          (assoc op :type :ok, :value res, :ts ts)))
+          (assoc op :type :ok, :value res, :ts (str ts))))
 
       :transfer
       (wrapped-query op
