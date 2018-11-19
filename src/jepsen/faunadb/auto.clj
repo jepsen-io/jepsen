@@ -371,8 +371,18 @@
     (info "Adding repo")
     (debian/add-repo! "faunadb"
                       "deb [arch=all] https://repo.fauna.com/debian unstable non-free")
-    (assert (:version test))
-    (debian/install {"faunadb" (str (:version test) "-0")})
+
+    (let [v (:version test)]
+      (assert v)
+      (if (re-find #"\.deb$" v)
+        ; Install deb file
+        (do (c/exec :mkdir :-p "/tmp/jepsen")
+            (info "Uploading" v)
+            (c/upload v "/tmp/jepsen/faunadb.deb")
+            (info "Installing" v)
+            (c/exec :dpkg :-i :--force-confnew "/tmp/jepsen/faunadb.deb"))
+        (debian/install {"faunadb" (str (:version test) "-0")})))
+
     (when-let [k (:datadog-api-key test)]
       (when-not (debian/installed? :datadog-agent)
         (info "Datadog install")
