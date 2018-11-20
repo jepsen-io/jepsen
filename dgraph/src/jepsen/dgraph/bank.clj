@@ -155,6 +155,7 @@
                                                     op)]
                         (let [message (merge error (t/context))
                               message (dissoc message :op)]
+                          (t/attribute! {"checker_violation" "true"})
                           (assoc op
                                  :message message
                                  :error :checker-violation))
