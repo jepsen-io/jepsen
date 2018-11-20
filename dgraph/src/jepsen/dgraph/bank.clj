@@ -12,7 +12,7 @@
   (:import (io.dgraph TxnConflictException)))
 
 (def pred-count "Number of predicates to stripe keys and values across."
-  1)
+  3)
 
 (defn multi-pred-acct->key+amount
   "Takes a query result like {:key_0 1 :amount_2 5} and returns [1 5], by
