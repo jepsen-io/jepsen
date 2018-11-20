@@ -414,9 +414,9 @@
                    :network_datacenter_name        (topo/replica topo node)
                    :network_host_id                node
                    :network_listen_address         ip}
-                   ; 2.6.0 and higher don't require manual log config
-                   ;:storage_transaction_log_nodes  (topo/log-configuration
-                   ;                                  topo)}
+                  (when (topo/manual-log-config? test)
+                    {:storage_transaction_log_nodes (topo/log-configuration
+                                                       topo)})
                   (when (:datadog-api-key test)
                     {:stats_host "localhost"
                      :stats_port 8125})))

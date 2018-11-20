@@ -182,5 +182,5 @@
   "A version which uses indices for reads"
   [opts]
   (-> (bank/test)
-      (assoc :client (BankClient. nil))
+      (assoc :client (IndexClient. (BankClient. nil) nil))
       (update :generator (partial gen/delay 1/10))))
