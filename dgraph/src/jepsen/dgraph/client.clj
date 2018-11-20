@@ -360,16 +360,14 @@
 (defn gen-pred
   "Generates a predicate for a key, given a count of keys, and a prefix."
   [prefix n k]
-  (t/with-trace "client.gen-pred"
-    (str prefix "_" (mod (hash k) n))))
+  (str prefix "_" (mod (hash k) n)))
 
 (defn gen-preds
   "Given a key prefix and a number of keys, generates all predicate names that
   might be used."
   [prefix n]
-  (t/with-trace "client.gen-preds"
-    (->> (range n)
-         (map (fn [i] (str prefix "_" i))))))
+  (->> (range n)
+       (map (fn [i] (str prefix "_" i)))))
 
 (defrecord TxnClient [opts conn]
   jc/Client

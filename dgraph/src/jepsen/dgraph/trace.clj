@@ -1,7 +1,8 @@
 (ns jepsen.dgraph.trace
   (:import (io.opencensus.trace Tracer
                                 Tracing
-                                Span)
+                                Span
+                                AttributeValue)
            (io.opencensus.trace.samplers Samplers)
            (io.opencensus.exporter.trace.logging LoggingTraceExporter)
            (io.opencensus.exporter.trace.jaeger JaegerTraceExporter)))
@@ -28,8 +29,9 @@
   service."
   [endpoint]
   (when endpoint
-    (JaegerTraceExporter/createAndRegister endpoint "jepsen")
-    "jaeger"))
+    (try
+      (JaegerTraceExporter/createAndRegister endpoint "jepsen")
+      (catch java.lang.IllegalStateException _))))
 
 (defn tracing [endpoint]
   (let [sampler (sampler endpoint)]
@@ -38,7 +40,7 @@
      :exporter (exporter endpoint)}))
 
 (defmacro with-trace
-  "Takes a test map, span name, and a body and wraps the
+  "Takes a span name, and a body and wraps the
   body in a tracing span."
   [name & body]
   `(let [span# (-> (Tracing/getTracer)
@@ -49,9 +51,26 @@
        (finally (.close span#)))))
 
 (defn context
-  "Takes a test map and returns the context map for the current trace."
+  "Returns the context map for the current trace."
   []
   (let [span (.getCurrentSpan (Tracing/getTracer))
         context (.getContext span)]
     {:span-id  (-> context .getSpanId .toString)
      :trace-id (-> context .getTraceId .toString)}))
+
+(defn annotate!
+  "Annotates the current span with the message."
+  [message]
+  (let [span (.getCurrentSpan (Tracing/getTracer))]
+    (.addAnnotation span message)))
+
+(defn attribute!
+  "Takes a key and value, or a map of keys to values, and assigns the kv
+  pairs as attributes on the current span. All keys and values MUST be strings
+  or opencensus will throw."
+  ([m]
+   (let [span (.getCurrentSpan (Tracing/getTracer))]
+     (doseq [[k v] m]
+       (let [av (AttributeValue/stringAttributeValue v)]
+         (.putAttribute span k av)))))
+  ([k v] (attribute! {k v})))
