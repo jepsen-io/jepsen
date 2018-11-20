@@ -65,8 +65,9 @@
     (.addAnnotation span message)))
 
 (defn attribute!
-  "Adds the key and the value to the current span as
-  an attribute. Only takes strings. VERY IMPORTANT"
+  "Takes a key and value, or a map of keys to values, and assigns the kv
+  pairs as attributes on the current span. All keys and values MUST be strings
+  or opencensus will throw."
   ([m]
    (let [span (.getCurrentSpan (Tracing/getTracer))]
      (doseq [[k v] m]
