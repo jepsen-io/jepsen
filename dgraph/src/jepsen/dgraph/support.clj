@@ -66,6 +66,7 @@
           :zero
           :--idx                (node-idx test node)
           :--port_offset        zero-port-offset
+          :--expose_trace
           :--v 2
           :--replicas           (:replicas test)
           :--rebalance_interval (:rebalance-interval test)
