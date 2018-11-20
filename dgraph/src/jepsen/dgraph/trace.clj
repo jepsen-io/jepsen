@@ -1,7 +1,8 @@
 (ns jepsen.dgraph.trace
   (:import (io.opencensus.trace Tracer
                                 Tracing
-                                Span)
+                                Span
+                                AttributeValue)
            (io.opencensus.trace.samplers Samplers)
            (io.opencensus.exporter.trace.logging LoggingTraceExporter)
            (io.opencensus.exporter.trace.jaeger JaegerTraceExporter)))
@@ -65,9 +66,10 @@
 
 (defn attribute!
   "Adds the key and the value to the current span as
-  an attribute."
+  an attribute. Only takes strings. VERY IMPORTANT"
   ([m]
    (let [span (.getCurrentSpan (Tracing/getTracer))]
      (doseq [[k v] m]
-       (.putAttribute span k v))))
+       (let [av (AttributeValue/stringAttributeValue v)]
+         (.putAttribute span k av)))))
   ([k v] (attribute! {k v})))
