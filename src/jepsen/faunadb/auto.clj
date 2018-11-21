@@ -378,6 +378,7 @@
       (if (re-find #"\.deb$" v)
         ; Install deb file
         (do (c/exec :mkdir :-p "/tmp/jepsen")
+            (c/exec :chmod "a+rwx" "/tmp/jepsen")
             (info "Uploading" v)
             (c/upload v "/tmp/jepsen/faunadb.deb")
             (info "Installing" v)
