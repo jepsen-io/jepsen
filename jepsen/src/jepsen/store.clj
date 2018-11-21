@@ -3,6 +3,7 @@
   (:refer-clojure :exclude [load])
   (:require [clojure.data.fressian :as fress]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.tools.logging :refer :all]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
@@ -181,6 +182,48 @@
     (let [in (fress/create-reader file :handlers read-handlers)]
       (fress/read-object in))))
 
+(defn class-name->ns-str
+  "Turns a class string into a namespace string (by translating _ to -)"
+  [class-name]
+  (str/replace class-name #"_" "-"))
+
+(defn edn-tag->constructor
+  "Takes an edn tag and returns a constructor fn taking that tag's value and
+  building an object from it."
+  [tag]
+  (let [c (resolve tag)]
+    (when (nil? c)
+      (throw (RuntimeException. (str "EDN tag " (pr-str tag) " isn't resolvable to a class")
+                                (pr-str tag))))
+
+    (when-not ((supers c) clojure.lang.IRecord)
+      (throw (RuntimeException.
+             (str "EDN tag " (pr-str tag)
+                  " looks like a class, but it's not a record,"
+                  " so we don't know how to deserialize it."))))
+
+    (let [; Translate from class name "foo.Bar" to namespaced constructor fn
+          ; "foo/map->Bar"
+          constructor-name (-> (name tag)
+                               class-name->ns-str
+                               (str/replace #"\.([^\.]+$)" "/map->$1"))
+          constructor (resolve (symbol constructor-name))]
+      (when (nil? constructor)
+        (throw (RuntimeException.
+               (str "EDN tag " (pr-str tag) " looks like a record, but we don't"
+                    " have a map constructor " constructor-name " for it"))))
+      constructor)))
+
+(def memoized-edn-tag->constructor (memoize edn-tag->constructor))
+
+(defn default-edn-reader
+  "We use defrecords heavily and it's nice to be able to deserialize them."
+  [tag value]
+  (if-let [c (memoized-edn-tag->constructor tag)]
+    (c value)
+    (throw (RuntimeException.
+             (str "Don't know how to read edn tag " (pr-str tag))))))
+
 (defn load-results
   "Loads only a results.edn by name and time."
   [test-name test-time]
@@ -188,7 +231,7 @@
                      (io/reader (path {:name       test-name
                                        :start-time test-time}
                                       "results.edn")))]
-    (clojure.edn/read file)))
+    (clojure.edn/read {:default default-edn-reader} file)))
 
 (def memoized-load-results (memoize load-results))
 
