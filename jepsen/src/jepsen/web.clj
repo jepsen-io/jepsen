@@ -62,6 +62,7 @@
                               :results    {:valid? :incomplete}})
                            (catch java.lang.RuntimeException e
                              ; Um???
+                             (warn e "Unable to parse" test-name test-time)
                              {:name       test-name
                               :start-time test-time
                               :results    {:valid? :incomplete}})))
