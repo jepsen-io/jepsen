@@ -24,6 +24,25 @@ lein run test --local-binary /gobin/dgraph --force-download --nemesis partition-
 
 This runs a Dgraph binary at /gobin/dgraph with Jaeger running on a `jaeger` host.
 
+To run bank tests with partition ring with 5 nodes:
+
+```sh
+lein run test --local-binary /gobin/dgraph --force-download --nemesis partition-ring --workload bank --rebalance-interval 10h --upsert-schema --time-limit 600 --concurrency 30 --replicas 3 --test-count 20 --dgraph-jaeger-collector http://jaeger:14268 --tracing http://jaeger:14268/api/traces
+```
+
+To run the skew-clock tests, use `--nemesis skew-clock` and specify the skew amount with `--skew (tiny|small|big|huge)` for 100ms, 250ms, 2s, and 7.5s clock skews respectively on random nodes:
+
+```sh
+lein run test --local-binary /gobin/dgraph --workload bank --nemesis skew-clock --skew small --rebalance-interval 10h --upsert-schema --time-limit 600 --dgraph-jaeger-collector http://jaeger:14268
+```
+
+To run the delete workload ([dgraph-io/dgraph#2391](https://github.com/dgraph-io/dgraph/issues/2391#issuecomment-391442598)):
+
+```sh
+lein run test --local-binary /gobin/dgraph --force-download --nemesis none --rebalance-interval 10h --sequencing server --upsert-schema --time-limit 600 --concurrency 30 --workload delete --retry-db-setup --test-count 20 --dgraph-jaeger-collector http://jaeger:14268
+```
+
+
 ## License
 
 Copyright © 2018 Jepsen, LLC
