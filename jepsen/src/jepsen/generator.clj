@@ -142,7 +142,8 @@
 (defgenerator FMap [f g]
   [f g]
   (op [gen test process]
-      (update (op g test process) :f f)))
+      (when-let [op (op g test process)]
+        (update op :f f))))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,
