@@ -81,8 +81,9 @@
     (setup! [nem test]
       (c/with-test-nodes test (install!))
       ; Try to stop ntpd service in case it is present and running.
-      (try (c/with-test-nodes test (c/su (c/exec :service :ntpd :stop)))
-        (catch RuntimeException e))
+      (c/with-test-nodes test
+        (try (c/su (c/exec :service :ntpd :stop))
+             (catch RuntimeException e)))
       (reset-time! test)
       nem)
 
