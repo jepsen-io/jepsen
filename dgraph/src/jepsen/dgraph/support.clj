@@ -72,8 +72,6 @@
           :--rebalance_interval (:rebalance-interval test)
           (when (:dgraph-jaeger-collector test)
             [:--jaeger.collector (:dgraph-jaeger-collector test)])
-          (when (:dgraph-jaeger-agent test)
-            [:--jaeger.agent (:dgraph-jaeger-agent test)])
           :--my                 (str node ":" zero-internal-port)
           (when-not (= node (jepsen/primary test))
             [:--peer (str (jepsen/primary test) ":" zero-internal-port)])))

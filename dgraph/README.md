@@ -19,7 +19,7 @@ nemesis, sequencing, and upserts.
 To run it with Jaeger trace collection:
 
 ```sh
-lein run test --local-binary /gobin/dgraph --force-download --nemesis partition-ring --workload bank --rebalance-interval 10h --upsert-schema --time-limit 600 --concurrency 30 --nodes "n1, n2, n3" --replicas 3 --test-count 20 --dgraph-jaeger-collector http://jaeger:14268 --dgraph-jaeger-agent http://jaeger:6831 --tracing http://jaeger:14268/api/traces
+lein run test --local-binary /gobin/dgraph --force-download --nemesis partition-ring --workload bank --rebalance-interval 10h --upsert-schema --time-limit 600 --concurrency 30 --nodes "n1, n2, n3" --replicas 3 --test-count 20 --dgraph-jaeger-collector http://jaeger:14268 --tracing http://jaeger:14268/api/traces
 ```
 
 This runs a Dgraph binary at /gobin/dgraph with Jaeger running on a `jaeger` host.
