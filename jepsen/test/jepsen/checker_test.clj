@@ -209,6 +209,15 @@
               vec)
          {}))
 
+(deftest clock-plot-test
+  (check (clock-plot)
+         {:name       "clock plot test"
+          :start-time 0}
+         nil
+         [{:process :nemesis, :time 5,  :clock-offsets {"n1" 2}}
+          {:process :nemesis, :time 10, :clock-offsets {"n1" 0, "n2" -3}}]
+         {}))
+
 (defn history
   "Takes a sequence of operations and adds times and indexes."
   [h]
@@ -231,6 +240,9 @@
               :lost-count       0
               :never-read       [0]
               :never-read-count 1
+              :stale-count      0
+              :stale            []
+              :worst-stale      []
               :stable-count     0
               :valid?           :unknown}
              (c [(invoke-op 0 :add 0)
@@ -248,6 +260,9 @@
                 :lost-count       0
                 :never-read       [0]
                 :never-read-count 1
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
                 :stable-count     0}
                (c [a r r-]))))
       (testing "successful read either concurrently or after"
@@ -257,6 +272,9 @@
                 :lost-count       0
                 :never-read       []
                 :never-read-count 0
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
                 :stable-count     1
                 :stable-latencies {0 0, 0.5 0, 0.95 0, 0.99 0, 1 0}}
                (c [r a r+ a']) ; Concurrent read before
@@ -273,6 +291,9 @@
                 :lost-count       1
                 :never-read       []
                 :never-read-count 0
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
                 :stable-count     0
                 :lost-latencies  {0 0, 0.5 0, 0.95 0, 0.99 0, 1 0}}
                (c [a a' r r-]))))
@@ -284,6 +305,9 @@
                 :lost-count       0
                 :never-read       [0]
                 :never-read-count 1
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
                 :stable-count     0}
                (c [r a r- a']) ; Read before
                (c [r a a' r-]) ; Read outside
@@ -312,6 +336,9 @@
                 :lost-count 2
                 :never-read []
                 :never-read-count 0
+                :stale-count 0
+                :stale       []
+                :worst-stale []
                 :stable-count 0
                 :lost-latencies {0 3, 0.5 4, 0.95 4, 0.99 4,
                                  1 4}}
@@ -325,6 +352,20 @@
                 :lost-count 1
                 :never-read []
                 :never-read-count 0
+                ; 1 should have been done at 4, is missing at time 6000, and
+                ; recovered at 7000.
+                :stale-count 1
+                :stale       [1]
+                :worst-stale [{:element         1
+                               :known           (assoc r2'1
+                                                       :index 4
+                                                       :time 4000000)
+                               :last-absent     (assoc r2
+                                                       :index 6
+                                                       :time 6000000)
+                               :lost-latency    nil
+                               :outcome         :stable
+                               :stable-latency  2}]
                 :stable-count 1
                 ; We know 0 is done at time 1000, but it goes missing after
                 ; 6000.
