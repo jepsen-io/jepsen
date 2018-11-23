@@ -214,8 +214,13 @@
          {:name       "clock plot test"
           :start-time 0}
          nil
-         [{:process :nemesis, :time 5,  :clock-offsets {"n1" 2}}
-          {:process :nemesis, :time 10, :clock-offsets {"n1" 0, "n2" -3}}]
+         [{:process :nemesis, :time 500000000,  :clock-offsets {"n1" 2.1}}
+          {:process :nemesis, :time 1000000000, :clock-offsets {"n1" 0
+                                                                "n2" -3.1}}
+          {:process :nemesis, :time 1500000000, :clock-offsets {"n1" 1
+                                                                "n2" -2}}
+          {:process :nemesis, :time 2000000000, :clock-offsets {"n1" 2
+                                                              "n2" -4.1}}]
          {}))
 
 (defn history

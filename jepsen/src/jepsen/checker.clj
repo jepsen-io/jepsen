@@ -10,7 +10,8 @@
             [potemkin :refer [definterface+]]
             [jepsen.util :as util :refer [meh fraction map-kv]]
             [jepsen.store :as store]
-            [jepsen.checker.perf :as perf]
+            [jepsen.checker [perf :as perf]
+                            [clock :as clock]]
             [multiset.core :as multiset]
             [gnuplot.core :as g]
             [knossos [model :as model]
@@ -721,3 +722,11 @@
   []
   (compose {:latency-graph (latency-graph)
             :rate-graph    (rate-graph)}))
+
+(defn clock-plot
+  "Plots clock offsets on all nodes"
+  []
+  (reify Checker
+    (check [_ test model history opts]
+      (clock/plot! test history opts)
+      {:valid? true})))

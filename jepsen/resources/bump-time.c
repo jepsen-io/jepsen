@@ -43,5 +43,11 @@ int main(int argc, char **argv) {
       return 2;
     }
 
+    /* Print current time */
+    if (0 != gettimeofday(&time, &tz)) {
+      perror("gettimeofday");
+      return 1;
+    }
+    fprintf(stdout, "%d.%06d\n", time.tv_sec, time.tv_usec);
     return 0;
 }
