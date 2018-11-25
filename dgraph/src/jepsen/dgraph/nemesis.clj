@@ -4,8 +4,10 @@
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as c]
                     [generator :as gen]
+                    [net :as net]
                     [util :as util]
                     [nemesis :as nemesis]]
+            [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
             [jepsen.dgraph [support :as s]]))
 
@@ -75,6 +77,38 @@
 
     (teardown! [this test])))
 
+(defn bump-time
+  "On randomly selected nodes, adjust the system clock by dt seconds.  Uses
+  millisecond precision."
+  [dt]
+  (reify nemesis/Nemesis
+    (setup! [this test]
+      (nt/reset-time! test)
+      this)
+
+    (invoke! [this test op]
+      (assoc op :value
+             (case (:f op)
+               :start (c/with-test-nodes test
+                        (if (< (rand) 0.5)
+                          (do (nt/bump-time! dt)
+                              dt)
+                          0))
+               :stop (c/with-test-nodes test
+                       (nt/reset-time!)))))
+
+    (teardown! [this test]
+      (nt/reset-time! test))))
+
+(defn skew
+  [{:keys [skew] :as opts}]
+  (case skew
+    :huge  (bump-time 7500)
+    :big   (bump-time 2000)
+    :small (bump-time 250)
+    :tiny  (bump-time 100)
+    (bump-time 0)))
+
 (defn full-nemesis
   "Can kill and restart all processes and initiate network partitions."
   [opts]
@@ -88,7 +122,9 @@
      {:start-partition-halves  :start
       :stop-partition-halves   :stop} (nemesis/partition-random-halves)
      {:start-partition-ring    :start
-      :stop-partition-ring     :stop} (nemesis/partition-majorities-ring)}))
+      :stop-partition-ring     :stop} (nemesis/partition-majorities-ring)
+     {:start-skew :start
+      :stop-skew  :stop} (skew opts)}))
 
 (defn op
   "Construct a nemesis op"
@@ -113,6 +149,8 @@
         (when (:partition-ring? opts)
           [(gen/seq (cycle (map op [:start-partition-ring
                                     :stop-partition-ring])))])
+        (when (:skew-clock? opts)
+          [(gen/seq (cycle (map op [:start-skew :stop-skew])))])
         (when (:move-tablet? opts)
           [(op :move-tablet)])]
        (apply concat)
@@ -126,6 +164,7 @@
    :generator (full-generator opts)
    :final-generator (->> [(when (:partition-halves opts) :stop-partition-halves)
                           (when (:partition-ring opts)   :stop-partition-ring)
+                          (when (:skew-clock? opts)      :stop-skew)
                           (when (:kill-zero?  opts)      :restart-zero)
                           (when (:kill-alpha? opts)      :restart-alpha)]
                          (remove nil?)

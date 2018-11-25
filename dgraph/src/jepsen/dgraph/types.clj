@@ -32,7 +32,7 @@
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
-      (c/with-txn test [t conn]
+      (c/with-txn [t conn]
         ; We take entity-attribute-value triples
         (let [[e a v] (:value op)]
           (case (:f op)

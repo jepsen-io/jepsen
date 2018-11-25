@@ -119,8 +119,8 @@
             :db      (c/db (:tarball opts))
             :client  (LostUpdatesClient. (atom false) nil) 
             :checker (checker/compose
-                       {:set  (independent/checker checker/set)
-                        :perf (checker/perf)})
+                       {:perf (checker/perf)
+                        :set  (independent/checker (checker/set))})
             :concurrency 100
             :nemesis (nemesis/partition-random-halves)
             :generator (->> (independent/concurrent-generator

@@ -142,7 +142,8 @@
 (defgenerator FMap [f g]
   [f g]
   (op [gen test process]
-      (update (op g test process) :f f)))
+      (when-let [op (op g test process)]
+        (update op :f f))))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,
@@ -166,7 +167,10 @@
 (defgenerator DelayFn [f gen]
   [f gen]
   (op [_ test process]
-      (Thread/sleep (* 1000 (f)))
+      (try
+        (Thread/sleep (* 1000 (f)))
+        (catch InterruptedException e
+          nil))
       (op gen test process)))
 
 (defn delay-fn

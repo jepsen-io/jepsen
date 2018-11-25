@@ -1,11 +1,13 @@
 (ns jepsen.nemesis.time
   "Functions for messing with time and clocks."
   (:require [jepsen.os.debian :as debian]
+            [jepsen.os.centos :as centos]
             [jepsen [util :as util]
                     [client :as client]
                     [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]]
+            [clojure.string :as str]
             [clojure.java.io :as io])
   (:import (java.io File)))
 
@@ -33,14 +35,38 @@
   (with-open [r (io/reader (io/resource resource))]
     (compile! r bin)))
 
+(defn compile-tools!
+  []
+  (compile-resource! "strobe-time.c" "strobe-time")
+  (compile-resource! "bump-time.c" "bump-time"))
+
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
   []
   (c/su
-    (debian/install [:build-essential])
+   (try (compile-tools!)
+     (catch RuntimeException e
+       (try (debian/install [:build-essential])
+         (catch RuntimeException e
+           (centos/install [:gcc])))
+       (compile-tools!)))))
 
-    (compile-resource! "strobe-time.c" "strobe-time")
-    (compile-resource! "bump-time.c" "bump-time")))
+(defn parse-time
+  "Parses a decimal time in unix seconds since the epoch, provided as a string,
+  to a bigdecimal"
+  [s]
+  (bigdec (str/trim-newline s)))
+
+(defn clock-offset
+  "Takes a time in seconds since the epoch, and subtracts the local node time,
+  to obtain a relative offset in seconds."
+  [remote-time]
+  (- remote-time (/ (System/currentTimeMillis) 1000)))
+
+(defn current-offset
+  "Returns the clock offset of this node, in seconds."
+  []
+  (clock-offset (parse-time (c/exec :date "+%s.%N"))))
 
 (defn reset-time!
   "Resets the local node's clock to NTP. If a test is given, resets time on all
@@ -49,9 +75,10 @@
   ([test] (c/with-test-nodes test (reset-time!))))
 
 (defn bump-time!
-  "Adjusts the clock by delta milliseconds."
+  "Adjusts the clock by delta milliseconds. Returns the time offset from the
+  current local wall clock, in seconds."
   [delta]
-  (c/su (c/exec "/opt/jepsen/bump-time" delta)))
+  (c/su (clock-offset (parse-time (c/exec "/opt/jepsen/bump-time" delta)))))
 
 (defn strobe-time!
   "Strobes the time back and forth by delta milliseconds, every period
@@ -72,22 +99,37 @@
   (reify nemesis/Nemesis
     (setup! [nem test]
       (c/with-test-nodes test (install!))
+      ; Try to stop ntpd service in case it is present and running.
+      (c/with-test-nodes test
+        (try (c/su (c/exec :service :ntpd :stop))
+             (catch RuntimeException e)))
       (reset-time! test)
       nem)
 
     (invoke! [_ test op]
-      (case (:f op)
-        :reset (c/on-nodes test (:value op) (fn [test node] (reset-time!)))
-        :strobe (let [m (:value op)]
-                  (c/on-nodes test (keys m)
-                            (fn [test node]
-                              (let [{:keys [delta period duration]} (get m node)]
-                                (strobe-time! delta period duration)))))
-        :bump (let [m (:value op)]
-                (c/on-nodes test (keys m)
-                            (fn [test node]
-                              (bump-time! (get m node))))))
-      op)
+      (let [res (case (:f op)
+                  :reset (c/on-nodes test (:value op) (fn [test node]
+                                                        (reset-time!)
+                                                        (current-offset)))
+
+                  :check-offsets (c/on-nodes test (fn [test node]
+                                                    (current-offset)))
+
+                  :strobe
+                  (let [m (:value op)]
+                    (c/on-nodes test (keys m)
+                                (fn [test node]
+                                  (let [{:keys [delta period duration]}
+                                        (get m node)]
+                                    (strobe-time! delta period duration))
+                                  (current-offset))))
+
+                  :bump
+                  (let [m (:value op)]
+                    (c/on-nodes test (keys m)
+                                (fn [test node]
+                                  (bump-time! (get m node))))))]
+        (assoc op :clock-offsets res)))
 
     (teardown! [_ test]
       (reset-time! test))))
@@ -123,6 +165,9 @@
                                  :duration (rand 32)})))})
 
 (defn clock-gen
-  "Emits a random schedule of clock skew operations."
+  "Emits a random schedule of clock skew operations. Always starts by checking
+  the clock offsets to establish an initial bound."
   []
-  (gen/mix [reset-gen bump-gen strobe-gen]))
+  (gen/phases
+    (gen/once {:type :info, :f :check-offsets})
+    (gen/mix [reset-gen bump-gen strobe-gen])))
