@@ -194,7 +194,7 @@
                                      nemesis    [; Nothing
                                                  {:interval         1}
                                                  ; Predicate migrations
-                                                 {:interval         5
+                                                 {:interval         15
                                                   :move-tablet?     true}
                                                  ; Partitions
                                                  {:interval         30
