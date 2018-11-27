@@ -68,9 +68,7 @@
   "Takes a key and value, or a map of keys to values, and assigns the kv
   pairs as attributes on the current span. All keys and values MUST be strings
   or opencensus will throw."
-  ([m]
-   (let [span (.getCurrentSpan (Tracing/getTracer))]
-     (doseq [[k v] m]
-       (let [av (AttributeValue/stringAttributeValue v)]
-         (.putAttribute span k av)))))
-  ([k v] (attribute! {k v})))
+  [k v]
+  (let [span (.getCurrentSpan (Tracing/getTracer))
+        val  (AttributeValue/stringAttributeValue v)]
+    (.putAttribute span k val)))

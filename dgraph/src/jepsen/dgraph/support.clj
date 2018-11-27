@@ -157,12 +157,26 @@
 (defn zero-state
   "Fetches zero /state from the given node."
   [node]
-  (-> (http/get (zero-url node "state")
-                http-opts)
-      :body
-      (json/parse-string (fn [k] (if (re-find #"\A\d+\z" k)
-                                   (Long/parseLong k)
-                                   (keyword k))))))
+  (try
+    (-> (http/get (zero-url node "state")
+                  http-opts)
+        :body
+        (json/parse-string (fn [k] (if (re-find #"\A\d+\z" k)
+                                     (Long/parseLong k)
+                                     (keyword k)))))
+    ;; It's ok if this times out, just move on
+    (catch java.net.SocketTimeoutException e :timeout)))
+
+(defn zero-leader
+  "Takes result of zero-state and returns the node of the zero leader"
+  [state]
+  (let [leader (->> state
+                    :zeros
+                    vals
+                    (filter :leader)
+                    first
+                    :addr)]
+    (first (clojure.string/split leader #":"))))
 
 (defn move-tablet!
   "Given a zero node, asks that node to move a tablet to the given group."
