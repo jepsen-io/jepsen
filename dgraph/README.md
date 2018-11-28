@@ -42,6 +42,11 @@ To run the delete workload ([dgraph-io/dgraph#2391](https://github.com/dgraph-io
 lein run test --local-binary /gobin/dgraph --force-download --nemesis none --rebalance-interval 10h --sequencing server --upsert-schema --time-limit 600 --concurrency 30 --workload delete --retry-db-setup --test-count 20 --dgraph-jaeger-collector http://jaeger:14268
 ```
 
+To run the move tablet nemesis:
+
+```sh
+lein run test --local-binary /gobin/dgraph --force-download --nemesis move-tablet --rebalance-interval 10h --time-limit 600 --concurrency 1n --nemesis move-tablet --workload bank --upsert-schema --dgraph-jaeger-collector http://jaeger:14268 --tracing http://jaeger:14268/api/traces --test-count 20
+```
 
 ## License
 
