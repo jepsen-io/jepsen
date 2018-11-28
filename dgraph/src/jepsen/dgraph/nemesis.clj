@@ -52,30 +52,28 @@
     (setup! [this test] this)
 
     (invoke! [this test op]
-      (let [state  (s/zero-state (rand-nth (:nodes test)))]
-        (if (= :timeout state)
-          (assoc op :value :timeout)
-          (let [groups (->> state :groups keys)
-                node   (s/zero-leader state)]
-                (->> state
-                     :groups
-                     vals
-                     (map :tablets)
-                     (mapcat vals)
-                     shuffle
-                     (keep (fn [tablet]
-                             (let [pred   (:predicate tablet)
-                                   group  (:groupId tablet)
-                                   group' (rand-nth groups)]
-                               (when-not (= group group')
-                                 ;; Actually move tablet
-                                 (info "Moving" pred "from" group "to" group')
-                                 (s/move-tablet! node pred group')
-                                 (info "Moved" pred "from" group "to" group')
-                                 ;; Return predicate and new group
-                                 [pred [group group']]))))
-                     (into (sorted-map))
-                     (assoc op :value))))))
+      (let [state  (s/zero-state (rand-nth (:nodes test)))
+            groups (->> state :groups keys)]
+        (info :state (with-out-str (pprint state)))
+        (->> state
+             :groups
+             vals
+             (map :tablets)
+             (mapcat vals)
+             shuffle
+             (keep (fn [tablet]
+                     (let [pred   (:predicate tablet)
+                           group  (:groupId tablet)
+                           group' (rand-nth groups)]
+                       (when-not (= group group')
+                         ; Actually move tablet
+                         (info "Moving" pred "from" group "to" group')
+                         (s/move-tablet! (rand-nth (:nodes test)) pred group')
+                         (info "Moved" pred "from" group "to" group')
+                         ; Return predicate and new group
+                         [pred [group group']]))))
+             (into (sorted-map))
+             (assoc op :value))))
 
     (teardown! [this test])))
 
