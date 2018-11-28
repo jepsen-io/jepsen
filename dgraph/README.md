@@ -16,6 +16,12 @@ Use `lein run test-all` to run a full test suite. Test-all takes many of the
 same arguments as `test`, but cycles through all combinations of workload,
 nemesis, sequencing, and upserts.
 
+To run the full test suite:
+
+```sh
+lein run test-all --local-binary /gobin/dgraph --rebalance-interval 10h --time-limit 600 --test-count 20 --dgraph-jaeger-collector http://jaeger:14268 --tracing http://jaeger:14268/api/traces
+```
+
 To run it with Jaeger trace collection:
 
 ```sh
