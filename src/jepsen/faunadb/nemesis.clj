@@ -15,12 +15,6 @@
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]))
 
-;; duration between interruptions
-(def nemesis-delay 5) ; seconds
-
-;; duration of an interruption
-(def nemesis-duration 30) ; seconds
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;; Nemesis definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn single-node-partition-start
@@ -164,14 +158,27 @@
      {:start-partition  :start
       :stop-partition   :stop}  (nemesis/partitioner nil)
      #{:add-node :remove-node}  (topo-nemesis)
-     {:reset-clock      :reset
-      :strobe-clock     :strobe
-      :bump-clock       :bump}  (nt/clock-nemesis)}))
+     {:reset-clock          :reset
+      :strobe-clock         :strobe
+      :check-clock-offsets  :check-offsets
+      :bump-clock           :bump} (nt/clock-nemesis)}))
 
 (defn op
   "Construct a nemesis op with the given f and no value."
   [f]
   {:type :info, :f f, :value nil})
+
+(defn clock-gen
+  "Generator of clock skew operations."
+  []
+  ; (->> (nt/clock-gen)
+  ;      (gen/filter (fn [op]
+  ;                    (not (= :strobe-clock (:f op))))))
+  (let [node (promise)]
+    (reify gen/Generator
+      (op [this test process]
+        (deliver node (rand-nth (:nodes test)))
+        {:type :info, :f :bump, :value {@node -1000}}))))
 
 (defn full-generator
   "Takes nemesis options and constructs a generator for the nemesis operations
@@ -190,10 +197,11 @@
          (:single-node-partition n)
          (conj single-node-partition-start (op :stop-partition))
 
-         (:clock-skew n) (conj (gen/f-map {:reset  :reset-clock
-                                           :strobe :strobe-clock
-                                           :bump   :bump-clock}
-                                          (nt/clock-gen)))
+         (:clock-skew n) (conj (->> (clock-gen)
+                                    (gen/f-map {:check-offsets :check-clock-offsets
+                                                :reset  :reset-clock
+                                                :strobe :strobe-clock
+                                                :bump   :bump-clock})))
 
          (:topology n)  (conj (with-refresh topo-op)))
        gen/mix

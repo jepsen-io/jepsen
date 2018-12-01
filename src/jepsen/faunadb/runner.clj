@@ -151,8 +151,9 @@
            {:client (:client workload)
             :nemesis (:nemesis nemesis)
             :generator gen
-            :checker   (checker/compose {:perf     (checker/perf)
-                                         :workload (:checker workload)})})))
+            :checker   (checker/compose {:perf        (checker/perf)
+                                         :clock-skew  (checker/clock-plot)
+                                         :workload    (:checker workload)})})))
 
 (defn fauna-test
   "Constructs a FaunaDB test map from CLI options."
