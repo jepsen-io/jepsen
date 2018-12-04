@@ -34,32 +34,32 @@
         (case (:f op)
           :read (let [v (f/query conn
                                  (q/if (q/exists? id*)
-                                   (q/select ["data" "register"]
-                                             (q/get id*))))]
+                                   (q/get id*)))]
                   (assoc op
                          :type :ok
-                         :value (indy/tuple id v)))
+                         :value (indy/tuple id (:register (:data v)))
+                         :write-ts (:ts v)))
 
-          :write (do (-> conn
-                         (f/query
-                           (q/if (q/exists? id*)
-                             (q/update id* {:data {:register val'}})
-                             (q/create id* {:data {:register val'}}))))
-                     (assoc op :type :ok))
+          :write (let [r (-> conn
+                             (f/query
+                               (q/if (q/exists? id*)
+                                 (q/update id* {:data {:register val'}})
+                                 (q/create id* {:data {:register val'}}))))]
+                   (assoc op :type :ok, :write-ts (:ts r)))
 
           :cas (let [[expected new] val'
-                     cas (f/query
-                           conn
-                           (q/if (q/exists? id*)
-                             (q/let [reg (q/select ["data" "register"]
-                                                   (q/get id*))]
-                               (q/if (q/= expected reg)
-                                 (q/do
-                                   (q/update id* {:data {:register new}})
-                                   true)
-                                 false))
-                             false))]
-                 (assoc op :type (if cas :ok :fail)))))))
+                     r (f/query
+                         conn
+                         (q/if (q/exists? id*)
+                           (q/let [reg (q/select ["data" "register"]
+                                                 (q/get id*))]
+                             (q/if (q/= expected reg)
+                               (q/update id* {:data {:register new}})
+                               false))
+                           false))]
+                 (assoc op
+                        :type   (if r :ok :fail)
+                        :write-ts (when r (:ts r))))))))
 
   (teardown! [this test])
 
