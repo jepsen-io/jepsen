@@ -11,7 +11,8 @@
             [knossos.op :as op]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [generator :as gen]]
+                    [generator :as gen]
+                    [independent :as independent]]
             [jepsen.faunadb [query :as q]
                             [client :as f]]))
 
@@ -29,32 +30,36 @@
 
   (setup! [this test]
     (f/with-retry
-      (f/query conn (f/upsert-class {:name elements-name}))
-      (f/query conn (f/upsert-index {:name   idx-name
-                                     :source elements
-                                     :serialized (boolean
-                                                   (:serialized-indices test))
+      (f/query conn (f/upsert-class {:name        elements-name}))
+      (f/query conn (f/upsert-index {:name        idx-name
+                                     :source      elements
+                                     :serialized  (boolean
+                                                    (:serialized-indices test))
                                      ; :partitions 1
+                                     :terms  [{:field ["data" "key"]}]
                                      :values [{:field ["data" "value"]}]}))
       (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
-    (f/with-errors op #{:read}
-      (case (:f op)
-        :add (do (f/query conn
-                          (q/do*
-                            (map (fn [v]
-                                   (q/create (q/ref elements v)
-                                             {:data {:value v}}))
-                                 (:value op))))
-                 (assoc op :type :ok))
+    (let [[k v] (:value op)]
+      (f/with-errors op #{:read}
+        (case (:f op)
+          :add (do (f/query conn
+                            (q/do*
+                              (map (fn [v]
+                                     (q/create (q/ref elements v)
+                                               {:data {:key k
+                                                       :value v}}))
+                                   v)))
+                   (assoc op :type :ok))
 
-        :read (->> (f/query-all conn (q/match idx)
-                                ; TODO: remove this once they've patched the
-                                ; iteration bug
-                                -10000000)
-                   vec
-                   (assoc op :type :ok, :value)))))
+          :read (->> (f/query-all conn (q/match idx k)
+                                  ; TODO: remove this once they've patched the
+                                  ; iteration bug
+                                  -10000000)
+                     vec
+                     (independent/tuple k)
+                     (assoc op :type :ok, :value))))))
 
   (teardown! [this test])
 
@@ -139,17 +144,22 @@
   [opts]
   (let [zero        0
         n           10000
-        group-size  4
-        adds (->> (range (- n) n)
-                  shuffle
-                  (partition group-size)
-                  (map (fn [group]
-                         {:type  :invoke
-                          :f     :add
-                          :value group}))
-                   (gen/seq))
-        reads {:type :invoke, :f :read, :value nil}]
+        group-size  4]
     {:client    (PagesClient. nil)
-     :generator (->> (gen/mix [adds adds adds adds reads])
-                     (gen/stagger 1/5))
-     :checker   (checker)}))
+     :generator (->> (independent/concurrent-generator
+                       (* 2 (count (:nodes opts)))
+                       (range)
+                       (fn [k]
+                         (let [adds (->> (range (- n) n)
+                                         shuffle
+                                         (partition group-size)
+                                         (map (fn [group]
+                                                {:type  :invoke
+                                                 :f     :add
+                                                 :value group}))
+                                         (gen/seq))
+                               reads {:type :invoke, :f :read, :value nil}]
+                           (->> (gen/mix [adds adds adds adds reads])
+                                (gen/limit 512)
+                                (gen/stagger 1/5))))))
+     :checker   (independent/checker (checker))}))
