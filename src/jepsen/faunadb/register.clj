@@ -18,15 +18,14 @@
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defrecord AtomicClient [tbl-created? conn]
+(defrecord AtomicClient [conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (f/linearized-client node)))
 
   (setup! [this test]
-    (locking tbl-created?
-      (when (compare-and-set! tbl-created? false true)
-        (f/query conn (q/create-class {:name "test"})))))
+    (f/with-retry
+      (f/query conn (f/upsert-class {:name "test"}))))
 
   (invoke! [this test op]
     (f/with-errors op #{:read}
@@ -70,7 +69,7 @@
 (defn workload
   [opts]
   (let [n (count (:nodes opts))]
-    {:client    (AtomicClient. (atom false) nil)
+    {:client    (AtomicClient. nil)
      :model     (model/cas-register 0)
      :generator (indy/concurrent-generator
                   (* 2 n)
