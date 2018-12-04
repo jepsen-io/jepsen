@@ -56,6 +56,7 @@
            (.. (Dsl/config)
                ; By default this chooses cores * 2 and blows out process limits
                (setIoThreadsCount 1)
+               (setMaxRequestRetry 0)
                (build))))
        (.withEndpoint (str "http://" node ":8443" path))
        (.withSecret root-key)))))
