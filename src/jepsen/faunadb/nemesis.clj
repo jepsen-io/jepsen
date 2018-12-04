@@ -171,14 +171,15 @@
 (defn clock-gen
   "Generator of clock skew operations."
   []
-  ; (->> (nt/clock-gen)
-  ;      (gen/filter (fn [op]
-  ;                    (not (= :strobe-clock (:f op))))))
-  (let [node (promise)]
-    (reify gen/Generator
-      (op [this test process]
-        (deliver node (rand-nth (:nodes test)))
-        {:type :info, :f :bump, :value {@node -1000}}))))
+  (->> [(fn [test process]
+          {:type  :info
+           :f     :bump
+           ; Tune this number up or down to control the clock skew; -2000 runs
+           ; the clock on this node two seconds behind.
+           :value {(rand-nth (:nodes test)) -20000}})
+        (fn [test process] {:type :info, :f :reset, :value (:nodes test)})]
+       cycle
+       gen/seq))
 
 (defn full-generator
   "Takes nemesis options and constructs a generator for the nemesis operations
@@ -197,7 +198,7 @@
          (:single-node-partition n)
          (conj single-node-partition-start (op :stop-partition))
 
-         (:clock-skew n) (conj (->> (clock-gen)
+         (:clock-skew n) (conj (->> (nt/clock-gen)
                                     (gen/f-map {:check-offsets :check-clock-offsets
                                                 :reset  :reset-clock
                                                 :strobe :strobe-clock

@@ -88,13 +88,14 @@
   "All nemesis specs to run as a part of a complete test suite"
   (->> [[]
         [:kill]
-        [:inter-replica-partition
-         :intra-replica-partition
-         :single-node-partition]
         [:clock-skew]
         [:inter-replica-partition
          :intra-replica-partition
+         :single-node-partition]
+        [:inter-replica-partition
+         :intra-replica-partition
          :single-node-partition
+         :clock-skew
          :kill]
         [:topology]]
        (map (fn [faults]
