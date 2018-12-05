@@ -25,7 +25,7 @@
 
   (setup! [this test]
     (f/with-retry
-      (f/query conn (f/upsert-class {:name "test"}))))
+      (f/upsert-class! conn {:name "test"})))
 
   (invoke! [this test op]
     (f/with-errors op #{:read}

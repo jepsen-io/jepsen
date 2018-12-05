@@ -43,8 +43,7 @@
 (defn create-class!
   "Creates the class for accounts"
   [test conn]
-  (f/query conn (q/when (q/not (q/exists? accounts))
-                  (q/create-class {:name accounts-name}))))
+  (f/upsert-class! conn {:name accounts-name}))
 
 (defn create-accounts!
   "Creates the initial accounts for a test"

@@ -37,8 +37,8 @@
 
   (setup! [this test]
     (f/with-retry
-      (f/query conn (q/do (f/upsert-class {:name a-name})
-                          (f/upsert-class {:name b-name})))
+      (f/upsert-class! conn {:name a-name})
+      (f/upsert-class! conn {:name b-name})
       (f/query conn (q/do (f/upsert-index
                             {:name a-index-name
                              :source a

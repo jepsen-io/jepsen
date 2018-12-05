@@ -59,7 +59,7 @@
 
   (setup! [this test]
     (f/with-retry
-      (f/query conn (f/upsert-class {:name cats-name}))
+      (f/upsert-class! conn {:name cats-name})
       (f/query conn (f/upsert-index
                       {:name index-name
                        :source cats

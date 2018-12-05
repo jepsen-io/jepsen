@@ -55,7 +55,7 @@
 
   (setup! [this test]
     (f/with-retry
-      (f/query conn (f/upsert-class {:name registers-name}))))
+      (f/upsert-class! conn {:name registers-name})))
 
   (invoke! [this test op]
     (try

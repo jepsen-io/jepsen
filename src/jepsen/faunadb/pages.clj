@@ -31,7 +31,7 @@
 
   (setup! [this test]
     (f/with-retry
-      (f/query conn (f/upsert-class {:name        elements-name}))
+      (f/upsert-class! conn {:name elements-name})
       (f/query conn (f/upsert-index {:name        idx-name
                                      :source      elements
                                      :serialized  (boolean

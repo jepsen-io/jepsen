@@ -263,6 +263,20 @@
   (q/when (q/not (q/exists? (q/class (:name cm))))
     (q/create-class cm)))
 
+(defn upsert-class!
+  "Class insertion is not transactional, and can throw \"Instance is not
+  unique\" even when using upsert-class. We can automatically recover from
+  this, but only when upserting a single class; e.g. we have to give up
+  compositional queries. This function takes a conn and a class map, and
+  performs the upsert."
+  [conn cm]
+  (try
+    (query conn (upsert-class cm))
+    (catch com.faunadb.client.errors.BadRequestException e
+      (if (re-find #"instance not unique" (.getMessage e))
+        :instance-not-unique
+        (throw e)))))
+
 (defn upsert-index
   "Query expression to upsert an index. Takes an index map."
   [im]
