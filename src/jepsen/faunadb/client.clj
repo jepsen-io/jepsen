@@ -263,6 +263,12 @@
   (q/when (q/not (q/exists? (q/class (:name cm))))
     (q/create-class cm)))
 
+(defn upsert-index
+  "Query expression to upsert an index. Takes an index map."
+  [im]
+  (q/when (q/not (q/exists? (q/index (:name im))))
+    (q/create-index im)))
+
 (defn upsert-class!
   "Class insertion is not transactional, and can throw \"Instance is not
   unique\" even when using upsert-class. We can automatically recover from
@@ -277,11 +283,15 @@
         :instance-not-unique
         (throw e)))))
 
-(defn upsert-index
-  "Query expression to upsert an index. Takes an index map."
-  [im]
-  (q/when (q/not (q/exists? (q/index (:name im))))
-    (q/create-index im)))
+(defn upsert-index!
+  "Like upsert-class! for indices."
+  [conn im]
+  (try
+    (query conn (upsert-index im))
+    (catch com.faunadb.client.errors.BadRequestException e
+      (if (re-find #"instance not unique" (.getMessage e))
+        :instance-not-unique
+        (throw e)))))
 
 (defn jitter-time
   "Jitters an Instant timestamp by +/- jitter milliseconds (default 10 s)"

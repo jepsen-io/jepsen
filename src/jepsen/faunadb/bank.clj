@@ -144,14 +144,12 @@
   (setup! [this test]
     (f/with-retry
       (client/setup! bank-client test)
-      (f/query conn
-               (q/when (q/not (q/exists? idx))
-                 (q/create-index {:name idx-name
-                                  :source accounts
-                                  :serialized (boolean (:serialized-indices test))
-                                  :values [{:field ["ref"]}
-                                           {:field ["data" "balance"]}]})))
-        (f/wait-for-index conn idx)))
+      (f/upsert-index! conn {:name idx-name
+                             :source accounts
+                             :serialized (boolean (:serialized-indices test))
+                             :values [{:field ["ref"]}
+                                      {:field ["data" "balance"]}]})
+      (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
     (if (= :read (:f op))

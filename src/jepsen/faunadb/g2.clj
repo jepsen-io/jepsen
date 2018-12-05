@@ -39,16 +39,14 @@
     (f/with-retry
       (f/upsert-class! conn {:name a-name})
       (f/upsert-class! conn {:name b-name})
-      (f/query conn (q/do (f/upsert-index
-                            {:name a-index-name
+      (f/upsert-index! conn {:name a-index-name
                              :source a
                              :serialized (boolean (:serialized-indices test))
                              :terms [{:field ["data" "key"]}]})
-                          (f/upsert-index
-                            {:name b-index-name
+      (f/upsert-index! conn {:name b-index-name
                              :source b
                              :serialized (boolean (:serialized-indices test))
-                             :terms [{:field ["data" "key"]}]})))
+                             :terms [{:field ["data" "key"]}]})
       (f/wait-for-index conn a-index)
       (f/wait-for-index conn b-index)))
 

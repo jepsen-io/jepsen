@@ -60,13 +60,12 @@
   (setup! [this test]
     (f/with-retry
       (f/upsert-class! conn {:name cats-name})
-      (f/query conn (f/upsert-index
-                      {:name index-name
-                       :source cats
-                       :serialized (boolean (:serialized-indices test))
-                       :terms [{:field ["data" "type"]}]
-                       :values [{:field ["ref"]}
-                                {:field ["data" "name"]}]}))))
+      (f/upsert-index! conn {:name index-name
+                             :source cats
+                             :serialized (boolean (:serialized-indices test))
+                             :terms [{:field ["data" "type"]}]
+                             :values [{:field ["ref"]}
+                                      {:field ["data" "name"]}]})))
 
   (invoke! [this test op]
     (let [v (:value op)]

@@ -32,13 +32,13 @@
   (setup! [this test]
     (f/with-retry
       (f/upsert-class! conn {:name elements-name})
-      (f/query conn (f/upsert-index {:name        idx-name
-                                     :source      elements
-                                     :serialized  (boolean
-                                                    (:serialized-indices test))
-                                     ; :partitions 1
-                                     :terms  [{:field ["data" "key"]}]
-                                     :values [{:field ["data" "value"]}]}))
+      (f/upsert-index! conn {:name        idx-name
+                             :source      elements
+                             :serialized  (boolean
+                                            (:serialized-indices test))
+                             ; :partitions 1
+                             :terms  [{:field ["data" "key"]}]
+                             :values [{:field ["data" "value"]}]})
       (f/wait-for-index conn idx)))
 
   (invoke! [this test op]

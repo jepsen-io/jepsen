@@ -25,12 +25,10 @@
     (f/with-retry
       (f/upsert-class! conn {:name elements})
       (f/upsert-class! conn {:name side-effects})
-      (f/query conn
-               (f/upsert-index
-                 {:name       idx-name
-                  :source     (q/class elements)
-                  :serialized (boolean (:serialized-indices test))
-                  :values     [{:field ["data" "value"]}]}))
+      (f/upsert-index! conn {:name       idx-name
+                             :source     (q/class elements)
+                             :serialized (boolean (:serialized-indices test))
+                             :values     [{:field ["data" "value"]}]})
       (f/wait-for-index conn idx)))
 
   (invoke! [this test op]
@@ -51,7 +49,8 @@
                             ; We're gonna do our read, then sneak a write in
                             ; to force this txn to be strict serializable
                             (q/let [r (q/match idx)]
-                              (q/create (q/class side-effects) {})
+                              (q/at (q/time "now")
+                                (q/create (q/class side-effects) {}))
                               r)
                             ; Just a regular read
                             (q/match idx))
