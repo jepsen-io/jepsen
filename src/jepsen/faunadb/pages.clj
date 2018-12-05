@@ -12,7 +12,8 @@
             [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]
-                    [independent :as independent]]
+                    [independent :as independent]
+                    [util :as util]]
             [jepsen.faunadb [query :as q]
                             [client :as f]]))
 
@@ -47,16 +48,13 @@
           :add (do (f/query conn
                             (q/do*
                               (map (fn [v]
-                                     (q/create (q/ref elements v)
+                                     (q/create elements
                                                {:data {:key k
                                                        :value v}}))
                                    v)))
                    (assoc op :type :ok))
 
-          :read (->> (f/query-all conn (q/match idx k)
-                                  ; TODO: remove this once they've patched the
-                                  ; iteration bug
-                                  -10000000)
+          :read (->> (f/query-all conn (q/match idx k))
                      vec
                      (independent/tuple k)
                      (assoc op :type :ok, :value))))))
@@ -122,23 +120,28 @@
                                       xs)))
                           (transient {})
                           adds))
+            ok-reads (->> history
+                          (r/filter #(= :read (:f %)))
+                          (r/filter op/ok?)
+                          (into []))
             ; Now check each read
-            errs (->> history
-                      (r/filter #(= :read (:f %)))
-                      (r/filter op/ok?)
-                      (r/map    (fn [op]
-                                  (let [v  (:value op)
-                                        v' (set v)]
-                                    (if-not (= (count v) (count v'))
-                                      {:op     op
-                                       :errors [:duplicate-items]}
-                                      (when-let [errs (read-errs idx v')]
-                                        {:op     op
-                                         :errors errs})))))
+            errs (->> ok-reads
+                      (r/map (fn [op]
+                               (let [v  (:value op)
+                                     v' (set v)]
+                                 (if-not (= (count v) (count v'))
+                                   {:op     op
+                                    :errors [:duplicate-items]}
+                                   (when-let [errs (read-errs idx v')]
+                                     {:op     op
+                                      :errors errs})))))
                       (r/filter identity)
                       (into []))]
         {:valid? (not (seq errs))
-         :errors errs}))))
+         :ok-read-count (count ok-reads)
+         :error-count   (count errs)
+         :first-error   (first errs)
+         :worst-error   (util/max-by (comp count :errors) errs)}))))
 
 (defn workload
   [opts]
@@ -160,6 +163,6 @@
                                          (gen/seq))
                                reads {:type :invoke, :f :read, :value nil}]
                            (->> (gen/mix [adds adds adds adds reads])
-                                (gen/limit 512)
+                                (gen/limit 256)
                                 (gen/stagger 1/5))))))
      :checker   (independent/checker (checker))}))
