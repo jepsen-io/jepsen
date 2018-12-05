@@ -370,8 +370,11 @@
     (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
             :apt-key :add :-)
     (info "Adding repo")
+    (debian/add-repo! "faunadb-stable"
+                      "deb [arch=all] https://repo.fauna.com/debian stable non-free")
     (debian/add-repo! "faunadb"
                       "deb [arch=all] https://repo.fauna.com/debian unstable non-free")
+    (debian/maybe-update!)
 
     (let [v (:version test)]
       (assert v)
