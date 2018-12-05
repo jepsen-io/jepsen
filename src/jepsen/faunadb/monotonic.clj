@@ -48,6 +48,15 @@
 
 (def k 0)
 
+(defn strip-time
+  "Timestamps like 2018-12-05T22:15:09Z and 2018-12-05T22:15:09.143Z won't
+  compare properly as strings; we strip off the trailing Z so we can sort
+  them."
+  [s]
+  (let [i (dec (count s))]
+    (assert (= \Z (.charAt s i)))
+    (subs s 0 i)))
+
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
@@ -94,7 +103,7 @@
                                                                (q/get r))
                                                      0))])))
               t (str t)]
-          (assoc op :type :ok, :value [t v])))
+          (assoc op :type :ok, :value [(strip-time t) v])))
       (catch com.faunadb.client.errors.NotFoundException e
         (assoc op :type :fail, :error :not-found))))
 
