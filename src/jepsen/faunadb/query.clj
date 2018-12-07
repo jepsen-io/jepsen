@@ -267,8 +267,10 @@
   (Language/Update (expr r) (expr data)))
 
 (defn select
-  [path e]
-  (Language/Select (expr path) (expr e)))
+  ([path e]
+   (Language/Select (expr path) (expr e)))
+  ([path e default]
+   (Language/Select (expr path) (expr e) (expr default))))
 
 (defn union*
   "Set union"
@@ -315,3 +317,14 @@
 (defn =
   [& exprs]
   (Language/Equals (c/mapv expr exprs)))
+
+; Histories
+
+(defn events
+  "Returns a history of an instance's data, given a refset (is a ref a refset?)"
+  [refset]
+  (Language/Events (expr refset)))
+
+(defn singleton
+  [e]
+  (Language/Singleton (expr e)))

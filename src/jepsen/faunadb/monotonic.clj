@@ -51,11 +51,35 @@
 (defn strip-time
   "Timestamps like 2018-12-05T22:15:09Z and 2018-12-05T22:15:09.143Z won't
   compare properly as strings; we strip off the trailing Z so we can sort
-  them."
-  [s]
-  (let [i (dec (count s))]
+  them. Also converts instants to strings."
+  [ts]
+  (let [s (str ts)
+        i (dec (count s))]
     (assert (= \Z (.charAt s i)))
     (subs s 0 i)))
+
+(defn stripped-time->instant
+  "Converts a stripped time string (without a Z) to an Instant."
+  [s]
+  (Instant/parse (str s "Z")))
+
+(defn restrict-history
+  "FaunaDB appears to return infinite sequences of events for the history of
+  single instances. This function takes a sequence of those events and cuts it
+  off when it starts to loop over itself."
+  [original-events]
+  (loop [events original-events
+         i      0
+         seen   (transient #{})]
+    (if-not (seq events)
+       ; Finite sequence; done
+       original-events
+
+       (let [event (first events)]
+         (if (seen event)
+           ; This is a dup
+           (take i original-events)
+           (recur (next events) (inc i) (conj! seen event)))))))
 
 (defrecord Client [conn]
   client/Client
@@ -71,7 +95,7 @@
       (f/with-errors op #{:read-at :read}
         (let [v   (:value op)
               r   (q/ref registers k)
-              [t v] (case (:f op)
+              res (case (:f op)
                       :inc
                       (f/query conn
                                [(q/time "now")
@@ -101,9 +125,21 @@
                                                    (q/if (q/exists? r)
                                                      (q/select ["data" "value"]
                                                                (q/get r))
-                                                     0))])))
-              t (str t)]
-          (assoc op :type :ok, :value [(strip-time t) v])))
+                                                     0))]))
+
+                      ; This is broken--the next/prev pointers for history
+                      ; traversal result in infinite loops.
+                      :events (->> (f/query-all-naive conn (q/events
+                                                             (q/singleton r)))
+                                   (map (juxt :ts
+                                               :action
+                                               (comp :value :data)))
+                                   (restrict-history)))
+              ; For increments and reads, convert timestamp to string
+              v (case (:f op)
+                  (:inc :read :read-at) (update (vec res) 0 strip-time)
+                  :events               res)]
+          (assoc op :type :ok, :value v)))
       (catch com.faunadb.client.errors.NotFoundException e
         (assoc op :type :fail, :error :not-found))))
 
@@ -221,7 +257,7 @@
                                        ; since start of test
                                        (let [t (-> (:value op)
                                                    first
-                                                   (Instant/parse))
+                                                   (stripped-time->instant))
                                              dt (-> t0
                                                     (.until t ChronoUnit/NANOS)
                                                     (util/nanos->secs))]
@@ -323,8 +359,13 @@
 
 (defn workload
   [opts]
+  (let [n (count (:nodes opts))]
   {:client    (Client. nil)
-   :generator (->> (gen/mix [inc-gen read-gen read-at-gen]))
+   :generator (gen/reserve n inc-gen
+                           n read-gen
+                           n read-at-gen
+                           (gen/mix [gen/reserve inc-gen read-gen read-at-gen]))
+   ;:final-generator (gen/once {:type :invoke, :f :events})
    :checker (checker/compose
               {:monotonic (checker)
                :not-found (not-found-checker)
