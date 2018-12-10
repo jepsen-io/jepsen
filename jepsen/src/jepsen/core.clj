@@ -17,11 +17,11 @@
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
+            [dom-top.core :as dt :refer [real-pmap]]
             [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
                                           fcatch
-                                          real-pmap
                                           relative-time-nanos]]
             [jepsen.os :as os]
             [jepsen.db :as db]
@@ -168,105 +168,33 @@
   (run-worker!      [worker])
   (teardown-worker! [worker]))
 
-(defn do-worker!
-  "Runs a worker through setup, running, and teardown. Returns nil on success,
-  or a throwable if any phase threw."
-  [                 abort!
-   ^CountDownLatch  run-latch
-   ^CountDownLatch  teardown-latch
-                    worker]
-  (let [name (worker-name worker)]
-    (with-thread-name (str "jepsen " name)
-      (try (info "Starting" name)
-           (setup-worker! worker)
-           (when (.isInterrupted (Thread/currentThread))
-             (throw (InterruptedException. "Interrupted before running")))
-
-           (try (.countDown run-latch)
-                (.await run-latch)
-                (info "Running" name)
-                (run-worker! worker)
-                ; Normal termination
-                (.countDown teardown-latch)
-                (.await teardown-latch)
-                (try (info "Stopping" name)
-                     (teardown-worker! worker)
-                     nil
-                     (catch Throwable t
-                       (warn t "Error tearing down" name)
-                       t))
-
-                (catch Throwable t
-                  ; Failure in running
-                  (warn t "Error running" name)
-                  (abort! worker)
-                  (Thread/interrupted) ; Clear our interrupt state
-                  (.countDown teardown-latch)
-                  (.await teardown-latch)
-                  (try (info "Stopping" name)
-                       (teardown-worker! worker)
-                       t
-                       (catch Throwable t
-                         (warn t "Error tearing down" name)
-                         t))))
-
-           (catch Throwable t
-             ; Failure in setup process
-             (warn t "Error setting up" name)
-             (abort! worker)
-             (Thread/interrupted) ; Clear our interrupt state
-             (.countDown teardown-latch)
-             (.await teardown-latch)
-             (try (info "Stopping" name)
-                  (teardown-worker! worker)
-                  t
-                  (catch Throwable t
-                    (warn t "Error tearing down" name)
-                    t)))))))
-
 (defn run-workers!
-  "Runs a set of workers."
+  "Runs a set of workers through setup, running, and teardown."
   [workers]
-  (let [n (count workers)
-        thread-group    (ThreadGroup. "jepsen workers")
-        aborting-worker (promise)
-        abort!          (fn abort! [w]
-                          (deliver aborting-worker w)
-                          (mapv abort-worker! workers)
-                          (.interrupt thread-group))
-        run-latch       (CountDownLatch. n)
-        teardown-latch  (CountDownLatch. n)
-        results         (take n (repeatedly promise))
-        threads         (mapv (fn [worker result]
-                                (Thread. thread-group
-                                         (bound-fn []
-                                           (deliver result
-                                                    (do-worker! abort!
-                                                                run-latch
-                                                                teardown-latch
-                                                                worker)))))
-                              workers
-                              results)]
+  (try
+    ; Set up
+    (real-pmap (fn setup [w]
+                 (let [name (worker-name w)]
+                   (with-thread-name (str "jepsen " name)
+                     (info "Setting up" name)
+                     (setup-worker! w))))
+               workers)
+    ; Run
+    (real-pmap (fn run [w]
+                 (let [name (worker-name w)]
+                   (with-thread-name (str "jepsen " name)
+                     (info "Running" name)
+                     (run-worker! w))))
+               workers)
 
-    ; Launch threads!
-    (doseq [t threads] (.start t))
-
-    ; Wait for completion
-    (let [results (mapv deref results)]
-      ; If nobody aborted already, we'll fill in a default of nil
-      (deliver aborting-worker nil)
-
-      ; Did any crash?
-      (when-let [aborting-worker @aborting-worker]
-        (->> (map (fn [worker result]
-                    (when (identical? worker aborting-worker)
-                      result))
-                  workers
-                  results)
-             (remove nil?)
-             first
-             throw)))))
-
+    (finally
+      ; Teardown
+      (real-pmap (fn teardown [w]
+                   (let [name (worker-name w)]
+                     (with-thread-name (str "jepsen " name)
+                       (info "Tearing down" name)
+                       (teardown-worker! w))))
+                 workers))))
 
 (defn invoke-op!
   "Applies an operation to a client, catching client exceptions and converting

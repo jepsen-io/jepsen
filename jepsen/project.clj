@@ -18,7 +18,7 @@
                  [hiccup "1.0.5"]
                  [org.clojars.achim/multiset "0.1.0"]
                  [byte-streams "0.2.2"]
-                 [dom-top "1.0.3"]
+                 [dom-top "1.0.4-SNAPSHOT"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.1.1"]
                  [fipp "0.6.13"]]
