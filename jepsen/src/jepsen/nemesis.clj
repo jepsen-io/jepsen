@@ -57,14 +57,14 @@
   "Sometimes nemeses are unreliable. If you wrap them in this nemesis, it'll
   time out their operations with the given timeout, in milliseconds. Timed out
   operations have :value :timeout."
-  [timeout nemesis]
+  [timeout-ms nemesis]
   (reify Nemesis
     (setup! [this test]
-      (setup! nemesis test))
+      (timeout timeout-ms (setup! nemesis test)))
 
     (invoke! [this test op]
-      (util/timeout timeout (assoc op :value :timeout)
-               (invoke! nemesis test op)))
+      (util/timeout timeout-ms (assoc op :value :timeout)
+                    (invoke! nemesis test op)))
 
     (teardown! [this test]
       (teardown! nemesis test))))
