@@ -266,11 +266,21 @@
 
 (defn upsert-by-ref
   "Takes a ref and an instance map; constructs an expr which creates the ref
-  with that data if it does not already exist."
+  with that data if it does not already exist, and updates it otherwise. TODO:
+  write instead of update?"
+  [r data]
+  (q/if (q/exists? r)
+    (q/update r data)
+    (q/create r data)))
+
+(defn maybe-insert
+  "Takes a ref and an instance map; constructs an expr which creates the ref
+  with that data iff it doesn't already exist, otherwise does nothing."
   [r data]
   (q/when (q/not (q/exists? r))
     (q/create r data)))
 
+; Oh gosh, these shouldn't be named upsert, what was I thinking
 (defn upsert-class
   "Query expr to upsert a class. Takes a class map."
   [cm]
@@ -375,6 +385,8 @@
          (assoc ~op :type type#, :error [:unavailable (.getMessage e#)]))
 
        (catch java.net.ConnectException e#
+         (Thread/sleep 1000) ; We likely won't be able to reconnect quickly, so
+                             ; take a breather here
          (assoc ~op :type :fail, :error [:connect (.getMessage e#)]))
 
        (catch java.util.concurrent.TimeoutException e#
@@ -383,7 +395,9 @@
        (catch IOException e#
          (condp re-find (.getMessage e#)
            #"Connection refused"
-           (assoc ~op :type :fail, :error :connection-refused)
+           (do (Thread/sleep 1000) ; Chances are we're not gonna be able to
+                                   ; reconnect quickly, so let's slow down
+               (assoc ~op :type :fail, :error :connection-refused))
            (assoc ~op :type type#, :error [:io (.getMessage e#)])))
 
        (catch com.faunadb.client.errors.InternalException e#
