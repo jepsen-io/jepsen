@@ -119,19 +119,73 @@
      [:td [:a {:href (url t "jepsen.log")}     "jepsen.log"]]
      [:td [:a {:href (str (url t) ".zip")} "zip"]]]))
 
+(defn test-list-item
+  [t]
+  (let [r    (:results t)
+        time (->> t
+                  :start-time
+                  (timef/parse   (timef/formatters :basic-date-time))
+                  (timef/unparse (timef/formatters :date-hour-minute-second)))
+        color (valid-color (:valid? r))]
+
+    [:a.mdc-list-item.mdc-ripple-upgraded {:href (url t "")}
+     [:span.mdc-list-item__graphic.material-icons
+      {:style (str "background: " color)}
+      (if (:valid? r)
+        "done"
+        "error")]
+
+     [:span.mdc-list-item__text
+      [:span.mdc-list-item__primary-text
+       (:name t)]
+      [:span.mdc-list-item__secondary-text time]]
+
+     ;; [:a.mdc-list-item__meta.material-icons {:href (str (url t) ".zip")}
+     ;;  "archive"]
+
+     ;; #_[:a.material-icons {:href (url t "results.edn")}
+     ;;    "results"]
+
+     ;; #_[:a.mdc-list-item__meta.material-icons {:href (url t "history.txt")}
+     ;;    "history"]
+
+     ;; #_[:a.mdc-list-item__meta.material-icons {:href (url t "jepsen.log")}
+     ;;    "log"]
+
+     ]))
+
 (defn home
   "Home page"
   [req]
   {:status 200
    :headers {"Content-Type" "text/html"}
-   :body (h/html [:h1 "Jepsen"]
-                 [:table {:cellspacing 3
-                          :cellpadding 3}
-                  [:thead (test-header)]
-                  [:tbody (->> (fast-tests)
-                               (sort-by :start-time)
-                               reverse
-                               (map test-row))]])})
+   :body (let [tests (fast-tests)
+               sorted (->> tests
+                           (sort-by :start-time)
+                           reverse)]
+           (h/html
+            ;; TODO Valid/error/unknown - counts/ratios/percents
+            ;; TODO Get sort by from drop-down & url data
+            ;; TODO Search/Filter by, tags?
+            [:head
+             [:link {:rel "stylesheet"
+                     :type "text/css"
+                     :href "https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css"}]
+             [:link {:href "https://fonts.googleapis.com/icon?family=Material+Icons" :rel "stylesheet"}]
+             [:script {:source "https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"}]]
+
+            [:body
+             [:h1.mdc-typography--headline2
+              "Jepsen Reports"]
+
+             [:h3.mdc-typography--headline3
+              "Tests in store: " (count tests)]
+
+             #_[:h4.mdc-typography--headline3
+                "Tests in store: " (count tests)]
+
+             [:ul.mdc-list.mdc-list--two-line.mdc-list--avatar-list
+              (map test-list-item sorted)]]))})
 
 (defn dir-cell
   "Renders a File (a directory) for a directory view."
