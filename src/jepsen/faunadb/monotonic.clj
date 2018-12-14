@@ -360,14 +360,11 @@
 (defn workload
   [opts]
   (let [n (count (:nodes opts))]
-  {:client    (Client. nil)
-   :generator (gen/reserve n inc-gen
-                           n read-gen
-                           n read-at-gen
-                           (gen/mix [gen/reserve inc-gen read-gen read-at-gen]))
-   ;:final-generator (gen/once {:type :invoke, :f :events})
-   :checker (checker/compose
-              {:monotonic (checker)
-               :not-found (not-found-checker)
-               :timestamp-value-plot (timestamp-value-plotter)
-               :timestamp-value (timestamp-value-checker)})})
+    {:client    (Client. nil)
+     :generator (gen/mix [inc-gen read-gen])
+     ;:final-generator (gen/once {:type :invoke, :f :events})
+     :checker (checker/compose
+                {:monotonic (checker)
+                 :not-found (not-found-checker)
+                 :timestamp-value-plot (timestamp-value-plotter)
+                 :timestamp-value (timestamp-value-checker)})}))

@@ -20,6 +20,7 @@
                             [g2 :as g2]
                             [register :as register]
                             [monotonic :as monotonic]
+                            [multimonotonic :as multimonotonic]
                             [set :as set]
                             [pages :as pages]
                             [internal :as internal]
@@ -29,14 +30,15 @@
 (def workloads
   "A map of workload names to functions that can take opts and construct
   workloads."
-  {:set         set/workload
-   :bank        bank/workload
-   :bank-index  bank/index-workload
-   :g2          g2/workload
-   :internal    internal/workload
-   :monotonic   monotonic/workload
-   :pages       pages/workload
-   :register    register/workload})
+  {:set             set/workload
+   :bank            bank/workload
+   :bank-index      bank/index-workload
+   :g2              g2/workload
+   :internal        internal/workload
+   :monotonic       monotonic/workload
+   :multimonotonic  multimonotonic/workload
+   :pages           pages/workload
+   :register        register/workload})
 
 (def workload-options
   "For each workload, a map of workload options to all the values that option
@@ -50,6 +52,7 @@
    :g2          {:serialized-indices  [true false]}
    :internal    {:serialized-indices  [true false]}
    :monotonic   {:at-query-jitter     [0 10000 100000]}
+   :multimonotonic {}
    :pages       {:serialized-indices  [true false]}
    :register    {}})
 

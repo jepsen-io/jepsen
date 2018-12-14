@@ -152,16 +152,18 @@
 (defn full-nemesis
   "Merges together all failure modes into a single nemesis."
   []
-  (nemesis/compose
-    {{:kill             :start
-      :restart          :stop}  (killer)
-     {:start-partition  :start
-      :stop-partition   :stop}  (nemesis/partitioner nil)
-     #{:add-node :remove-node}  (topo-nemesis)
-     {:reset-clock          :reset
-      :strobe-clock         :strobe
-      :check-clock-offsets  :check-offsets
-      :bump-clock           :bump} (nt/clock-nemesis)}))
+  (->> (nemesis/compose
+         {{:kill                :start
+           :restart             :stop} (killer)
+          {:start-partition     :start
+           :stop-partition      :stop} (nemesis/partitioner nil)
+          #{:add-node
+            :remove-node}              (topo-nemesis)
+          {:reset-clock         :reset
+           :strobe-clock        :strobe
+           :check-clock-offsets :check-offsets
+           :bump-clock          :bump} (nt/clock-nemesis)})
+       (nemesis/timeout 60000)))
 
 (defn op
   "Construct a nemesis op with the given f and no value."
