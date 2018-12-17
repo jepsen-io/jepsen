@@ -28,6 +28,12 @@
   "Directory for fauna logs"
   "/var/log/faunadb")
 
+(def log-files
+  "Files to snarf at the end of each test"
+  ["/var/log/faunadb/core.log"
+   "/var/log/faunadb/query.log"
+   "/var/log/faunadb/exception.log"])
+
 ; FaunaDB setup is really slow, and we haven't been able to get tests to launch
 ; in under 8 minutes or so. To work around that, we're gonna do something kinda
 ; ugly: cache the data files from a clean cluster in a local directory, and
@@ -327,11 +333,12 @@
   [test node]
   (if (running?)
     (info node "FaunaDB already running.")
-    (do (info node "Starting FaunaDB...")
-        (c/su (c/exec :service :faunadb :start))
-        (c/exec
-          :bash :-c "while ! netstat -tna | grep 'LISTEN\\>' | grep -q ':8444\\>'; do sleep 0.1; done")
-        (info node "FaunaDB started")))
+    (c/su (info node "Starting FaunaDB...")
+          (c/exec :service :faunadb :start)
+          (c/exec
+            :bash :-c "while ! netstat -tna | grep 'LISTEN\\>' | grep -q ':8444\\>'; do sleep 0.1; done")
+          (c/exec :chmod :a+r log-files)
+          (info node "FaunaDB started")))
   :started)
 
 (defn kill!
@@ -462,6 +469,4 @@
 
     db/LogFiles
     (log-files [_ test node]
-      ["/var/log/faunadb/core.log"
-       "/var/log/faunadb/query.log"
-       "/var/log/faunadb/exception.log"])))
+      log-files)))
