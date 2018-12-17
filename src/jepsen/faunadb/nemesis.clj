@@ -134,11 +134,13 @@
 (defn killer
   "A nemesis for killing and restarting nodes."
   []
-  (nemesis/node-start-stopper
-    (fn [test nodes]
-      (->> test :topology deref :nodes (map :node) util/random-nonempty-subset))
-    auto/kill!
-    auto/start!))
+  (nemesis/timeout 30000
+                   (nemesis/node-start-stopper
+                     (fn [test nodes]
+                       (->> test :topology deref :nodes (map :node)
+                            util/random-nonempty-subset))
+                     auto/kill!
+                     auto/start!)))
 
 (defn topology
   "A nemesis package which randomly permutes the set of nodes in the cluster."
@@ -162,8 +164,7 @@
           {:reset-clock         :reset
            :strobe-clock        :strobe
            :check-clock-offsets :check-offsets
-           :bump-clock          :bump} (nt/clock-nemesis)})
-       (nemesis/timeout 60000)))
+           :bump-clock          :bump} (nt/clock-nemesis)})))
 
 (defn op
   "Construct a nemesis op with the given f and no value."
