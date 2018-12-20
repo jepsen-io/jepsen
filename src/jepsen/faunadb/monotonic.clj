@@ -361,7 +361,7 @@
   [opts]
   (let [n (count (:nodes opts))]
     {:client    (Client. nil)
-     :generator (gen/mix [inc-gen read-gen])
+     :generator (gen/mix [inc-gen read-gen read-at-gen])
      ;:final-generator (gen/once {:type :invoke, :f :events})
      :checker (checker/compose
                 {:monotonic (checker)
