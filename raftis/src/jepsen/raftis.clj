@@ -29,6 +29,8 @@
   "A client for a single register"
   [conn]
   (reify client/Client
+    (open! [this test node] this)
+
     (setup! [_ test node]
       (client {:pool {} :spec {:host (name node) :port 6379 :timeout-ms 5000}}))
 
@@ -55,7 +57,9 @@
         (catch java.lang.NumberFormatException e
           (assoc op :type :fail, :error (str "readnil--- " e)))))
 
-    (teardown! [_ test])))
+    (teardown! [_ test])
+
+    (close! [_ test])))
 
 (def dir     "/opt/raftis")
 (def logfile (str dir "/data/LOG"))
@@ -79,9 +83,9 @@
     (setup! [_ test node]
       (c/su
         (info node "installing raftis" version)
-        (let [url (str "https://github.com/Qihoo360/floyd/releases/download/"
+        (let [url (str "https://github.com/PikaLabs/floyd/releases/download/"
                        version "/raftis-" version ".tar.gz")]
-          (cu/install-tarball! c/*host* url dir))
+          (cu/install-archive! url dir))
         (cu/start-daemon!
           {:logfile logfile1
            :pidfile pidfile
@@ -118,7 +122,7 @@
           :checker (checker/compose
                      {:perf     (checker/perf)
                       :timeline (timeline/html)
-                      :linear   checker/linearizable})
+                      :linear   (checker/linearizable)})
           :generator (->> (gen/mix [r w])
                           (gen/stagger 1/10)
                           (gen/nemesis
