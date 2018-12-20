@@ -322,7 +322,8 @@
   ([t]
    (jitter-time t 10000))
   ([^Instant t jitter]
-   (.plusMillis t (- (rand-int (* 2 jitter)) jitter))))
+   (.plusMillis t (- (rand-int (* 2 jitter))
+                     jitter))))
 
 (defn maybe-at
   "Useful for comparing the results of regular queries to At(...) queries. This
