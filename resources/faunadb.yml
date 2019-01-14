@@ -23,3 +23,11 @@ network_round_trip_time_ms: 50
 
 # Try to keep fauna from spawning enormous numbers of threads
 runtime_processors: 2
+
+# The default for this value was false before 2.6.0.rc10. Allowing sync for
+# polite stop/restart cycles happens to make it easier to see a catastrophic
+# bank test failure in 2.6.0.rc9, so we turn it on explicitly here.
+storage_sync_on_shutdown: true
+
+# Speed up graceful shutdowns a bit? Default is 30s
+shutdown_grace_period_seconds: 10

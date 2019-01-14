@@ -84,22 +84,29 @@
     :intra-replica-partition
     :single-node-partition
     :kill
+    :stop
     :topology
     :clock-skew})
 
 (def all-nemeses
   "All nemesis specs to run as a part of a complete test suite"
-  (->> [[]
+  (->> [; No faults
+        []
+        ; Single types of faults
         [:kill]
+        [:stop]
         [:clock-skew]
+        ; Partitions
         [:inter-replica-partition
          :intra-replica-partition
          :single-node-partition]
+        ; Everything but topology
         [:inter-replica-partition
          :intra-replica-partition
          :single-node-partition
          :clock-skew
-         :kill]
+         :kill
+         :stop]
         [:topology]]
        (map (fn [faults]
               (zipmap faults (repeat true))))))

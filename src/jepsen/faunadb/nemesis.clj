@@ -131,16 +131,27 @@
 
     (teardown! [this test])))
 
-(defn killer
-  "A nemesis for killing and restarting nodes."
+(defn restart-stop-kill
+  "A nemesis that starts all nodes, or stops or kills a randomly selected
+  subset of nodes."
   []
-  (nemesis/timeout 30000
-                   (nemesis/node-start-stopper
-                     (fn [test nodes]
-                       (->> test :topology deref :nodes (map :node)
-                            util/random-nonempty-subset))
-                     auto/kill!
-                     auto/start!)))
+  (nemesis/timeout 60000
+    (reify nemesis/Nemesis
+      (setup! [this test] this)
+
+      (invoke! [this test op]
+        (let [nodes (->> test :topology deref :nodes (map :node))
+              nodes (case (:f op)
+                      :restart nodes
+                      (:stop :kill) (util/random-nonempty-subset nodes))]
+          (assoc op :value
+                 (c/on-nodes test nodes
+                             (case (:f op)
+                               :restart  auto/start!
+                               :stop     auto/stop!
+                               :kill     auto/kill!)))))
+
+      (teardown! [this test]))))
 
 (defn topology
   "A nemesis package which randomly permutes the set of nodes in the cluster."
@@ -154,17 +165,18 @@
 (defn full-nemesis
   "Merges together all failure modes into a single nemesis."
   []
-  (->> (nemesis/compose
-         {{:kill                :start
-           :restart             :stop} (killer)
-          {:start-partition     :start
-           :stop-partition      :stop} (nemesis/partitioner nil)
-          #{:add-node
-            :remove-node}              (topo-nemesis)
-          {:reset-clock         :reset
-           :strobe-clock        :strobe
-           :check-clock-offsets :check-offsets
-           :bump-clock          :bump} (nt/clock-nemesis)})))
+  (nemesis/compose
+    {#{:restart
+       :kill
+       :stop}                     (restart-stop-kill)
+     {:start-partition     :start
+      :stop-partition      :stop} (nemesis/partitioner nil)
+     #{:add-node
+       :remove-node}              (topo-nemesis)
+     {:reset-clock         :reset
+      :strobe-clock        :strobe
+      :check-clock-offsets :check-offsets
+      :bump-clock          :bump} (nt/clock-nemesis)}))
 
 (defn op
   "Construct a nemesis op with the given f and no value."
@@ -191,6 +203,9 @@
   (->> (cond-> []
          (:kill n)
          (conj (op :kill) (op :restart))
+
+         (:stop n)
+         (conj (op :stop) (op :restart))
 
          (:inter-replica-partition n)
          (conj inter-replica-partition-start (op :stop-partition))
@@ -221,7 +236,7 @@
                                     (:intra-replica-partition opts)
                                     (:single-node-partition opts))
                             :stop-partition)
-                          (when (:kill opts) :restart)]
+                          (when (or (:stop opts) (:kill opts)) :restart)]
                          (remove nil?)
                          (map op)
                          gen/seq)})

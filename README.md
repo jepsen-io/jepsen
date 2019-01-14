@@ -37,6 +37,12 @@ To demonstrate read skew in the bank test with temporal queries on 2.5.5:
 lein run test --wait-for-convergence --version 2.5.5 --time-limit 600 --concurrency 8n --at-query
 ```
 
+Or catastrophic read skew in 2.6.0.rc9:
+
+```
+lein run test-all --wait-for-convergence --version 2.6.0.rc9 -w bank --concurrency 8n --nemesis stop --nemesis-interval 10 --time-limit 600 --test-count 5
+```
+
 ## License
 
 Copyright © 2018 Fauna, Inc & Jepsen, LLC.
