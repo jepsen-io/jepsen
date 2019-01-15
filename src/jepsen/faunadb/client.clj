@@ -367,6 +367,12 @@
   [& body]
   `(dt/with-retry [tries# 5]
     ~@body
+    (catch java.util.concurrent.TimeoutException e#
+      (if (< 1 tries#)
+        (do (info "Waiting for cluster ready")
+            (Thread/sleep 1000)
+            (~'retry (dec tries#)))
+        (throw e#)))
     (catch com.faunadb.client.errors.UnavailableException e#
       (if (< 1 tries#)
         (do (info "Waiting for cluster ready")
