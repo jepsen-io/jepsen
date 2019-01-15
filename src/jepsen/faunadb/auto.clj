@@ -335,8 +335,13 @@
     (info node "FaunaDB already running.")
     (c/su (info node "Starting FaunaDB...")
           (c/exec :service :faunadb :start)
-          (c/exec
-            :bash :-c "while ! netstat -tna | grep 'LISTEN\\>' | grep -q ':8444\\>'; do sleep 0.1; done")
+          ; Wait for admin interface to come up
+          (while (not (try (c/exec :netstat :-tna |
+                                   :grep "LISTEN\\>" |
+                                   :grep :-q ":8444\\>")
+                           (catch java.lang.RuntimeException e false)))
+            (info "Waiting for interface to come up")
+            (Thread/sleep 100))
           (c/exec :chmod :a+r log-files)
           (info node "FaunaDB started")))
   :started)
