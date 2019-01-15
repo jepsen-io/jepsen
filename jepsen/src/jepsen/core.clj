@@ -564,5 +564,8 @@
                                    (when (:name test) (store/save-1! test))
                                    (analyze! test)))))))))]
           (log-results test)))
+      (catch Throwable t
+        (warn t "Test crashed!")
+        (throw t))
     (finally
       (store/stop-logging!)))))
