@@ -328,40 +328,46 @@
         (info "New topology is" (with-out-str (pprint topology))))
       (info "Couldn't update topology; no node returned a status."))))
 
+(defonce node-locks
+  (util/named-locks))
+
 (defn start!
   "Starts faunadb on node, if it is not already running"
   [test node]
   (if (running?)
     (info node "FaunaDB already running.")
-    (c/su (info node "Starting FaunaDB...")
-          (c/exec :service :faunadb :start)
-          ; Wait for admin interface to come up
-          (while (not (try (c/exec :netstat :-tna |
-                                   :grep "LISTEN\\>" |
-                                   :grep :-q ":8444\\>")
-                           (catch java.lang.RuntimeException e false)))
-            (info "Waiting for interface to come up")
-            (Thread/sleep 100))
-          (c/exec :chmod :a+r log-files)
-          (info node "FaunaDB started")))
+    (util/with-named-lock node-locks node
+      (c/su (info node "Starting FaunaDB...")
+            (c/exec :service :faunadb :start)
+            ; Wait for admin interface to come up
+            (while (not (try (c/exec :netstat :-tna |
+                                     :grep "LISTEN\\>" |
+                                     :grep :-q ":8444\\>")
+                             (catch java.lang.RuntimeException e false)))
+              (info "Waiting for interface to come up")
+              (Thread/sleep 100))
+            (c/exec :chmod :a+r log-files)
+            (info node "FaunaDB started"))))
   :started)
 
 (defn kill!
   "Kills FaunaDB on node."
   [test node]
-  (c/su
-    (util/meh (cu/grepkill! "faunadb.jar"))
-    ; Don't restart!
-    (c/exec :service :faunadb :stop))
-  (info node "FaunaDB killed.")
-  :killed)
+  (util/with-named-lock node-locks node
+    (c/su
+      (util/meh (cu/grepkill! "faunadb.jar"))
+      ; Don't restart!
+      (c/exec :service :faunadb :stop))
+    (info node "FaunaDB killed.")
+    :killed))
 
 (defn stop!
   "Gracefully stops FaunaDB on a node."
   [test node]
-  (info node "Stopping FaunaDB")
-  (c/su (c/exec :service :faunadb :stop))
-  :stopped)
+  (util/with-named-lock node-locks node
+    (info node "Stopping FaunaDB")
+    (c/su (c/exec :service :faunadb :stop))
+    :stopped))
 
 (defn delete-data-files!
   "Erases FaunaDB data files on a node, but leaves logs intact."
