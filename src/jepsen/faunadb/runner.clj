@@ -110,13 +110,18 @@
         [:topology]]
        (map (fn [faults]
               (zipmap faults (repeat true))))))
+(defn parse-version
+  "Handle local package files by ignoring the path"
+  [opts]
+  (let [v (:version opts)]
+    (last (str/split v #"/"))))
 
 (defn test-1
   "Initial test construction from a map of CLI options. Establishes the test
   name, OS, DB, and topology."
   [opts]
   (assoc opts
-         :name (str "fauna " (:version opts)
+         :name (str "fauna " (parse-version opts)
                     " " (name (:workload opts))
                     (when (:strong-read opts)
                       " strong-read")
