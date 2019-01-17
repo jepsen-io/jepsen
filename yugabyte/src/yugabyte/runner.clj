@@ -6,10 +6,11 @@
             [jepsen [core :as jepsen]
                     [cli :as cli]]
             [yugabyte [core]
-                      [nemesis :as nemesis]
-                      [single-row-inserts]
-                      [single-key-acid]
+                      [counter]
                       [multi-key-acid]
+                      [nemesis :as nemesis]
+                      [single-key-acid]
+                      [single-row-inserts]
              ]
   )
 )
@@ -19,6 +20,8 @@
   {"single-row-inserts" yugabyte.single-row-inserts/test
    "single-key-acid" yugabyte.single-key-acid/test
    "multi-key-acid" yugabyte.multi-key-acid/test
+   "counter-inc" yugabyte.counter/test-inc
+   "counter-inc-dec" yugabyte.counter/test-inc-dec
    }
   )
 

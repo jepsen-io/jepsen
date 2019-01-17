@@ -32,6 +32,8 @@ TESTS = [
     "single-row-inserts",
     "single-key-acid",
     "multi-key-acid",
+    "counter-inc",
+    "counter-inc-dec",
 ]
 NEMESES = [
     "none",
