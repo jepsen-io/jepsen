@@ -129,12 +129,12 @@
 
                       ; This is broken--the next/prev pointers for history
                       ; traversal result in infinite loops.
-                      :events (->> (f/query-all-naive conn (q/events
-                                                             (q/singleton r)))
+                      :events (->> (f/query-all conn (q/events r))
+                                   (take 1000)
                                    (map (juxt :ts
                                                :action
                                                (comp :value :data)))
-                                   (restrict-history)))
+                                   ))
               ; For increments and reads, convert timestamp to string
               v (case (:f op)
                   (:inc :read :read-at) (update (vec res) 0 strip-time)
@@ -362,7 +362,7 @@
   (let [n (count (:nodes opts))]
     {:client    (Client. nil)
      :generator (gen/mix [inc-gen read-gen read-at-gen])
-     ;:final-generator (gen/once {:type :invoke, :f :events})
+     :final-generator (gen/once {:type :invoke, :f :events})
      :checker (checker/compose
                 {:monotonic (checker)
                  :not-found (not-found-checker)
