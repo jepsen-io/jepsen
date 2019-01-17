@@ -370,13 +370,13 @@
     (catch java.util.concurrent.TimeoutException e#
       (if (< 1 tries#)
         (do (info "Waiting for cluster ready")
-            (Thread/sleep 1000)
+            (Thread/sleep 5000)
             (~'retry (dec tries#)))
         (throw e#)))
     (catch com.faunadb.client.errors.UnavailableException e#
       (if (< 1 tries#)
         (do (info "Waiting for cluster ready")
-            (Thread/sleep 1000)
+            (Thread/sleep 5000)
             (~'retry (dec tries#)))
         (throw e#)))))
 
