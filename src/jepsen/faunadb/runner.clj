@@ -56,6 +56,14 @@
    :pages       {:serialized-indices  [true false]}
    :register    {}})
 
+(def workload-options-expected-to-pass
+  "Workload options restricted to just those we expect to pass."
+  (-> workload-options
+      (assoc-in [:set :strong-read]       [true])
+      ; I forget, are serialized indices necessary for set tests?
+      (assoc-in [:set :serialized-indices] [true])
+      (assoc-in [:g2 :serialized-indices] [true])))
+
 (defn all-combos
   "Takes a map of options to collections of values for that option. Computes a
   collection of maps with the combinatorial expansion of every possible option
@@ -73,7 +81,7 @@
 (defn all-workload-options
   "Expands workload-options into all possible CLI opts for each combination of
   workload options."
-  []
+  [workload-options]
   (mapcat (fn [[workload opts]]
             (all-combos {:workload workload} opts))
           workload-options))
@@ -110,6 +118,7 @@
         [:topology]]
        (map (fn [faults]
               (zipmap faults (repeat true))))))
+
 (defn parse-version
   "Handle local package files by ignoring the path"
   [opts]
@@ -236,7 +245,11 @@
     "Test workload to run. If omitted, runs all workloads"
     :parse-fn keyword
     :default nil
-    :validate [workloads (jc/one-of workloads)]]])
+    :validate [workloads (jc/one-of workloads)]]
+
+   [nil "--only-workloads-expected-to-pass"
+    "If present, skips tests which are not expected to pass, given Fauna's docs"
+    :default false]])
 
 (def single-test-opts
   "Command line options for single tests"
@@ -282,7 +295,10 @@
     :run      (fn [{:keys [options]}]
                 (info "CLI options:\n" (with-out-str (pprint options)))
                 (let [w         (:workload options)
-                      workloads (cond->> (all-workload-options)
+                      workload-opts (if (:only-workloads-expected-to-pass options)
+                                      workload-options-expected-to-pass
+                                      workload-options)
+                      workloads (cond->> (all-workload-options workload-opts)
                                   w (filter (comp #{w} :workload)))
                       tests (for [nemesis   all-nemeses
                                   workload  workloads
