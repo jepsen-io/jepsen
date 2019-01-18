@@ -344,7 +344,6 @@
                                      :grep "LISTEN\\>" |
                                      :grep :-q ":8444\\>")
                              (catch java.lang.RuntimeException e false)))
-              (info "Waiting for interface to come up")
               (Thread/sleep 100))
             (c/exec :chmod :a+r log-files)
             (info node "FaunaDB started"))))
