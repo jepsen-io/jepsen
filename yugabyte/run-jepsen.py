@@ -34,6 +34,7 @@ TESTS = [
     "multi-key-acid",
     "counter-inc",
     "counter-inc-dec",
+    "bank",
 ]
 NEMESES = [
     "none",
