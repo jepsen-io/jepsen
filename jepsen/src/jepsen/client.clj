@@ -6,6 +6,7 @@
             [dom-top.core :refer [with-retry]]))
 
 (defprotocol Client
+  ; TODO: this should be open, not open!
   (open! [client test node]
           "Set up the client to work with a particular node. Returns a client
           which is ready to accept operations via invoke! Open *should not*
@@ -31,7 +32,6 @@
     (setup!    [this test])
     (teardown! [this test])
     (invoke!   [this test op] (assoc op :type :ok))
-    ; TODO: this should be open, not open!
     (open!     [this test node] this)
     (close!    [this test])))
 

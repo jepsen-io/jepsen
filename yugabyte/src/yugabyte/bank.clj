@@ -165,7 +165,7 @@
 (defn test
   [opts]
   (bank-test-base
-    (merge {:name   "CQL Bank"
+    (merge {:name   "cql-bank"
             :model  {:n 5 :total 50}
             :client (CQLBank. 5 10 nil)}
            opts)))

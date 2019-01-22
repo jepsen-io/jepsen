@@ -4,7 +4,7 @@
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :repositories [["bintray" "http://dl.bintray.com/crate/crate"]]
+  :repositories [["bintray" "https://dl.bintray.com/crate/crate"]]
   :jvm-opts ["-Xmx32g"
              "-XX:+UseConcMarkSweepGC"
              "-XX:+UseParNewGC"

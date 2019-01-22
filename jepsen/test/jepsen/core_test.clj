@@ -13,6 +13,7 @@
             [jepsen.generator :as gen]
             [jepsen.store :as store]
             [jepsen.checker :as checker]
+            [jepsen.nemesis :as nemesis]
             [knossos.model :as model]))
 
 (deftest basic-cas-test
@@ -92,11 +93,13 @@
     (run! (assoc tst/noop-test
                  :name "worker recovery"
                  :client (reify client/Client
-                           (setup! [c _ _] c)
+                           (open!  [c t n] c)
+                           (setup! [c t])
                            (invoke! [_ _ _]
                              (swap! invocations inc)
                              (/ 1 0))
-                           (teardown! [c _]))
+                           (teardown! [c t])
+                           (close! [c t]))
                  :checker  (checker/unbridled-optimism)
                  :generator (->> (gen/queue)
                                  (gen/limit n)
@@ -147,3 +150,29 @@
                                                 {:type :invoke, :f :meow})))))
                                       (gen/once {:type :invoke, :f :done})))))))
     (is (empty? @conns))))
+
+(deftest worker-error-test
+  ; Errors in client and nemesis setup and teardown should be rethrown from
+  ; tests.
+  (let [client (fn [t]
+                 (reify client/Client
+                   (open!     [c test node] (if (= :open t)  (assert false) c))
+                   (setup!    [c test]      (if (= :setup t) (assert false)))
+                   (invoke!   [c test op]   (assoc op :type :ok))
+                   (teardown! [c test]      (if (= :teardown t) (assert false)))
+                   (close!    [c test]      (if (= :close t) (assert false)))))
+        nemesis (fn [t]
+                  (reify nemesis/Nemesis
+                    (setup! [n test]        (if (= :setup t) (assert false) n))
+                    (invoke! [n test op]    op)
+                    (teardown! [n test]     (if (= :teardown t) (assert false)))))
+        test (fn [client-type nemesis-type]
+               (run! (assoc tst/noop-test
+                            :client   (client client-type)
+                            :nemesis  (nemesis nemesis-type))))]
+    (testing "client open"      (is (thrown-with-msg? AssertionError #"false" (test :open  nil))))
+    (testing "client setup"     (is (thrown-with-msg? AssertionError #"false" (test :setup nil))))
+    (testing "client teardown"  (is (thrown-with-msg? AssertionError #"false" (test :teardown nil))))
+    (testing "client close"     (is (thrown-with-msg? AssertionError #"false" (test :close nil))))
+    (testing "nemesis setup"    (is (thrown-with-msg? AssertionError #"false" (test :setup nil))))
+    (testing "nemesis teardown" (is (thrown-with-msg? AssertionError #"false" (test :teardown nil))))))

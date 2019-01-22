@@ -54,41 +54,46 @@
                                         (:total-amount test))))
     :negative-value (- (reduce + (:negative err)))))
 
+(defn check-op
+  "Takes a single op and returns errors in its balance"
+  [accts total op]
+  (let [ks       (keys (:value op))
+        balances (vals (:value op))]
+    (cond (not-every? accts ks)
+          {:type        :unexpected-key
+           :unexpected  (remove accts ks)
+           :op          op}
+
+          (some nil? balances)
+          {:type    :nil-balance
+           :nils    (->> (:value op)
+                         (remove val)
+                         (into {}))
+           :op      op}
+
+          (not= total
+                (reduce + balances))
+          {:type     :wrong-total
+           :total    (reduce + balances)
+           :op       op}
+
+          (some neg? balances)
+          {:type     :negative-value
+           :negative (filter neg? balances)
+           :op       op})))
+
 (defn checker
-	"Balances must all be non-negative and sum to (:total test)."
+  "Balances must all be non-negative and sum to (:total test)."
   []
   (reify checker/Checker
     (check [this test model history opts]
-      (let [accts     (set (:accounts test))
+      (let [accts (set (:accounts test))
+            total (:total-amount test)
             reads (->> history
                        (r/filter op/ok?)
                        (r/filter #(= :read (:f %))))
             errors (->> reads
-                        (r/map (fn [op]
-                                 (let [ks       (keys (:value op))
-                                       balances (vals (:value op))]
-                                   (cond (not-every? accts ks)
-                                         {:type        :unexpected-key
-                                          :unexpected  (remove accts ks)
-                                          :op          op}
-
-                                         (some nil? balances)
-                                         {:type    :nil-balance
-                                          :nils    (->> (:value op)
-                                                        (remove val)
-                                                        (into {}))
-                                          :op      op}
-
-                                         (not= (:total-amount test)
-                                               (reduce + balances))
-                                         {:type     :wrong-total
-                                          :total    (reduce + balances)
-                                          :op       op}
-
-                                         (some neg? balances)
-                                         {:type     :negative-value
-                                          :negative (filter neg? balances)
-                                          :op       op}))))
+                        (r/map #(check-op accts total %))
                         (r/filter identity)
                         (group-by :type))]
         {:valid?      (every? empty? (vals errors))

@@ -2,8 +2,9 @@
   (:refer-clojure :exclude [set])
   (:use jepsen.checker
         clojure.test)
-  (:require [knossos.core :refer [ok-op invoke-op]]
-            [knossos.model :as model]
+  (:require [knossos [history :as history]
+                     [model :as model]
+                     [core :refer [ok-op invoke-op]]]
             [multiset.core :as multiset]
             [jepsen.checker.perf :refer :all]))
 
@@ -202,8 +203,189 @@
                               type (rand-nth [:ok :ok :ok :ok :ok
                                               :fail :info :info])]
                           [{:process proc, :type :invoke, :f f, :time time}
-                           {:process proc, :type type,    :f f, :time 
+                           {:process proc, :type type,    :f f, :time
                             (+ time latency)}])))
               (take 10000)
               vec)
          {}))
+
+(deftest clock-plot-test
+  (check (clock-plot)
+         {:name       "clock plot test"
+          :start-time 0}
+         nil
+         [{:process :nemesis, :time 500000000,  :clock-offsets {"n1" 2.1}}
+          {:process :nemesis, :time 1000000000, :clock-offsets {"n1" 0
+                                                                "n2" -3.1}}
+          {:process :nemesis, :time 1500000000, :clock-offsets {"n1" 1
+                                                                "n2" -2}}
+          {:process :nemesis, :time 2000000000, :clock-offsets {"n1" 2
+                                                              "n2" -4.1}}]
+         {}))
+
+(defn history
+  "Takes a sequence of operations and adds times and indexes."
+  [h]
+  (let [h (history/index h)]
+    (condp = (count h)
+      0 h
+      1 [(assoc (first h) :time 0)]
+      (reduce (fn [h op]
+                (conj h (assoc op :time (+ (:time (peek h))
+                                           1000000))))
+              [(assoc (first h) :time 0)]
+              (rest h)))))
+
+(deftest set-full-test
+  ; Helper fn to check a history
+  (let [c (fn [h] (check (set-full) nil nil (history h) {}))]
+    (testing "never read"
+      (is (= {:lost             []
+              :attempt-count    1
+              :lost-count       0
+              :never-read       [0]
+              :never-read-count 1
+              :stale-count      0
+              :stale            []
+              :worst-stale      []
+              :stable-count     0
+              :valid?           :unknown}
+             (c [(invoke-op 0 :add 0)
+                 (ok-op 0 :add 0)]))))
+
+    (let [a   (invoke-op 0 :add 0)
+          a'  (ok-op 0 :add 0)
+          r   (invoke-op 1 :read nil)
+          r+  (ok-op 1 :read #{0})
+          r-  (ok-op 1 :read #{})]
+      (testing "never confirmed, never read"
+        (is (= {:valid?           :unknown
+                :attempt-count    1
+                :lost             []
+                :lost-count       0
+                :never-read       [0]
+                :never-read-count 1
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
+                :stable-count     0}
+               (c [a r r-]))))
+      (testing "successful read either concurrently or after"
+        (is (= {:valid?           true
+                :attempt-count    1
+                :lost             []
+                :lost-count       0
+                :never-read       []
+                :never-read-count 0
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
+                :stable-count     1
+                :stable-latencies {0 0, 0.5 0, 0.95 0, 0.99 0, 1 0}}
+               (c [r a r+ a']) ; Concurrent read before
+               (c [r a a' r+]) ; Concurrent read outside
+               (c [a r r+ a']) ; Concurrent read inside
+               (c [a r a' r+]) ; Concurrent read after
+               (c [a a' r r+]) ; Subsequent read
+               )))
+
+      (testing "Absent read after"
+        (is (= {:valid?           false
+                :attempt-count    1
+                :lost             [0]
+                :lost-count       1
+                :never-read       []
+                :never-read-count 0
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
+                :stable-count     0
+                :lost-latencies  {0 0, 0.5 0, 0.95 0, 0.99 0, 1 0}}
+               (c [a a' r r-]))))
+
+    (testing "Absent read concurrently"
+        (is (= {:valid?           :unknown
+                :attempt-count    1
+                :lost             []
+                :lost-count       0
+                :never-read       [0]
+                :never-read-count 1
+                :stale-count      0
+                :stale            []
+                :worst-stale      []
+                :stable-count     0}
+               (c [r a r- a']) ; Read before
+               (c [r a a' r-]) ; Read outside
+               (c [a r r- a']) ; Read inside
+               (c [a r a' r-]) ; Read after
+               ))))
+
+    (let [a0    (invoke-op  0 :add 0)
+          a0'   (ok-op      0 :add 0)
+          a1    (invoke-op  1 :add 1)
+          a1'   (ok-op      1 :add 1)
+          r2    (invoke-op  2 :read nil)
+          r3    (invoke-op  3 :read nil)
+          r2'   (ok-op      2 :read #{})
+          r3'   (ok-op      3 :read #{})
+          r2'0  (ok-op      2 :read #{0})
+          r3'0  (ok-op      3 :read #{0})
+          r2'1  (ok-op      2 :read #{1})
+          r3'1  (ok-op      3 :read #{1})
+          r2'01 (ok-op      2 :read #{0 1})
+          r3'01 (ok-op      3 :read #{0 1})]
+      (testing "write, present, missing"
+        (is (= {:valid? false
+                :attempt-count 2
+                :lost [0 1]
+                :lost-count 2
+                :never-read []
+                :never-read-count 0
+                :stale-count 0
+                :stale       []
+                :worst-stale []
+                :stable-count 0
+                :lost-latencies {0 3, 0.5 4, 0.95 4, 0.99 4,
+                                 1 4}}
+               ; We write a0 and a1 concurrently, reading 1 before a1
+               ; completes. Then we read both, 0, then nothing.
+               (c [a0 a1 r2 r2'1 a0' a1' r2 r2'01 r2 r2'0 r2 r2']))))
+      (testing "write, flutter, stable/lost"
+        (is (= {:valid? false
+                :attempt-count 2
+                :lost [0]
+                :lost-count 1
+                :never-read []
+                :never-read-count 0
+                ; 1 should have been done at 4, is missing at time 6000, and
+                ; recovered at 7000.
+                :stale-count 1
+                :stale       [1]
+                :worst-stale [{:element         1
+                               :known           (assoc r2'1
+                                                       :index 4
+                                                       :time 4000000)
+                               :last-absent     (assoc r2
+                                                       :index 6
+                                                       :time 6000000)
+                               :lost-latency    nil
+                               :outcome         :stable
+                               :stable-latency  2}]
+                :stable-count 1
+                ; We know 0 is done at time 1000, but it goes missing after
+                ; 6000.
+                :lost-latencies {0 5, 0.5 5, 0.95 5,
+                                  0.99 5, 1 5}
+                ; 1 is known at time 4 (not 5! The read sees it before the
+                ; write completes). It is missing at 6000, and recovered at
+                ; 7000.
+                :stable-latencies {0 2, 0.5 2, 0.95 2,
+                                   0.99 2, 1 2}}
+               ; We write a0, then a1, reading 1 before a1 completes, then just
+               ; 0 and 1 concurrently, but 1 starting later. This is a recovery
+               ; of 1, but 0 should be lost, because there's no time after
+               ; which an operation can begin and always observe 0.
+               ;
+               ; t 0  1   2  3  4    5   6  7  8    9
+               (c [a0 a0' a1 r2 r2'1 a1' r2 r3 r3'1 r2'0]))))
+      )))

@@ -10,7 +10,7 @@
   Every object may act as a generator, and constantly yields itself.
 
   Big ol box of monads, really."
-  (:refer-clojure :exclude [concat delay seq filter await])
+  (:refer-clojure :exclude [map concat delay seq filter await])
   (:require [jepsen.util :as util]
             [knossos.history :as history]
             [clojure.core :as c]
@@ -139,10 +139,20 @@
   "A generator which terminates immediately"
   (GVoid.))
 
-(defgenerator FMap [f g]
+(defgenerator Map [f g]
   [f g]
   (op [gen test process]
-      (update (op g test process) :f f)))
+      (when-let [op (op g test process)]
+        (try (f op test process)
+             (catch clojure.lang.ArityException e
+               (f op))))))
+
+(defn map
+  "A generator which wraps another generator g, transforming operations it
+  generates with (f op test process), of if that fails, (f op). When the
+  underlying generator yields nil, this generator also returns nil."
+  [f g]
+  (Map. f g))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,
@@ -150,7 +160,7 @@
   according to `f-map`. Useful for composing generators together for use with a
   composed nemesis."
   [f-map g]
-  (FMap. f-map g))
+  (map (fn [op] (update op :f f-map)) g))
 
 (defn sleep-til-nanos
   "High-resolution sleep; takes a time in nanos, relative to System/nanotime."
@@ -404,7 +414,7 @@
 
 ; T I M E   L I M I T S
 ;
-; Our general approach here is to schedule a task which will interrupt as
+; Our general approach here is to schedule a task which will interrupt
 ; at the deadline. To figure out who to interrupt, we keep a set of
 ; threads currently engaged in this time-limit; the deadline task
 ; interrupts every thread in that set.
@@ -675,7 +685,7 @@
   "Like concat, but requires that all threads finish the first generator before
   moving to the second, and so on."
   [& generators]
-  (apply concat (map synchronize generators)))
+  (apply concat (c/map synchronize generators)))
 
 (defn then
   "Generator B, synchronize, then generator A. Why is this backwards? Because
