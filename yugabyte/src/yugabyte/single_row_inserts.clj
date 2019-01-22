@@ -166,7 +166,7 @@
   [opts]
   (yugabyte-test
     (merge opts
-         {:name "Single row inserts"
+         {:name "single-row-inserts"
           :client (CQLRowInsertClient. nil)
           :client-generator (->> w
                                  (gen/stagger 1))
