@@ -19,7 +19,7 @@
 
 ## Performance
 
-- Knossos: Identify when model/memo will be large, and don't memoize
+- Knossos: we should allow users to pass a :time-limit option, and after that many seconds, abort the search. Relying on OOM detection and abort still means plenty of tests spin for hoooours.
 
 ## Core
 
@@ -27,6 +27,8 @@
   constructors instead.
 - Deprecate keyword hosts; this was a silly idea and the minor improvement
   in readability isn't really worth it.
+- Clean up checker/counter: remove failed ops in an initial pre-pass, rather
+  than adding them then undoing those adds.
 - Macro like (synchronize-nodes test), which enforces a synchronization
   barrier where (count nodes threads) must come to sync on the test map.
 - Generator/each works on each *process*, not each *thread*, but almost always,
