@@ -10,5 +10,5 @@
 (def noop
   "Does nothing"
   (reify OS
-    (setup!    [os test node])
+         (setup!    [os test node])
     (teardown! [os test node])))
