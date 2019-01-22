@@ -8,7 +8,11 @@
 ## Visualizations
 
 - Rework latency plot color scheme to use colors that hint at a continuum
-- Adaptive temporal resolution for rate and latency plots, based on point density
+- Adaptive temporal resolution for rate and latency plots, based on point
+  density
+- Nemesis regions are just lines now. Let's bring back shaded regions for :f
+  :start-foo to :stop-foo? Maybe colorize for each type of nemesis f, when
+  they're mixed together?
 - Where plots are dense, make points somewhat transparent to better show
   density?
 
