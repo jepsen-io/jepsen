@@ -648,57 +648,88 @@
 (defn counter
   "A counter starts at zero; add operations should increment it by that much,
   and reads should return the present value. This checker validates that at
-  each read, the value is at greater than the sum of all :ok increments, and
-  lower than the sum of all attempted increments.
+  each read, the value is at greater than the sum of all :ok increments and
+  attempted decrements, and lower than the sum of all attempted increments and
+  :ok decrements.
 
-  Note that this counter verifier assumes the value monotonically increases. If
-  you want to increment by negative amounts, you'll have to recalculate and
-  possibly widen the intervals for all pending reads with each invoke/ok write.
+  Since we know a :fail increment did not occur, we should decrement the
+  counter by the appropriate amount.
+
+  TODO: filter out failed operations in an initial pass.
 
   Returns a map:
 
   {:valid?              Whether the counter remained within bounds
    :reads               [[lower-bound read-value upper-bound] ...]
    :errors              [[lower-bound read-value upper-bound] ...]
-   :max-absolute-error  The [lower read upper] where read falls furthest outside
-   :max-relative-error  Same, but with error computed as a fraction of the mean}
   "
   []
   (reify Checker
     (check [this test model history opts]
       (loop [history            (seq (history/complete history))
-             lower              0             ; Current lower bound on counter
-             upper              0             ; Upper bound on counter value
-             pending-reads      {}            ; Process ID -> [lower read-val]
-             reads              []]           ; Completed [lower val upper]s
-          (if (nil? history)
-            ; We're done here
-            (let [errors (remove (partial apply <=) reads)]
-              {:valid?             (empty? errors)
-               :reads              reads
-               :errors             errors})
-            ; But wait, there's more
-            (let [op      (first history)
-                  history (next history)]
-              (case [(:type op) (:f op)]
-                [:invoke :read]
+             ; Current lower bound on counter.
+             lower              0
+             ; Upper bound on counter value.
+             upper              0
+             ; Map: process ID -> list of [lower upper] pairs for the pending read operation invoked by the process.
+             ; Last pair in the list is most recent one and reflects the current counter possible range.
+             ; List is cleared once read operation is completed.
+             pending-reads      {}
+             ; Completed reads: list of [lower val upper] tuples - one tuple for each successful read.
+             ; Once read operation returns value val - we select first pair [lower upper] from pending-reads for which
+             ; lower <= val <= upper, or just the first pair if no such pair is found (that means we've found an
+             ; inconsistency, because val is out of any of possible ranges).
+             ; TODO: probably we can use single union range instead of list of ranges and that will makes reads and
+             ; errors reporting better.
+             reads              []]
+        (if (nil? history)
+          ; We're done here
+          (let [errors (remove (partial apply <=) reads)]
+            {:valid?             (empty? errors)
+             :reads              reads
+             :errors             errors})
+          ; But wait, there's more
+          (let [op      (first history)
+                process-id (:process op)
+                history (next history)]
+            (case [(:type op) (:f op)]
+              [:invoke :read]
+              (recur history lower upper
+                     (assoc pending-reads process-id [[lower upper]])
+                     reads)
+
+              [:ok :read]
+              (let [read-ranges (get pending-reads process-id)
+                    v (:value op)
+                    [l' u'] (first read-ranges)
+                    read (or (some (fn [[l u]] (when (<= l v u) [l v u])) read-ranges)
+                             [l' v u'])]
                 (recur history lower upper
-                       (assoc pending-reads (:process op) [lower (:value op)])
-                       reads)
+                       (dissoc pending-reads process-id)
+                       (conj reads read)))
 
-                [:ok :read]
-                (let [r (get pending-reads (:process op))]
-                  (recur history lower upper
-                         (dissoc pending-reads (:process op))
-                         (conj reads (conj r upper))))
+              [:invoke :add]
+              (let [value (:value op)
+                    [l' u'] (if (> value 0) [lower (+ upper value)] [(+ lower value) upper])]
+                (recur history l' u'
+                       (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
+                       reads))
 
-                [:invoke :add]
-                (recur history lower (+ upper (:value op)) pending-reads reads)
+              [:fail :add]
+              (let [value (:value op)
+                    [l' u'] (if (> value 0) [lower (- upper value)] [(- lower value) upper])]
+                (recur history l' u'
+                       (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
+                       reads))
 
-                [:ok :add]
-                (recur history (+ lower (:value op)) upper pending-reads reads)
+              [:ok :add]
+              (let [value (:value op)
+                    [l' u'] (if (> value 0) [(+ lower value) upper] [lower (+ upper value)])]
+                (recur history l' u'
+                       (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
+                       reads))
 
-                (recur history lower upper pending-reads reads))))))))
+              (recur history lower upper pending-reads reads))))))))
 
 (defn latency-graph
   "Spits out graphs of latencies."
