@@ -104,7 +104,7 @@
   [opts]
   (yugabyte-test
     (merge opts
-           {:name "Single key ACID"
+           {:name "singe-key-acid"
             :client (CQLSingleKey. nil)
             :concurrency (max 10 (:concurrency opts))
             :client-generator (independent/concurrent-generator

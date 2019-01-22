@@ -97,7 +97,7 @@
   [opts]
   (yugabyte-test
     (merge opts
-           {:name             "CQL counter inc"
+           {:name             "cql-counter-inc"
             :client           (CQLCounterClient. nil)
             :client-generator (->>
                                 (repeat 100 add)
@@ -115,7 +115,7 @@
   [opts]
   (yugabyte-test
     (merge opts
-           {:name             "CQL counter inc dec"
+           {:name             "cql-counter-inc-dec"
             :client           (CQLCounterClient. nil)
             :client-generator (->>
                                 (take 100 (cycle [add sub]))

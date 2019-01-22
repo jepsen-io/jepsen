@@ -68,6 +68,15 @@
      (gen/sleep nemesis-duration)
      {:type :info :f :stop}])))
 
+(defn start-stop
+  "Return start-stop nemesis map config"
+  [nemesis]
+  {:nemesis nemesis
+   :generator `(gen-start-stop)
+   :final-generator `(gen/once {:type :info, :f :stop})
+   }
+)
+
 (defn bump-gen
   "Randomized clock bump generator. On random subsets of nodes, bumps the clock
   from -max-skew to +max-skew milliseconds, exponentially distributed."
@@ -90,21 +99,25 @@
   "Return clock skew nemesis map config"
   [max-skew-ms]
   (def clock-gen-partial (partial clock-gen max-skew-ms))
-  {:nemesis `(nt/clock-nemesis) :max-clock-skew-ms max-skew-ms :generator `(clock-gen-partial)}
+  {:nemesis `(nt/clock-nemesis)
+   :max-clock-skew-ms max-skew-ms
+   :generator `(clock-gen-partial)
+   :final-generator `(gen/once nt/reset-gen)
+   }
 )
 
 (def nemeses
   "Supported nemeses"
   {"none"                       {:nemesis `(none)}
-   "start-stop-tserver"         {:nemesis `(tserver-killer) :generator `(gen-start-stop)}
-   "start-kill-tserver"         {:nemesis `(tserver-killer :-9) :generator `(gen-start-stop)}
-   "start-stop-master"          {:nemesis `(master-killer) :generator `(gen-start-stop)}
-   "start-kill-master"          {:nemesis `(master-killer :-9) :generator `(gen-start-stop)}
-   "start-stop-node"            {:nemesis `(node-killer) :generator `(gen-start-stop)}
-   "start-kill-node"            {:nemesis `(node-killer :-9) :generator `(gen-start-stop)}
-   "partition-random-halves"    {:nemesis `(nemesis/partition-random-halves) :generator `(gen-start-stop)}
-   "partition-random-node"      {:nemesis `(nemesis/partition-random-node) :generator `(gen-start-stop)}
-   "partition-majorities-ring"  {:nemesis `(nemesis/partition-majorities-ring) :generator `(gen-start-stop)}
+   "start-stop-tserver"         (start-stop `(tserver-killer))
+   "start-kill-tserver"         (start-stop `(tserver-killer :-9))
+   "start-stop-master"          (start-stop `(master-killer))
+   "start-kill-master"          (start-stop `(master-killer :-9))
+   "start-stop-node"            (start-stop `(node-killer))
+   "start-kill-node"            (start-stop `(node-killer :-9))
+   "partition-random-halves"    (start-stop `(nemesis/partition-random-halves))
+   "partition-random-node"      (start-stop `(nemesis/partition-random-node))
+   "partition-majorities-ring"  (start-stop `(nemesis/partition-majorities-ring))
    "small-skew"                 (clock-nemesis 100)
    "medium-skew"                (clock-nemesis 250)
    "large-skew"                 (clock-nemesis 500)
@@ -119,6 +132,14 @@
     (get nemeses)
     :generator
     eval))
+
+(defn final-gen
+  [opts]
+  (->> opts
+       :nemesis
+       (get nemeses)
+       :final-generator
+       eval))
 
 (defn get-nemesis-by-name
   [name]
