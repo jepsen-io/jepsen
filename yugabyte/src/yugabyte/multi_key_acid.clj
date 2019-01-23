@@ -10,8 +10,8 @@
                                      [query :refer :all]
                                      [policies :refer :all]
                                      [cql :as cql]]
-            [yugabyte.core :refer :all]
-            )
+            [yugabyte [core :refer :all]
+                      [auto :as auto]])
   (:import (knossos.model Model)
            (com.datastax.driver.core.exceptions DriverException
                                                 UnavailableException
@@ -20,7 +20,9 @@
                                                 WriteTimeoutException
                                                 NoHostAvailableException)))
 
+(def setup-lock (Object.))
 (def table-name "multi_key_acid")
+(def keyspace "jepsen")
 
 (defrecord MultiRegister []
   Model
@@ -73,7 +75,7 @@
            (assert (= (:f op) :txn))
            (let [value (:value op)]
              (if (= value :read)
-               (try (wait-for-recovery 30 conn)
+               (try (auto/wait-for-recovery 30 conn)
                  (assoc op :type :ok :value
                                  (->> (cql/select-with-ks conn keyspace table-name)
                                       (map (fn [x] [:read (:id x) (:val x)]))

@@ -9,8 +9,8 @@
              [query :refer :all]
              [policies :refer :all]
              [cql :as cql]]
-            [yugabyte.core :refer :all]
-            )
+            [yugabyte [auto :as auto]
+                      [core :refer :all]])
   (:import (com.datastax.driver.core.exceptions DriverException
                                                 UnavailableException
                                                 OperationTimedOutException
@@ -18,6 +18,8 @@
                                                 WriteTimeoutException
                                                 NoHostAvailableException)))
 
+(def setup-lock (Object.))
+(def keyspace "jepsen")
 (def table-name "counters")
 
 (defrecord CQLCounterClient [conn]

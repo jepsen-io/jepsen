@@ -11,22 +11,16 @@
                       [multi-key-acid]
                       [nemesis :as nemesis]
                       [single-key-acid]
-                      [single-row-inserts]
-             ]
-  )
-)
+                      [single-row-inserts]]))
 
 (def tests
   "A map of test names to test constructors."
-  {
-   "single-row-inserts" yugabyte.single-row-inserts/test
-   "single-key-acid" yugabyte.single-key-acid/test
-   "multi-key-acid" yugabyte.multi-key-acid/test
-   "counter-inc" yugabyte.counter/test-inc
-   "counter-inc-dec" yugabyte.counter/test-inc-dec
-   "bank" yugabyte.bank/test
-   }
-  )
+  {"single-row-inserts" yugabyte.single-row-inserts/test
+   "single-key-acid"    yugabyte.single-key-acid/test
+   "multi-key-acid"     yugabyte.multi-key-acid/test
+   "counter-inc"        yugabyte.counter/test-inc
+   "counter-inc-dec"    yugabyte.counter/test-inc-dec
+   "bank"               yugabyte.bank/test})
 
 (def opt-spec
   "Additional command line options"

@@ -28,9 +28,6 @@
    clock skew between servers"
    100)
 
-(def setup-lock (Object.))
-(def keyspace "jepsen_keyspace")
-
 ; OS-level polymorphic functions for Yugabyte
 (defprotocol OS
   (install-python! [os]))

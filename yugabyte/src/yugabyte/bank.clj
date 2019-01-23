@@ -1,19 +1,19 @@
 (ns yugabyte.bank
   "Simulates transfers between bank accounts"
+  (:refer-clojure :exclude [test])
   (:require [clojure.tools.logging :refer [debug info warn]]
             [clojure.core.reducers :as r]
             [jepsen [client    :as client]
-             [checker   :as checker]
-             [generator :as gen]
-            ]
+                    [checker   :as checker]
+                    [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
             [knossos.op :as op]
             [clojurewerkz.cassaforte [client :as cassandra]
              [query :refer :all]
              [policies :refer :all]
              [cql :as cql]]
-            [yugabyte.core :refer :all]
-            )
+            [yugabyte [core :refer :all]
+                      [auto :as auto]])
   (:import (com.datastax.driver.core.exceptions DriverException
                                                 UnavailableException
                                                 OperationTimedOutException
@@ -21,15 +21,22 @@
                                                 WriteTimeoutException
                                                 NoHostAvailableException)))
 
+(def setup-lock (Object.))
+(def keyspace   "jepsen")
 (def table-name "accounts")
 
 (defrecord CQLBank [n starting-balance conn]
   client/Client
   (open! [this test node]
     (info "Opening connection to " node)
-    (assoc this :conn (cassandra/connect [node] {:protocol-version 3
-                                                 :retry-policy (retry-policy :no-retry-on-client-timeout)})))
+    (let [c (cassandra/connect
+              [node]
+              {:protocol-version  3
+               :retry-policy      (retry-policy :no-retry-on-client-timeout)})]
+      (assoc this :conn c)))
+
   (setup! [this test]
+    ; TODO: oh this is interesting. Conditional creation that isn't threadsafe?
     (locking setup-lock
       (cql/create-keyspace conn keyspace
                            (if-not-exists)
@@ -48,7 +55,7 @@
   (invoke! [this test op]
     (case (:f op)
       :read
-      (try (wait-for-recovery 30 conn)
+      (try (auto/wait-for-recovery 30 conn)
         (->> (cql/select-with-ks conn keyspace table-name)
              (mapv :balance)
              (assoc op :type :ok, :value))
@@ -197,7 +204,7 @@
   (invoke! [this test op]
     (case (:f op)
       :read
-      (try (wait-for-recovery 30 conn)
+      (try (auto/wait-for-recovery 30 conn)
       (->> (range n)
         (mapv (fn [x]
           ;; TODO - should be wrapped in a transaction after we support transactions with selects.

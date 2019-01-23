@@ -11,15 +11,17 @@
                                      [query :refer :all]
                                      [policies :refer :all]
                                      [cql :as cql]]
-            [yugabyte [core :refer :all]]
-            )
+            [yugabyte [auto :as auto]
+                      [core :refer :all]])
   (:import (com.datastax.driver.core.exceptions UnavailableException
                                                 OperationTimedOutException
                                                 WriteTimeoutException
                                                 ReadTimeoutException
                                                 NoHostAvailableException)))
 
+(def keyspace "jepsen")
 (def table-name "single_key_acid")
+(def setup-lock (Object.))
 
 (defrecord CQLSingleKey [conn]
   client/Client
@@ -77,7 +79,7 @@
                (info "All nodes are down - sleeping 2s")
                (Thread/sleep 2000)
                (assoc op :type :fail :error (.getMessage e))))
-      :read (try (wait-for-recovery 30 conn)
+      :read (try (auto/wait-for-recovery 30 conn)
                  (let [value (->> (cql/select-with-ks conn keyspace table-name (where [[= :id id]])) first :val)]
                    (assoc op :type :ok :value (independent/tuple id value)))
                  (catch UnavailableException e

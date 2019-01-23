@@ -6,8 +6,7 @@
              [util :as util :refer [meh timeout]]]
             [jepsen.nemesis.time :as nt]
             [slingshot.slingshot :refer [try+]]
-            [yugabyte.common :refer :all]
-))
+            [yugabyte.auto :as auto]))
 
 (def nemesis-delay 5) ; Delay between nemesis cycles in seconds.
 (def nemesis-duration 5) ; Duration of single nemesis cycle in secods.
@@ -32,15 +31,15 @@
   (nemesis/node-start-stopper
     rand-nth
     (fn start [test node] (kill! node "yb-tserver" kill-opts))
-    (fn stop  [test node] (start-tserver! node))))
+    (fn stop  [test node] (auto/start-tserver! (:db test) test))))
 
 (defn master-killer
   "Kills a random node master on start, restarts it on stop."
   [& kill-opts]
   (nemesis/node-start-stopper
-    (comp rand-nth running-masters)
+    (comp rand-nth auto/running-masters)
     (fn start [test node] (kill! node "yb-master" kill-opts))
-    (fn stop  [test node] (start-master! node))))
+    (fn stop  [test node] (auto/start-master! (:db test) test))))
 
 (defn node-killer
   "Kills a random node tserver and master on start, restarts it on stop."
@@ -52,8 +51,8 @@
       (kill! node "yb-master" kill-opts)
     )
     (fn stop  [test node]
-      (start-master! node)
-      (start-tserver! node)
+      (auto/start-master! (:db test) test)
+      (auto/start-tserver! (:db test) test)
     )
   )
 )
