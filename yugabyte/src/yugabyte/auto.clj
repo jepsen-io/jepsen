@@ -94,6 +94,14 @@
        (map #(str % ":7100"))
        (str/join ",")))
 
+(defn log-files-without-symlinks
+  "Takes a directory, and returns a list of logfiles in that direcory, skipping
+  the symlinks which end in .INFO, .WARNING, etc."
+  [dir]
+  (remove (partial re-find #"\.(INFO|WARNING|ERROR)$")
+          (try (cu/ls-full dir)
+               (catch RuntimeException e nil))))
+
 ; Community-edition-specific files
 (def ce-data-dir        (str dir "/data"))
 
@@ -107,15 +115,8 @@
 (def ce-tserver-logfile (str ce-tserver-log-dir "/stdout"))
 (def ce-tserver-pidfile (str dir "/tserver.pid"))
 
-(defn log-files-without-symlinks
-  "Takes a directory, and returns a list of logfiles in that direcory, skipping
-  the symlinks which end in .INFO, .WARNING, etc."
-  [dir]
-  (remove (partial re-find #"\.(INFO|WARNING|ERROR)$")
-          (try (cu/ls-full dir)
-               (catch RuntimeException e nil))))
-
 (defn community-edition
+  "Constructs a DB for installing and running the community edition"
   []
   (reify
     Auto
@@ -151,15 +152,14 @@
               :--fs_data_dirs     ce-data-dir)))
 
     (start-tserver! [db test]
-      (c/su ;(c/exec :mkdir :-p ce-tserver-log-dir)
+      (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
             (cu/start-daemon!
               {:logfile ce-tserver-logfile
                :pidfile ce-tserver-pidfile
                :chdir   dir}
               ce-tserver-bin
               :--tserver_master_addrs (master-addresses test)
-              :--fs_data_dirs         ce-data-dir))
-      (Thread/sleep 10000))
+              :--fs_data_dirs         ce-data-dir)))
 
     (stop-master! [db]
       (c/su (cu/stop-daemon! ce-master-bin ce-master-pidfile)))
