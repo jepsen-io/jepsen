@@ -30,15 +30,33 @@
 
 (def opt-spec
   "Additional command line options"
-  [
-   (cli/repeated-opt "-t" "--test NAME..." "Test(s) to run" [] tests)
+  [(cli/repeated-opt "-t" "--test NAME..." "Test(s) to run" [] tests)
 
    [nil "--nemesis NAME"
-    (str "Nemesis to use, one of: " (clojure.string/join ", " (keys nemesis/nemeses)))
+    (str "Nemesis to use, one of: "
+         (clojure.string/join ", " (keys nemesis/nemeses)))
     :default "none"
     :validate [identity (cli/one-of nemesis/nemeses)]]
-  ]
-)
+
+   ["-o" "--os NAME" "Operating system: either centos or debian."
+    :default  :centos
+    :parse-fn keyword
+    :validate [#{:centos :debian} "One of `centos` or `debian`"]]
+
+   ["-d" "--db NAME" "Database variant: either community-edition (ce for short), or enterprise edition (ee for short)"
+    :default :community-edition
+    :parse-fn {"ce"                 :community-edition
+               "community-edition"  :community-edition
+               "ee"                 :enterprise-edition
+               "enterprise-edition" :enterprise-edition}
+    :validate [#{:community-edition :enterprise-edition}
+               "Either community-edition or enterprise edition"]]
+
+   [nil "--yugabyte-ssh" "Override SSH options with hardcoded defaults for Yugabyte's internal testing environment"
+    :default false]
+
+   [nil "--version VERSION" "What version of Yugabyte to install"
+    :default "1.1.9.0"]])
 
 (defn log-test
   [t attempt]
@@ -62,7 +80,8 @@
                                       (->>
                                        (for [i       (range 1 (inc (:test-count options)))
                                              test-fn (:test options)]
-                                         (let [test (-> options
+                                         (let [_ (info :i i)
+                                               test (-> options
                                                         (dissoc :test)
                                                         (assoc :nemesis-name (:nemesis options))
                                                         test-fn
@@ -70,6 +89,7 @@
                                                         jepsen/run!)]
                                            [(:results test) i]))
                                        (filter #(->> % first :valid? true? not)))]
+                                  (info :invalid-results invalid-results)
                                   (when-not (empty? invalid-results)
                                     ((info "Following tests have been failed:\n" (with-out-str (pprint invalid-results)))
                                       (System/exit 1)))

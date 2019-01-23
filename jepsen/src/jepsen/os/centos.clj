@@ -130,31 +130,33 @@
        str/split-lines
        (some #(if (re-find #"start-stop-daemon" %) true))))
 
-(def os
-  (reify os/OS
-    (setup! [_ test node]
-      (info node "setting up centos")
+(deftype CentOS []
+  os/OS
+  (setup! [_ test node]
+    (info node "setting up centos")
 
-      (setup-hostfile!)
+    (setup-hostfile!)
 
-      (maybe-update!)
+    (maybe-update!)
 
-      (c/su
-        ; Packages!
-        (install [:wget
-                  :gcc
-                  :gcc-c++
-                  :curl
-                  :vim-common
-                  :unzip
-                  :rsyslog
-                  :iptables
-                  :ncurses-devel
-                  :iproute
-                  :logrotate]))
+    (c/su
+      ; Packages!
+      (install [:wget
+                :gcc
+                :gcc-c++
+                :curl
+                :vim-common
+                :unzip
+                :rsyslog
+                :iptables
+                :ncurses-devel
+                :iproute
+                :logrotate]))
 
-      (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
+    (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
-      (meh (net/heal! (:net test) test)))
+    (meh (net/heal! (:net test) test)))
 
-    (teardown! [_ test node])))
+  (teardown! [_ test node]))
+
+(def os "Support for CentOS." (CentOS.))
