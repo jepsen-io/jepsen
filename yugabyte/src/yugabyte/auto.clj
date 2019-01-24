@@ -16,8 +16,8 @@
            jepsen.os.centos.CentOS))
 
 (def dir
-    "Where we unpack the Yugabyte package"
-      "/home/yugabyte")
+  "Where we unpack the Yugabyte package"
+  "/home/yugabyte")
 
 (def master-log-dir  (str dir "/master/logs"))
 (def tserver-log-dir (str dir "/tserver/logs"))
@@ -83,6 +83,25 @@
                        (map :is-up) and not)
              (Thread/sleep 500))))
 
+(defn version
+  "Returns a map of version information by calling `bin/yb-master --version`,
+  including:
+
+      :version
+      :build
+      :revision
+      :build-type
+      :timestamp"
+  []
+  (try
+    (-> #"version (.+?) build (.+?) revision (.+?) build_type (.+?) built at (.+)"
+        (re-find (c/exec (str dir "/bin/yb-master") :--version))
+        next
+        (->> (zipmap [:version :build :revision :build-type :timestamp])))
+    (catch RuntimeException e
+      ; Probably not installed
+      )))
+
 (defn master-addresses
   "Given a test, returns a list of master addresses, like \"n1:7100,n2:7100,...
   \""
@@ -121,7 +140,11 @@
       (c/cd dir
             ; Post-install takes forever, so let's try and skip this on
             ; subsequent runs
-            (when-not (cu/exists? :setup-done)
+            (when-not (and (= (:version test)
+                              (:version (version)))
+                           (cu/exists? :setup-done))
+              (info "Replacing version " (:version (version)) " with "
+                    (:version test))
               (install-python! (:os test))
               (assert (re-find #"Python 2\.7"
                                (c/exec :python :--version (c/lit "2>&1"))))
