@@ -73,7 +73,7 @@
            (assert (= (:f op) :txn))
            (let [value (:value op)]
              (if (= value :read)
-               (try (wait-for-recovery 30 conn)
+               (try
                  (assoc op :type :ok :value
                                  (->> (cql/select-with-ks conn keyspace table-name)
                                       (map (fn [x] [:read (:id x) (:val x)]))

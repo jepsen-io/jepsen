@@ -77,7 +77,7 @@
                (info "All nodes are down - sleeping 2s")
                (Thread/sleep 2000)
                (assoc op :type :fail :error (.getMessage e))))
-      :read (try (wait-for-recovery 30 conn)
+      :read (try
                  (let [value (->> (cql/select-with-ks conn keyspace table-name (where [[= :id id]])) first :val)]
                    (assoc op :type :ok :value (independent/tuple id value)))
                  (catch UnavailableException e

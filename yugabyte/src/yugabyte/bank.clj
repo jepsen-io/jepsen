@@ -48,7 +48,7 @@
   (invoke! [this test op]
     (case (:f op)
       :read
-      (try (wait-for-recovery 30 conn)
+      (try
         (->> (cql/select-with-ks conn keyspace table-name)
              (mapv :balance)
              (assoc op :type :ok, :value))
@@ -197,7 +197,7 @@
   (invoke! [this test op]
     (case (:f op)
       :read
-      (try (wait-for-recovery 30 conn)
+      (try
       (->> (range n)
         (mapv (fn [x]
           ;; TODO - should be wrapped in a transaction after we support transactions with selects.
