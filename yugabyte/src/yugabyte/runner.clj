@@ -20,7 +20,8 @@
    "multi-key-acid"     yugabyte.multi-key-acid/test
    "counter-inc"        yugabyte.counter/test-inc
    "counter-inc-dec"    yugabyte.counter/test-inc-dec
-   "bank"               yugabyte.bank/test})
+   "bank"               yugabyte.bank/test
+   "bank-multitable"    yugabyte.bank/multitable-test})
 
 (def opt-spec
   "Additional command line options"
@@ -30,7 +31,7 @@
     (str "Nemesis to use, one of: "
          (clojure.string/join ", " (keys nemesis/nemeses)))
     :default "none"
-    :validate [identity (cli/one-of nemesis/nemeses)]]
+    :validate [nemesis/nemeses (cli/one-of nemesis/nemeses)]]
 
    ["-o" "--os NAME" "Operating system: either centos or debian."
     :default  :centos

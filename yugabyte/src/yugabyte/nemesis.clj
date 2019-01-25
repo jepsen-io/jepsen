@@ -97,6 +97,7 @@
 (defn clock-nemesis
   "Return clock skew nemesis map config"
   [max-skew-ms]
+  ; TODO: uh, is this redefining globals?
   (def clock-gen-partial (partial clock-gen max-skew-ms))
   {:nemesis `(nt/clock-nemesis)
    :max-clock-skew-ms max-skew-ms
