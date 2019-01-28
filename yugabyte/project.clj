@@ -10,6 +10,6 @@
                  [org.slf4j/jcl-over-slf4j "1.7.25"]
                  [org.slf4j/jul-to-slf4j "1.7.25"]
                 ]
-  :main yugabyte.runner
-  :aot [yugabyte.runner
-        clojure.tools.logging.impl])
+  :main yugabyte.runner)
+;  :aot [yugabyte.runner
+;        clojure.tools.logging.impl])

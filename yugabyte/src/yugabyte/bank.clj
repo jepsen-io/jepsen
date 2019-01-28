@@ -15,14 +15,7 @@
              [cql :as cql]]
             [yugabyte [client :as c]
                       [core :refer :all]
-                      [auto :as auto]])
-  (:import (com.datastax.driver.core.exceptions DriverException
-                                                UnavailableException
-                                                OperationTimedOutException
-                                                ReadTimeoutException
-                                                WriteTimeoutException
-                                                NoHostAvailableException
-                                                TransportException)))
+                      [auto :as auto]]))
 
 (def setup-lock (Object.))
 (def keyspace   "jepsen")

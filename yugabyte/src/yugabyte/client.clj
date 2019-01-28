@@ -53,6 +53,9 @@
          ; (info "Not enough replicas - failing")
          (assoc ~op :type :fail, :error [:unavailable (.getMessage e#)]))
 
+       (catch WriteTimeoutException e#
+         (assoc ~op :type crash#, :error :write-timed-out))
+
        (catch ReadTimeoutException e#
          (assoc ~op :type crash#, :error :read-timed-out))
 
