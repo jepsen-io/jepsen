@@ -1,0 +1,211 @@
+GroupID: 1. Leader: 1 (4, 5 are followers)
+GroupID: 2. Leader: 2.
+
+All were moved from 2 -> 1: type_1, amount_2, amount_0
+I0128 18:49:39.470730    3063 predicate_move.go:190] Move predicate request: predicate:"_predicate_" source_gid:2 dest_gid:1 txn_ts:1513
+I0128 18:49:42.870555    3063 predicate_move.go:190] Move predicate request: predicate:"type_1" source_gid:2 dest_gid:1 txn_ts:1518
+I0128 18:49:43.371439    3063 predicate_move.go:190] Move predicate request: predicate:"amount_2" source_gid:2 dest_gid:1 txn_ts:1525
+I0128 18:49:44.146759    3063 predicate_move.go:190] Move predicate request: predicate:"amount_0" source_gid:2 dest_gid:1 txn_ts:1538
+
+
+Txn @1574 <--- FAILED READ
+
+"Query received: query:"query all($type: string) { q(func: eq(type_0, $type)) {\nkey_0\nkey_1\nkey_2\namount_0\namount_1\namount_2}}" vars:<key:"$type" value:"account" > lin_read:<> "
+
+"Response = {"q":[{"key_0":0,"amount_0":57}]}"
+
+amount_0 was served by 4.
+
+0 -> 57.
+
+---
+"ProcessTaskOverNetwork. attr: amount_0 gid: 1, readTs: 1574, node id: 4"
+
+
+At n4, which served amount_0
+
+dgraph debug --at=1574 -r amount_0 -p n4/tmp/jepsen-dgraph-data/p -o=false -l=000008616d6f756e745f30000000000000000001 -y
+Opening DB: n4/tmp/jepsen-dgraph-data/p
+badger 2019/01/28 11:15:14 INFO: All 1 tables opened in 0s
+badger 2019/01/28 11:15:14 INFO: Replaying file id: 0 at offset: 464343
+badger 2019/01/28 11:15:14 INFO: Replay took: 14.79µs
+ts: 1558 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "57"
+
+ts: 1538 {item}{discard}{complete}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "61"
+ Num uids = 1. Size = 16
+ Uid = 18446744073709551615
+
+ts: 1244 {item}{deleted}
+
+ts: 1231 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "54"
+
+
+--- At n5 for comparison
+
+dgraph debug --at=1574 -r amount_0 -p=p -o=false -l=000008616d6f756e745f30000000000000000001 -y
+
+ts: 1558 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "57"
+
+ts: 1538 {item}{discard}{complete}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "61"
+ Num uids = 1. Size = 16
+ Uid = 18446744073709551615
+
+ts: 1244 {item}{deleted}
+
+ts: 1231 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "54"
+
+ts: 1224 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "51"
+
+
+---
+
+At n1:
+
+dgraph debug --at=1574 -r amount_0 -p n1/tmp/jepsen-dgraph-data/p -o=false -l=000008616d6f756e745f30000000000000000001 -y
+Opening DB: n1/tmp/jepsen-dgraph-data/p
+badger 2019/01/28 11:16:02 INFO: All 0 tables opened in 0s
+badger 2019/01/28 11:16:02 INFO: Replaying file id: 0 at offset: 0
+badger 2019/01/28 11:16:02 INFO: Replay took: 14.399757ms
+ts: 1558 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "57"
+
+ts: 1538 {item}{discard}{complete}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "61"
+ Num uids = 1. Size = 16
+ Uid = 18446744073709551615
+
+ts: 1244 {item}{deleted}
+
+ts: 1231 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "54"
+
+---
+
+NOTE: All the 3 are in sync about the data. So, let's look at the txn which
+happened at 1550.
+
+
+{"uid":"0xed","type_1":null,"key_1":3,"amount_1":13}"
+{"uid":"0x1","type_0":null,"key_0":0,"amount_0":57}"
+
+So, 3 (key_1, amount_1) was set to 13. That looks to be right as well.
+
+---
+
+"Query received: query:"query all($type: string) { q(func: eq(type_1, $type)) {\nkey_0\nkey_1\nkey_2\namount_0\namount_1\namount_2}}" vars:<key:"$type" value:"account" > start_ts:1574 lin_read:<> "
+
+"Response = {"q":[{"key_1":7,"amount_1":15},{"key_1":3,"amount_1":13},{"key_1":4,"amount_1":5},{"key_1":2,"amount_1":1}]}"
+
+7 -> 15 (OK @1568): 216
+3 -> 13 (@1558) : 237
+4 -> 5  (@1503) : 241
+2 -> 1  (OK @1568): 245
+Txn @1551
+
+{"uid":"0xd8","type_1":null,"key_1":7,"amount_1":12}" : 216
+{"uid":"0xca","type_2":null,"key_2":5,"amount_2":2}"  : 202
+
+Total: 34
+
+Txn @1551
+{"uid":"0xd8","type_1":null,"key_1":7,"amount_1":12}" : 216
+{"uid":"0xca","type_2":null,"key_2":5,"amount_2":2}"  : 202
+
+Txn @1568
+{"uid":"0xd8","type_1":null,"key_1":7,"amount_1":15}" : 216
+{"uid":"0xf5","type_1":null,"key_1":2,"amount_1":1}"  : 245
+
+7 (key_1, amount_1) should be 12, not 15 <-- FAIL FAIL
+I0128 18:48:15.330717    3093 predicate_move.go:190] Move predicate request: predicate:"amount_1" source_gid:1 dest_gid:2 txn_ts:944
+I0128 18:49:05.469070    3063 predicate_move.go:190] Move predicate request: predicate:"amount_1" source_gid:2 dest_gid:1 txn_ts:1266
+I0128 18:49:17.562420    3093 predicate_move.go:190] Move predicate request: predicate:"key_1" source_gid:1 dest_gid:2 txn_ts:1305
+
+So, group 2 owns key_1, and group 1 owns amount_1.
+
+dgraph debug --at=1574 -r amount_1 -p n4/tmp/jepsen-dgraph-data/p -o=false -l=000008616d6f756e745f310000000000000000d8 -y
+Opening DB: n4/tmp/jepsen-dgraph-data/p
+badger 2019/01/28 11:36:48 INFO: All 1 tables opened in 0s
+badger 2019/01/28 11:36:48 INFO: Replaying file id: 0 at offset: 464343
+badger 2019/01/28 11:36:48 INFO: Replay took: 6.71µs
+ts: 1568 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "15" <- got returned.
+
+ts: 1551 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "12" <- @1551. So, correct.
+
+ts: 1502 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "7"
+
+
+---
+
+I0128 18:49:43.371439    3063 predicate_move.go:190] Move predicate request: predicate:"amount_2" source_gid:2 dest_gid:1 txn_ts:1525
+
+amount_2 was served by n4.
+
+"Query received: query:"query all($type: string) { q(func: eq(type_2, $type)) {\nkey_0\nkey_1\nkey_2\namount_0\namount_1\namount_2}}" vars:<key:"$type" value:"account" > start_ts:1574 lin_read:<> "
+
+"Response = {"q":[{"key_2":1,"amount_2":10},{"key_2":5,"amount_2":2},{"key_2":6,"amount_2":2}]}"
+
+1 -> 10 (Uid=200, OK)
+5 -> 2  (Uid=202, OK)
+6 -> 2 (Uid=249, OK)
+
+Total: 14
+
+uid=200, 202, 249
+
+Overall: 105
+
+
+At n4 (matches at n1, leader)
+
+dgraph debug --at=1574 -r amount_2 -p n4/tmp/jepsen-dgraph-data/p -o=false -l=000008616d6f756e745f320000000000000000c8 -y
+Opening DB: n4/tmp/jepsen-dgraph-data/p
+badger 2019/01/28 11:24:13 INFO: All 1 tables opened in 1ms
+badger 2019/01/28 11:24:13 INFO: Replaying file id: 0 at offset: 464343
+badger 2019/01/28 11:24:13 INFO: Replay took: 11.2µs
+ts: 1539 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "10"
+
+ts: 1532 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "12"
+
+ts: 1525 {item}{discard}{complete}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "9"
+ Num uids = 1. Size = 16
+ Uid = 18446744073709551615
+
+
+Txn at 1539:
+{"uid":"0xc8","type_2":null,"key_2":1,"amount_2":10}"
+{"type_2":"account","key_2":6,"amount_2":2}"
+
+
+For 5->2 (matches with n1)
+
+dgraph debug --at=1574 -r amount_2 -p n4/tmp/jepsen-dgraph-data/p -o=false -l=000008616d6f756e745f320000000000000000ca -y
+Opening DB: n4/tmp/jepsen-dgraph-data/p
+badger 2019/01/28 11:29:24 INFO: All 1 tables opened in 0s
+badger 2019/01/28 11:29:24 INFO: Replaying file id: 0 at offset: 464343
+badger 2019/01/28 11:29:24 INFO: Replay took: 11.62µs
+ts: 1551 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "2"
+
+ts: 1525 {item}{discard}{complete}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "7"
+ Num uids = 1. Size = 16
+ Uid = 18446744073709551615
+
+
+Txn @1551
+
+{"uid":"0xd8","type_1":null,"key_1":7,"amount_1":12}" : 216
+{"uid":"0xca","type_2":null,"key_2":5,"amount_2":2}"  : 202
