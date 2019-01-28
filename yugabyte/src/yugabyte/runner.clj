@@ -47,6 +47,11 @@
     :validate [#{:community-edition :enterprise-edition}
                "Either community-edition or enterprise edition"]]
 
+   ["-r" "--replication-factor INT" "Number of nodes in each Raft cluster."
+    :default 3
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "Must be a positive integer"]]
+
    [nil "--yugabyte-ssh" "Override SSH options with hardcoded defaults for Yugabyte's internal testing environment"
     :default false]
 

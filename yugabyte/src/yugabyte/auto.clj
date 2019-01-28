@@ -7,6 +7,7 @@
             [clojure.pprint :refer [pprint]]
             [clojurewerkz.cassaforte.client :as cassandra]
             [clj-http.client :as http]
+            [dom-top.core :as dt]
             [jepsen [control :as c]
                     [db :as db]
                     [util :as util :refer [meh timeout]]]
@@ -57,58 +58,32 @@
   (stop-tserver!  [db])
   (wipe!          [db]))
 
-(defn start! [db test]
-  "Start both master and tserver"
-  (start-master! db test)
-  ; TODO: wait for all masters up instead of sleeping
-  (Thread/sleep 5000)
-  (start-tserver! db test)
-  ; TODO: wait for all masters up instead of sleeping
-  (Thread/sleep 5000)
-  :started)
+(defn master-nodes
+  "Given a test, returns the nodes we run masters on."
+  [test]
+  ; Right now you must run the same number of masters as --replication-factor.
+  ; Maybe? YB's not sure.
+  (let [nodes (take (:replication-factor test)
+                    (:nodes test))]
+    (assert (= (count nodes) (:replication-factor test))
+            (str "We need at least "
+                 (:replication-factor test)
+                 " nodes as masters, but test only has nodes: "
+                 (pr-str (:nodes test))))
+    nodes))
 
-(defn stop! [db]
-  "Stop both master and tserver"
-  (info "Stopping YugaByteDB")
-  (stop-tserver! db)
-  (stop-master! db)
-  :stopped)
-
-(defn wait-for-recovery
-  "Waits for the driver to report all nodes are up"
-  [timeout-secs conn]
-  (timeout (* 1000 timeout-secs)
-           (throw (RuntimeException.
-                    (str "Driver didn't report all nodes were up in "
-                         timeout-secs "s - failing")))
-           (while (->> (cassandra/get-hosts conn)
-                       (map :is-up) and not)
-             (Thread/sleep 500))))
-
-(defn version
-  "Returns a map of version information by calling `bin/yb-master --version`,
-  including:
-
-      :version
-      :build
-      :revision
-      :build-type
-      :timestamp"
-  []
-  (try
-    (-> #"version (.+?) build (.+?) revision (.+?) build_type (.+?) built at (.+)"
-        (re-find (c/exec (str dir "/bin/yb-master") :--version))
-        next
-        (->> (zipmap [:version :build :revision :build-type :timestamp])))
-    (catch RuntimeException e
-      ; Probably not installed
-      )))
+(defn master-node?
+  "Is this node a master?"
+  [test node]
+  (some #{node} (master-nodes test)))
 
 (defn master-addresses
   "Given a test, returns a list of master addresses, like \"n1:7100,n2:7100,...
   \""
   [test]
-  (->> (:nodes test)
+  (assert (coll? (:nodes test)))
+  (->> (master-nodes test)
+       (take (:replication-factor test))
        (map #(str % ":7100"))
        (str/join ",")))
 
@@ -142,6 +117,107 @@
                    (re-find #"(\w+)\s+([^\s]+)")
                    next
                    (zipmap [:uuid :address]))))))
+
+(defn await-masters
+  "Waits until all masters for a test are online, according to this node."
+  [test]
+  (dt/with-retry [tries 20]
+    (when (< 0 tries 20)
+      (info "Waiting for masters to come online")
+      (Thread/sleep 1000))
+
+    (when (zero? tries)
+      (throw (RuntimeException. "Giving up waiting for masters.")))
+
+    (when-not (= (count (master-addresses test))
+                 (->> (list-all-masters test)
+                      (filter (comp #{"ALIVE"} :state))
+                      count))
+      (retry (dec tries)))
+
+    :ready
+
+    (catch RuntimeException e
+      (condp re-find (.getMessage e)
+        #"Timed out"                              (retry (dec tries))
+        #"Leader not yet ready to serve requests" (retry (dec tries))
+        (throw e)))))
+
+(defn await-tservers
+  "Waits until all tservers for a test are online, according to this node."
+  [test]
+  (dt/with-retry [tries 20]
+    (when (< 0 tries 20)
+      (info "Waiting for tservers to come online")
+      (Thread/sleep 1000))
+
+    (when (zero? tries)
+      (throw (RuntimeException. "Giving up waiting for tservers.")))
+
+    (when-not (= (count (:nodes test))
+                 (->> (list-all-tservers test)
+                      (filter (comp #{"ALIVE"} :state))
+                      count))
+      (retry (dec tries)))
+
+    :ready
+
+    (catch RuntimeException e
+      (condp re-find (.getMessage e)
+        #"Leader not yet ready to serve requests"   (retry (dec tries))
+        #"This leader has not yet acquired a lease" (retry (dec tries))
+        #"Not the leader"                           (retry (dec tries))
+        (throw e)))))
+
+(defn start! [db test node]
+  "Start both master and tserver. Only starts master if this node is a master
+  node. Waits for masters and tservers."
+  (when (master-node? test node)
+    (start-master! db test)
+    (await-masters test))
+
+  (start-tserver! db test)
+  (await-tservers test)
+
+  (yc/await-setup node)
+  :started)
+
+(defn stop! [db test node]
+  "Stop both master and tserver. Only stops master if this node needs to."
+  (stop-tserver! db)
+  (when (master-node? test node)
+    (stop-master! db))
+  :stopped)
+
+(defn wait-for-recovery
+  "Waits for the driver to report all nodes are up"
+  [timeout-secs conn]
+  (timeout (* 1000 timeout-secs)
+           (throw (RuntimeException.
+                    (str "Driver didn't report all nodes were up in "
+                         timeout-secs "s - failing")))
+           (while (->> (cassandra/get-hosts conn)
+                       (map :is-up) and not)
+             (Thread/sleep 500))))
+
+(defn version
+  "Returns a map of version information by calling `bin/yb-master --version`,
+  including:
+
+      :version
+      :build
+      :revision
+      :build-type
+      :timestamp"
+  []
+  (try
+    (-> #"version (.+?) build (.+?) revision (.+?) build_type (.+?) built at (.+)"
+        (re-find (c/exec (str dir "/bin/yb-master") :--version))
+        next
+        (->> (zipmap [:version :build :revision :build-type :timestamp])))
+    (catch RuntimeException e
+      ; Probably not installed
+      )))
 
 (defn log-files-without-symlinks
   "Takes a directory, and returns a list of logfiles in that direcory, skipping
@@ -201,8 +277,10 @@
                :pidfile ce-master-pidfile
                :chdir   dir}
               ce-master-bin
-              :--master_addresses (master-addresses test)
-              :--fs_data_dirs     ce-data-dir)))
+              :--master_addresses   (master-addresses test)
+              :--replication_factor (:replication-factor test)
+              :--fs_data_dirs       ce-data-dir)))
+      ;(Thread/sleep 10000)) ; sigh
 
     (start-tserver! [db test]
       (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
@@ -226,13 +304,10 @@
     db/DB
     (setup! [db test node]
       (install! db test)
-      (start! db test)
-      (info (with-out-str (pprint (list-all-masters test))))
-      (info (with-out-str (pprint (list-all-tservers test))))
-      (yc/await-setup node))
+      (start! db test node))
 
     (teardown! [db test node]
-      (stop! db)
+      (stop! db test node)
       (wipe! db))
 
     db/LogFiles
@@ -291,20 +366,21 @@
             (try (c/su (c/exec :service :ntpd :stop))
                  (catch RuntimeException e))
             (c/su (c/exec :ntpdate :-b "pool.ntp.org")))))
-      (start! this test))
+      (start! this test node))
 
     (teardown! [this test node]
       (info "Tearing down YugaByteDB...")
-      (stop! this)
+      (stop! this test node)
       (wipe! this))
 
     db/LogFiles
     (log-files [_ test node]
       (concat
         ; Filter out symlinks.
-        (try (remove (partial re-matches #".*\/yb-master.(INFO|WARNING|ERROR)")
-                     (cu/ls-full master-log-dir))
-             (catch RuntimeException e []))
+        (when (master-node? test node)
+          (try (remove (partial re-matches #".*\/yb-master.(INFO|WARNING|ERROR)")
+                       (cu/ls-full master-log-dir))
+               (catch RuntimeException e [])))
         (try (remove (partial re-matches #".*\/yb-tserver.(INFO|WARNING|ERROR)")
                      (cu/ls-full tserver-log-dir))
              (catch RuntimeException e []))

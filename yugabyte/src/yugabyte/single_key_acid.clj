@@ -12,6 +12,7 @@
                                      [policies :refer :all]
                                      [cql :as cql]]
             [yugabyte [auto :as auto]
+                      [client :as c]
                       [core :refer :all]])
   (:import (com.datastax.driver.core.exceptions UnavailableException
                                                 OperationTimedOutException
@@ -27,8 +28,8 @@
   client/Client
   (open! [this test node]
     (info "Opening connection to " node)
-    (assoc this :conn (cassandra/connect [node] {:protocol-version 3
-                                                 :retry-policy (retry-policy :no-retry-on-client-timeout)})))
+    (assoc this :conn (c/connect node)))
+
   (setup! [this test]
     (locking setup-lock
       (cql/create-keyspace conn keyspace

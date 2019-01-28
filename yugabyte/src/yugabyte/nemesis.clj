@@ -9,7 +9,7 @@
             [yugabyte.auto :as auto]))
 
 (def nemesis-delay 5) ; Delay between nemesis cycles in seconds.
-(def nemesis-duration 5) ; Duration of single nemesis cycle in secods.
+(def nemesis-duration 60) ; Duration of single nemesis cycle in secods.
 
 (defn kill!
   [node process opts]
