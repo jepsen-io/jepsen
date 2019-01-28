@@ -4,6 +4,7 @@
   enterprise edition."
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
+            [clojure.pprint :refer [pprint]]
             [clojurewerkz.cassaforte.client :as cassandra]
             [clj-http.client :as http]
             [jepsen [control :as c]
@@ -11,7 +12,8 @@
                     [util :as util :refer [meh timeout]]]
             [jepsen.control.util :as cu]
             [jepsen.os [debian :as debian]
-                       [centos :as centos]])
+                       [centos :as centos]]
+            [yugabyte.client :as yc])
   (:import jepsen.os.debian.Debian
            jepsen.os.centos.CentOS))
 
@@ -110,6 +112,37 @@
        (map #(str % ":7100"))
        (str/join ",")))
 
+(defn yb-admin
+  "Runs a yb-admin command on a node. Args are passed to yb-admin."
+  [test & args]
+  (apply c/exec (str dir "/bin/yb-admin")
+         :--master_addresses (master-addresses test)
+         args))
+
+(defn list-all-masters
+  "Asks a node to list all the masters it knows about."
+  [test]
+  (->> (yb-admin test :list_all_masters)
+       (str/split-lines)
+       rest
+       (map (fn [line]
+              (->> line
+                   (re-find #"(\w+)\s+([^\s]+)\s+(\w+)\s+(\w+)")
+                   next
+                   (zipmap [:uuid :address :state :role]))))))
+
+(defn list-all-tservers
+  "Asks a node to list all the tservers it knows about."
+  [test]
+  (->> (yb-admin test :list_all_tablet_servers)
+       (str/split-lines)
+       rest
+       (map (fn [line]
+              (->> line
+                   (re-find #"(\w+)\s+([^\s]+)")
+                   next
+                   (zipmap [:uuid :address]))))))
+
 (defn log-files-without-symlinks
   "Takes a directory, and returns a list of logfiles in that direcory, skipping
   the symlinks which end in .INFO, .WARNING, etc."
@@ -193,7 +226,10 @@
     db/DB
     (setup! [db test node]
       (install! db test)
-      (start! db test))
+      (start! db test)
+      (info (with-out-str (pprint (list-all-masters test))))
+      (info (with-out-str (pprint (list-all-tservers test))))
+      (yc/await-setup node))
 
     (teardown! [db test node]
       (stop! db)

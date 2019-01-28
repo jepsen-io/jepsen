@@ -13,7 +13,8 @@
              [query :refer :all]
              [policies :refer :all]
              [cql :as cql]]
-            [yugabyte [core :refer :all]
+            [yugabyte [client :as c]
+                      [core :refer :all]
                       [auto :as auto]])
   (:import (com.datastax.driver.core.exceptions DriverException
                                                 UnavailableException
@@ -27,53 +28,7 @@
 (def keyspace   "jepsen")
 (def table-name "accounts")
 
-(defmacro with-errors
-  "Takes an op, a set of idempotent operation :fs, and a body. Evalates body,
-  and catches common errors, returning an appropriate completion for `op`."
-  [op idempotent & body]
-  `(let [crash# (if (~idempotent (:f ~op)) :fail :info)]
-     (try
-       ~@body
-       (catch UnavailableException e#
-         ; I think this was used back when we blocked on all nodes being online
-         ; (info "Not enough replicas - failing")
-         (assoc ~op :type :fail, :error [:unavailable (.getMessage e#)]))
-
-       (catch ReadTimeoutException e#
-         (assoc ~op :type crash#, :error :read-timed-out))
-
-       (catch OperationTimedOutException e#
-         (assoc ~op :type crash#, :error :operation-timed-out))
-
-       (catch TransportException e#
-         (condp re-find (.getMessage e#)
-           #"Connection has been closed"
-           (assoc ~op :type crash#, :error :connection-closed)
-
-           (throw e#)))
-
-       (catch NoHostAvailableException e#
-         (info "All nodes are down - sleeping 2s")
-         (Thread/sleep 2000)
-         (assoc ~op :type :fail :error [:no-host-available (.getMessage e#)]))
-
-       (catch DriverException e#
-         (if (re-find #"Value write after transaction start|Conflicts with higher priority transaction|Conflicts with committed transaction|Operation expired: Failed UpdateTransaction.* status: COMMITTED .*: Transaction expired"
-                      (.getMessage e#))
-           ; Definitely failed
-           (assoc ~op :type :fail, :error (.getMessage e#))
-           (throw e#))))))
-
-(defrecord CQLBank [conn]
-  client/Client
-  (open! [this test node]
-    (info "Opening connection to" node)
-    (let [c (cassandra/connect
-              [node]
-              {:protocol-version  3
-               :retry-policy      (retry-policy :no-retry-on-client-timeout)})]
-      (assoc this :conn c)))
-
+(c/defclient CQLBank []
   (setup! [this test]
     ; This is a workaround for a bug in Yugabyte's create-table code
     (locking setup-lock
@@ -98,7 +53,7 @@
                             {:id a, :balance 0}))))
 
   (invoke! [this test op]
-    (with-errors op #{:read}
+    (c/with-errors op #{:read}
       (case (:f op)
         :read
         (->> (cql/select-with-ks conn keyspace table-name)
@@ -120,11 +75,7 @@
                  "END TRANSACTION;"))
           (assoc op :type :ok)))))
 
-  (teardown! [this test])
-
-  (close! [this test]
-    (info "Closing client with conn" conn)
-    (cassandra/disconnect! conn)))
+  (teardown! [this test]))
 
 (defn bank-test-base
   [opts]
@@ -146,17 +97,7 @@
            opts)))
 
 ;; Shouldn't be used until we support transactions with selects.
-(defrecord CQLMultiBank [conn]
-  client/Client
-  (open! [this test node]
-    (info "Opening connection to " node)
-    (let [c (cassandra/connect [node]
-                               {:protocol-version 3
-                                :retry-policy (retry-policy
-                                                :no-retry-on-client-timeout)})]
-
-      (assoc this :conn c)))
-
+(c/defclient CQLMultiBank []
   (setup! [this test]
     (locking setup-lock
       (cql/create-keyspace conn keyspace
@@ -180,7 +121,7 @@
                                         0)}))))
 
   (invoke! [this test op]
-    (with-errors op #{:read}
+    (c/with-errors op #{:read}
       (case (:f op)
         :read
         (let [as (shuffle (:accounts test))]
@@ -209,11 +150,7 @@
                                   "END TRANSACTION;"))
           (assoc op :type :ok)))))
 
-  (teardown! [this test])
-
-  (close! [this test]
-    (info "Closing client with conn" conn)
-      (cassandra/disconnect! conn)))
+  (teardown! [this test]))
 
 (defn multitable-test
   [opts]
