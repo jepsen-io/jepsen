@@ -69,7 +69,6 @@
           :--port_offset        zero-port-offset
           :--expose_trace
           :--v 2
-          :--vmodule=groups=3 ;; flag to set -v=3 for worker/groups.go
           :--replicas           (:replicas test)
           :--rebalance_interval (:rebalance-interval test)
           (when (:dgraph-jaeger-collector test)
@@ -105,6 +104,7 @@
           (lru-opt)
           :--expose_trace
           :--v 2
+          :--vmodule=groups=3 ;; flag to set -v=3 for worker/groups.go
           (when (:dgraph-jaeger-collector test)
             [:--jaeger.collector (:dgraph-jaeger-collector test)])
           (when (:dgraph-jaeger-agent test)
