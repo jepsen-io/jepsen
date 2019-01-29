@@ -135,35 +135,37 @@
     (install [:oracle-java8-installer])
     (install [:oracle-java8-set-default])))
 
-(def os
-  (reify os/OS
-    (setup! [_ test node]
-      (info node "setting up debian")
+(deftype Debian []
+  os/OS
+  (setup! [_ test node]
+    (info node "setting up debian")
 
-      (setup-hostfile!)
+    (setup-hostfile!)
 
-      (maybe-update!)
+    (maybe-update!)
 
-      (c/su
-        ; Packages!
-        (install [:apt-transport-https
-                  :wget
-                  :curl
-                  :vim
-                  :man-db
-                  :faketime
-                  :ntpdate
-                  :unzip
-                  :iptables
-                  :psmisc
-                  :tar
-                  :bzip2
-                  :libzip2
-                  :iputils-ping
-                  :iproute
-                  :rsyslog
-                  :logrotate]))
+    (c/su
+      ; Packages!
+      (install [:apt-transport-https
+                :wget
+                :curl
+                :vim
+                :man-db
+                :faketime
+                :ntpdate
+                :unzip
+                :iptables
+                :psmisc
+                :tar
+                :bzip2
+                :libzip2
+                :iputils-ping
+                :iproute
+                :rsyslog
+                :logrotate]))
 
-      (meh (net/heal! (:net test) test)))
+    (meh (net/heal! (:net test) test)))
 
-    (teardown! [_ test node])))
+  (teardown! [_ test node]))
+
+(def os "An implementation of the Debian OS." (Debian.))

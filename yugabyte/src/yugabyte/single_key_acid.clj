@@ -11,22 +11,15 @@
                                      [query :refer :all]
                                      [policies :refer :all]
                                      [cql :as cql]]
-            [yugabyte [core :refer :all]]
-            )
-  (:import (com.datastax.driver.core.exceptions UnavailableException
-                                                OperationTimedOutException
-                                                WriteTimeoutException
-                                                ReadTimeoutException
-                                                NoHostAvailableException)))
+            [yugabyte [auto :as auto]
+                      [client :as c]
+                      [core :refer :all]]))
 
+(def keyspace "jepsen")
 (def table-name "single_key_acid")
+(def setup-lock (Object.))
 
-(defrecord CQLSingleKey [conn]
-  client/Client
-  (open! [this test node]
-    (info "Opening connection to " node)
-    (assoc this :conn (cassandra/connect [node] {:protocol-version 3
-                                                 :retry-policy (retry-policy :no-retry-on-client-timeout)})))
+(c/defclient CQLSingleKey []
   (setup! [this test]
     (locking setup-lock
       (cql/create-keyspace conn keyspace
@@ -39,62 +32,34 @@
                         (if-not-exists)
                         (column-definitions {:id :int
                                              :val :int
-                                             :primary-key [:id]}))
-      (->CQLSingleKey conn)))
+                                             :primary-key [:id]}))))
+
   (invoke! [this test op]
-    (let [id   (key (:value op))
-          val  (val (:value op))]
-      (case (:f op)
-      :write (try
-               (cql/insert-with-ks conn keyspace table-name {:id id :val val})
-               (assoc op :type :ok)
-               (catch UnavailableException e
-                 (info "Got expection during write: " (.getMessage e) (type e))
-                 (assoc op :type :fail :error (.getMessage e)))
-               (catch WriteTimeoutException e
-                 (assoc op :type :info :error :write-timed-out))
-               (catch OperationTimedOutException e
-                 (assoc op :type :info :error :client-timed-out))
-               (catch NoHostAvailableException e
-                 (info "All nodes are down - sleeping 2s")
-                 (Thread/sleep 2000)
-                 (assoc op :type :fail :error (.getMessage e))))
-      :cas (try
-             (let [[expected-val new-val] val
-                   res (cql/update-with-ks conn keyspace table-name {:val new-val}
-                                   (only-if [[= :val expected-val]]) (where [[= :id id]]))
-                   applied (get (first res) (keyword "[applied]"))
-                   ]
-               (assoc op :type (if applied :ok :fail)))
-             (catch UnavailableException e
-               (info "Got expection during CAS: " (.getMessage e) (type e))
-               (assoc op :type :fail :error (.getMessage e)))
-             (catch WriteTimeoutException e
-               (assoc op :type :info :error :write-timed-out))
-             (catch OperationTimedOutException e
-               (assoc op :type :info :error :client-timed-out))
-             (catch NoHostAvailableException e
-               (info "All nodes are down - sleeping 2s")
-               (Thread/sleep 2000)
-               (assoc op :type :fail :error (.getMessage e))))
-      :read (try
-                 (let [value (->> (cql/select-with-ks conn keyspace table-name (where [[= :id id]])) first :val)]
-                   (assoc op :type :ok :value (independent/tuple id value)))
-                 (catch UnavailableException e
-                   (info "Not enough replicas - failing")
-                   (assoc op :type :fail :error (.getMessage e)))
-                 (catch ReadTimeoutException e
-                   (assoc op :type :fail :error :read-timed-out))
-                 (catch OperationTimedOutException e
-                   (assoc op :type :fail :error :client-timed-out))
-                 (catch NoHostAvailableException e
-                   (info "All nodes are down - sleeping 2s")
-                   (Thread/sleep 2000)
-                   (assoc op :type :fail :error (.getMessage e)))))))
-  (teardown! [this test])
-  (close! [this test]
-    (info "Closing client with conn" conn)
-    (cassandra/disconnect! conn)))
+    (c/with-errors op #{:read}
+      (let [[id val] (:value op)]
+        (case (:f op)
+          :write
+          (do (cql/insert-with-ks conn keyspace table-name
+                                  {:id id, :val val})
+              (assoc op :type :ok))
+
+          :cas
+          (let [[expected-val new-val] val
+                res (cql/update-with-ks conn keyspace table-name
+                                        {:val new-val}
+                                        (only-if [[= :val expected-val]])
+                                        (where [[= :id id]]))
+                applied (get (first res) (keyword "[applied]"))]
+            (assoc op :type (if applied :ok :fail)))
+
+          :read
+          (let [value (->> (cql/select-with-ks conn keyspace table-name
+                                               (where [[= :id id]]))
+                           first
+                           :val)]
+            (assoc op :type :ok :value (independent/tuple id value)))))))
+
+  (teardown! [this test]))
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -102,23 +67,23 @@
 
 (defn test
   [opts]
-  (yugabyte-test
-    (merge opts
-           {:name "singe-key-acid"
-            :client (CQLSingleKey. nil)
-            :concurrency (max 10 (:concurrency opts))
-            :client-generator (independent/concurrent-generator
-                               10
-                               (range)
-                               (fn [k]
-                                 (->> (gen/reserve 5 (gen/mix [w cas cas]) r)
-                                      (gen/delay-til 1/2)
-                                      (gen/stagger 0.1)
-                                      (gen/limit 100))))
-            :model (model/cas-register 0)
-            :checker (checker/compose {:perf (checker/perf)
-                                       :indep (independent/checker
-                                         (checker/compose
-                                          {:timeline (timeline/html)
-                                           :linear   (checker/linearizable)}))})
-            })))
+  (let [n (count (:nodes opts))]
+    (yugabyte-test
+      (merge opts
+             {:name "singe-key-acid"
+              :client (CQLSingleKey. nil)
+              :concurrency (max 10 (:concurrency opts))
+              :client-generator (independent/concurrent-generator
+                                  (* 2 n)
+                                  (range)
+                                  (fn [k]
+                                    (->> (gen/reserve n (gen/mix [w cas cas]) r)
+                                         (gen/stagger 0.1)
+                                         (gen/limit 100))))
+              :model (model/cas-register 0)
+              :checker (checker/compose
+                         {:perf (checker/perf)
+                          :indep (independent/checker
+                                   (checker/compose
+                                     {:timeline (timeline/html)
+                                      :linear   (checker/linearizable)}))})}))))

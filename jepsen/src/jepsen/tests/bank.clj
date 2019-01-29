@@ -56,7 +56,7 @@
 
 (defn check-op
   "Takes a single op and returns errors in its balance"
-  [accts total op]
+  [accts total negative-balances? op]
   (let [ks       (keys (:value op))
         balances (vals (:value op))]
     (cond (not-every? accts ks)
@@ -71,20 +71,21 @@
                          (into {}))
            :op      op}
 
-          (not= total
-                (reduce + balances))
+          (not= total (reduce + balances))
           {:type     :wrong-total
            :total    (reduce + balances)
            :op       op}
 
-          (some neg? balances)
+          (and (not negative-balances?) (some neg? balances))
           {:type     :negative-value
            :negative (filter neg? balances)
            :op       op})))
 
 (defn checker
-  "Balances must all be non-negative and sum to (:total test)."
-  []
+  "Verifies that all reads must sum to (:total test), and, unless
+  :negative-balances? is true, checks that all balances are
+  non-negative."
+  [checker-opts]
   (reify checker/Checker
     (check [this test model history opts]
       (let [accts (set (:accounts test))
@@ -93,7 +94,10 @@
                        (r/filter op/ok?)
                        (r/filter #(= :read (:f %))))
             errors (->> reads
-                        (r/map #(check-op accts total %))
+                        (r/map (partial check-op
+                                        accts
+                                        total
+                                        (:negative-balances? checker-opts)))
                         (r/filter identity)
                         (group-by :type))]
         {:valid?      (every? empty? (vals errors))
@@ -168,11 +172,15 @@
 
 (defn test
   "A partial test; bundles together some default choices for keys and amounts
-  with a generator and checker."
-  []
-  {:max-transfer  5
-   :total-amount  100
-   :accounts      (vec (range 8))
-   :checker       (checker/compose {:SI    (checker)
-                                    :plot  (plotter)})
-   :generator     (generator)})
+  with a generator and checker. Options:
+
+  :negative-balances?   if true, doesn't verify that balances remain positive"
+  ([]
+   (test {:negative-balances? false}))
+  ([opts]
+   {:max-transfer  5
+    :total-amount  100
+    :accounts      (vec (range 8))
+    :checker       (checker/compose {:SI    (checker opts)
+                                     :plot  (plotter)})
+    :generator     (generator)}))
