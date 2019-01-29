@@ -10,6 +10,8 @@
 
 ## Visualizations
 
+- Add a plot for counters, showing the upper and lower bounds, and the observed
+  value
 - Rework latency plot color scheme to use colors that hint at a continuum
 - Adaptive temporal resolution for rate and latency plots, based on point
   density
