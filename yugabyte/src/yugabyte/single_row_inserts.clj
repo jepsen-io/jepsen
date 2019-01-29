@@ -14,47 +14,42 @@
                                      [policies :refer :all]
                                      [cql :as cql]]
             [yugabyte [auto :as auto]
-                      [core :refer :all]])
-  (:import (com.datastax.driver.core.exceptions UnavailableException
-                                                OperationTimedOutException
-                                                WriteTimeoutException
-                                                ReadTimeoutException
-                                                NoHostAvailableException)))
+                      [client :as c]
+                      [core :refer :all]]))
 
 (def setup-lock (Object.))
 (def keyspace "jepsen")
 
 (defn mk-pair
   [x]
-  {:id x :val x}
-)
+  {:id x, :val x})
 
 (defn check-inserts
-  "Given a set of :add operations followed by a final :read, verifies that every successfully added
-  row is present in the read, and that the read contains only rows for which an add was attempted,
-  and that all rows are unique."
+  "Given a set of :write operations followed by a final :read, verifies that
+  every successfully added row is present in the read, and that the read
+  contains only rows for which an add was attempted, and that all rows are
+  unique."
   []
   (reify checker/Checker
     (check [this test model history opts]
       (let [attempts (->> history
                           (r/filter op/invoke?)
                           (r/filter #(= :write (:f %)))
-                          (r/map (comp mk-pair :value))
-                          (into #{})
-                     )
+                          (r/map :value)
+                          (into #{}))
             adds (->> history
                       (r/filter op/ok?)
-                      (r/filter #(= :add (:f %)))
+                      (r/filter #(= :write (:f %)))
                       (r/map :value)
                       (into #{}))
             fails (->> history
                        (r/filter op/fail?)
-                       (r/filter #(= :add (:f %)))
+                       (r/filter #(= :write (:f %)))
                        (r/map :value)
                        (into #{}))
             unsure (->> history
                         (r/filter op/info?)
-                        (r/filter #(= :add (:f %)))
+                        (r/filter #(= :write (:f %)))
                         (r/map :value)
                         (into #{}))
             final-read-l (->> history
@@ -62,6 +57,10 @@
                               (r/filter #(= :read (:f %)))
                               (r/map :value)
                               (reduce (fn [_ x] x) nil))]
+
+        (info :final-read (pr-str final-read-l))
+        (info :adds (pr-str adds))
+
         (if-not final-read-l
           {:valid? :unknown
            :error  "Set was never read"}
@@ -107,13 +106,7 @@
 
 (def table-name "kv_pairs")
 
-(defrecord CQLRowInsertClient [conn]
-  client/Client
-  (open! [this test node]
-         (info "Opening connection")
-  (assoc this :conn (cassandra/connect (->> test :nodes (map name))
-                                       {:protocol-version 3
-                                        :retry-policy (retry-policy :no-retry-on-client-timeout)})))
+(c/defclient CQLRowInsertClient []
   (setup! [this test]
     (locking setup-lock
       (cql/create-keyspace conn keyspace
@@ -124,43 +117,22 @@
       (cql/use-keyspace conn keyspace)
       (cql/create-table conn "kv_pairs"
                         (if-not-exists)
-                        (column-definitions {:id :int
-                                             :val :int
-                                             :primary-key [:id]}))
-      (->CQLRowInsertClient conn)))
+                        (column-definitions {:id          :int
+                                             :val         :int
+                                             :primary-key [:id]}))))
+
   (invoke! [this test op]
-    (case (:f op)
-      :write (try
-                (cql/insert-with-ks conn keyspace table-name (mk-pair (:value op)))
-                (assoc op :type :ok)
-                (catch UnavailableException e
-                  (assoc op :type :fail :error (.getMessage e)))
-                (catch WriteTimeoutException e
-                  (assoc op :type :info :error :write-timed-out))
-                (catch OperationTimedOutException e
-                  (assoc op :type :info :error :client-timed-out))
-                (catch NoHostAvailableException e
-                  (info "All nodes are down - sleeping 2s")
-                  (Thread/sleep 2000)
-                  (assoc op :type :fail :error (.getMessage e))))
-      :read (try (auto/wait-for-recovery 30 conn)
-                 (let [value (->> (cql/select-with-ks conn keyspace table-name))]
-                   (assoc op :type :ok :value value))
-                 (catch UnavailableException e
-                   (info "Not enough replicas - failing")
-                   (assoc op :type :fail :error (.getMessage e)))
-                 (catch ReadTimeoutException e
-                   (assoc op :type :fail :error :read-timed-out))
-                 (catch OperationTimedOutException e
-                   (assoc op :type :fail :error :client-timed-out))
-                 (catch NoHostAvailableException e
-                   (info "All nodes are down - sleeping 2s")
-                   (Thread/sleep 2000)
-                   (assoc op :type :fail :error (.getMessage e))))))
-   (teardown! [this test])
-   (close! [this test]
-    (info "Closing client with conn" conn)
-    (cassandra/disconnect! conn)))
+    (c/with-errors op #{:read}
+      (case (:f op)
+        :write (do (cql/insert-with-ks conn keyspace table-name
+                                       (mk-pair (:value op)))
+                   (assoc op :type :ok))
+
+        :read (let [value (->> (cql/select-with-ks conn keyspace table-name)
+                               (map :val))]
+                (assoc op :type :ok :value value)))))
+
+   (teardown! [this test]))
 
 (defn r [_ _] {:type :invoke, :f :read, :value nil})
 (defn w [_ _] {:type :invoke, :f :write, :value (rand-int 500)})
@@ -172,9 +144,8 @@
          {:name "single-row-inserts"
           :client (CQLRowInsertClient. nil)
           :client-generator (->> w
-                                 (gen/stagger 1))
+                                 (gen/stagger 1/10))
           :client-final-generator (gen/once r)
-          :checker (checker/compose {:perf (checker/perf)
-                                     :timeline (timeline/html)
-                                     :details (check-inserts)})
-         })))
+          :checker (checker/compose {:perf      (checker/perf)
+                                     :timeline  (timeline/html)
+                                     :details   (check-inserts)}) })))
