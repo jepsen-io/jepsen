@@ -279,7 +279,11 @@
               ce-master-bin
               :--master_addresses   (master-addresses test)
               :--replication_factor (:replication-factor test)
-              :--fs_data_dirs       ce-data-dir)))
+              :--fs_data_dirs       ce-data-dir
+              ; Limit memory to 4GB/node
+              :--memory_limit_hard_bytes 4294967296
+              ; Fewer shards to improve perf
+              :--yb_num_shards_per_tserver 4)))
       ;(Thread/sleep 10000)) ; sigh
 
     (start-tserver! [db test]
@@ -290,7 +294,9 @@
                :chdir   dir}
               ce-tserver-bin
               :--tserver_master_addrs (master-addresses test)
-              :--fs_data_dirs         ce-data-dir)))
+              :--fs_data_dirs         ce-data-dir
+              ; Limit memory to 4GB
+              :--memory_limit_hard_bytes 4294967296)))
 
     (stop-master! [db]
       (c/su (cu/stop-daemon! ce-master-bin ce-master-pidfile)))
