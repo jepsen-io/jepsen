@@ -26,7 +26,11 @@
 
 ## Performance
 
-- Knossos: we should allow users to pass a :time-limit option, and after that many seconds, abort the search. Relying on OOM detection and abort still means plenty of tests spin for hoooours.
+- Knossos: we should allow users to pass a :time-limit option, and after that
+  many seconds, abort the search. Relying on OOM detection and abort still
+  means plenty of tests spin for hoooours.
+- Knossos: let's make the memoization threshold configurable via options passed
+  to the checker.
 
 ## Core
 
