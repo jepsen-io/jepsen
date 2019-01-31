@@ -30,10 +30,10 @@ for i in $(seq 1 $TEST_COUNT); do
     for workload in bank delete long-fork linearizable-register uid-linearizable-register upsert set sequential; do
         for upsert in " " "--upsert-schema"; do
             for nemesis in none move-tablet partition-ring kill-alpha,kill-zero move-tablet,partition-ring,kill-alpha,kill-zero; do
-                if [ $workload = "delete" ]; then
-                    concurrency=30 # delete fails assertion when concurrency <10
+                if echo $workload | grep -q -E 'delete|linearizable-register$'; then
+                    concurrency=30
                 else
-                    concurrency=1n # default value
+                    concurrency=1n
                 fi
                 lein run test --local-binary /gobin/dgraph --force-download --rebalance-interval 10h --workload $workload --nemesis $nemesis --time-limit $TIME_LIMIT $upsert --concurrency $concurrency
             done
