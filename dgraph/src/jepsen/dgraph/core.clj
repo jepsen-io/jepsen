@@ -187,7 +187,7 @@
                    (info "CLI options:\n" (with-out-str (pprint options)))
                    (let [force-download? (atom true)
                          tests (for [i          (range (:test-count options))
-                                     workload   (remove #{:types}
+                                     workload   (remove #{:types :uid-set}
                                                         (keys workloads))
                                      sequencing [:client :server]
                                      upsert     [false true]
