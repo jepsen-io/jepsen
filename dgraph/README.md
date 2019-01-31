@@ -22,6 +22,21 @@ To run the full test suite:
 lein run test-all --local-binary /gobin/dgraph --rebalance-interval 10h --time-limit 600 --test-count 20 --dgraph-jaeger-collector http://jaeger:14268 --tracing http://jaeger:14268/api/traces
 ```
 
+To run the equivalent of `test-all` as separate `lein run test` commands in a shell loop:
+```sh
+TIME_LIMIT=600
+TEST_COUNT=20
+for i in $(seq 1 $TEST_COUNT); do
+    for workload in bank delete long-fork linearizable-register uid-linearizable-register upsert set sequential; do
+        for upsert in " " "--upsert-schema"; do
+            for nemesis in none move-tablet partition-ring kill-alpha,kill-zero move-tablet,partition-ring,kill-alpha,kill-zero; do
+                lein run test --local-binary /gobin/dgraph --force-download --rebalance-interval 10h --workload $workload --nemesis $nemesis --time-limit $TIME_LIMIT $upsert
+            done
+        done
+    done
+done
+```
+
 To run it with Jaeger trace collection:
 
 ```sh
