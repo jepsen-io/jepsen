@@ -62,9 +62,9 @@
   []
   (->> (range 3)
        (mapcat (fn [i]
-                 [(gen/sleep 5)
+                 [(gen/sleep 20)
                   {:type :info, :f :start}
-                  (gen/sleep 5)
+                  (gen/sleep 20)
                   {:type :info, :f :stop}]))))
 
 (defn strobe-rest

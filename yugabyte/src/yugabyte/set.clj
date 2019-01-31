@@ -55,7 +55,8 @@
     (merge opts
            {:name "set"
             :client (CQLSetClient. nil)
-            :client-generator (->> (gen/mix [(adds) (reads)])
-                                   (gen/stagger 1/10))
+            :client-generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
+                                                (reads))
+                                   (gen/stagger 1/100))
             :checker (checker/compose {:perf (checker/perf)
                                        :set (checker/set-full)})})))
