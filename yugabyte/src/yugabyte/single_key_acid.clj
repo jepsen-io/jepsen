@@ -78,7 +78,7 @@
                                   (range)
                                   (fn [k]
                                     (->> (gen/reserve n (gen/mix [w cas cas]) r)
-                                         (gen/stagger 0.1)
+                                         (gen/stagger 0)
                                          (gen/limit 100))))
               :model (model/cas-register 0)
               :checker (checker/compose

@@ -296,7 +296,22 @@
               :--tserver_master_addrs (master-addresses test)
               :--fs_data_dirs         ce-data-dir
               ; Limit memory to 4GB
-              :--memory_limit_hard_bytes 4294967296)))
+              :--memory_limit_hard_bytes 4294967296
+              ; Fewer shards to improve perf
+              :--yb_num_shards_per_tserver 4
+              ; Tracing
+              :--enable_tracing
+              :--rpc_slow_query_threshold_ms 1000
+              ; Heartbeats
+              ;:--heartbeat_interval_ms 100
+              ;:--heartbeat_rpc_timeout_ms 1500
+              ;:--retryable_rpc_single_call_timeout_ms 2000
+              ;:--rpc_connection_timeout_ms 1500
+              ;:--leader_failure_exp_backoff_max_delta_ms 1000
+              ;:--leader_failure_max_missed_heartbeat_period 3
+              ;:--consensus_rpc_timeout_ms 300
+              ;:--client_read_write_timeout_ms 6000
+              )))
 
     (stop-master! [db]
       (c/su (cu/stop-daemon! ce-master-bin ce-master-pidfile)))

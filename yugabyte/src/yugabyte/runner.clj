@@ -10,6 +10,7 @@
                       [counter]
                       [multi-key-acid]
                       [nemesis :as nemesis]
+                      [set :as set]
                       [single-key-acid]
                       [single-row-inserts]]))
 
@@ -21,7 +22,8 @@
    "counter-inc"        yugabyte.counter/test-inc
    "counter-inc-dec"    yugabyte.counter/test-inc-dec
    "bank"               yugabyte.bank/test
-   "bank-multitable"    yugabyte.bank/multitable-test})
+   "bank-multitable"    yugabyte.bank/multitable-test
+   "set"                yugabyte.set/test})
 
 (def opt-spec
   "Additional command line options"

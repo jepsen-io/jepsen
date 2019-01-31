@@ -41,6 +41,17 @@
                  (policies/retry-policy :no-retry-on-client-timeout)}
                 opts))))
 
+(defn ensure-keyspace!
+  "Creates a keyspace using the given connection, if it doesn't already exist.
+  Replication-factor is derived from the test."
+  [conn keyspace-name test]
+  (cql/create-keyspace conn keyspace-name
+                       (q/if-not-exists)
+                       (q/with {:replication
+                                {"class" "SimpleStrategy"
+                                 "replication_factor"
+                                 (:replication-factor test)}})))
+
 (defmacro with-errors
   "Takes an op, a set of idempotent operation :fs, and a body. Evalates body,
   and catches common errors, returning an appropriate completion for `op`."
@@ -100,7 +111,7 @@
 			(teardown! [this test]))"
   [name fields & exprs]
   `(defrecord ~name ~(conj (vec fields) 'conn)
-     client/Client
+     jepsen.client/Client
      (open! [~'this ~'test ~'node]
        (assoc ~'this :conn (connect ~'node)))
 
