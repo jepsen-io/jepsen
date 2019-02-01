@@ -5,8 +5,17 @@
                                      [policies :as policies]
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
-            [dom-top.core :as dt])
+            [dom-top.core :as dt]
+            [wall.hack :as wh])
   (:import (java.net InetSocketAddress)
+           (com.datastax.driver.core Cluster
+                                     Cluster$Builder
+                                     HostDistance
+                                     NettyOptions
+                                     NettyUtil
+                                     PoolingOptions
+                                     ProtocolVersion
+                                     ThreadingOptions)
            (com.datastax.driver.core.policies RoundRobinPolicy
                                               WhiteListPolicy)
            (com.datastax.driver.core.exceptions DriverException
@@ -15,7 +24,60 @@
                                                 ReadTimeoutException
                                                 WriteTimeoutException
                                                 NoHostAvailableException
-                                                TransportException)))
+                                                TransportException)
+           (io.netty.channel.nio NioEventLoopGroup)
+           (java.util.concurrent LinkedBlockingQueue
+                                 ThreadPoolExecutor
+                                 TimeUnit)))
+
+(defn epoll-event-loop-group-constructor
+  "Why is this not public?"
+  []
+  (wh/field NettyUtil :EPOLL_EVENT_LOOP_GROUP_CONSTRUCTOR NettyUtil))
+
+(defn epoll-available?
+  "Annnd security policy prevents us from calling this ??!!? so uhhh, wall-hack
+  our way in there too, sigh"
+  []
+  ; Also this returns a boolean which is NOT the usual Boolean/FALSE, so we
+  ; coerce it to a normal one with (boolean)... don't even ask
+  (boolean (wh/method NettyUtil :isEpollAvailable [] nil)))
+
+(defn ^Cluster cluster
+  "Constructs a Cassandra client Cluster object with appropriate options.
+  Normally we'd let Cassaforte do this, but we need to reach into its guts to
+  pass some options, like ThreadingOptions, Cassaforte doesn't support."
+  [node]
+  (.. (Cluster/builder)
+    (withProtocolVersion (ProtocolVersion/fromInt 3))
+    (withPoolingOptions (doto (PoolingOptions.)
+                          (.setCoreConnectionsPerHost HostDistance/LOCAL 1)
+                          (.setMaxConnectionsPerHost  HostDistance/LOCAL 1)))
+    (addContactPoint node)
+    (withRetryPolicy (policies/retry-policy :no-retry-on-client-timeout))
+    (withReconnectionPolicy (policies/constant-reconnection-policy 1000))
+    (withLoadBalancingPolicy (WhiteListPolicy.
+                               (RoundRobinPolicy.)
+                               [(InetSocketAddress. node 9042)]))
+    (withThreadingOptions (proxy [ThreadingOptions] []
+                            (createExecutor [cluster-name]
+                              (info "Creating executor")
+                              (doto (ThreadPoolExecutor.
+                                      1 ; Core pool size
+                                      1 ; Max pool size
+                                      30 ; How long to keep threads alive
+                                      TimeUnit/SECONDS
+                                      (LinkedBlockingQueue.)
+                                      (.createThreadFactory
+                                        this cluster-name "worker"))
+                                (.allowCoreThreadTimeOut true)))))
+    (withNettyOptions (proxy [NettyOptions] []
+                        (eventLoopGroup [thread-factory]
+                          (if (epoll-available?)
+                            (.newInstance (epoll-event-loop-group-constructor)
+                                          1 thread-factory)
+                            (NioEventLoopGroup. 1 thread-factory)))))
+    (build)))
 
 (defn connect
   "Opens a new client, with helpful defaults for YugaByte. Options are passed to
@@ -23,23 +85,11 @@
   ([node]
    (connect node {}))
   ([node opts]
-   (c/connect [node]
-              (merge
-                {:protocol-version          3
-                 :connections-per-host      1
-                 :max-connections-per-host  1
-
-                 ; We need to pin this client to one particular node.
-                 :load-balancing-policy
-                 (WhiteListPolicy. (RoundRobinPolicy.)
-                                   [(InetSocketAddress. node 9042)])
-
-                 :reconnection-policy
-                 (policies/constant-reconnection-policy 1000)
-
-                 :retry-policy
-                 (policies/retry-policy :no-retry-on-client-timeout)}
-                opts))))
+   (let [c (cluster node)]
+     (try (.connect c)
+          (catch DriverException e
+            (.close cluster)
+            (throw e))))))
 
 (defn ensure-keyspace!
   "Creates a keyspace using the given connection, if it doesn't already exist.
