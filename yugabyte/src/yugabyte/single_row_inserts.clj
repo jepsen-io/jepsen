@@ -42,16 +42,18 @@
                       (r/filter #(= :write (:f %)))
                       (r/map :value)
                       (into #{}))
-            fails (->> history
-                       (r/filter op/fail?)
-                       (r/filter #(= :write (:f %)))
-                       (r/map :value)
-                       (into #{}))
             unsure (->> history
                         (r/filter op/info?)
                         (r/filter #(= :write (:f %)))
                         (r/map :value)
                         (into #{}))
+            fails (->> history
+                       (r/filter op/fail?)
+                       (r/filter #(= :write (:f %)))
+                       (r/map :value)
+                       (into #{}))
+            ; We need to exclude values which might be added by other attempts from fails.
+            fails (set/difference fails (set/union adds unsure))
             final-read-l (->> history
                               (r/filter op/ok?)
                               (r/filter #(= :read (:f %)))
@@ -60,6 +62,7 @@
 
         (info :final-read (pr-str final-read-l))
         (info :adds (pr-str adds))
+        (info :fails (pr-str fails))
 
         (if-not final-read-l
           {:valid? :unknown
@@ -71,7 +74,7 @@
                                            :when (> freq 1)]
                                        id))
 
-                ;;The OK set is every read value which we added successfully
+                ;; The OK set is every read value which we added successfully
                 ok          (set/intersection final-read adds)
 
                 ;; Unexpected records are those we *never* attempted.
