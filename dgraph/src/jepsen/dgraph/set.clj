@@ -4,7 +4,8 @@
   (:require [clojure.tools.logging :refer [info]]
             [dom-top.core :refer [with-retry]]
             [knossos.op :as op]
-            [jepsen.dgraph [client :as c]]
+            [jepsen.dgraph [client :as c]
+                           [trace :as t]]
             [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]]))
@@ -68,11 +69,13 @@
   (invoke! [this test op]
     (c/with-conflict-as-fail op
       (case (:f op)
-        :add (let [inserted (c/with-txn [t conn]
+        :add (t/with-trace "set-add"
+              (let [inserted (c/with-txn [t conn]
+                              (t/attribute! "value" (str (:value op)))
                               (c/mutate! t {:uid @uid
                                             :value (:value op)}))]
-               (swap! written conj (:value op))
-               (assoc op :type :ok, :uid @uid))
+                (swap! written conj (:value op))
+                (assoc op :type :ok, :uid @uid)))
 
         :read (let [r (c/with-txn [t conn]
                         (let [found (->> (c/query t
@@ -83,22 +86,6 @@
                                          (mapcat :value)
                                          (remove #{-1}) ; Our sentinel
                                          (into (sorted-set)))]
-                          ; We need to force a conflict on every one tuple we
-                          ; supposedly wrote, to ensure that we're not failing
-                          ; to read because some other txn is still ongoing.
-                          (doseq [w @written]
-                            (info "Forcing conflict by"
-                                  (if (found w) "inserting" "deleting")
-                                  w)
-                            ; We're going to write back exactly what we read,
-                            ; so our read doesn't change anything
-                            (if (found w)
-                              ; We read this element
-                              (c/mutate! t {:uid   @uid
-                                            :value w})
-                              ; We failed to read this element; to force a
-                              ; conflict, we delete it.
-                              (c/delete! t {:uid @uid, :value w})))
                           found))]
                 (deliver successfully-read? true)
                 (assoc op :type :ok, :value r)))))
