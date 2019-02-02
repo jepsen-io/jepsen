@@ -9,6 +9,7 @@
                  [clojurewerkz/cassaforte "3.0.0-alpha2-yb-SNAPSHOT"]
                  [org.slf4j/jcl-over-slf4j "1.7.25"]
                  [org.slf4j/jul-to-slf4j "1.7.25"]
+                 [clj-wallhack "1.0.1"]
                 ]
   :main yugabyte.runner)
 ;  :aot [yugabyte.runner

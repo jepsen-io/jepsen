@@ -19,10 +19,10 @@
     (locking setup-lock
       (c/ensure-keyspace! conn keyspace test)
       (cql/use-keyspace conn keyspace)
-      (cql/create-table conn table
-                        (q/if-not-exists)
-                        (q/column-definitions {:value :int
-                                               :primary-key [:value]}))))
+      (c/create-table conn table
+                      (q/if-not-exists)
+                      (q/column-definitions {:value :int
+                                             :primary-key [:value]}))))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -55,8 +55,9 @@
     (merge opts
            {:name "set"
             :client (CQLSetClient. nil)
-            :client-generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
-                                                (reads))
-                                   (gen/stagger 1/100))
+            :client-generator (->> ;(gen/reserve (/ (:concurrency opts) 2) (adds)
+                                   ; (reads))
+                                   (gen/mix [(adds) (reads)])
+                                   (gen/stagger 1/10))
             :checker (checker/compose {:perf (checker/perf)
                                        :set (checker/set-full)})})))

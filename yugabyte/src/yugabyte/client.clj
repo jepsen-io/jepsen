@@ -15,6 +15,7 @@
                                      NettyUtil
                                      PoolingOptions
                                      ProtocolVersion
+                                     SocketOptions
                                      ThreadingOptions)
            (com.datastax.driver.core.policies RoundRobinPolicy
                                               WhiteListPolicy)
@@ -56,12 +57,14 @@
     (addContactPoint node)
     (withRetryPolicy (policies/retry-policy :no-retry-on-client-timeout))
     (withReconnectionPolicy (policies/constant-reconnection-policy 1000))
+    (withSocketOptions (.. (SocketOptions.)
+                         (setConnectTimeoutMillis 1000)
+                         (setReadTimeoutMillis 2000)))
     (withLoadBalancingPolicy (WhiteListPolicy.
                                (RoundRobinPolicy.)
                                [(InetSocketAddress. node 9042)]))
     (withThreadingOptions (proxy [ThreadingOptions] []
                             (createExecutor [cluster-name]
-                              (info "Creating executor")
                               (doto (ThreadPoolExecutor.
                                       1 ; Core pool size
                                       1 ; Max pool size
@@ -88,8 +91,22 @@
    (let [c (cluster node)]
      (try (.connect c)
           (catch DriverException e
-            (.close cluster)
+            (.close c)
             (throw e))))))
+
+(defn execute-with-timeout!
+  "Executes a statement on a session, but applies a custom read timeout, in
+  milliseconds, for it."
+  [session timeout statement]
+  (let [statement (.. (c/build-statement statement)
+                      (setReadTimeoutMillis timeout))]
+    (c/execute session statement)))
+
+(defn create-table
+  "Table creation is fairly slow in YB, so we need to run it with a custom
+  timeout. Works just like cql/create-table."
+  [conn & table-args]
+  (execute-with-timeout! conn 10000 (apply q/create-table table-args)))
 
 (defn ensure-keyspace!
   "Creates a keyspace using the given connection, if it doesn't already exist.
@@ -196,9 +213,13 @@
                                    {:replication
                                     {"class"              "SimpleStrategy"
                                      "replication_factor" 3}}))
-            (c/execute conn (str "CREATE TABLE IF NOT EXISTS jepsen_setup.waiting"
-                                 " (id INT PRIMARY KEY, balance BIGINT)"
-                                 " WITH transactions = { 'enabled': true }"))
+
+            (execute-with-timeout!
+              conn 10000
+              (str "CREATE TABLE IF NOT EXISTS jepsen_setup.waiting"
+                   " (id INT PRIMARY KEY, balance BIGINT)"
+                   " WITH transactions = { 'enabled': true }"))
+
             (cql/insert-with-ks conn "jepsen_setup" "waiting"
                                 {:id 0, :balance 5}))
           (info "Cluster ready")
