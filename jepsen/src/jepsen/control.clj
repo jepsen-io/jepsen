@@ -265,10 +265,22 @@
   `(binding [*trace* true]
      ~@body))
 
+(defn check-name
+  "Ensures a given hostname is string. Warns user if legacy behavior passes in a
+  keyword host.
+  TODO This can be removed when tests no tests generate keyword hosts. CLI already
+       refuses keyword hostnames."
+  [host]
+  (when (keyword? host)
+    (warn (str "DEPRECATED: Host "
+               host
+               " is a keyword; please provide node hostnames as strings. Support for keyword hosts will be removed in future versions of jepsen.")))
+  (name host))
+
 (defn clj-ssh-session
   "Opens a raw session to the given host."
   [host]
-  (let [host  (name host)
+  (let [host  (check-name host)
         agent (ssh/ssh-agent {})
         _     (when *private-key-path*
                 (ssh/add-identity agent
