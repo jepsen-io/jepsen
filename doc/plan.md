@@ -41,8 +41,6 @@
 
 - Deprecate model argument in checker; these should be arguments to checker
   constructors instead.
-- Deprecate keyword hosts; this was a silly idea and the minor improvement
-  in readability isn't really worth it.
 - Clean up checker/counter: remove failed ops in an initial pre-pass, rather
   than adding them then undoing those adds.
 - Macro like (synchronize-nodes test), which enforces a synchronization
