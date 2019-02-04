@@ -383,8 +383,6 @@
             m)]
     m))
 
-; TODO: assert every value is a set
-
 (defn set-full
   "A more rigorous set analysis. We allow :add operations which add a single
   element, and :reads which return all elements present at that time. For each
@@ -464,43 +462,58 @@
     (check [this test model history opts]
       ; Build up a map of elements to element states. We track the current set
       ; of ongoing reads as well, so we can map completions back to
-      ; invocations.
-      (->> history
-           (r/filter (comp number? :process)) ; Ignore the nemesis
-           (reduce (fn red [[elements reads] op]
-                     (let [v (:value op)
-                           p (:process op)]
-                       (condp = (:f op)
-                         :add
-                         (if (= :invoke (:type op))
-                           ; Track a new element
-                           [(assoc elements v (set-full-element op))
-                            reads]
-                           ; Oh good, it completed
-                           [(update elements v set-full-add op) reads])
+      ; invocations. Finally we track a map of duplicates: elements to maximum
+      ; multiplicities for that element in any given read.
+      (let [[elements reads dups]
+            (->> history
+                 (r/filter (comp number? :process)) ; Ignore the nemesis
+                 (reduce (fn red [[elements reads dups] op]
+                           (let [v (:value op)
+                                 p (:process op)]
+                             (condp = (:f op)
+                               :add
+                               (if (= :invoke (:type op))
+                                 ; Track a new element
+                                 [(assoc elements v (set-full-element op))
+                                  reads dups]
+                                 ; Oh good, it completed
+                                 [(update elements v set-full-add op)
+                                  reads dups])
 
-                         :read
-                         (condp = (:type op)
-                           :invoke [elements (assoc reads p op)]
-                           :fail   [elements (dissoc reads p op)]
-                           :info   [elements reads]
-                           :ok
-                           (do (assert (set? v))
-                               ; We read stuff! Update every element
-                               (let [inv (get reads (:process op))]
-                                 [(map-kv (fn update-all [[element state]]
-                                            [element
-                                             (if (contains? v element)
-                                               (set-full-read-present
-                                                 state inv op)
-                                               (set-full-read-absent
-                                                 state inv op))])
-                                          elements)
-                                  reads]))))))
-                   [{} {}])
-           first
-           vals
-           (set-full-results checker-opts))))))
+                               :read
+                               (condp = (:type op)
+                                 :invoke [elements (assoc reads p op) dups]
+                                 :fail   [elements (dissoc reads p op) dups]
+                                 :info   [elements reads dups]
+                                 :ok
+                                 (do ; We read stuff! Update every element
+                                     (let [inv (get reads (:process op))
+                                           ; Find duplicates
+                                           dups' (->> (frequencies v)
+                                                      (reduce (fn [m [k v]]
+                                                                (if (< v 1)
+                                                                  (assoc m k v)
+                                                                  m))
+                                                              (sorted-map))
+                                                      (merge-with max dups))
+                                           v   (into (sorted-set) v)]
+                                       ; Process visibility of all elements
+                                       [(map-kv (fn update-all [[element state]]
+                                                  [element
+                                                   (if (contains? v element)
+                                                     (set-full-read-present
+                                                       state inv op)
+                                                     (set-full-read-absent
+                                                       state inv op))])
+                                                elements)
+                                        reads
+                                        dups']))))))
+                         [{} {} (sorted-map)]))
+            set-results (set-full-results checker-opts (vals elements))]
+        (assoc set-results
+               :valid?           (and (empty? dups) (:valid? set-results))
+               :duplicated-count (count dups)
+               :duplicated       dups))))))
 
 (defn expand-queue-drain-ops
   "Takes a history. Looks for :drain operations with their value being a
