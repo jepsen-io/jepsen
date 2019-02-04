@@ -282,4 +282,4 @@ Open up a new terminal window, and leave the web server running there. That way
 we can see the results of our tests without having to start and stop it
 repeatedly.
 
-With this groundwork in place, we'll write the code to [set up and tear down the database](02-db.md)
+With this groundwork in place, we'll write the code to [set up and tear down the database](02-db.md).
