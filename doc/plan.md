@@ -25,6 +25,9 @@
 
 - Use utf-8 for transferring files; I think we're doing latin-1 or ascii or
   8859-1 or something now.
+- Add search for tests
+- Add sorting
+- Add filtering
 
 ## Performance
 
