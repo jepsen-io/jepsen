@@ -240,6 +240,19 @@
 (def ce-tserver-logfile (str ce-tserver-log-dir "/stdout"))
 (def ce-tserver-pidfile (str dir "/tserver.pid"))
 
+(def ce-shared-opts
+  "Shared options for both master and tserver"
+  [; Data files!
+   :--fs_data_dirs         ce-data-dir
+   ; Limit memory to 4GB
+   :--memory_limit_hard_bytes 4294967296
+   ; Fewer shards to improve perf
+   :--yb_num_shards_per_tserver 4
+   ; Seconds before declaring an unavailable node dead and initiating a raft
+   ; membership change
+   ;:--follower_unavailable_considered_failed_sec 10
+   ])
+
 (defn community-edition
   "Constructs a DB for installing and running the community edition"
   []
@@ -277,14 +290,9 @@
                :pidfile ce-master-pidfile
                :chdir   dir}
               ce-master-bin
+              ce-shared-opts
               :--master_addresses   (master-addresses test)
-              :--replication_factor (:replication-factor test)
-              :--fs_data_dirs       ce-data-dir
-              ; Limit memory to 4GB/node
-              :--memory_limit_hard_bytes 4294967296
-              ; Fewer shards to improve perf
-              :--yb_num_shards_per_tserver 4)))
-      ;(Thread/sleep 10000)) ; sigh
+              :--replication_factor (:replication-factor test))))
 
     (start-tserver! [db test]
       (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
@@ -293,10 +301,22 @@
                :pidfile ce-tserver-pidfile
                :chdir   dir}
               ce-tserver-bin
+              ce-shared-opts
               :--tserver_master_addrs (master-addresses test)
-              :--fs_data_dirs         ce-data-dir
-              ; Limit memory to 4GB
-              :--memory_limit_hard_bytes 4294967296)))
+              ; Tracing
+              :--enable_tracing
+              :--rpc_slow_query_threshold_ms 1000
+              :--load_balancer_max_concurrent_adds 10
+              ; Heartbeats
+              ;:--heartbeat_interval_ms 100
+              ;:--heartbeat_rpc_timeout_ms 1500
+              ;:--retryable_rpc_single_call_timeout_ms 2000
+              ;:--rpc_connection_timeout_ms 1500
+              ;:--leader_failure_exp_backoff_max_delta_ms 1000
+              ;:--leader_failure_max_missed_heartbeat_period 3
+              ;:--consensus_rpc_timeout_ms 300
+              ;:--client_read_write_timeout_ms 6000
+              )))
 
     (stop-master! [db]
       (c/su (cu/stop-daemon! ce-master-bin ce-master-pidfile)))

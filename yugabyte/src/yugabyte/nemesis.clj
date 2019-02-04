@@ -8,8 +8,8 @@
             [slingshot.slingshot :refer [try+]]
             [yugabyte.auto :as auto]))
 
-(def nemesis-delay 5) ; Delay between nemesis cycles in seconds.
-(def nemesis-duration 60) ; Duration of single nemesis cycle in secods.
+(def nemesis-delay    50) ; Delay between nemesis cycles in seconds.
+(def nemesis-duration 50) ; Duration of single nemesis cycle in secods.
 
 (defn kill!
   [node process opts]
@@ -57,15 +57,33 @@
   )
 )
 
+(defn strobe
+  "A rapid sequence of starts and stops."
+  []
+  (->> (range 3)
+       (mapcat (fn [i]
+                 [(gen/sleep 20)
+                  {:type :info, :f :start}
+                  (gen/sleep 20)
+                  {:type :info, :f :stop}]))))
+
+(defn strobe-rest
+  "A rapid sequence of starts and stops followed by a long pause"
+  []
+  (concat (strobe)
+          [(gen/sleep 40)]))
+
 (defn gen-start-stop
   "Generates start/stop generic nemesis events sequences"
   []
-  (gen/seq
-   (cycle
-    [(gen/sleep nemesis-delay)
-     {:type :info :f :start}
-     (gen/sleep nemesis-duration)
-     {:type :info :f :stop}])))
+  (gen/seq (cycle (strobe-rest))))
+
+;  (gen/seq
+;   (cycle
+;    [(gen/sleep nemesis-delay)
+;     {:type :info :f :start}
+;     (gen/sleep nemesis-duration)
+;     {:type :info :f :stop}])))
 
 (defn start-stop
   "Return start-stop nemesis map config"
