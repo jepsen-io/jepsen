@@ -5,6 +5,7 @@
                                      [policies :as policies]
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
+			      [clojure.pprint :refer [pprint]]
             [dom-top.core :as dt]
             [wall.hack :as wh])
   (:import (java.net InetSocketAddress)
@@ -160,11 +161,24 @@
            (throw e#))))))
 
 (defmacro defclient
-  "Helper for defining CQL clients. Takes a class name, a vector of state
-	fields (as for defrecord), followed by protocols and functions, like
-	defrecord. Appends a field, `conn`, to the state fields, which stores the
-  cassandra client connection, provides default open! and close! functions, and
-  passes the whole state to defrecord.
+  "Helper for defining CQL clients. Takes a class name, a string keyspace, a
+  vector of state fields (as for defrecord), followed by protocols and
+  functions, like defrecord. Appends two fields, `conn`, and `keyspace-created`
+  to the state fields, which stores the cassandra client connection, provides
+  default open! and close! functions, and passes the whole state to defrecord.
+
+  Defines a constructor without conn or keyspace-created fields. Args are 1:1
+  with your state fields.
+
+    (->MyClient)
+
+  Automatically creates keyspace during setup!, and ensures that keyspace is
+  used on every conn thereafter. We do this because CQL assumes clients set the
+  keyspace once, and we don't want to do multiple network trips to set the
+  keyspace for every operation.
+
+  Calls to setup! take a lock to prevent concurrent creation of tables, which
+  hits a bug in Yugabyte.
 
   Example:
 
@@ -176,16 +190,47 @@
         ...)
 
 			(teardown! [this test]))"
-  [name fields & exprs]
-  `(defrecord ~name ~(conj (vec fields) 'conn)
-     jepsen.client/Client
-     (open! [~'this ~'test ~'node]
-       (assoc ~'this :conn (connect ~'node)))
+  [name keyspace fields & exprs]
+  (let [[interfaces methods opts] (#'clojure.core/parse-opts+specs
+                                    (cons 'jepsen.client/Client exprs))
+        ; We're going to rewrite the setup! fn to lock, create the keyspace,
+        ; and use it before executing user code.
+        setup-code (->> methods
+                        (filter (comp #{'setup!} first))
+                        first
+                        (drop 2))
 
-     (close! [~'this ~'test]
-       (c/disconnect! ~'conn))
+        ; Strip the original setup from the interface list. This is a hack, we
+        ; should handle multiple setup! fns from diff protocols correctly.
+        exprs (->> (remove (fn [expr]
+                             (and (list? expr)
+                                  (= 'setup! (first expr))))
+                           exprs))]
+		`(do (defrecord ~name ~(conj (vec fields) 'conn 'keyspace-created)
+					 jepsen.client/Client
+					 (open! [~'this ~'test ~'node]
+						 (let [conn# (connect ~'node)]
+							 (when (realized? ~'keyspace-created)
+                 (cql/use-keyspace conn# ~keyspace))
+							 (assoc ~'this :conn conn#)))
 
-     ~@exprs))
+           (setup! [~'this ~'test]
+             (locking ~'keyspace-created
+               (ensure-keyspace! ~'conn ~keyspace ~'test)
+               (deliver ~'keyspace-created true)
+               (cql/use-keyspace ~'conn ~keyspace)
+               ~@setup-code))
+
+					 (close! [~'this ~'test]
+						 (c/disconnect! ~'conn))
+
+					 ~@exprs)
+
+				 ; Constructor
+				 (defn ~(symbol (str "->" name))
+					 ~(vec fields)
+					 ; Pass user fields, conn, keyspace-created
+					 (new ~name ~@fields nil (promise))))))
 
 (defn await-setup
   "Used at the start of a test. Takes a node, opens a connection to it, and

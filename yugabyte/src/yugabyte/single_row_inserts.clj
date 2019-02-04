@@ -17,7 +17,6 @@
                       [client :as c]
                       [core :refer :all]]))
 
-(def setup-lock (Object.))
 (def keyspace "jepsen")
 
 (defn mk-pair
@@ -106,20 +105,14 @@
 
 (def table-name "kv_pairs")
 
-(c/defclient CQLRowInsertClient []
+(c/defclient CQLRowInsertClient keyspace []
   (setup! [this test]
-    (locking setup-lock
-      (cql/create-keyspace conn keyspace
-                           (if-not-exists)
-                           (with {:replication
-                                  {"class" "SimpleStrategy"
-                                   "replication_factor" 3}}))
-      (cql/use-keyspace conn keyspace)
-      (cql/create-table conn "kv_pairs"
-                        (if-not-exists)
-                        (column-definitions {:id          :int
-                                             :val         :int
-                                             :primary-key [:id]}))))
+    (cql/use-keyspace conn keyspace)
+    (cql/create-table conn "kv_pairs"
+                      (if-not-exists)
+                      (column-definitions {:id          :int
+                                           :val         :int
+                                           :primary-key [:id]})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -142,7 +135,7 @@
   (yugabyte-test
     (merge opts
          {:name "single-row-inserts"
-          :client (CQLRowInsertClient. nil)
+          :client (->CQLRowInsertClient)
           :client-generator (->> w
                                  (gen/stagger 1/10))
           :client-final-generator (gen/once r)

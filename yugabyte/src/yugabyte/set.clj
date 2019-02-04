@@ -14,27 +14,28 @@
 (def keyspace "jepsen")
 (def table "elements")
 
-(c/defclient CQLSetClient []
+(c/defclient CQLSetClient keyspace []
   (setup! [this test]
-    (locking setup-lock
-      (c/ensure-keyspace! conn keyspace test)
-      (cql/use-keyspace conn keyspace)
-      (c/create-table conn table
-                      (q/if-not-exists)
-                      (q/column-definitions {:value :int
-                                             :primary-key [:value]}))))
+          (c/create-table conn table
+                          (q/if-not-exists)
+                          (q/column-definitions {:val :int
+                                                 :count :counter
+                                                 :primary-key [:val]})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
       (case (:f op)
-        :add (do (cql/insert-with-ks conn keyspace table
-                                     {:value (:value op)})
+        :add (do (cql/update conn table
+                             {:count (q/increment)}
+                             (q/where {:val (:value op)}))
                  (assoc op :type :ok))
 
         :read (->> (cql/select-with-ks conn keyspace table)
-                   (map :value)
+                   (mapcat (fn [row]
+                             (info row)
+                             (repeat (:count row) (:val row))))
                    ; sort
-                   (into (sorted-set))
+                   (sort)
                    (assoc op :type :ok, :value)))))
 
   (teardown! [this test]))
@@ -54,7 +55,7 @@
   (yugabyte-test
     (merge opts
            {:name "set"
-            :client (CQLSetClient. nil)
+            :client (->CQLSetClient)
             :client-generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
                                                 (reads))
                                    (gen/stagger 1/10))

@@ -12,26 +12,18 @@
                       [client :as c]
                       [core :refer :all]]))
 
-(def setup-lock (Object.))
+(def table-name "counter")
 (def keyspace "jepsen")
-(def table-name "counters")
 
-(c/defclient CQLCounterClient []
+(c/defclient CQLCounterClient keyspace []
   (setup! [this test]
-    (locking setup-lock
-      (cql/create-keyspace conn keyspace
-                           (if-not-exists)
-                           (with {:replication
-                                  {"class"              "SimpleStrategy"
-                                   "replication_factor" 3}}))
-      (cql/use-keyspace conn keyspace)
-      (cql/create-table conn table-name
-                        (if-not-exists)
-                        (column-definitions {:id :int
-                                             :count :counter
-                                             :primary-key [:id]}))
-      (cql/update conn table-name {:count (increment-by 0)}
-                  (where [[= :id 0]]))))
+    (cql/create-table conn table-name
+                      (if-not-exists)
+                      (column-definitions {:id :int
+                                           :count :counter
+                                           :primary-key [:id]}))
+    (cql/update conn table-name {:count (increment-by 0)}
+                (where [[= :id 0]])))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -58,7 +50,7 @@
   (yugabyte-test
     (merge opts
            {:name             "cql-counter-inc"
-            :client           (CQLCounterClient. nil)
+            :client           (->CQLCounterClient)
             :client-generator (->> (repeat 100 add)
                                    (cons r)
                                    gen/mix
@@ -74,7 +66,7 @@
   (yugabyte-test
     (merge opts
            {:name             "cql-counter-inc-dec"
-            :client           (CQLCounterClient. nil)
+            :client           (->CQLCounterClient)
             :client-generator (->> (take 100 (cycle [add sub]))
                                    (cons r)
                                    gen/mix
