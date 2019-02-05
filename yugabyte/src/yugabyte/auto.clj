@@ -25,6 +25,7 @@
 (def master-log-dir  (str dir "/master/logs"))
 (def tserver-log-dir (str dir "/tserver/logs"))
 (def tserver-conf    (str dir "/tserver/conf/server.conf"))
+(def installed-url-file (str dir "/installed-url"))
 
 (def max-bump-time-ops-per-test
    "Upper bound on number of bump time ops per test, needed to estimate max
@@ -241,6 +242,20 @@
       ; Probably not installed
       )))
 
+(defn get-installed-url
+      "Returns URL from which YugaByte was installed on node"
+      []
+      (try
+        (c/exec :cat installed-url-file)
+        (catch RuntimeException e
+          ; Probably not installed
+          )))
+
+(defn get-ce-url
+  "Returns URL to community edition tarball for specific released version"
+  [version]
+  (str "https://downloads.yugabyte.com/yugabyte-ce-" version "-linux.tar.gz"))
+
 (defn log-files-without-symlinks
   "Takes a directory, and returns a list of logfiles in that direcory, skipping
   the symlinks which end in .INFO, .WARNING, etc."
@@ -284,25 +299,22 @@
       (c/cd dir
             ; Post-install takes forever, so let's try and skip this on
             ; subsequent runs
-            (when-not (and (= (:version test)
-                              (:version (version)))
-                           (cu/exists? :setup-done))
-              (info "Replacing version " (:version (version)) " with "
-                    (:version test))
+            (let [url (or (:url test) (get-ce-url (:version test)))
+                  installed-url (get-installed-url)
+                  ]
+              (when-not (= url installed-url)
+                (info "Replacing version" installed-url "with" url)
               (install-python! (:os test))
               (assert (re-find #"Python 2\.7"
                                (c/exec :python :--version (c/lit "2>&1"))))
 
               (info "Installing tarball")
-              (cu/install-archive! (str "https://downloads.yugabyte.com/yugabyte-ce-"
-                                        (:version test)
-                                        "-linux.tar.gz")
-                                   dir)
+                (cu/install-archive! url dir)
               (c/su (info "Post-install script")
                     (c/exec "./bin/post_install.sh")
 
-                    (c/exec :touch :setup-done)
-                    (info "Done with setup")))))
+                      (c/exec :echo url (c/lit (str ">>" installed-url-file)))
+                      (info "Done with setup"))))))
 
 
     (start-master! [db test]
