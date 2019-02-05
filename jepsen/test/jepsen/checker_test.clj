@@ -10,24 +10,24 @@
 
 (deftest queue-test
   (testing "empty"
-    (is (:valid? (check (queue) nil nil [] {}))))
+    (is (:valid? (check (queue nil) nil [] {}))))
 
   (testing "Possible enqueue but no dequeue"
-    (is (:valid? (check (queue) nil (model/unordered-queue)
+    (is (:valid? (check (queue (model/unordered-queue)) nil
                         [(invoke-op 1 :enqueue 1)] {}))))
 
   (testing "Definite enqueue but no dequeue"
-    (is (:valid? (check (queue) nil (model/unordered-queue)
+    (is (:valid? (check (queue (model/unordered-queue)) nil
                         [(ok-op 1 :enqueue 1)] {}))))
 
   (testing "concurrent enqueue/dequeue"
-    (is (:valid? (check (queue) nil (model/unordered-queue)
+    (is (:valid? (check (queue (model/unordered-queue)) nil
                         [(invoke-op 2 :dequeue nil)
                          (invoke-op 1 :enqueue 1)
                          (ok-op     2 :dequeue 1)] {}))))
 
   (testing "dequeue but no enqueue"
-    (is (not (:valid? (check (queue) nil (model/unordered-queue)
+    (is (not (:valid? (check (queue (model/unordered-queue)) nil
                              [(ok-op 1 :dequeue 1)] {}))))))
 
 (deftest total-queue-test
@@ -387,5 +387,13 @@
                ; which an operation can begin and always observe 0.
                ;
                ; t 0  1   2  3  4    5   6  7  8    9
-               (c [a0 a0' a1 r2 r2'1 a1' r2 r3 r3'1 r2'0]))))
-      )))
+               (c [a0 a0' a1 r2 r2'1 a1' r2 r3 r3'1 r2'0])))))))
+
+;; DEPRECTED Ensure we have backwards compatibility while deprecating the
+;            5 arity check method
+(deftest check-arity-test []
+  (testing "Can satisfy Checker/check with or without model arg"
+    (let [c-4 (noop nil)
+          c-5 (noop)]
+      (is (nil? (check c-4 nil nil nil)))
+      (is (nil? (check c-5 nil nil nil nil))))))

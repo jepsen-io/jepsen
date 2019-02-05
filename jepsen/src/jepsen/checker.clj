@@ -46,8 +46,11 @@
           true
           valids))
 
+;; DEPRECATED Checkers should be implemented without model. Model should be an
+;;            arg to the constructor function.
 (defprotocol Checker
   (check [checker test model history opts]
+         [checker test history opts]
          "Verify the history is correct. Returns a map like
 
          {:valid? true}
@@ -62,6 +65,15 @@
 
          :subdirectory - A directory within this test's store directory where
                          output files should be written. Defaults to nil."))
+
+(defn noop
+  "Creates a an empty non-functional checker. 0 arg arity is deprecated."
+  ([]
+   (reify Checker
+     (check [_ _ model _ _])))
+  ([model]
+   (reify Checker
+     (check [_ _ _ _]))))
 
 (defn check-safe
   "Like check, but wraps exceptions up and returns them as a map like
@@ -140,27 +152,34 @@
                   :final-paths (take 10 (:final-paths a))
                   :configs     (take 10 (:configs a))))))))
 
+(defn check-queue [model history]
+  (let [final (->> history
+                   (r/filter (fn select [op]
+                               (condp = (:f op)
+                                 :enqueue (op/invoke? op)
+                                 :dequeue (op/ok? op)
+                                 false)))
+                   (reduce model/step model))]
+    (if (model/inconsistent? final)
+      {:valid? false
+       :error  (:msg final)}
+      {:valid?      true
+       :final-queue final})))
+
 (defn queue
   "Every dequeue must come from somewhere. Validates queue operations by
   assuming every non-failing enqueue succeeded, and only OK dequeues succeeded,
   then reducing the model with that history. Every subhistory of every queue
   should obey this property. Should probably be used with an unordered queue
   model, because we don't look for alternate orderings. O(n)."
-  []
-  (reify Checker
-    (check [this test model history opts]
-      (let [final (->> history
-                       (r/filter (fn select [op]
-                                   (condp = (:f op)
-                                     :enqueue (op/invoke? op)
-                                     :dequeue (op/ok? op)
-                                     false)))
-                                 (reduce model/step model))]
-        (if (model/inconsistent? final)
-          {:valid? false
-           :error  (:msg final)}
-          {:valid?      true
-           :final-queue final})))))
+  ([]
+   (reify Checker
+     (check [this test model history opts]
+       (check-queue model history))))
+  ([model]
+   (reify Checker
+     (check [this test history opts]
+       (check-queue model history)))))
 
 (defn set
   "Given a set of :add operations followed by a final :read, verifies that
