@@ -21,6 +21,7 @@
            (com.datastax.driver.core.policies RoundRobinPolicy
                                               WhiteListPolicy)
            (com.datastax.driver.core.exceptions DriverException
+                                                InvalidQueryException
                                                 UnavailableException
                                                 OperationTimedOutException
                                                 ReadTimeoutException
@@ -103,11 +104,48 @@
                       (setReadTimeoutMillis timeout))]
     (c/execute session statement)))
 
+(defn statement->str
+  "Converts a statement to a string so we can do string munging on it."
+  [s]
+  (if (string? s)
+    s
+    (-> s
+        ;(.setForceNoValues true)
+        .getQueryString)))
+
+(defn with-transactions
+  "Takes a CQL create-table statement, converts it to a string, and adds \"WITH
+  transctions = { 'enabled' : true }\". Sort of a hack, the Cassandra client
+  doesn't know about this syntax, I think."
+  [s]
+  (str (statement->str s) " WITH transactions = { 'enabled' : true }"))
+
 (defn create-table
   "Table creation is fairly slow in YB, so we need to run it with a custom
   timeout. Works just like cql/create-table."
   [conn & table-args]
   (execute-with-timeout! conn 10000 (apply q/create-table table-args)))
+
+(defn create-index
+  "Index creation is also slow in YB, so we run it with a custom timeout. Works
+  just like cql/create-index.
+
+  Also you, like, literally *can't* tell Cassaforte (or maybe Cassandra's
+  client or CQL or YB?) to create an index if it doesn't exist, so we're
+  swallowing the duplicate table execeptions here"
+  [conn & index-args]
+  (try (execute-with-timeout! conn 10000 (apply q/create-index index-args))
+       (catch InvalidQueryException e
+         (if (re-find #"Target index already exists" (.getMessage e))
+           :already-exists
+           (throw e)))))
+
+(defn create-transactional-table
+  "Like create-table, but enables transactions."
+  [conn & table-args]
+  (execute-with-timeout! conn 30000
+                         (with-transactions
+                           (apply q/create-table table-args))))
 
 (defn ensure-keyspace!
   "Creates a keyspace using the given connection, if it doesn't already exist.

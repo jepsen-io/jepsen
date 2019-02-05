@@ -10,7 +10,6 @@
             [yugabyte [client :as c]
                       [core :refer [yugabyte-test]]]))
 
-(def setup-lock (Object.))
 (def keyspace "jepsen")
 (def table "elements")
 
@@ -32,11 +31,41 @@
 
         :read (->> (cql/select-with-ks conn keyspace table)
                    (mapcat (fn [row]
-                             (info row)
                              (repeat (:count row) (:val row))))
-                   ; sort
-                   (sort)
+                   sort
                    (assoc op :type :ok, :value)))))
+
+  (teardown! [this test]))
+
+(def group-count
+  "Number of distinct groups for indexing"
+  8)
+
+(c/defclient CQLSetIndexClient keyspace []
+  (setup! [this test]
+          (c/create-transactional-table conn table
+                                        (q/if-not-exists)
+                                        (q/column-definitions
+                                          {:val         :int
+                                           :grp         :int
+                                           :primary-key [:val]}))
+          (c/create-index conn "elements_by_group"
+                            (q/on-table table)
+                            (q/and-column :grp)))
+
+  (invoke! [this test op]
+    (c/with-errors op #{:read}
+      (case (:f op)
+        :add (do (cql/update conn table
+                             {:grp (rand-int group-count)}
+                             (q/where {:val (:value op)}))
+                 (assoc op :type :ok))
+
+         :read (->> (cql/select conn table
+                               (q/where [[:in :grp (range group-count)]]))
+                    (map :val)
+                    sort
+                    (assoc op :type :ok, :value)))))
 
   (teardown! [this test]))
 
@@ -61,3 +90,8 @@
                                    (gen/stagger 1/10))
             :checker (checker/compose {:perf (checker/perf)
                                        :set (checker/set-full)})})))
+
+(defn index-test
+  [opts]
+  (assoc (test opts)
+         :client (->CQLSetIndexClient)))

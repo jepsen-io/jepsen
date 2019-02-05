@@ -21,7 +21,8 @@
    "counter-inc-dec"    yugabyte.counter/test-inc-dec
    "bank"               yugabyte.bank/test
    "bank-multitable"    yugabyte.bank/multitable-test
-   "set"                yugabyte.set/test})
+   "set"                set/test
+   "set-index"          set/index-test})
 
 (def opt-spec
   "Additional command line options"
