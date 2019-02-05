@@ -118,3 +118,12 @@ Nemeses:
 - `medium-skew` - clock skews up to 250 ms.
 - `large-skew` - clock skews up to 500 ms.
 - `xlarge-skew` - clock skews up to 1000 ms.
+
+## Examples
+
+To demonstrate a rare case of lost inserts (this might take several runs):
+
+```
+git checkout 5804dd00964f72184c4ae5c62c5630adc92fe980
+lein run test -o debian --version 1.1.10.0 --test set --nemesis partition-random-halves --time-limit 500 --concurrency 6n --test-count 10
+```

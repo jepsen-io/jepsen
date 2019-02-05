@@ -15,7 +15,6 @@
                       [auto :as auto]])
   (:import (knossos.model Model)))
 
-(def setup-lock (Object.))
 (def table-name "multi_key_acid")
 (def keyspace "jepsen")
 
@@ -54,23 +53,16 @@
   [values]
   (map->MultiRegister values))
 
-(c/defclient CQLMultiKey []
+(c/defclient CQLMultiKey keyspace []
   (setup! [this test]
-    (locking setup-lock
-      (cql/create-keyspace conn keyspace
-                           (if-not-exists)
-                           (with
-                             {:replication
-                              {"class"              "SimpleStrategy"
-                               "replication_factor" 3}}))
-      (cassandra/execute
-        conn (str "CREATE TABLE IF NOT EXISTS "
-                  keyspace "." table-name
-                  ; ik is an independent-key, so we can segment the test into
-                  ; independent groups. group is a reserved keyword. :(
-                  " (id INT, ik INT, val INT,"
-                  " PRIMARY KEY (id, ik)"
-                  ") WITH transactions = { 'enabled' : true }"))))
+    (cassandra/execute
+      conn (str "CREATE TABLE IF NOT EXISTS "
+                keyspace "." table-name
+                ; ik is an independent-key, so we can segment the test into
+                ; independent groups. group is a reserved keyword. :(
+                " (id INT, ik INT, val INT,"
+                " PRIMARY KEY (id, ik)"
+                ") WITH transactions = { 'enabled' : true }")))
 
   (invoke! [this test op]
     (assert (= (:f op) :txn))
@@ -119,7 +111,7 @@
    (let [n (count (:nodes opts))]
      (merge opts
             {:name             "multi-key-acid"
-             :client           (CQLMultiKey. nil)
+             :client           (->CQLMultiKey)
              :client-generator (independent/concurrent-generator
                                  (* 2 n)
                                  (range)

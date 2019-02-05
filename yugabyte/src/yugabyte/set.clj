@@ -10,32 +10,67 @@
             [yugabyte [client :as c]
                       [core :refer [yugabyte-test]]]))
 
-(def setup-lock (Object.))
 (def keyspace "jepsen")
 (def table "elements")
 
-(c/defclient CQLSetClient []
+(c/defclient CQLSetClient keyspace []
   (setup! [this test]
-    (locking setup-lock
-      (c/ensure-keyspace! conn keyspace test)
-      (cql/use-keyspace conn keyspace)
-      (c/create-table conn table
-                      (q/if-not-exists)
-                      (q/column-definitions {:value :int
-                                             :primary-key [:value]}))))
+          (c/create-table conn table
+                          (q/if-not-exists)
+                          (q/column-definitions {:val :int
+                                                 :count :counter
+                                                 :primary-key [:val]})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
       (case (:f op)
-        :add (do (cql/insert-with-ks conn keyspace table
-                                     {:value (:value op)})
+        :add (do (cql/update conn table
+                             {:count (q/increment)}
+                             (q/where {:val (:value op)}))
                  (assoc op :type :ok))
 
         :read (->> (cql/select-with-ks conn keyspace table)
-                   (map :value)
-                   ; sort
-                   (into (sorted-set))
+                   (mapcat (fn [row]
+                             (repeat (:count row) (:val row))))
+                   sort
                    (assoc op :type :ok, :value)))))
+
+  (teardown! [this test]))
+
+(def group-count
+  "Number of distinct groups for indexing"
+  8)
+
+(c/defclient CQLSetIndexClient keyspace []
+  (setup! [this test]
+          (c/create-transactional-table conn table
+                                        (q/if-not-exists)
+                                        (q/column-definitions
+                                          {:key         :int
+                                           :val         :int
+                                           :grp         :int
+                                           :primary-key [:key]}))
+          (c/create-index conn (str (c/statement->str
+                                      (q/create-index "elements_by_group"
+                                                      (q/on-table table)
+                                                      (q/and-column :grp)))
+                                    " INCLUDE (val)")))
+
+  (invoke! [this test op]
+    (c/with-errors op #{:read}
+      (case (:f op)
+        :add (do (cql/insert conn table
+                             {:key (:value op)
+                              :val (:value op)
+                              :grp (rand-int group-count)})
+                 (assoc op :type :ok))
+
+         :read (->> (cql/select conn table
+                                (q/columns :val)
+                                (q/where [[:in :grp (range group-count)]]))
+                    (map :val)
+                    sort
+                    (assoc op :type :ok, :value)))))
 
   (teardown! [this test]))
 
@@ -54,9 +89,14 @@
   (yugabyte-test
     (merge opts
            {:name "set"
-            :client (CQLSetClient. nil)
+            :client (->CQLSetClient)
             :client-generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
                                                 (reads))
-                                   (gen/stagger 1/10))
+                                   (gen/stagger 1))
             :checker (checker/compose {:perf (checker/perf)
                                        :set (checker/set-full)})})))
+
+(defn index-test
+  [opts]
+  (assoc (test opts)
+         :client (->CQLSetIndexClient)))

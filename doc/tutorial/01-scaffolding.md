@@ -218,16 +218,16 @@ details.
 $ lein run test --help
 #object[jepsen.cli$test_usage 0x7ddd84b5 jepsen.cli$test_usage@7ddd84b5]
 
-  -h, --help                                             Print out this message and exit
-  -n, --node HOSTNAME             [:n1 :n2 :n3 :n4 :n5]  Node(s) to run test on
-      --nodes-file FILENAME                              File containing node hostnames, one per line.
-      --username USER             root                   Username for logins
-      --password PASS             root                   Password for sudo access
-      --strict-host-key-checking                         Whether to check host keys
-      --ssh-private-key FILE                             Path to an SSH identity file
-      --concurrency NUMBER        1n                     How many workers should we run? Must be an integer, optionally followed by n (e.g. 3n) to multiply by the number of nodes.
-      --test-count NUMBER         1                      How many times should we repeat a test?
-      --time-limit SECONDS        60                     Excluding setup and teardown, how long should a test run for, in seconds?
+  -h, --help                                                  Print out this message and exit
+  -n, --node HOSTNAME             ["n1" "n2" "n3" "n4" "n5"]  Node(s) to run test on
+      --nodes-file FILENAME                                   File containing node hostnames, one per line.
+      --username USER             root                        Username for logins
+      --password PASS             root                        Password for sudo access
+      --strict-host-key-checking                              Whether to check host keys
+      --ssh-private-key FILE                                  Path to an SSH identity file
+      --concurrency NUMBER        1n                          How many workers should we run? Must be an integer, optionally followed by n (e.g. 3n) to multiply by the number of nodes.
+      --test-count NUMBER         1                           How many times should we repeat a test?
+      --time-limit SECONDS        60                          Excluding setup and teardown, how long should a test run for, in seconds?
 ```
 
 We'll use `lein run test ...` throughout this guide to re-run our Jepsen test. Each time we run a test, Jepsen will create a new directory in `store/`. You can see the latest results in `store/latest`:
@@ -282,4 +282,4 @@ Open up a new terminal window, and leave the web server running there. That way
 we can see the results of our tests without having to start and stop it
 repeatedly.
 
-With this groundwork in place, we'll write the code to [set up and tear down the database](02-db.md)
+With this groundwork in place, we'll write the code to [set up and tear down the database](02-db.md).
