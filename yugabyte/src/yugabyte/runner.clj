@@ -8,6 +8,7 @@
             [yugabyte [core]
                       [bank]
                       [counter]
+                      [long-fork :as long-fork]
                       [multi-key-acid]
                       [nemesis :as nemesis]
                       [set :as set]
@@ -21,6 +22,7 @@
    "counter-inc-dec"    yugabyte.counter/test-inc-dec
    "bank"               yugabyte.bank/test
    "bank-multitable"    yugabyte.bank/multitable-test
+   "long-fork-index"    long-fork/index-test
    "set"                set/test
    "set-index"          set/index-test})
 

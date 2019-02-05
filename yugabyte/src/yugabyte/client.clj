@@ -128,17 +128,22 @@
 
 (defn create-index
   "Index creation is also slow in YB, so we run it with a custom timeout. Works
-  just like cql/create-index.
+  just like cql/create-index, or you can pass a string if you need to use YB
+  custom syntax.
 
   Also you, like, literally *can't* tell Cassaforte (or maybe Cassandra's
   client or CQL or YB?) to create an index if it doesn't exist, so we're
   swallowing the duplicate table execeptions here"
   [conn & index-args]
-  (try (execute-with-timeout! conn 10000 (apply q/create-index index-args))
-       (catch InvalidQueryException e
-         (if (re-find #"Target index already exists" (.getMessage e))
-           :already-exists
-           (throw e)))))
+  (let [statement (if (and (= 1 (count index-args))
+                           (string? (first index-args)))
+                    (first index-args)
+                    (apply q/create-index index-args))]
+    (try (execute-with-timeout! conn 10000 statement)
+         (catch InvalidQueryException e
+           (if (re-find #"Target index already exists" (.getMessage e))
+             :already-exists
+             (throw e))))))
 
 (defn create-transactional-table
   "Like create-table, but enables transactions."
