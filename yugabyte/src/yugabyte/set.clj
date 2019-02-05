@@ -46,23 +46,28 @@
           (c/create-transactional-table conn table
                                         (q/if-not-exists)
                                         (q/column-definitions
-                                          {:val         :int
+                                          {:key         :int
+                                           :val         :int
                                            :grp         :int
-                                           :primary-key [:val]}))
-          (c/create-index conn "elements_by_group"
-                            (q/on-table table)
-                            (q/and-column :grp)))
+                                           :primary-key [:key]}))
+          (c/create-index conn (str (c/statement->str
+                                      (q/create-index "elements_by_group"
+                                                      (q/on-table table)
+                                                      (q/and-column :grp)))
+                                    " INCLUDE (val)")))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
       (case (:f op)
-        :add (do (cql/update conn table
-                             {:grp (rand-int group-count)}
-                             (q/where {:val (:value op)}))
+        :add (do (cql/insert conn table
+                             {:key (:value op)
+                              :val (:value op)
+                              :grp (rand-int group-count)})
                  (assoc op :type :ok))
 
          :read (->> (cql/select conn table
-                               (q/where [[:in :grp (range group-count)]]))
+                                (q/columns :val)
+                                (q/where [[:in :grp (range group-count)]]))
                     (map :val)
                     sort
                     (assoc op :type :ok, :value)))))
@@ -87,7 +92,7 @@
             :client (->CQLSetClient)
             :client-generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
                                                 (reads))
-                                   (gen/stagger 1/10))
+                                   (gen/stagger 1))
             :checker (checker/compose {:perf (checker/perf)
                                        :set (checker/set-full)})})))
 
