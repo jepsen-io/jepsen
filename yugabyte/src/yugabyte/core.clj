@@ -19,6 +19,14 @@
          :private-key-path (str (System/getenv "HOME")
                                 "/.yugabyte/yugabyte-dev-aws-keypair.pem")}})
 
+(def trace-logging
+  "Logging configuration for the test which sets up traces for queries."
+  {:logging {:overrides {;"com.datastax"                            :trace
+                         ;"com.yugabyte"                            :trace
+                         "com.datastax.driver.core.RequestHandler" :trace
+                         ;"com.datastax.driver.core.CodecRegistry"  :info
+                         }}})
+
 (defn yugabyte-test
   [opts]
   (let [{:keys [client-generator
@@ -38,6 +46,7 @@
   (merge tests/noop-test
          (dissoc opts :client-generator :client-final-generator)
          (when (:yugabyte-ssh opts) (yugabyte-ssh-defaults))
+         (when (:trace-cql opts)    trace-logging)
          {:db         (case (:db opts)
                         :community-edition  (auto/community-edition)
                         :enterprise-edition (auto/enterprise-edition))

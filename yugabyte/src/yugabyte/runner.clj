@@ -59,7 +59,10 @@
     :default false]
 
    [nil "--version VERSION" "What version of Yugabyte to install"
-    :default "1.1.9.0"]])
+    :default "1.1.9.0"]
+
+   [nil "--trace-cql" "If provided, logs CQL queries"
+    :default false]])
 
 (defn log-test
   [t attempt]

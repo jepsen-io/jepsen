@@ -92,7 +92,7 @@
             :client (->CQLSetClient)
             :client-generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
                                                 (reads))
-                                   (gen/stagger 1))
+                                   (gen/stagger 1/10))
             :checker (checker/compose {:perf (checker/perf)
                                        :set (checker/set-full)})})))
 
