@@ -282,14 +282,15 @@
   [node]
   (let [max-tries 1000]
     (dt/with-retry [tries max-tries]
+      (when (< 0 tries max-tries)
+        (Thread/sleep 1000))
+
+      (when (zero? tries)
+        (info "Zero?, tries " tries)
+        (throw (RuntimeException.
+                 "Client gave up waiting for cluster setup.")))
       (let [conn (connect node)]
         (try
-          (when (< 0 tries max-tries)
-            (Thread/sleep 1000))
-
-          (when (zero? tries)
-            (throw (RuntimeException.
-                     "Client gave up waiting for cluster setup.")))
 
           ; We need to do this serially to avoid a race in table creation
           (locking await-setup
