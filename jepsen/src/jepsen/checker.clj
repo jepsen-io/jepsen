@@ -648,14 +648,9 @@
 (defn counter
   "A counter starts at zero; add operations should increment it by that much,
   and reads should return the present value. This checker validates that at
-  each read, the value is at greater than the sum of all :ok increments and
+  each read, the value is greater than the sum of all :ok increments and
   attempted decrements, and lower than the sum of all attempted increments and
   :ok decrements.
-
-  Since we know a :fail increment did not occur, we should decrement the
-  counter by the appropriate amount.
-
-  TODO: filter out failed operations in an initial pass.
 
   Returns a map:
 
@@ -666,7 +661,12 @@
   []
   (reify Checker
     (check [this test model history opts]
-      (loop [history            (seq (history/complete history))
+             ; Pre-process our history so failed adds do not get applied
+      (loop [history         (->> history
+                                  history/complete
+                                  (remove :fails?)
+                                  (remove op/fail?)
+                                  seq)
              ; Current lower bound on counter.
              lower              0
              ; Upper bound on counter value.
@@ -711,13 +711,6 @@
               [:invoke :add]
               (let [value (:value op)
                     [l' u'] (if (> value 0) [lower (+ upper value)] [(+ lower value) upper])]
-                (recur history l' u'
-                       (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
-                       reads))
-
-              [:fail :add]
-              (let [value (:value op)
-                    [l' u'] (if (> value 0) [lower (- upper value)] [(- lower value) upper])]
                 (recur history l' u'
                        (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
                        reads))
