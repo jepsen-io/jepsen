@@ -77,7 +77,7 @@
 
 (deftest checker-test
   (let [even-checker (reify checker/Checker
-                       (check [this test model history opts]
+                       (check [this test history opts]
                          {:valid? (even? (count history))}))
         history (->> (fn [k] (->> (range k)
                                   (map (partial array-map :value))

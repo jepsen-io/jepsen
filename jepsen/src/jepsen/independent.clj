@@ -261,7 +261,7 @@
   subset of that :results map which were not valid."
   [checker]
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [ks       (history-keys history)
             results  (->> ks
                           (bounded-pmap
@@ -270,7 +270,7 @@
                                     subdir (concat (:subdirectory opts)
                                                    [dir k])
                                     results (check-safe
-                                              checker test model h
+                                              checker test h
                                               {:subdirectory subdir
                                                :history-key  k})]
                                 ; Write analysis

@@ -314,7 +314,7 @@
   observes x but not y, and another observes y but not x."
   [n]
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [reads (reads history)]
         (merge {:reads-count      (count reads)
                 :early-read-count (count (early-reads reads))

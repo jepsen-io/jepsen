@@ -7,7 +7,6 @@
              [independent :as independent]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
-            [knossos.model :as model]
             [knossos.op :as op]))
 
 (defn g2-gen
@@ -64,7 +63,7 @@
   "Verifies that at most one :insert completes successfully for any given key."
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       ; There should be at most one successful insert for any given key
       (let [keys (reduce (fn [m op]
                            (if (= :insert (:f op))

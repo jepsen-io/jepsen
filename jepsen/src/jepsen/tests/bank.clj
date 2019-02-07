@@ -87,7 +87,7 @@
   non-negative."
   [checker-opts]
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [accts (set (:accounts test))
             total (:total-amount test)
             reads (->> history
@@ -146,7 +146,7 @@
   "Renders a graph of balances over time"
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [totals (->> history
                         (by-node test)
                         (util/map-vals points))

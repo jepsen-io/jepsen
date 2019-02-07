@@ -439,13 +439,13 @@
   (info "Analyzing...")
   (let [; Give each op in the history a monotonically increasing index
         test (assoc test :history (history/index (:history test)))
-
+        _ (when (:model test)
+            (warn "DEPRECATED: Checker model is assigned to test, which is no longer supported. If the checker still needs a model, see `jepsen.checker` documentation for details."))
         ; Run checkers
         test (assoc test :results (checker/check-safe
-                                    (:checker test)
-                                    test
-                                    (:model test)
-                                    (:history test)))]
+                                   (:checker test)
+                                   test
+                                   (:history test)))]
     (info "Analysis complete")
     (when (:name test) (store/save-2! test))
     test))
@@ -480,7 +480,6 @@
   :client     A client for the database
   :nemesis    A client for failures
   :generator  A generator of operations to apply to the DB
-  :model      The model used to verify the history is correct
   :checker    Verifies that the history is valid
   :log-files  A list of paths to logfiles/dirs which should be captured at
               the end of the test.
@@ -511,8 +510,7 @@
 
   8. Teardown the operating system
 
-  9. When the generator is finished, invoke the checker with the model and
-     the history
+  9. When the generator is finished, invoke the checker with the history
     - This generates the final report"
   [test]
   (tt/with-threadpool
