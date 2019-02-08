@@ -16,7 +16,28 @@
             [jepsen.nemesis :as nemesis]
             [knossos.model :as model]))
 
-(deftest basic-cas-test
+(defn tracking-client
+  "Tracks connections in an atom."
+  ([conns]
+   (tracking-client conns (atom 0)))
+  ([conns uid]
+   (reify client/Client
+     (open! [c test node]
+       (let [uid (swap! uid inc)] ; silly hack
+         (swap! conns conj uid)
+         (tracking-client conns uid)))
+
+     (setup! [c test] c)
+
+     (invoke! [c test op]
+       (assoc op :type :ok))
+
+     (teardown! [c test] c)
+
+     (close! [c test]
+       (swap! conns disj uid)))))
+
+(deftest ^:integration basic-cas-test
   (let [state (atom nil)
         db    (tst/atom-db state)
         n     10
@@ -30,7 +51,7 @@
                            :model      (model/->CASRegister 0)))]
     (is (:valid? (:results test)))))
 
-(deftest ssh-test
+(deftest ^:integration ssh-test
   (let [os-startups  (atom {})
         os-teardowns (atom {})
         db-startups  (atom {})
@@ -86,7 +107,7 @@
             "n5" "n5"}))
     (is (= @db-primaries ["n1"]))))
 
-(deftest worker-recovery-test
+(deftest ^:integration worker-recovery-test
   ; Workers should only consume n ops even when failing.
   (let [invocations (atom 0)
         n 12]
@@ -106,28 +127,7 @@
                                  (gen/nemesis gen/void))))
       (is (= n @invocations))))
 
-(defn tracking-client
-  "Tracks connections in an atom."
-  ([conns]
-   (tracking-client conns (atom 0)))
-  ([conns uid]
-   (reify client/Client
-     (open! [c test node]
-       (let [uid (swap! uid inc)] ; silly hack
-         (swap! conns conj uid)
-         (tracking-client conns uid)))
-
-     (setup! [c test] c)
-
-     (invoke! [c test op]
-       (assoc op :type :ok))
-
-     (teardown! [c test] c)
-
-     (close! [c test]
-       (swap! conns disj uid)))))
-
-(deftest generator-recovery-test
+(deftest ^:integration generator-recovery-test
   ; Throwing an exception from a generator shouldn't break the core. We use
   ; gen/phases to force a synchronization barrier in the generator, which would
   ; ordinarily deadlock when one worker thread prematurely exits, and prove
@@ -151,7 +151,7 @@
                                       (gen/once {:type :invoke, :f :done})))))))
     (is (empty? @conns))))
 
-(deftest worker-error-test
+(deftest ^:integration worker-error-test
   ; Errors in client and nemesis setup and teardown should be rethrown from
   ; tests.
   (let [client (fn [t]
