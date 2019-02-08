@@ -27,10 +27,11 @@
             [lein-codox "0.10.3"]]
   :aot [jepsen.cli clojure.tools.logging.impl]
 ;        clojure.tools.logging.impl]
-  :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
+  :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"
              ;"-XX:-OmitStackTraceInFastThrow"
+             ;"-XX:+UseParNewGC"
              ]
   :test-selectors {:default (complement :integration)
                    :integration :integration}
