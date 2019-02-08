@@ -10,32 +10,32 @@
 
 (deftest queue-test
   (testing "empty"
-    (is (:valid? (check (queue) nil nil [] {}))))
+    (is (:valid? (check (queue nil) nil [] {}))))
 
   (testing "Possible enqueue but no dequeue"
-    (is (:valid? (check (queue) nil (model/unordered-queue)
+    (is (:valid? (check (queue (model/unordered-queue)) nil
                         [(invoke-op 1 :enqueue 1)] {}))))
 
   (testing "Definite enqueue but no dequeue"
-    (is (:valid? (check (queue) nil (model/unordered-queue)
+    (is (:valid? (check (queue (model/unordered-queue)) nil
                         [(ok-op 1 :enqueue 1)] {}))))
 
   (testing "concurrent enqueue/dequeue"
-    (is (:valid? (check (queue) nil (model/unordered-queue)
+    (is (:valid? (check (queue (model/unordered-queue)) nil
                         [(invoke-op 2 :dequeue nil)
                          (invoke-op 1 :enqueue 1)
                          (ok-op     2 :dequeue 1)] {}))))
 
   (testing "dequeue but no enqueue"
-    (is (not (:valid? (check (queue) nil (model/unordered-queue)
+    (is (not (:valid? (check (queue (model/unordered-queue)) nil
                              [(ok-op 1 :dequeue 1)] {}))))))
 
 (deftest total-queue-test
   (testing "empty"
-    (is (:valid? (check (total-queue) nil nil [] {}))))
+    (is (:valid? (check (total-queue) nil [] {}))))
 
   (testing "sane"
-    (is (= (check (total-queue) nil nil
+    (is (= (check (total-queue) nil
                   [(invoke-op 1 :enqueue 1)
                    (invoke-op 2 :enqueue 2)
                    (ok-op     2 :enqueue 2)
@@ -58,7 +58,7 @@
             :recovered-count     1})))
 
   (testing "pathological"
-    (is (= (check (total-queue) nil nil
+    (is (= (check (total-queue) nil
                   [(invoke-op 1 :enqueue :hung)
                    (invoke-op 2 :enqueue :enqueued)
                    (ok-op     2 :enqueue :enqueued)
@@ -87,13 +87,14 @@
 
 (deftest counter-test
   (testing "empty"
-    (is (= (check (counter) nil nil [] {})
+    (is (= (check (counter) nil [] {})
            {:valid? true
             :reads  []
             :errors []})))
 
   (testing "initial read"
-    (is (= (check (counter) nil nil
+    (is (= (check (counter)
+                  nil
                   [(invoke-op 0 :read nil)
                    (ok-op     0 :read 0)]
                   {})
@@ -113,7 +114,7 @@
             :errors []})))
 
   (testing "initial invalid read"
-    (is (= (check (counter) nil nil
+    (is (= (check (counter) nil
                   [(invoke-op 0 :read nil)
                    (ok-op     0 :read 1)]
                   {})
@@ -122,7 +123,7 @@
             :errors [[0 1 0]]})))
 
   (testing "interleaved concurrent reads and writes"
-    (is (= (check (counter) nil nil
+    (is (= (check (counter) nil
                   [(invoke-op 0 :read nil)
                    (invoke-op 1 :add 1)
                    (invoke-op 2 :read nil)
@@ -147,7 +148,7 @@
             :errors [[0 100 15]]})))
 
   (testing "rolling reads and writes"
-    (is (= (check (counter) nil nil
+    (is (= (check (counter) nil
                   [(invoke-op 0 :read nil)
                    (invoke-op 1 :add  1)
                    (ok-op     0 :read 0)
@@ -164,7 +165,7 @@
 
 (deftest compose-test
   (is (= (check (compose {:a (unbridled-optimism) :b (unbridled-optimism)})
-                nil nil nil {})
+                nil nil {})
          {:a {:valid? true}
           :b {:valid? true}
           :valid? true})))
@@ -205,7 +206,6 @@
   (check (perf)
          {:name       "perf test"
           :start-time 0}
-         nil
          (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
               (mapcat (fn [latency]
                         (let [f (rand-nth [:write :read])
@@ -224,7 +224,6 @@
   (check (clock-plot)
          {:name       "clock plot test"
           :start-time 0}
-         nil
          [{:process :nemesis, :time 500000000,  :clock-offsets {"n1" 2.1}}
           {:process :nemesis, :time 1000000000, :clock-offsets {"n1" 0
                                                                 "n2" -3.1}}
@@ -249,7 +248,7 @@
 
 (deftest set-full-test
   ; Helper fn to check a history
-  (let [c (fn [h] (check (set-full) nil nil (history h) {}))]
+  (let [c (fn [h] (check (set-full) nil (history h) {}))]
     (testing "never read"
       (is (= {:lost             []
               :attempt-count    1
@@ -398,5 +397,4 @@
                ; which an operation can begin and always observe 0.
                ;
                ; t 0  1   2  3  4    5   6  7  8    9
-               (c [a0 a0' a1 r2 r2'1 a1' r2 r3 r3'1 r2'0]))))
-      )))
+               (c [a0 a0' a1 r2 r2'1 a1' r2 r3 r3'1 r2'0])))))))

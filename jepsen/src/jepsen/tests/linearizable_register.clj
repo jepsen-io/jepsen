@@ -30,9 +30,8 @@
   [opts]
   {:checker (independent/checker
               (checker/compose
-                {:linearizable (checker/linearizable)
-                 :timeline     (timeline/html)}))
-   :model   (model/cas-register)
+               {:linearizable (checker/linearizable {:model (model/cas-register)})
+                :timeline     (timeline/html)}))
    :generator (let [n (count (:nodes opts))]
                 (independent/concurrent-generator
                   (* 2 n)

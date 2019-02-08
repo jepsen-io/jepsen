@@ -47,7 +47,7 @@
           valids))
 
 (defprotocol Checker
-  (check [checker test model history opts]
+  (check [checker test history opts]
          "Verify the history is correct. Returns a map like
 
          {:valid? true}
@@ -61,16 +61,27 @@
          Opts is a map of options controlling checker execution. Keys include:
 
          :subdirectory - A directory within this test's store directory where
-                         output files should be written. Defaults to nil."))
+                         output files should be written. Defaults to nil.
+
+          DEPRECATED Checkers should now implement the 4-arity check method
+          without model. If the checker still needs a model, provide it at
+          construction rather than as an argument to `Checker/check`. See the
+          queue and linearizable checkers for examples."))
+
+(defn noop
+  "An empty checker that only returns nil."
+  []
+  (reify Checker
+    (check [_ _ _ _])))
 
 (defn check-safe
   "Like check, but wraps exceptions up and returns them as a map like
 
   {:valid? :unknown :error \"...\"}"
-  ([checker test model history]
-   (check-safe checker test model history {}))
-  ([checker test model history opts]
-   (try (check checker test model history opts)
+  ([checker test history]
+   (check-safe checker test history {}))
+  ([checker test history opts]
+   (try (check checker test history opts)
         (catch Exception t
           (warn t "Error while checking history:")
           {:valid? :unknown
@@ -83,10 +94,10 @@
   valid."
   [checker-map]
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [results (->> checker-map
                          (pmap (fn [[k checker]]
-                                 [k (check-safe checker test model history opts)]))
+                                 [k (check-safe checker test history opts)]))
                          (into {}))]
         (assoc results :valid? (merge-valid (map :valid? (vals results))))))))
 
@@ -101,9 +112,9 @@
   ; often.
   (let [sem (Semaphore. limit true)]
     (reify Checker
-      (check [this test model history opts]
+      (check [this test history opts]
         (try (.acquire sem)
-             (check checker test model history opts)
+             (check checker test history opts)
              (finally
                (.release sem)))))))
 
@@ -111,34 +122,40 @@
   "Everything is awesoooommmmme!"
   []
   (reify Checker
-    (check [this test model history opts] {:valid? true})))
+    (check [this test history opts] {:valid? true})))
 
 (defn linearizable
   "Validates linearizability with Knossos. Defaults to the competition checker,
-  but can be controlled by passing either :linear or :wgl."
-  ([]
-   (linearizable :competition))
-  ([algorithm]
-     (reify Checker
-       (check [this test model history opts]
-         (let [a ((case algorithm
-                    :competition  competition/analysis
-                    :linear       linear/analysis
-                    :wgl          wgl/analysis)
-                  model history)]
-           (when-not (:valid? a)
-             (try
-               ; Renderer can't handle really broad concurrencies yet
-               (linear.report/render-analysis!
-                 history a (.getCanonicalPath
-                             (store/path! test (:subdirectory opts)
-                                          "linear.svg")))
-               (catch Throwable e
-                 (warn e "Error rendering linearizability analysis"))))
-           ; Writing these can take *hours* so we truncate
-           (assoc a
-                  :final-paths (take 10 (:final-paths a))
-                  :configs     (take 10 (:configs a))))))))
+  but can be controlled by passing either :linear or :wgl.
+
+  Takes an options map for arguments, ex.
+  {:model (model/cas-register)
+   :algorithm :wgl}"
+  [{:keys [algorithm model]}]
+  (assert model
+          (str "The linearizable checker requires a model. It received: "
+               model
+               " instead."))
+  (reify Checker
+    (check [this test history opts]
+      (let [a ((case algorithm
+                 :linear       linear/analysis
+                 :wgl          wgl/analysis
+                 competition/analysis)
+               model history)]
+        (when-not (:valid? a)
+          (try
+            ;; Renderer can't handle really broad concurrencies yet
+            (linear.report/render-analysis!
+             history a (.getCanonicalPath
+                        (store/path! test (:subdirectory opts)
+                                     "linear.svg")))
+            (catch Throwable e
+              (warn e "Error rendering linearizability analysis"))))
+        ;; Writing these can take *hours* so we truncate
+        (assoc a
+               :final-paths (take 10 (:final-paths a))
+               :configs     (take 10 (:configs a)))))))
 
 (defn queue
   "Every dequeue must come from somewhere. Validates queue operations by
@@ -146,16 +163,16 @@
   then reducing the model with that history. Every subhistory of every queue
   should obey this property. Should probably be used with an unordered queue
   model, because we don't look for alternate orderings. O(n)."
-  []
+  [model]
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [final (->> history
                        (r/filter (fn select [op]
                                    (condp = (:f op)
                                      :enqueue (op/invoke? op)
                                      :dequeue (op/ok? op)
                                      false)))
-                                 (reduce model/step model))]
+                       (reduce model/step model))]
         (if (model/inconsistent? final)
           {:valid? false
            :error  (:msg final)}
@@ -168,7 +185,7 @@
   contains only elements for which an add was attempted."
   []
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [attempts (->> history
                           (r/filter op/invoke?)
                           (r/filter #(= :add (:f %)))
@@ -180,10 +197,10 @@
                       (r/map :value)
                       (into #{}))
             final-read (->> history
-                          (r/filter op/ok?)
-                          (r/filter #(= :read (:f %)))
-                          (r/map :value)
-                          (reduce (fn [_ x] x) nil))]
+                            (r/filter op/ok?)
+                            (r/filter #(= :read (:f %)))
+                            (r/map :value)
+                            (reduce (fn [_ x] x) nil))]
         (if-not final-read
           {:valid? :unknown
            :error  "Set was never read"}
@@ -459,7 +476,7 @@
    (set-full {:linearizable? false}))
   ([checker-opts]
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       ; Build up a map of elements to element states. We track the current set
       ; of ongoing reads as well, so we can map completions back to
       ; invocations. Finally we track a map of duplicates: elements to maximum
@@ -555,7 +572,7 @@
   draining them completely. O(n)."
   []
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [history  (expand-queue-drain-ops history)
             attempts (->> history
                           (r/filter op/invoke?)
@@ -624,7 +641,7 @@
        :range               [lowest-id highest-id]}"
   []
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [attempted-count (->> history
                                  (filter op/invoke?)
                                  (filter #(= :generate (:f %)))
@@ -673,7 +690,7 @@
   "
   []
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
              ; Pre-process our history so failed adds do not get applied
       (loop [history         (->> history
                                   history/complete
@@ -741,7 +758,7 @@
   "Spits out graphs of latencies."
   []
   (reify Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (perf/point-graph! test history opts)
       (perf/quantiles-graph! test history opts)
       {:valid? true})))
@@ -750,7 +767,7 @@
   "Spits out graphs of throughput over time."
   []
   (reify Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (perf/rate-graph! test history opts)
       {:valid? true})))
 
@@ -764,6 +781,6 @@
   "Plots clock offsets on all nodes"
   []
   (reify Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (clock/plot! test history opts)
       {:valid? true})))
