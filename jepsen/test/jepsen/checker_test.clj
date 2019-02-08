@@ -259,6 +259,8 @@
               :stale            []
               :worst-stale      []
               :stable-count     0
+              :duplicated-count 0
+              :duplicated       {}
               :valid?           :unknown}
              (c [(invoke-op 0 :add 0)
                  (ok-op 0 :add 0)]))))
@@ -277,6 +279,8 @@
                 :never-read-count 1
                 :stale-count      0
                 :stale            []
+                :duplicated-count 0
+                :duplicated       {}
                 :worst-stale      []
                 :stable-count     0}
                (c [a r r-]))))
@@ -290,6 +294,8 @@
                 :stale-count      0
                 :stale            []
                 :worst-stale      []
+                :duplicated-count 0
+                :duplicated       {}
                 :stable-count     1
                 :stable-latencies {0 0, 0.5 0, 0.95 0, 0.99 0, 1 0}}
                (c [r a r+ a']) ; Concurrent read before
@@ -310,6 +316,8 @@
                 :stale            []
                 :worst-stale      []
                 :stable-count     0
+                :duplicated-count 0
+                :duplicated       {}
                 :lost-latencies  {0 0, 0.5 0, 0.95 0, 0.99 0, 1 0}}
                (c [a a' r r-]))))
 
@@ -323,6 +331,8 @@
                 :stale-count      0
                 :stale            []
                 :worst-stale      []
+                :duplicated-count 0
+                :duplicated       {}
                 :stable-count     0}
                (c [r a r- a']) ; Read before
                (c [r a a' r-]) ; Read outside
@@ -355,6 +365,8 @@
                 :stale       []
                 :worst-stale []
                 :stable-count 0
+                :duplicated-count 0
+                :duplicated       {}
                 :lost-latencies {0 3, 0.5 4, 0.95 4, 0.99 4,
                                  1 4}}
                ; We write a0 and a1 concurrently, reading 1 before a1
@@ -367,6 +379,8 @@
                 :lost-count 1
                 :never-read []
                 :never-read-count 0
+                :duplicated-count 0
+                :duplicated       {}
                 ; 1 should have been done at 4, is missing at time 6000, and
                 ; recovered at 7000.
                 :stale-count 1

@@ -2,7 +2,7 @@
   :description "Distributed systems testing framework."
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.9.0"]
+  :dependencies [[org.clojure/clojure "1.10.0"]
                  [org.clojure/data.fressian "0.2.1"]
                  [org.clojure/tools.logging "0.4.1"]
                  [spootnik/unilog "0.7.13"]
