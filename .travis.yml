@@ -2,12 +2,11 @@ language: clojure
 lein: lein
 dist: xenial
 jdk:
-   - oraclejdk10
+   - openjdk11
    - oraclejdk11
    - oraclejdk12
 branches:
   only:
     - master
-script:
-  - cd jepsen
-  - lein do clean, test
+before_install: cd jepsen
+script: lein do clean, test
