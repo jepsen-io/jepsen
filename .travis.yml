@@ -1,10 +1,10 @@
 language: clojure
 lein: lein
-dist: xenial
+dist: trusty
 jdk:
-   - oraclejdk11
+   - oraclejdk8
 branches:
   only:
     - master
 before_install: cd jepsen
-script: lein with-profile ci do clean, test
+script: lein do clean, test
