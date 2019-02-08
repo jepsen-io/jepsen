@@ -2,9 +2,7 @@ language: clojure
 lein: lein
 dist: xenial
 jdk:
-   - openjdk11
-   - oraclejdk11
-   - oraclejdk12
+   - oraclejdk8
 branches:
   only:
     - master
