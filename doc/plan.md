@@ -62,3 +62,6 @@
 - Port pure-insert from Cockroach into core
 - Port comments from Cockroach into core (better name?)
 - Port other Hermitage tests to Jepsen?
+
+## Github
+- Add a travisCI integration for PRs and wherever else is appropriate.
