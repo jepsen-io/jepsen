@@ -8,4 +8,6 @@ jdk:
 branches:
   only:
     - master
-script: lein do clean, test
+script:
+  - cd jepsen
+  - lein do clean, test
