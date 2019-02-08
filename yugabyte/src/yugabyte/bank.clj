@@ -21,16 +21,8 @@
 (def keyspace   "jepsen")
 (def table-name "accounts")
 
-(c/defclient CQLBank []
+(c/defclient CQLBank keyspace []
   (setup! [this test]
-    ; This is a workaround for a bug in Yugabyte's create-table code
-    (locking setup-lock
-      (cql/create-keyspace conn keyspace
-                           (if-not-exists)
-                           (with
-                             {:replication
-                              {"class"              "SimpleStrategy"
-                               "replication_factor" 3}}))
       (info "Creating table")
       (cassandra/execute conn (str "CREATE TABLE IF NOT EXISTS "
                                    keyspace "." table-name
@@ -43,7 +35,7 @@
                            :balance (:total-amount test)})
       (doseq [a (rest (:accounts test))]
         (cql/insert-with-ks conn keyspace table-name
-                            {:id a, :balance 0}))))
+                            {:id a, :balance 0})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -86,32 +78,25 @@
   [opts]
   (bank-test-base
     (merge {:name   "cql-bank"
-            :client (CQLBank. nil)}
+            :client (->CQLBank)}
            opts)))
 
 ;; Shouldn't be used until we support transactions with selects.
-(c/defclient CQLMultiBank []
+(c/defclient CQLMultiBank keyspace []
   (setup! [this test]
-    (locking setup-lock
-      (cql/create-keyspace conn keyspace
-                           (if-not-exists)
-                           (with
-                             {:replication
-                              {"class"              "SimpleStrategy"
-                               "replication_factor" 3}}))
-      (info "Creating accounts")
-      (doseq [a (:accounts test)]
-        (info "Creating table" a)
-        (cassandra/execute conn (str "CREATE TABLE IF NOT EXISTS "
-                                     keyspace "." table-name a
-                                     " (id INT PRIMARY KEY, balance BIGINT)"
-                                     " WITH transactions = { 'enabled' : true }"))
-        (info "Populating account" a)
-        (cql/insert-with-ks conn keyspace (str table-name a)
-                            {:id      a
-                             :balance (if (= a (first (:accounts test)))
-                                        (:total-amount test)
-                                        0)}))))
+    (info "Creating accounts")
+    (doseq [a (:accounts test)]
+      (info "Creating table" a)
+      (cassandra/execute conn (str "CREATE TABLE IF NOT EXISTS "
+                                   keyspace "." table-name a
+                                   " (id INT PRIMARY KEY, balance BIGINT)"
+                                   " WITH transactions = { 'enabled' : true }"))
+      (info "Populating account" a)
+      (cql/insert-with-ks conn keyspace (str table-name a)
+                          {:id      a
+                           :balance (if (= a (first (:accounts test)))
+                                      (:total-amount test)
+                                      0)})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -149,5 +134,5 @@
   [opts]
   (bank-test-base
     (merge {:name   "cql-bank-multitable"
-            :client (CQLMultiBank. nil)}
+            :client (->CQLMultiBank)}
            opts)))

@@ -25,6 +25,9 @@
 
 - Use utf-8 for transferring files; I think we're doing latin-1 or ascii or
   8859-1 or something now.
+- Add search for tests
+- Add sorting
+- Add filtering
 
 ## Performance
 
@@ -38,8 +41,6 @@
 
 - Deprecate model argument in checker; these should be arguments to checker
   constructors instead.
-- Deprecate keyword hosts; this was a silly idea and the minor improvement
-  in readability isn't really worth it.
 - Clean up checker/counter: remove failed ops in an initial pre-pass, rather
   than adding them then undoing those adds.
 - Macro like (synchronize-nodes test), which enforces a synchronization

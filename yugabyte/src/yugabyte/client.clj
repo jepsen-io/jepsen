@@ -5,6 +5,7 @@
                                      [policies :as policies]
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
+			      [clojure.pprint :refer [pprint]]
             [dom-top.core :as dt]
             [wall.hack :as wh])
   (:import (java.net InetSocketAddress)
@@ -20,6 +21,7 @@
            (com.datastax.driver.core.policies RoundRobinPolicy
                                               WhiteListPolicy)
            (com.datastax.driver.core.exceptions DriverException
+                                                InvalidQueryException
                                                 UnavailableException
                                                 OperationTimedOutException
                                                 ReadTimeoutException
@@ -102,11 +104,53 @@
                       (setReadTimeoutMillis timeout))]
     (c/execute session statement)))
 
+(defn statement->str
+  "Converts a statement to a string so we can do string munging on it."
+  [s]
+  (if (string? s)
+    s
+    (-> s
+        ;(.setForceNoValues true)
+        .getQueryString)))
+
+(defn with-transactions
+  "Takes a CQL create-table statement, converts it to a string, and adds \"WITH
+  transctions = { 'enabled' : true }\". Sort of a hack, the Cassandra client
+  doesn't know about this syntax, I think."
+  [s]
+  (str (statement->str s) " WITH transactions = { 'enabled' : true }"))
+
 (defn create-table
   "Table creation is fairly slow in YB, so we need to run it with a custom
   timeout. Works just like cql/create-table."
   [conn & table-args]
   (execute-with-timeout! conn 10000 (apply q/create-table table-args)))
+
+(defn create-index
+  "Index creation is also slow in YB, so we run it with a custom timeout. Works
+  just like cql/create-index, or you can pass a string if you need to use YB
+  custom syntax.
+
+  Also you, like, literally *can't* tell Cassaforte (or maybe Cassandra's
+  client or CQL or YB?) to create an index if it doesn't exist, so we're
+  swallowing the duplicate table execeptions here"
+  [conn & index-args]
+  (let [statement (if (and (= 1 (count index-args))
+                           (string? (first index-args)))
+                    (first index-args)
+                    (apply q/create-index index-args))]
+    (try (execute-with-timeout! conn 10000 statement)
+         (catch InvalidQueryException e
+           (if (re-find #"Target index already exists" (.getMessage e))
+             :already-exists
+             (throw e))))))
+
+(defn create-transactional-table
+  "Like create-table, but enables transactions."
+  [conn & table-args]
+  (execute-with-timeout! conn 30000
+                         (with-transactions
+                           (apply q/create-table table-args))))
 
 (defn ensure-keyspace!
   "Creates a keyspace using the given connection, if it doesn't already exist.
@@ -160,11 +204,24 @@
            (throw e#))))))
 
 (defmacro defclient
-  "Helper for defining CQL clients. Takes a class name, a vector of state
-	fields (as for defrecord), followed by protocols and functions, like
-	defrecord. Appends a field, `conn`, to the state fields, which stores the
-  cassandra client connection, provides default open! and close! functions, and
-  passes the whole state to defrecord.
+  "Helper for defining CQL clients. Takes a class name, a string keyspace, a
+  vector of state fields (as for defrecord), followed by protocols and
+  functions, like defrecord. Appends two fields, `conn`, and `keyspace-created`
+  to the state fields, which stores the cassandra client connection, provides
+  default open! and close! functions, and passes the whole state to defrecord.
+
+  Defines a constructor without conn or keyspace-created fields. Args are 1:1
+  with your state fields.
+
+    (->MyClient)
+
+  Automatically creates keyspace during setup!, and ensures that keyspace is
+  used on every conn thereafter. We do this because CQL assumes clients set the
+  keyspace once, and we don't want to do multiple network trips to set the
+  keyspace for every operation.
+
+  Calls to setup! take a lock to prevent concurrent creation of tables, which
+  hits a bug in Yugabyte.
 
   Example:
 
@@ -176,16 +233,47 @@
         ...)
 
 			(teardown! [this test]))"
-  [name fields & exprs]
-  `(defrecord ~name ~(conj (vec fields) 'conn)
-     jepsen.client/Client
-     (open! [~'this ~'test ~'node]
-       (assoc ~'this :conn (connect ~'node)))
+  [name keyspace fields & exprs]
+  (let [[interfaces methods opts] (#'clojure.core/parse-opts+specs
+                                    (cons 'jepsen.client/Client exprs))
+        ; We're going to rewrite the setup! fn to lock, create the keyspace,
+        ; and use it before executing user code.
+        setup-code (->> methods
+                        (filter (comp #{'setup!} first))
+                        first
+                        (drop 2))
 
-     (close! [~'this ~'test]
-       (c/disconnect! ~'conn))
+        ; Strip the original setup from the interface list. This is a hack, we
+        ; should handle multiple setup! fns from diff protocols correctly.
+        exprs (->> (remove (fn [expr]
+                             (and (list? expr)
+                                  (= 'setup! (first expr))))
+                           exprs))]
+		`(do (defrecord ~name ~(conj (vec fields) 'conn 'keyspace-created)
+					 jepsen.client/Client
+					 (open! [~'this ~'test ~'node]
+						 (let [conn# (connect ~'node)]
+							 (when (realized? ~'keyspace-created)
+                 (cql/use-keyspace conn# ~keyspace))
+							 (assoc ~'this :conn conn#)))
 
-     ~@exprs))
+           (setup! [~'this ~'test]
+             (locking ~'keyspace-created
+               (ensure-keyspace! ~'conn ~keyspace ~'test)
+               (deliver ~'keyspace-created true)
+               (cql/use-keyspace ~'conn ~keyspace)
+               ~@setup-code))
+
+					 (close! [~'this ~'test]
+						 (c/disconnect! ~'conn))
+
+					 ~@exprs)
+
+				 ; Constructor
+				 (defn ~(symbol (str "->" name))
+					 ~(vec fields)
+					 ; Pass user fields, conn, keyspace-created
+					 (new ~name ~@fields nil (promise))))))
 
 (defn await-setup
   "Used at the start of a test. Takes a node, opens a connection to it, and

@@ -475,6 +475,7 @@
     :port               SSH listening port (22)
     :private-key-path   A path to an SSH identity file (~/.ssh/id_rsa)
     :strict-host-key-checking  Whether or not to verify host keys
+  :logging    Logging options; see jepsen.store/start-logging!
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
   :client     A client for the database

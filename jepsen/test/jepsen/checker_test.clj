@@ -4,7 +4,7 @@
         clojure.test)
   (:require [knossos [history :as history]
                      [model :as model]
-                     [core :refer [ok-op invoke-op]]]
+                     [core :refer [ok-op invoke-op fail-op]]]
             [multiset.core :as multiset]
             [jepsen.checker.perf :refer :all]))
 
@@ -96,6 +96,17 @@
     (is (= (check (counter)
                   nil
                   [(invoke-op 0 :read nil)
+                   (ok-op     0 :read 0)]
+                  {})
+           {:valid? true
+            :reads  [[0 0 0]]
+            :errors []})))
+
+  (testing "ignore failed ops"
+    (is (= (check (counter) nil nil
+                  [(invoke-op 0 :add 1)
+                   (fail-op   0 :add 1)
+                   (invoke-op 0 :read nil)
                    (ok-op     0 :read 0)]
                   {})
            {:valid? true

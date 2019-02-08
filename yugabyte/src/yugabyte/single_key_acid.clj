@@ -17,22 +17,15 @@
 
 (def keyspace "jepsen")
 (def table-name "single_key_acid")
-(def setup-lock (Object.))
 
-(c/defclient CQLSingleKey []
+(c/defclient CQLSingleKey keyspace []
   (setup! [this test]
-    (locking setup-lock
-      (cql/create-keyspace conn keyspace
-                           (if-not-exists)
-                           (with {:replication
-                                  {"class" "SimpleStrategy"
-                                   "replication_factor" 3}}))
-      (cql/use-keyspace conn keyspace)
-      (cql/create-table conn table-name
-                        (if-not-exists)
-                        (column-definitions {:id :int
-                                             :val :int
-                                             :primary-key [:id]}))))
+    (cql/use-keyspace conn keyspace)
+    (cql/create-table conn table-name
+                      (if-not-exists)
+                      (column-definitions {:id :int
+                                           :val :int
+                                           :primary-key [:id]})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -71,7 +64,7 @@
     (yugabyte-test
       (merge opts
              {:name "singe-key-acid"
-              :client (CQLSingleKey. nil)
+              :client (->CQLSingleKey)
               :concurrency (max 10 (:concurrency opts))
               :client-generator (independent/concurrent-generator
                                   (* 2 n)
