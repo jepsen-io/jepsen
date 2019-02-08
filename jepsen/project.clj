@@ -27,12 +27,12 @@
             [lein-codox "0.10.3"]]
   :aot [jepsen.cli clojure.tools.logging.impl]
 ;        clojure.tools.logging.impl]
-  :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC"
+  :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"
              ;"-XX:-OmitStackTraceInFastThrow"
-             ;"-XX:+UseParNewGC"
              ]
+  :profiles {:ci {:jvm-opts ^:replace ["-Xmx32g" "-server"]}}
   :test-selectors {:default (complement :integration)
                    :integration :integration}
   :codox {:output-path "doc/"

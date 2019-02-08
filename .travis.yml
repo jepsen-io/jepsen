@@ -3,9 +3,8 @@ lein: lein
 dist: xenial
 jdk:
    - oraclejdk11
-   - oraclejdk12
 branches:
   only:
     - master
 before_install: cd jepsen
-script: lein do clean, test
+script: lein with-profile ci do clean, test
