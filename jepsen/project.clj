@@ -32,7 +32,7 @@
              "-XX:+UseFastAccessorMethods" "-server"
              ;"-XX:-OmitStackTraceInFastThrow"
              ]
-  :profiles {:ci {:jvm-opts ^:replace ["-Xmx32g" "-server"]}}
+  :profiles {:ci {:jvm-opts ["-Xmx32g" "-server"]}}
   :test-selectors {:default (complement :integration)
                    :integration :integration}
   :codox {:output-path "doc/"
