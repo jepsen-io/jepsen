@@ -103,7 +103,7 @@
             :errors []})))
 
   (testing "ignore failed ops"
-    (is (= (check (counter) nil nil
+    (is (= (check (counter) nil
                   [(invoke-op 0 :add 1)
                    (fail-op   0 :add 1)
                    (invoke-op 0 :read nil)
