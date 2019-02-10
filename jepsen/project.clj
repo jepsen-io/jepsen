@@ -32,6 +32,8 @@
              "-XX:+UseFastAccessorMethods" "-server"
              ;"-XX:-OmitStackTraceInFastThrow"
              ]
+  :test-selectors {:default (complement :integration)
+                   :integration :integration}
   :codox {:output-path "doc/"
           :source-uri "https://github.com/jepsen-io/jepsen/blob/{version}/jepsen/{filepath}#L{line}"
           :metadata {:doc/format :markdown}})

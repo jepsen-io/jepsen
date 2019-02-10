@@ -63,5 +63,5 @@
 - Port comments from Cockroach into core (better name?)
 - Port other Hermitage tests to Jepsen?
 
-## Github
-- Add a travisCI integration for PRs and wherever else is appropriate.
+## CI
+- Add gnuplot to travis.yml installation so we can run those checker tests

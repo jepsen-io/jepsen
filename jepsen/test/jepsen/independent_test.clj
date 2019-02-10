@@ -93,6 +93,5 @@
            (checker/check (checker even-checker)
                           {:name "independent-checker-test"
                            :start-time 0}
-                          nil
                           history
                           {})))))

@@ -1,0 +1,10 @@
+language: clojure
+lein: lein
+dist: trusty
+jdk:
+   - oraclejdk8
+branches:
+  only:
+    - master
+before_install: cd jepsen
+script: lein do clean, test

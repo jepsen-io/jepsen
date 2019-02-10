@@ -16,7 +16,7 @@
                       :multiset (into (multiset/multiset)
                                       [1 1 2 3 5 8])))
 
-(deftest roundtrip-test
+(deftest ^:integration roundtrip-test
   (delete! "store-test")
 
   (let [t (-> base-test
