@@ -7,8 +7,7 @@
             [clojurewerkz.cassaforte [client :as cass]
                                      [query :as q]
                                      [cql :as cql]]
-            [yugabyte [client :as c]
-                      [core :refer [yugabyte-test]]]))
+            [yugabyte [client :as c]]))
 
 (def keyspace "jepsen")
 (def table "elements")
@@ -84,19 +83,15 @@
   []
   {:type :invoke, :f :read, :value nil})
 
-(defn test
+(defn workload
   [opts]
-  (yugabyte-test
-    (merge opts
-           {:name "set"
-            :client (->CQLSetClient)
-            :client-generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
-                                                (reads))
-                                   (gen/stagger 1/10))
-            :checker (checker/compose {:perf (checker/perf)
-                                       :set (checker/set-full)})})))
+  {:client     (->CQLSetClient)
+   :generator  (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
+                                 (reads))
+                    (gen/stagger 1/10))
+   :checker    (checker/set-full)})
 
-(defn index-test
+(defn index-workload
   [opts]
-  (assoc (test opts)
+  (assoc (workload opts)
          :client (->CQLSetIndexClient)))

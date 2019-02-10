@@ -10,9 +10,7 @@
                                      [query :refer :all]
                                      [policies :refer :all]
                                      [cql :as cql]]
-            [yugabyte [core :refer :all]
-                      [client :as c]
-                      [auto :as auto]])
+            [yugabyte [client :as c]])
   (:import (knossos.model Model)))
 
 (def table-name "multi_key_acid")
@@ -105,24 +103,19 @@
    :value [[:write (rand-int 3) (rand-int 5)]
            [:write (rand-int 3) (rand-int 5)]]})
 
-(defn test
+(defn workload
   [opts]
-  (yugabyte-test
-   (let [n (count (:nodes opts))]
-     (merge opts
-            {:name             "multi-key-acid"
-             :client           (->CQLMultiKey)
-             :client-generator (independent/concurrent-generator
-                                 (* 2 n)
-                                 (range)
-                                 (fn [k]
-                                   (->> (gen/reserve n r w)
-                                        (gen/stagger 0.1)
-                                        (gen/limit 100))))
-             :model            (multi-register {})
-             :checker (checker/compose
-                        {:perf     (checker/perf)
-                         :indep (independent/checker
-                                  (checker/compose
-                                    {:timeline (timeline/html)
-                                     :linear   (checker/linearizable)}))})}))))
+  (let [n (count (:nodes opts))]
+    {:client           (->CQLMultiKey)
+     :generator (independent/concurrent-generator
+                  (* 2 n)
+                  (range)
+                  (fn [k]
+                    (->> (gen/reserve n r w)
+                         (gen/stagger 0.1)
+                         (gen/limit 100))))
+     :checker (independent/checker
+                (checker/compose
+                  {:timeline (timeline/html)
+                   :linear   (checker/linearizable
+                               {:model (multi-register {})})}))}))

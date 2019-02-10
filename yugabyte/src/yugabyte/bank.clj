@@ -13,9 +13,7 @@
              [query :refer :all]
              [policies :refer :all]
              [cql :as cql]]
-            [yugabyte [client :as c]
-                      [core :refer :all]
-                      [auto :as auto]]))
+            [yugabyte [client :as c]]))
 
 (def setup-lock (Object.))
 (def keyspace   "jepsen")
@@ -62,24 +60,11 @@
 
   (teardown! [this test]))
 
-(defn bank-test-base
+(defn workload
   [opts]
-  (let [workload (bank/test {:negative-balances? true})]
-    (yugabyte-test
-      (merge (dissoc workload :generator)
-             {:client-generator (:generator workload)
-              :checker          (checker/compose
-                                  {:perf     (checker/perf)
-                                   ;:timeline (timeline/html)
-                                   :details  (:checker workload)})}
-             opts))))
-
-(defn test
-  [opts]
-  (bank-test-base
-    (merge {:name   "cql-bank"
-            :client (->CQLBank)}
-           opts)))
+  (assoc (bank/test {:negative-balances? true})
+         :generator (:generator workload)
+         :client    (->CQLBank)))
 
 ;; Shouldn't be used until we support transactions with selects.
 (c/defclient CQLMultiBank keyspace []
@@ -130,9 +115,7 @@
 
   (teardown! [this test]))
 
-(defn multitable-test
+(defn multitable-workload
   [opts]
-  (bank-test-base
-    (merge {:name   "cql-bank-multitable"
-            :client (->CQLMultiBank)}
-           opts)))
+  (assoc (workload opts)
+         :client (->CQLMultiBank)))

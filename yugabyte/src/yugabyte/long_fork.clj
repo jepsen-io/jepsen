@@ -9,8 +9,7 @@
             [jepsen [checker    :as checker]
                     [generator  :as gen]]
             [jepsen.tests.long-fork :as lf]
-            [yugabyte [client :as c]
-                      [core :refer [yugabyte-test]]]))
+            [yugabyte [client :as c]]))
 
 (def keyspace "jepsen")
 (def table "long_fork")
@@ -58,13 +57,7 @@
 
   (teardown! [this test]))
 
-(defn index-test
+(defn workload
   [opts]
-  (let [w (lf/workload 3)]
-    (yugabyte-test
-      (merge opts
-             {:name             "long-fork-index"
-              :client           (->CQLLongForkIndexClient)
-              :client-generator (->> (:generator w))
-              :checker (checker/compose {:perf (checker/perf)
-                                         :long-fork (:checker w)})}))))
+  (assoc (lf/workload 3)
+         :client  (->CQLLongForkIndexClient)))

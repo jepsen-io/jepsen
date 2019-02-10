@@ -8,9 +8,7 @@
              [query :refer :all]
              [policies :refer :all]
              [cql :as cql]]
-            [yugabyte [auto :as auto]
-                      [client :as c]
-                      [core :refer :all]]))
+            [yugabyte [client :as c]]))
 
 (def table-name "counter")
 (def keyspace "jepsen")
@@ -45,34 +43,21 @@
 (def sub {:type :invoke :f :add :value -1})
 (def r   {:type :invoke :f :read})
 
-(defn test-inc
+(defn workload
   [opts]
-  (yugabyte-test
-    (merge opts
-           {:name             "cql-counter-inc"
-            :client           (->CQLCounterClient)
-            :client-generator (->> (repeat 100 add)
-                                   (cons r)
-                                   gen/mix
-                                   (gen/delay 1/10))
-            :model            nil
-            :checker         (checker/compose
-                               {:perf     (checker/perf)
-                                :timeline (timeline/html)
-                                :counter  (checker/counter)})})))
+  {:client          (->CQLCounterClient)
+   :generator       (->> (repeat 100 add)
+                          (cons r)
+                          gen/mix
+                          (gen/delay 1/10))
+   :checker         (checker/compose
+                      {:timeline (timeline/html)
+                       :counter  (checker/counter)})})
 
-(defn test-inc-dec
+(defn workload-dec
   [opts]
-  (yugabyte-test
-    (merge opts
-           {:name             "cql-counter-inc-dec"
-            :client           (->CQLCounterClient)
-            :client-generator (->> (take 100 (cycle [add sub]))
-                                   (cons r)
-                                   gen/mix
-                                   (gen/delay 1/10))
-            :model            nil
-            :checker          (checker/compose
-                                {:perf     (checker/perf)
-                                 :timeline (timeline/html)
-                                 :counter  (checker/counter)})})))
+  (assoc (workload opts)
+         :generator (->> (take 100 (cycle [add sub]))
+                         (cons r)
+                         gen/mix
+                         (gen/delay 1/10))))
