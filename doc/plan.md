@@ -4,9 +4,6 @@
 
 - Knossos: Better error messages when users pass models that fail on the
   first op (I think there's a ticket about this? Null pointer exception for i?)
-- Jepsen.control: let's throw Slingshot errors so that it's possible for
-  everyone to catch specific shell exceptions, and include
-  cmd/stdin/stdout/stderr as fields, so users can figure out what went wrong.
 
 ## Visualizations
 
