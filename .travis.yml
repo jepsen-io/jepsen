@@ -19,7 +19,7 @@ before_install:
   - cd
   - gnuplot --version
   - gnuplot -e 'set term'
-install: cd jepsen
+  - cd /jepsen-io/jepsen
 script: lein do clean, test
 notifications:
   email:
