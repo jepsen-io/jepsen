@@ -313,7 +313,8 @@
               ce-master-bin
               ce-shared-opts
               :--master_addresses   (master-addresses test)
-              :--replication_factor (:replication-factor test))))
+              :--replication_factor (:replication-factor test)
+              :--v 3)))
 
     (start-tserver! [db test]
       (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
