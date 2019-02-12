@@ -18,7 +18,7 @@ before_install:
   - echo PATH
   - cd
   - gnuplot --version
-  - gnuplot -e 'set term'
+  - gnuplot -e 'set term dumb'
   - cd ${TRAVIS_BUILD_DIR}/jepsen
 script: lein do clean, test
 notifications:
