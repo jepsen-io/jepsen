@@ -147,28 +147,30 @@
   []
   (reify checker/Checker
     (check [this test history opts]
-      (let [totals (->> history
-                        (by-node test)
-                        (util/map-vals points))
-            colors (perf/qs->colors (keys totals))
-            path (.getCanonicalPath
-                   (store/path! test (:subdirectory opts) "bank.png"))]
-        (try
-          (g/raw-plot!
-            (concat (perf/preamble path)
-                    [['set 'title (str (:name test) " bank")]
-                     '[set ylabel "Total of all accounts"]
-                     ['plot (apply g/list
-                                   (for [[node points] totals]
-                                     ["-"
-                                      'with       'points
-                                      'pointtype  2
-                                      'linetype   (colors node)
-                                      'title      (name node)]))]])
-            (vals totals))
-          {:valid? true}
-          (catch java.io.IOException _
-                 (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))))))
+      ; Don't graph empty histories
+      (when (seq history)
+        (let [totals (->> history
+                          (by-node test)
+                          (util/map-vals points))
+              colors (perf/qs->colors (keys totals))
+              path (.getCanonicalPath
+                     (store/path! test (:subdirectory opts) "bank.png"))]
+          (try
+            (g/raw-plot!
+              (concat (perf/preamble path)
+                      [['set 'title (str (:name test) " bank")]
+                       '[set ylabel "Total of all accounts"]
+                       ['plot (apply g/list
+                                     (for [[node points] totals]
+                                       ["-"
+                                        'with       'points
+                                        'pointtype  2
+                                        'linetype   (colors node)
+                                        'title      (name node)]))]])
+              (vals totals))
+            {:valid? true}
+            (catch java.io.IOException _
+              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))))
 
 (defn test
   "A partial test; bundles together some default choices for keys and amounts
