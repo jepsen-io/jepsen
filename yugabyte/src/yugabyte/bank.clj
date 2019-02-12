@@ -31,8 +31,8 @@
                         {:id (first (:accounts test))
                          :balance (:total-amount test)})
     (doseq [a (rest (:accounts test))]
-      (cql/insert-with-ks conn keyspace table-name
-                          {:id a, :balance 0})))
+      (cql/insert conn table-name
+                  {:id a, :balance 0})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}

@@ -61,7 +61,7 @@
     (withReconnectionPolicy (policies/constant-reconnection-policy 1000))
     (withSocketOptions (.. (SocketOptions.)
                          (setConnectTimeoutMillis 1000)
-                         (setReadTimeoutMillis 2000)))
+                         (setReadTimeoutMillis 5000)))
     (withLoadBalancingPolicy (WhiteListPolicy.
                                (RoundRobinPolicy.)
                                [(InetSocketAddress. node 9042)]))
