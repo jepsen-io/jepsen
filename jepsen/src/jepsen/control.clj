@@ -5,12 +5,12 @@
   (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap
-                                             with-retry
                                              with-thread-name]]
+            [dom-top.core :refer [with-retry]]
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
-            [clojure.pprint :refer [pprint]]
-            [clojure.tools.logging :refer [warn info debug error]]))
+            [clojure.tools.logging :refer [warn info debug error]]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
@@ -121,17 +121,16 @@
 
 (defn throw-on-nonzero-exit
   "Throws when the result of an SSH result has nonzero exit status."
-  [result]
-  (if (zero? (:exit result))
+  [{:keys [exit action host out err in] :as result}]
+  (if (zero? exit)
     result
-    (throw
-      (RuntimeException.
-        (str (:cmd (:action result))
-             " returned non-zero exit status " (:exit result)
-             " on " (:host result) ". STDOUT:\n"
-             (:out result)
-             "\n\nSTDERR:\n"
-             (:err result))))))
+    (throw+
+     (let [cmd (:cmd action)
+           message (str cmd " returned non-zero exit status " exit " on " host
+                        ". STDOUT:\n" out "\n\nSTDERR:\n" err)]
+       (merge {:throwable (RuntimeException. message)
+               :cmd cmd}
+              result)))))
 
 (defn just-stdout
   "Returns the stdout from an ssh result, trimming any newlines at the end."
@@ -144,9 +143,8 @@
   [action]
   (with-retry [tries *retries*]
     (when (nil? *session*)
-      (throw (RuntimeException.
-              (str "Unable to perform an SSH action because no SSH session for this host is available. SSH configuration is:\n\n"
-                   (with-out-str (pprint (debug-data)))))))
+      (throw+ (merge {:throwable (RuntimeException. (str "Unable to perform an SSH action because no SSH session for this host is available."))}
+                     (debug-data))))
 
     (rc/with-conn [s *session*]
       (assoc (ssh/ssh s action)
@@ -158,7 +156,8 @@
                    (= "Packet corrupt" (.getMessage e))))
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
-        (throw e)))))
+        (throw+ (merge {:throwable e}
+                       (debug-data)))))))
 
 (defn exec*
   "Like exec, but does not escape."
@@ -213,7 +212,8 @@
                    (= "Packet corrupt" (.getMessage e))))
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
-        (throw e)))))
+        (throw+ (merge {:throwable e}
+                       (debug-data)))))))
 
 (defn download
   "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from.
@@ -228,7 +228,8 @@
                    (= "Packet corrupt" (.getMessage e))))
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
-        (throw e)))))
+        (throw+ (merge {:throwable e}
+                       (debug-data)))))))
 
 (defn expand-path
   "Expands path relative to the current directory."
@@ -297,19 +298,19 @@
   "Wraps clj-ssh-session in a wrapper for reconnection."
   [host]
   (rc/open!
-   (rc/wrapper {:open    (if *dummy*
-                           (fn [] [:dummy host])
-                           (fn [] (try
-                                    (clj-ssh-session host)
-                                    (catch com.jcraft.jsch.JSchException e
-                                      (error "Error opening SSH session. Verify username, password, and node hostnames are correct.\nSSH configuration is:\n"
-                                             (util/pprint-str (binding [*host* host] (debug-data))))
-                                      (throw e)))))
-                :name    [:control host]
-                :close   (if *dummy*
-                           identity
-                           ssh/disconnect)
-                :log?    true})))
+   (rc/wrapper {:open  (if *dummy*
+                         (fn [] [:dummy host])
+                         (fn [] (try+
+                                  (clj-ssh-session host)
+                                  (catch Object o
+                                    (throw+ (merge {:throwable o
+                                                    :host host}
+                                                   (debug-data)))))))
+                :name  [:control host]
+                :close (if *dummy*
+                         identity
+                         ssh/disconnect)
+                :log?  true})))
 
 (defn disconnect
   "Close a session"
@@ -348,7 +349,7 @@
   session when body completes."
   [host & body]
   `(let [session# (session ~host)]
-     (try
+     (try+
        (with-session ~host session#
          ~@body)
        (finally

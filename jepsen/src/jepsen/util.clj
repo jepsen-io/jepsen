@@ -766,3 +766,6 @@
   of the body."
   [locks name & body]
   `(locking (get-named-lock! ~locks ~name) ~@body))
+
+(defn contains-many? [m & ks]
+  (every? #(contains? m %) ks))
