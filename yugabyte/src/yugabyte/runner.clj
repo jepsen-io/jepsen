@@ -43,12 +43,6 @@
     :parse-fn parse-long
     :validate [(complement neg?) "Must be a non-negative number"]]
 
-   [nil "--nemesis-interval SECONDS"
-    "Roughly how long to wait between nemesis operations. Default: 10s."
-    :parse-fn parse-long
-    :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
-    :validate [(complement neg?) "should be a non-negative number"]]
-
    [nil "--nemesis SPEC" "A comma-separated list of nemesis types"
     :default {:interval 10}
     :parse-fn parse-nemesis-spec
@@ -59,6 +53,17 @@
                (str "Should be a comma-separated list of failure types. A failure "
                     (.toLowerCase (cli/one-of core/nemesis-specs))
                     ". Or, you can use 'none' to indicate no failures.")]]
+
+   [nil "--nemesis-interval SECONDS"
+    "Roughly how long to wait between nemesis operations. Default: 10s."
+    :parse-fn parse-long
+    :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
+    :validate [(complement neg?) "should be a non-negative number"]]
+
+   [nil "--nemesis-schedule SCHEDULE" "Whether to have randomized delays between nemesis actions, or fixed ones."
+    :parse-fn keyword
+    :assoc-fn (fn [m k v] (update m :nemesis assoc :schedule v))
+    :validate [#{:fixed :random} "Must be either 'fixed' or 'random'"]]
 
    ["-r" "--replication-factor INT" "Number of nodes in each Raft cluster."
     :default 3

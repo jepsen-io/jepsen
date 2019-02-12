@@ -1,5 +1,6 @@
 (ns yugabyte.nemesis
   (:require [clojure.tools.logging :refer :all]
+            [clojure.pprint :refer [pprint]]
             [jepsen [control :as c]
              [generator :as gen]
              [nemesis :as nemesis]
@@ -96,44 +97,66 @@
                 (into {})))))
 
 (defn clock-gen
-  "Emits a random schedule of clock skew operations up to skew-ms milliseconds."
-  [max-skew-ms]
-  (gen/mix (concat [nt/reset-gen] (repeat 3 (partial bump-gen max-skew-ms)))))
+  "A mixture of clock operations."
+  []
+  (->> (nt/clock-gen)
+       (gen/f-map {:check-offsets  :check-clock-offsets
+                   :reset          :reset-clock
+                   :strobe         :strobe-clock
+                   :bump           :bump-clock})))
+
+(defn flip-flop
+  "Switches between ops from two generators: a, b, a, b, ..."
+  [a b]
+  (gen/seq (cycle [a b])))
+
+(defn opt-mix
+  "Given a nemesis map n, and a map of options to generators to use if that
+  option is present in n, constructs a mix of generators for those options. If
+  no options match, returns `nil`."
+  [n possible-gens]
+  (let [gens (reduce (fn [gens [option gen]]
+                       (if (option n)
+                         (conj gens gen)
+                         gens))
+                     []
+                     possible-gens)]
+    (when (seq gens)
+      (gen/mix gens))))
 
 (defn full-generator
   "Takes a nemesis options map `n`, and constructs a generator for all nemesis
   operations. This generator is used during normal nemesis operations."
   [n]
-  (->> (cond-> []
-         (:kill-tserver n)
-         (conj (op :kill-tserver) (op :start-tserver))
+  ; Shorthand: we're going to have a bunch of flip-flops with various types of
+  ; failure conditions and a single recovery.
+  (let [o (fn [possible-gens recovery]
+            ; We return nil when mix does to avoid generating flip flops when
+            ; *no* options are present in the nemesis opts.
+            (when-let [mix (opt-mix n possible-gens)]
+              (flip-flop mix recovery)))]
 
-         (:kill-master n)
-         (conj (op :kill-master) (op :start-master))
-
-         (:stop-tserver n)
-         (conj (op :stop-tserver) (op :start-tserver))
-
-         (:stop-master n)
-         (conj (op :stop-master) (op :start-master))
-
-         (:partition-one n)
-         (conj partition-one-gen (op :stop-partition))
-
-         (:partition-half n)
-         (conj partition-half-gen (op :stop-partition))
-
-         (:partition-ring n)
-         (conj partition-ring-gen (op :stop-partition))
-
-         (:clock-skew n)
-         (conj (->> (nt/clock-gen)
-                    (gen/f-map {:check-offsets  :check-clock-offsets
-                                :reset          :reset-clock
-                                :strobe         :strobe-clock
-                                :bump           :bump-clock}))))
-       gen/mix
-       (gen/stagger (:interval n))))
+    ; Mix together our different types of process crashes, partitions, and
+    ; clock skews.
+    (->> [(o {:kill-tserver (op :kill-tserver)
+              :stop-tserver (op :stop-tserver)}
+             (op :start-tserver))
+          (o {:kill-master (op :kill-master)
+              :stop-master (op :stop-master)}
+             (op :start-master))
+          (o {:partition-one  partition-one-gen
+              :partition-half partition-half-gen
+              :partition-ring partition-ring-gen}
+             (op :stop-partition))
+          (opt-mix n {:clock-skew (clock-gen)})]
+         ; For all options relevant for this nemesis, mix them together
+         (remove nil?)
+         gen/mix
+         ; Introduce either random or fixed delays between ops
+         ((case (:schedule n)
+            (nil :random)    gen/stagger
+            :fixed           gen/delay-til)
+          (:interval n)))))
 
 (defn final-generator
   "Takes a nemesis options map `n`, and constructs a generator to stop all
