@@ -33,7 +33,15 @@
 (def workload-options
   "For each workload, a map of workload options to all the values that option
   supports."
-  {})
+  {:bank            {}
+   :bank-multitable {}
+   :counter         {}
+   :counter-dec     {}
+   :long-fork       {}
+   :multi-key-acid  {}
+   :set             {}
+   :set-index       {}
+   :single-key-acid {}})
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
