@@ -6,19 +6,12 @@ jdk:
 branches:
   only:
     - master
+addons:
+  apt:
+    packages:
+      - gnuplot
+      - gnuplot-x11
 before_install:
-  - cd /tmp
-  - wget https://sourceforge.net/projects/gnuplot/files/gnuplot/5.2.6/gnuplot-5.2.6.tar.gz
-  - tar -xf gnuplot-5.2.6.tar.gz
-  - cd gnuplot-5.2.6
-  - ./configure --prefix=$HOME/local
-  - make -j2
-  - make install
-  - export PATH="$HOME/local/bin:$PATH"
-  - echo PATH
-  - cd
-  - gnuplot --version
-  - gnuplot -e 'set term dumb'
   - cd ${TRAVIS_BUILD_DIR}/jepsen
 script: lein do clean, test
 notifications:
