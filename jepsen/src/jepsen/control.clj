@@ -120,17 +120,14 @@
       arg))
 
 (defn throw-on-nonzero-exit
-  "Throws when the result of an SSH result has nonzero exit status."
-  [{:keys [exit action host out err in] :as result}]
+  "Throws when an SSH result has nonzero exit status."
+  [{:keys [exit action] :as result}]
   (if (zero? exit)
     result
     (throw+
-     (let [cmd (:cmd action)
-           message (str cmd " returned non-zero exit status " exit " on " host
-                        ". STDOUT:\n" out "\n\nSTDERR:\n" err)]
-       (merge {:throwable (RuntimeException. message)
-               :cmd cmd}
-              result)))))
+     (merge {:type ::nonzero-exit
+             :cmd (:cmd action)}
+            result))))
 
 (defn just-stdout
   "Returns the stdout from an ssh result, trimming any newlines at the end."
@@ -143,7 +140,8 @@
   [action]
   (with-retry [tries *retries*]
     (when (nil? *session*)
-      (throw+ (merge {:throwable (RuntimeException. (str "Unable to perform an SSH action because no SSH session for this host is available."))}
+      (throw+ (merge {:type ::no-session-available
+                      :message "Unable to perform an SSH action because no SSH session for this host is available."}
                      (debug-data))))
 
     (rc/with-conn [s *session*]
@@ -156,7 +154,7 @@
                    (= "Packet corrupt" (.getMessage e))))
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
-        (throw+ (merge {:throwable e}
+        (throw+ (merge {:type ::ssh-failed}
                        (debug-data)))))))
 
 (defn exec*
@@ -212,7 +210,7 @@
                    (= "Packet corrupt" (.getMessage e))))
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
-        (throw+ (merge {:throwable e}
+        (throw+ (merge {:type ::upload-failed}
                        (debug-data)))))))
 
 (defn download
@@ -228,7 +226,7 @@
                    (= "Packet corrupt" (.getMessage e))))
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
-        (throw+ (merge {:throwable e}
+        (throw+ (merge {:type ::download-failed}
                        (debug-data)))))))
 
 (defn expand-path
@@ -302,8 +300,9 @@
                          (fn [] [:dummy host])
                          (fn [] (try+
                                   (clj-ssh-session host)
-                                  (catch Object o
-                                    (throw+ (merge {:throwable o
+                                  (catch com.jcraft.jsch.JSchException _
+                                    (throw+ (merge {:type ::session-error
+                                                    :message "Error opening SSH session. Verify username, password, and node hostnames are correct."
                                                     :host host}
                                                    (debug-data)))))))
                 :name  [:control host]

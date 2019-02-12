@@ -767,5 +767,8 @@
   [locks name & body]
   `(locking (get-named-lock! ~locks ~name) ~@body))
 
-(defn contains-many? [m & ks]
+(defn contains-many?
+  "Takes a map and any number of keys, returning true if all of the keys are
+  present. Ex. (contains-many? {:a 1 :b 2 :c 3} :a :b :c) => true"
+  [m & ks]
   (every? #(contains? m %) ks))
