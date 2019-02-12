@@ -76,7 +76,10 @@
 
 (def test-all-opts
   "CLI options for testing everything."
-  [["-w" "--workload NAME"
+  [[nil "--only-workloads-expected-to-pass" "If present, skips tests which are not expected to pass"
+    :default false]
+
+   ["-w" "--workload NAME"
     "Test workload to run. If omitted, runs all workloads"
     :parse-fn keyword
     :default nil
@@ -104,7 +107,9 @@
 		:run      (fn [{:keys [options]}]
 								(info "CLI options:\n" (with-out-str (pprint options)))
 								(let [w             (:workload options)
-											workload-opts core/workload-options
+											workload-opts (if (:only-workloads-expected-to-pass options)
+                                      core/workload-options-expected-to-pass
+                                      core/workload-options)
 											workloads (cond->> (core/all-workload-options
                                            workload-opts)
 																	w (filter (comp #{w} :workload)))

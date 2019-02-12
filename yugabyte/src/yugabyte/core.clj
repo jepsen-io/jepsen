@@ -32,7 +32,7 @@
 
 (def workload-options
   "For each workload, a map of workload options to all the values that option
-  supports."
+  supports. Used for test-all."
   {:bank            {}
    :bank-multitable {}
    :counter         {}
@@ -42,6 +42,12 @@
    :set             {}
    :set-index       {}
    :single-key-acid {}})
+
+(def workload-options-expected-to-pass
+  "Only workloads and options that we think should pass. Also used for
+  test-all."
+  (-> workload-options
+      (dissoc :bank-multitable)))
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
