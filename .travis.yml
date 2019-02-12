@@ -19,7 +19,7 @@ before_install:
   - cd
   - gnuplot --version
   - gnuplot -e 'set term'
-  - cd jepsen
+  - cd ${TRAVIS_BUILD_DIR}/jepsen
 script: lein do clean, test
 notifications:
   email:
