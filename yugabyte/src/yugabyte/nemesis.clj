@@ -8,91 +8,82 @@
             [slingshot.slingshot :refer [try+]]
             [yugabyte.auto :as auto]))
 
-(def nemesis-delay    50) ; Delay between nemesis cycles in seconds.
-(def nemesis-duration 50) ; Duration of single nemesis cycle in secods.
-
-(defn kill!
-  [node process opts]
-  (meh (c/exec :pkill opts process))
-  (info (c/exec :echo :pkill opts process))
-  (c/exec (c/lit (str "! ps -ce | grep" process)))
-  (info node process "killed.")
-  :killed)
-
-(defn none
-  "No-op nemesis"
+(defn process-nemesis
+  "A nemesis that can start, stop, and kill randomly selected subsets of
+  nodes."
   []
-  nemesis/noop
-)
+  (reify nemesis/Nemesis
+    (setup! [this test] this)
 
-(defn tserver-killer
-  "Kills a random node tserver on start, restarts it on stop."
-  [& kill-opts]
-  (nemesis/node-start-stopper
-    rand-nth
-    (fn start [test node] (kill! node "yb-tserver" kill-opts))
-    (fn stop  [test node] (auto/start-tserver! (:db test) test))))
+    (invoke! [this test op]
+      (let [nodes (:nodes test)
+            nodes (case (:f op)
+                    (:start-master :start-tserver) nodes
 
-(defn master-killer
-  "Kills a random node master on start, restarts it on stop."
-  [& kill-opts]
-  (nemesis/node-start-stopper
-    (comp rand-nth auto/running-masters)
-    (fn start [test node] (kill! node "yb-master" kill-opts))
-    (fn stop  [test node] (auto/start-master! (:db test) test))))
+                    (:stop-tserver :kill-tserver)
+                    (util/random-nonempty-subset nodes)
 
-(defn node-killer
-  "Kills a random node tserver and master on start, restarts it on stop."
-  [& kill-opts]
-  (nemesis/node-start-stopper
-    rand-nth
-    (fn start [test node]
-      (kill! node "yb-tserver" kill-opts)
-      (kill! node "yb-master" kill-opts)
-    )
-    (fn stop  [test node]
-      (auto/start-master! (:db test) test)
-      (auto/start-tserver! (:db test) test)
-    )
-  )
-)
+                    (:stop-master :kill-master)
+                    (util/random-nonempty-subset (auto/master-nodes test)))
+            db (:db test)]
+        (assoc op :value
+               (c/on-nodes test nodes
+                           (fn [test node]
+                             (case (:f op)
+                               :start-master  (auto/start-master!   db test)
+                               :start-tserver (auto/start-tserver!  db test)
+                               :stop-master   (auto/stop-master!    db)
+                               :stop-tserver  (auto/stop-tserver!   db)
+                               :kill-master   (auto/kill-master!    db)
+                               :kill-tserver  (auto/kill-tserver!   db)))))))
 
-(defn strobe
-  "A rapid sequence of starts and stops."
+    (teardown! [this test])))
+
+(defn full-nemesis
+  "Merges together all nemeses"
   []
-  (->> (range 3)
-       (mapcat (fn [i]
-                 [(gen/sleep 20)
-                  {:type :info, :f :start}
-                  (gen/sleep 20)
-                  {:type :info, :f :stop}]))))
+  (nemesis/compose
+    {#{:start-master :start-tserver
+       :stop-master  :stop-tserver
+       :kill-master  :kill-tserver}   (process-nemesis)
+     {:start-partition :start
+      :stop-partition  :stop}         (nemesis/partitioner nil)
+     {:reset-clock          :reset
+      :strobe-clock         :strobe
+      :check-clock-offsets  :check-offsets
+      :bump-clock           :bump}    (nt/clock-nemesis)}))
 
-(defn strobe-rest
-  "A rapid sequence of starts and stops followed by a long pause"
-  []
-  (concat (strobe)
-          [(gen/sleep 40)]))
+; Generators
 
-(defn gen-start-stop
-  "Generates start/stop generic nemesis events sequences"
-  []
-  (gen/seq (cycle (strobe-rest))))
+(defn op
+  "Shorthand for constructing a nemesis op"
+  ([f]
+   (op f nil))
+  ([f v]
+   {:type :info, :f f, :value v})
+  ([f v & args]
+   (apply assoc (op f v) args)))
 
-;  (gen/seq
-;   (cycle
-;    [(gen/sleep nemesis-delay)
-;     {:type :info :f :start}
-;     (gen/sleep nemesis-duration)
-;     {:type :info :f :stop}])))
+(defn partition-one-gen
+  "A generator for a partition that isolates one node."
+  [test process]
+  (op :start-partition
+     (->> test :nodes nemesis/split-one nemesis/complete-grudge)
+     :partition-type :single-node))
 
-(defn start-stop
-  "Return start-stop nemesis map config"
-  [nemesis]
-  {:nemesis nemesis
-   :generator `(gen-start-stop)
-   :final-generator `(gen/once {:type :info, :f :stop})
-   }
-)
+(defn partition-half-gen
+  "A generator for a partition that cuts the network in half."
+  [test process]
+  (op :start-partition
+      (->> test :nodes shuffle nemesis/bisect nemesis/complete-grudge)
+      :partition-type :half))
+
+(defn partition-ring-gen
+  "A generator for a partition that creates overlapping majority rings"
+  [test process]
+  (op :start-partition
+      (->> test :nodes nemesis/majorities-ring)
+      :partition-type :ring))
 
 (defn bump-gen
   "Randomized clock bump generator. On random subsets of nodes, bumps the clock
@@ -107,68 +98,75 @@
 (defn clock-gen
   "Emits a random schedule of clock skew operations up to skew-ms milliseconds."
   [max-skew-ms]
-  (->>
-    (gen/mix (concat [nt/reset-gen] (repeat 3 (partial bump-gen max-skew-ms))))
-    (gen/delay nemesis-delay)
-   ))
+  (gen/mix (concat [nt/reset-gen] (repeat 3 (partial bump-gen max-skew-ms)))))
 
-(defn clock-nemesis
-  "Return clock skew nemesis map config"
-  [max-skew-ms]
-  ; TODO: uh, is this redefining globals?
-  (def clock-gen-partial (partial clock-gen max-skew-ms))
-  {:nemesis `(nt/clock-nemesis)
-   :max-clock-skew-ms max-skew-ms
-   :generator `(clock-gen-partial)
-   :final-generator `(gen/once nt/reset-gen)
-   }
-)
+(defn full-generator
+  "Takes a nemesis options map `n`, and constructs a generator for all nemesis
+  operations. This generator is used during normal nemesis operations."
+  [n]
+  (->> (cond-> []
+         (:kill-tserver n)
+         (conj (op :kill-tserver) (op :start-tserver))
 
-(def nemeses
-  "Supported nemeses"
-  {"none"                       {:nemesis `(none)}
-   "start-stop-tserver"         (start-stop `(tserver-killer))
-   "start-kill-tserver"         (start-stop `(tserver-killer :-9))
-   "start-stop-master"          (start-stop `(master-killer))
-   "start-kill-master"          (start-stop `(master-killer :-9))
-   "start-stop-node"            (start-stop `(node-killer))
-   "start-kill-node"            (start-stop `(node-killer :-9))
-   "partition-random-halves"    (start-stop `(nemesis/partition-random-halves))
-   "partition-random-node"      (start-stop `(nemesis/partition-random-node))
-   "partition-majorities-ring"  (start-stop `(nemesis/partition-majorities-ring))
-   "small-skew"                 (clock-nemesis 100)
-   "medium-skew"                (clock-nemesis 250)
-   "large-skew"                 (clock-nemesis 500)
-   "xlarge-skew"                (clock-nemesis 1000)
-  }
-)
+         (:kill-master n)
+         (conj (op :kill-master) (op :start-master))
 
-(defn gen
+         (:stop-tserver n)
+         (conj (op :stop-tserver) (op :start-tserver))
+
+         (:stop-master n)
+         (conj (op :stop-master) (op :start-master))
+
+         (:partition-one n)
+         (conj partition-one-gen (op :stop-partition))
+
+         (:partition-half n)
+         (conj partition-half-gen (op :stop-partition))
+
+         (:partition-ring n)
+         (conj partition-ring-gen (op :stop-partition))
+
+         (:clock-skew n)
+         (conj (->> (nt/clock-gen)
+                    (gen/f-map {:check-offsets  :check-clock-offsets
+                                :reset          :reset-clock
+                                :strobe         :strobe-clock
+                                :bump           :bump-clock}))))
+       gen/mix
+       (gen/stagger (:interval n))))
+
+(defn final-generator
+  "Takes a nemesis options map `n`, and constructs a generator to stop all
+  problems. This generator is called at the end of a test, before final client
+  operations."
+  [n]
+  (->> (cond-> []
+         (:clock-skew n)                          (conj :reset-clock)
+         (or (:kill-tserver n) (:stop-tserver n)) (conj :start-tserver)
+         (or (:kill-master n)  (:stop-master n))  (conj :start-master)
+
+         (some n [:partition-one :partition-half :partition-ring])
+         (conj :stop-partition))
+       (map op)
+       gen/seq))
+
+(defn expand-options
+  "We support shorthand options in nemesis maps, like :kill, which expands to
+  both :kill-tserver and :kill-master. This function expands those."
+  [n]
+  (cond-> n
+    (:kill n) (assoc :kill-tserver true
+                     :kill-master true)
+    (:stop n) (assoc :stop-tserver true
+                     :kill-master true)
+    (:partition n) (assoc :partition-one true
+                          :partition-half true
+                          :partition-ring true)))
+
+(defn nemesis
+  "Composite nemesis and generator, given test options."
   [opts]
-  (->> opts
-    :nemesis
-    (get nemeses)
-    :generator
-    eval))
-
-(defn final-gen
-  [opts]
-  (->> opts
-       :nemesis
-       (get nemeses)
-       :final-generator
-       eval))
-
-(defn get-nemesis-by-name
-  [name]
-  (->> name
-    (get nemeses)
-    :nemesis
-    eval))
-
-(defn get-nemesis-max-clock-skew-ms
-  [opts]
-  (->> opts
-       :nemesis
-       (get nemeses)
-       :max-clock-skew-ms))
+  (let [n (expand-options (:nemesis opts))]
+    {:nemesis         (full-nemesis)
+     :generator       (full-generator n)
+     :final-generator (final-generator n)}))

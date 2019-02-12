@@ -35,6 +35,38 @@
   supports."
   {})
 
+(def nemesis-specs
+  "These are the types of failures that the nemesis can perform."
+  #{:partition
+    :partition-half
+    :partition-ring
+    :partition-one
+    :kill
+    :kill-master
+    :kill-tserver
+    :stop
+    :stop-master
+    :stop-tserver
+    :clock-skew})
+
+(def all-nemeses
+  "All nemesis specs to run as a part of a complete test suite."
+  (->> [[] ; No faults
+        [:kill-tserver] ; Just tserver
+        [:kill-master]  ; Just master
+        [:clock-skew]   ; Just clocks
+        [:partition-one ; Just partitions
+         :partition-half
+         :partition-ring]
+        [:kill-tserver
+         :kill-master
+         :clock-skew
+         :partition-one
+         :partition-half
+         :partition-ring]]
+       ; Turn these into maps with each key being true
+       (map (fn [faults] (zipmap faults (repeat true))))))
+
 (defn yugabyte-ssh-defaults
   "A partial test map with SSH options for a test running in Yugabyte's
   internal testing environment."
@@ -81,13 +113,13 @@
   [opts]
   (assoc opts
          :name (str "yb " (:version opts)
-                    " " (name (:workload opts)))
-;                    (when-not (= [:interval] (keys (:nemesis opts)))
-;                      (str " nemesis " (->> (dissoc (:nemesis opts) :interval)
-;                                            keys
-;                                            (map name)
-;                                            sort
-;                                            (str/join ",")))))
+                    " " (name (:workload opts))
+                    (when-not (= [:interval] (keys (:nemesis opts)))
+                      (str " nemesis " (->> (dissoc (:nemesis opts) :interval)
+                                            keys
+                                            (map name)
+                                            sort
+                                            (str/join ",")))))
          :os (case (:os opts)
                :centos centos/os
                :debian debian/os)
@@ -100,19 +132,20 @@
   finalizes the test."
   [opts]
   (let [workload  ((get workloads (:workload opts)) opts)
+        nemesis   (nemesis/nemesis opts)
         gen       (->> (:generator workload)
-                       (gen/nemesis (nemesis/gen opts))
+                       (gen/nemesis (:generator nemesis))
                        (gen/time-limit (:time-limit opts)))
         gen       (if (:final-generator workload)
                     (gen/phases gen
                                 (gen/log "Healing cluster")
-                                ;(gen/nemesis (:final-generator nemesis))
-                                (gen/nemesis (nemesis/final-gen opts))
+                                (gen/nemesis (:final-generator nemesis))
                                 (gen/log "Waiting for recovery...")
                                 (gen/sleep (:final-recovery-time opts))
                                 (gen/clients (:final-generator workload)))
                     gen)]
-    (merge opts
+    (merge tests/noop-test
+           opts
            (dissoc workload
                    :generator
                    :final-generator
@@ -120,12 +153,11 @@
            (when (:yugabyte-ssh opts) (yugabyte-ssh-defaults))
            (when (:trace-cql opts)    (trace-logging))
            {:client     (:client workload)
-            :nemesis    (nemesis/get-nemesis-by-name (:nemesis opts))
+            :nemesis    (:nemesis nemesis)
             :generator  gen
             :checker    (checker/compose {:perf (checker/perf)
                                           :clock (checker/clock-plot)
-                                          :workload (:checker workload)})
-            :max-clock-skew-ms  (nemesis/get-nemesis-max-clock-skew-ms opts)})))
+                                          :workload (:checker workload)})})))
 
 (defn yb-test
   "Constructs a yugabyte test from CLI options."

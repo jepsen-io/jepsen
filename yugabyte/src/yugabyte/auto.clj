@@ -189,6 +189,26 @@
     (stop-master! db))
   :stopped)
 
+(defn kill!
+  "Kill a process forcibly."
+  [process]
+  (meh (c/exec :pkill :-9 process))
+  (c/exec (c/lit (str "! ps -ce | grep " process)))
+  (info process "killed")
+  :killed)
+
+(defn kill-tserver!
+  "Kills the tserver"
+  [db]
+  (kill! "yb-tserver")
+  (stop-tserver! db))
+
+(defn kill-master!
+  "Kills the master"
+  [db]
+  (kill! "yb-master")
+  (stop-master! db))
+
 (defn wait-for-recovery
   "Waits for the driver to report all nodes are up"
   [timeout-secs conn]

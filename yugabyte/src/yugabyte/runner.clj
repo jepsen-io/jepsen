@@ -1,7 +1,8 @@
 (ns yugabyte.runner
   "Runs YugaByteDB tests."
   (:gen-class)
-  (:require [clojure [pprint :refer :all]]
+  (:require [clojure [pprint :refer [pprint]]
+                     [string :as str]]
             [clojure.tools.logging :refer :all]
             [jepsen [core :as jepsen]
                     [cli :as cli]]
@@ -10,15 +11,20 @@
 
 (defn parse-long [x] (Long/parseLong x))
 
+(defn parse-nemesis-spec
+  "Parses a comma-separated string of nemesis types, and turns it into an
+  option map like {:kill-alpha? true ...}"
+  [s]
+  (if (= s "none")
+    {}
+    (->> (str/split s #",")
+         (map (fn [o] [(keyword o) true]))
+         (into {}))))
+
+; Options
 (def cli-opts
   "Options for single or multiple tests."
-  [[nil "--nemesis NAME"
-    (str "Nemesis to use, one of: "
-         (clojure.string/join ", " (keys nemesis/nemeses)))
-    :default "none"
-    :validate [nemesis/nemeses (cli/one-of nemesis/nemeses)]]
-
-   ["-o" "--os NAME" "Operating system: either centos or debian."
+  [["-o" "--os NAME" "Operating system: either centos or debian."
     :default  :centos
     :parse-fn keyword
     :validate [#{:centos :debian} "One of `centos` or `debian`"]]
@@ -36,6 +42,23 @@
     :default 30
     :parse-fn parse-long
     :validate [(complement neg?) "Must be a non-negative number"]]
+
+   [nil "--nemesis-interval SECONDS"
+    "Roughly how long to wait between nemesis operations. Default: 10s."
+    :parse-fn parse-long
+    :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
+    :validate [(complement neg?) "should be a non-negative number"]]
+
+   [nil "--nemesis SPEC" "A comma-separated list of nemesis types"
+    :default {:interval 10}
+    :parse-fn parse-nemesis-spec
+    :assoc-fn (fn [m k v] (update m :nemesis merge v))
+    :validate [(fn [parsed]
+                 (and (map? parsed)
+                      (every? core/nemesis-specs (keys parsed))))
+               (str "Should be a comma-separated list of failure types. A failure "
+                    (.toLowerCase (cli/one-of core/nemesis-specs))
+                    ". Or, you can use 'none' to indicate no failures.")]]
 
    ["-r" "--replication-factor INT" "Number of nodes in each Raft cluster."
     :default 3
@@ -85,13 +108,12 @@
 											workloads (cond->> (core/all-workload-options
                                            workload-opts)
 																	w (filter (comp #{w} :workload)))
-											tests (for [; TODO: nemesis
+											tests (for [nemesis   core/all-nemeses
                                   workload  workloads
 																	i         (range (:test-count options))]
                               (-> options
                                   (merge workload)
-                                  ;(update :nemesis merge nemesis)))]
-                                  ))]
+                                  (update :nemesis merge nemesis)))]
 									(->> tests
 											 (map-indexed
 												 (fn [i test-opts]
