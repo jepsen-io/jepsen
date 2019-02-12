@@ -166,6 +166,7 @@
       (condp re-find (.getMessage e)
         #"Leader not yet ready to serve requests"   (retry (dec tries))
         #"This leader has not yet acquired a lease" (retry (dec tries))
+        #"Leader not yet replicated NoOp"           (retry (dec tries))
         #"Not the leader"                           (retry (dec tries))
         (throw e)))))
 

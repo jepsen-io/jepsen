@@ -15,11 +15,11 @@
 
 (c/defclient CQLCounterClient keyspace []
   (setup! [this test]
-    (cql/create-table conn table-name
-                      (if-not-exists)
-                      (column-definitions {:id :int
-                                           :count :counter
-                                           :primary-key [:id]}))
+    (c/create-table conn table-name
+                    (if-not-exists)
+                    (column-definitions {:id :int
+                                         :count :counter
+                                         :primary-key [:id]}))
     (cql/update conn table-name {:count (increment-by 0)}
                 (where [[= :id 0]])))
 

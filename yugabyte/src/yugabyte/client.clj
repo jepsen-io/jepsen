@@ -124,7 +124,7 @@
   "Table creation is fairly slow in YB, so we need to run it with a custom
   timeout. Works just like cql/create-table."
   [conn & table-args]
-  (execute-with-timeout! conn 10000 (apply q/create-table table-args)))
+  (execute-with-timeout! conn 30000 (apply q/create-table table-args)))
 
 (defn create-index
   "Index creation is also slow in YB, so we run it with a custom timeout. Works

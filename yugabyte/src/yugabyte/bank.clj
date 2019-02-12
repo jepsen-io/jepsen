@@ -10,9 +10,8 @@
             [jepsen.checker.timeline :as timeline]
             [knossos.op :as op]
             [clojurewerkz.cassaforte [client :as cassandra]
-             [query :refer :all]
-             [policies :refer :all]
-             [cql :as cql]]
+             [query :as q :refer :all]
+             [cql   :as cql]]
             [yugabyte [client :as c]]))
 
 (def setup-lock (Object.))
@@ -21,19 +20,19 @@
 
 (c/defclient CQLBank keyspace []
   (setup! [this test]
-      (info "Creating table")
-      (cassandra/execute conn (str "CREATE TABLE IF NOT EXISTS "
-                                   keyspace "." table-name
-                                   " (id INT PRIMARY KEY, balance BIGINT)"
-                                   " WITH transactions = { 'enabled' : true }"))
-
-      (info "Creating accounts")
+    (c/create-transactional-table
+      conn table-name
+      (q/if-not-exists)
+      (q/column-definitions {:id      :int
+                             :balance :bigint
+                             :primary-key [:id]}))
+    (info "Creating accounts")
+    (cql/insert-with-ks conn keyspace table-name
+                        {:id (first (:accounts test))
+                         :balance (:total-amount test)})
+    (doseq [a (rest (:accounts test))]
       (cql/insert-with-ks conn keyspace table-name
-                          {:id (first (:accounts test))
-                           :balance (:total-amount test)})
-      (doseq [a (rest (:accounts test))]
-        (cql/insert-with-ks conn keyspace table-name
-                            {:id a, :balance 0})))
+                          {:id a, :balance 0})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -63,7 +62,6 @@
 (defn workload
   [opts]
   (assoc (bank/test {:negative-balances? true})
-         :generator (:generator workload)
          :client    (->CQLBank)))
 
 ;; Shouldn't be used until we support transactions with selects.
@@ -72,10 +70,13 @@
     (info "Creating accounts")
     (doseq [a (:accounts test)]
       (info "Creating table" a)
-      (cassandra/execute conn (str "CREATE TABLE IF NOT EXISTS "
-                                   keyspace "." table-name a
-                                   " (id INT PRIMARY KEY, balance BIGINT)"
-                                   " WITH transactions = { 'enabled' : true }"))
+      (c/create-transactional-table
+        conn (str table-name a)
+        (q/if-not-exists)
+        (q/column-definitions {:id          :int
+                               :balance     :bigint
+                               :primary-key [:id]}))
+
       (info "Populating account" a)
       (cql/insert-with-ks conn keyspace (str table-name a)
                           {:id      a

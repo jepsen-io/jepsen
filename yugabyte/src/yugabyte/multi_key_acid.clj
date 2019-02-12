@@ -7,8 +7,7 @@
             [jepsen.checker.timeline :as timeline]
             [knossos.model :as model]
             [clojurewerkz.cassaforte [client :as cassandra]
-                                     [query :refer :all]
-                                     [policies :refer :all]
+                                     [query :as q :refer :all]
                                      [cql :as cql]]
             [yugabyte [client :as c]])
   (:import (knossos.model Model)))
@@ -53,14 +52,13 @@
 
 (c/defclient CQLMultiKey keyspace []
   (setup! [this test]
-    (cassandra/execute
-      conn (str "CREATE TABLE IF NOT EXISTS "
-                keyspace "." table-name
-                ; ik is an independent-key, so we can segment the test into
-                ; independent groups. group is a reserved keyword. :(
-                " (id INT, ik INT, val INT,"
-                " PRIMARY KEY (id, ik)"
-                ") WITH transactions = { 'enabled' : true }")))
+    (c/create-transactional-table
+      conn table-name
+      (q/if-not-exists)
+      (q/column-definitions {:id          :int
+                             :ik          :int
+                             :val         :int
+                             :primary-key [:id :ik]})))
 
   (invoke! [this test op]
     (assert (= (:f op) :txn))
