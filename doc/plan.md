@@ -36,10 +36,6 @@
 
 ## Core
 
-- Deprecate model argument in checker; these should be arguments to checker
-  constructors instead.
-- Clean up checker/counter: remove failed ops in an initial pre-pass, rather
-  than adding them then undoing those adds.
 - Macro like (synchronize-nodes test), which enforces a synchronization
   barrier where (count nodes threads) must come to sync on the test map.
 - Generator/each works on each *process*, not each *thread*, but almost always,
@@ -59,6 +55,3 @@
 - Port pure-insert from Cockroach into core
 - Port comments from Cockroach into core (better name?)
 - Port other Hermitage tests to Jepsen?
-
-## CI
-- Add gnuplot to travis.yml installation so we can run those checker tests
