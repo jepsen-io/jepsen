@@ -292,9 +292,9 @@
         (info "Zero?, tries " tries)
         (throw (RuntimeException.
                  "Client gave up waiting for cluster setup.")))
+
       (let [conn (connect node)]
         (try
-
           ; We need to do this serially to avoid a race in table creation
           (locking await-setup
             ; This... doesn't actually seem to guarantee that subsequent
@@ -321,7 +321,7 @@
 
       (catch com.datastax.driver.core.exceptions.InvalidQueryException e
         (condp re-find (.getMessage e)
-          #"SQL error: Invalid Table Definition. Invalid argument: Error creating table .+? num_tablets should be greater than 0. Client would need to wait for master leader get heartbeats from tserver"
+          #"num_tablets should be greater than 0"
           (do (info "Waiting for cluster setup: num_tablets was 0")
               (retry (dec tries)))
 

@@ -23,7 +23,6 @@
   {:bank              bank/workload
    :bank-multitable   bank/multitable-workload
    :counter           counter/workload
-   :counter-dec       counter/workload-dec
    :long-fork         long-fork/workload
    :multi-key-acid    multi-key-acid/workload
    :set               set/workload
@@ -36,7 +35,6 @@
   {:bank            {}
    :bank-multitable {}
    :counter         {}
-   :counter-dec     {}
    :long-fork       {}
    :multi-key-acid  {}
    :set             {}
