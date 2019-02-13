@@ -6,5 +6,15 @@ jdk:
 branches:
   only:
     - master
-before_install: cd jepsen
+addons:
+  apt:
+    packages:
+      - gnuplot
+      - gnuplot-x11
+before_install:
+  - cd ${TRAVIS_BUILD_DIR}/jepsen
 script: lein do clean, test
+notifications:
+  email:
+    on_success: never
+    on_failure: never
