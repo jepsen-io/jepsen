@@ -32,12 +32,12 @@
                (c/on-nodes test nodes
                            (fn [test node]
                              (case (:f op)
-                               :start-master  (auto/start-master!   db test)
-                               :start-tserver (auto/start-tserver!  db test)
-                               :stop-master   (auto/stop-master!    db)
-                               :stop-tserver  (auto/stop-tserver!   db)
-                               :kill-master   (auto/kill-master!    db)
-                               :kill-tserver  (auto/kill-tserver!   db)))))))
+                               :start-master  (auto/start-master!  db test node)
+                               :start-tserver (auto/start-tserver! db test node)
+                               :stop-master   (auto/stop-master!   db)
+                               :stop-tserver  (auto/stop-tserver!  db)
+                               :kill-master   (auto/kill-master!   db)
+                               :kill-tserver  (auto/kill-tserver!  db)))))))
 
     (teardown! [this test])))
 

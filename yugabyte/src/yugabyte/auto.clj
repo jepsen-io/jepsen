@@ -11,7 +11,8 @@
             [jepsen [control :as c]
                     [db :as db]
                     [util :as util :refer [meh timeout]]]
-            [jepsen.control.util :as cu]
+            [jepsen.control [net :as cn]
+                            [util :as cu]]
             [jepsen.os [debian :as debian]
                        [centos :as centos]]
             [yugabyte.client :as yc])
@@ -53,8 +54,8 @@
 ; this protocol directly.
 (defprotocol Auto
   (install!       [db test])
-  (start-master!  [db test])
-  (start-tserver! [db test])
+  (start-master!  [db test node])
+  (start-tserver! [db test node])
   (stop-master!   [db])
   (stop-tserver!  [db])
   (wipe!          [db]))
@@ -176,10 +177,10 @@
   "Start both master and tserver. Only starts master if this node is a master
   node. Waits for masters and tservers."
   (when (master-node? test node)
-    (start-master! db test)
+    (start-master! db test node)
     (await-masters test))
 
-  (start-tserver! db test)
+  (start-tserver! db test node)
   (await-tservers test)
 
   (yc/await-setup node)
@@ -277,14 +278,17 @@
 (def ce-tserver-logfile (str ce-tserver-log-dir "/stdout"))
 (def ce-tserver-pidfile (str dir "/tserver.pid"))
 
-(def ce-shared-opts
+(defn ce-shared-opts
   "Shared options for both master and tserver"
+  [node]
   [; Data files!
    :--fs_data_dirs         ce-data-dir
    ; Limit memory to 1GB
    :--memory_limit_hard_bytes 1073741824
    ; Fewer shards to improve perf
    :--yb_num_shards_per_tserver 4
+   ; YB can do weird things with loopback interfaces, so... bind explicitly
+   :--rpc_bind_addresses (cn/ip node)
    ; Seconds before declaring an unavailable node dead and initiating a raft
    ; membership change
    ;:--follower_unavailable_considered_failed_sec 10
@@ -301,8 +305,7 @@
               ; Post-install takes forever, so let's try and skip this on
               ; subsequent runs
               (let [url (or (:url test) (get-ce-url (:version test)))
-                    installed-url (get-installed-url)
-                    ]
+                    installed-url (get-installed-url)]
                 (when-not (= url installed-url)
                   (info "Replacing version" installed-url "with" url)
                   (install-python! (:os test))
@@ -317,26 +320,26 @@
                         (c/exec :echo url (c/lit (str ">>" installed-url-file)))
                         (info "Done with setup")))))))
 
-    (start-master! [db test]
+    (start-master! [db test node]
       (c/su (c/exec :mkdir :-p ce-master-log-dir)
             (cu/start-daemon!
               {:logfile ce-master-logfile
                :pidfile ce-master-pidfile
                :chdir   dir}
               ce-master-bin
-              ce-shared-opts
+              (ce-shared-opts node)
               :--master_addresses   (master-addresses test)
               :--replication_factor (:replication-factor test)
               :--v 3)))
 
-    (start-tserver! [db test]
+    (start-tserver! [db test node]
       (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
             (cu/start-daemon!
               {:logfile ce-tserver-logfile
                :pidfile ce-tserver-pidfile
                :chdir   dir}
               ce-tserver-bin
-              ce-shared-opts
+              (ce-shared-opts node)
               :--tserver_master_addrs (master-addresses test)
               ; Tracing
               :--enable_tracing
@@ -387,11 +390,11 @@
       ; We assume the DB is already installed
       )
 
-    (start-master! [db test]
+    (start-master! [db test node]
       (info "Starting master")
       (info (c/exec (c/lit "if [[ -e /home/yugabyte/master/master.out ]]; then /home/yugabyte/bin/yb-server-ctl.sh master start; fi"))))
 
-    (start-tserver! [db test]
+    (start-tserver! [db test node]
       (info "Starting tserver")
       (info (c/exec (c/lit "/home/yugabyte/bin/yb-server-ctl.sh tserver start"))))
 

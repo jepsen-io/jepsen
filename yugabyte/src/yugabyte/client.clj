@@ -6,6 +6,7 @@
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
 			      [clojure.pprint :refer [pprint]]
+            [jepsen.control.net :as cn]
             [dom-top.core :as dt]
             [wall.hack :as wh])
   (:import (java.net InetSocketAddress)
@@ -56,7 +57,9 @@
     (withPoolingOptions (doto (PoolingOptions.)
                           (.setCoreConnectionsPerHost HostDistance/LOCAL 1)
                           (.setMaxConnectionsPerHost  HostDistance/LOCAL 1)))
-    (addContactPoint node)
+    ; This is sort of a hack; we're allowed to call cn/ip here without an SSH
+    ; connection because it memoizes, and we already called it during setup.
+    (addContactPoint (cn/ip node))
     (withRetryPolicy (policies/retry-policy :no-retry-on-client-timeout))
     (withReconnectionPolicy (policies/constant-reconnection-policy 1000))
     (withSocketOptions (.. (SocketOptions.)
@@ -64,7 +67,8 @@
                          (setReadTimeoutMillis 5000)))
     (withLoadBalancingPolicy (WhiteListPolicy.
                                (RoundRobinPolicy.)
-                               [(InetSocketAddress. node 9042)]))
+                               ; Same story: memoized.
+                               [(InetSocketAddress. (cn/ip node) 9042)]))
     (withThreadingOptions (proxy [ThreadingOptions] []
                             (createExecutor [cluster-name]
                               (doto (ThreadPoolExecutor.
