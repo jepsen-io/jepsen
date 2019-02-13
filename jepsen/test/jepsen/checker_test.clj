@@ -3,10 +3,11 @@
   (:use jepsen.checker
         clojure.test)
   (:require [knossos [history :as history]
-                     [model :as model]
-                     [core :refer [ok-op invoke-op fail-op]]]
+             [model :as model]
+             [core :refer [ok-op invoke-op fail-op]]]
             [multiset.core :as multiset]
-            [jepsen.checker.perf :refer :all]))
+            [jepsen.checker.perf :as cp]
+            [jepsen.util :as util]))
 
 (deftest queue-test
   (testing "empty"
@@ -171,14 +172,14 @@
           :valid? true})))
 
 (deftest bucket-points-test
-  (is (= (bucket-points 2
-                        [[1 :a]
-                         [7 :g]
-                         [5 :e]
-                         [2 :b]
-                         [3 :c]
-                         [4 :d]
-                         [6 :f]])
+  (is (= (cp/bucket-points 2
+                           [[1 :a]
+                            [7 :g]
+                            [5 :e]
+                            [2 :b]
+                            [3 :c]
+                            [4 :d]
+                            [6 :f]])
          {1 [[1 :a]]
           3 [[2 :b]
              [3 :c]]
@@ -190,35 +191,79 @@
 (deftest latencies->quantiles-test
   (is (= {0 [[5/2 0]  [15/2 20] [25/2 25]]
           1 [[5/2 10] [15/2 25] [25/2 25]]}
-         (latencies->quantiles 5 [0 1] (partition 2 [0 0
-                                                     1 10
-                                                     2 1
-                                                     3 1
-                                                     4 1
-                                                     5 20
-                                                     6 21
-                                                     7 22
-                                                     8 25
-                                                     9 25
-                                                     10 25])))))
+         (cp/latencies->quantiles 5 [0 1] (partition 2 [0 0
+                                                        1 10
+                                                        2 1
+                                                        3 1
+                                                        4 1
+                                                        5 20
+                                                        6 21
+                                                        7 22
+                                                        8 25
+                                                        9 25
+                                                        10 25])))))
+
+(defn perf-gen
+  ([latency]
+   (perf-gen latency nil))
+  ([latency nemesis-regions]
+   (let [f (rand-nth [:write :read])
+         proc (rand-int 100)
+         time (* 1e9 (rand-int 100))
+         type (rand-nth [:ok :ok :ok :ok :ok
+                         :fail :info :info])]
+     [{:process proc, :type :invoke, :f f, :time time}
+      {:process proc, :type type,    :f f, :time
+       (+ time latency)}])))
 
 (deftest perf-test
-  (check (perf)
-         {:name       "perf test"
-          :start-time 0}
-         (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
-              (mapcat (fn [latency]
-                        (let [f (rand-nth [:write :read])
-                              proc (rand-int 100)
-                              time (* 1e9 (rand-int 100))
-                              type (rand-nth [:ok :ok :ok :ok :ok
-                                              :fail :info :info])]
-                          [{:process proc, :type :invoke, :f f, :time time}
-                           {:process proc, :type type,    :f f, :time
-                            (+ time latency)}])))
-              (take 10000)
-              vec)
-         {}))
+  (let [history (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
+                     (mapcat perf-gen)
+                     (take 10000)
+                     vec)]
+
+    (testing "can render latency-graph"
+      (is (= (check (latency-graph)
+                    {:name "latency graph"
+                     :start-time 0}
+                    history
+                    {})
+             {:valid? true})))
+
+    (testing "can render rate-graph"
+      (is (= (check (rate-graph)
+                    {:name "rate graph"
+                     :start-time 0}
+                    history
+                    {})
+             {:valid? true})))
+
+    (testing "can render combined perf graph"
+      (is (= (check (perf)
+                    {:name "perf graph"
+                     :start-time 0}
+                    history
+                    {})
+             {:latency-graph {:valid? true},
+              :rate-graph {:valid? true},
+              :valid? true})))
+
+    ;; TODO Generate nemesis regions
+    (testing "can accept nemesis regions"
+      (let [checker (perf {:nemeses #{{:start #{:start1}
+                                       :stop  #{:stop1}}
+                                      {:start #{:start2.1 :start2.2}
+                                       :stop  #{:stop2}}
+                                      {:start #{:start3}
+                                       :stop  #{:stop3.1 :stop3.2}}
+                                      {:start #{:start4.1 :start4.2 :start4.3}
+                                       :stop  #{:stop4.1 :stop4.2 :stop4.3}}}})
+            test    {:name "nemeses regions perf test"
+                     :start-time 0}]
+        (is (= (check checker test history {})
+               {:latency-graph {:valid? true},
+                :rate-graph {:valid? true},
+                :valid? true}))))))
 
 (deftest clock-plot-test
   (check (clock-plot)
