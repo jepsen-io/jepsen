@@ -296,26 +296,26 @@
   (reify
     Auto
     (install! [db test]
-      (c/cd dir
-            ; Post-install takes forever, so let's try and skip this on
-            ; subsequent runs
-            (let [url (or (:url test) (get-ce-url (:version test)))
-                  installed-url (get-installed-url)
-                  ]
-              (when-not (= url installed-url)
-                (info "Replacing version" installed-url "with" url)
-              (install-python! (:os test))
-              (assert (re-find #"Python 2\.7"
-                               (c/exec :python :--version (c/lit "2>&1"))))
+      (c/su
+        (c/cd dir
+              ; Post-install takes forever, so let's try and skip this on
+              ; subsequent runs
+              (let [url (or (:url test) (get-ce-url (:version test)))
+                    installed-url (get-installed-url)
+                    ]
+                (when-not (= url installed-url)
+                  (info "Replacing version" installed-url "with" url)
+                  (install-python! (:os test))
+                  (assert (re-find #"Python 2\.7"
+                                   (c/exec :python :--version (c/lit "2>&1"))))
 
-              (info "Installing tarball")
-                (cu/install-archive! url dir)
-              (c/su (info "Post-install script")
-                    (c/exec "./bin/post_install.sh")
+                  (info "Installing tarball")
+                  (cu/install-archive! url dir)
+                  (c/su (info "Post-install script")
+                        (c/exec "./bin/post_install.sh")
 
-                      (c/exec :echo url (c/lit (str ">>" installed-url-file)))
-                      (info "Done with setup"))))))
-
+                        (c/exec :echo url (c/lit (str ">>" installed-url-file)))
+                        (info "Done with setup")))))))
 
     (start-master! [db test]
       (c/su (c/exec :mkdir :-p ce-master-log-dir)
