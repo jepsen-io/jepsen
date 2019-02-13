@@ -281,8 +281,8 @@
   "Shared options for both master and tserver"
   [; Data files!
    :--fs_data_dirs         ce-data-dir
-   ; Limit memory to 4GB
-   :--memory_limit_hard_bytes 4294967296
+   ; Limit memory to 1GB
+   :--memory_limit_hard_bytes 1073741824
    ; Fewer shards to improve perf
    :--yb_num_shards_per_tserver 4
    ; Seconds before declaring an unavailable node dead and initiating a raft

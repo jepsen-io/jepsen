@@ -139,7 +139,7 @@
                            (string? (first index-args)))
                     (first index-args)
                     (apply q/create-index index-args))]
-    (try (execute-with-timeout! conn 10000 statement)
+    (try (execute-with-timeout! conn 30000 statement)
          (catch InvalidQueryException e
            (if (re-find #"Target index already exists" (.getMessage e))
              :already-exists
