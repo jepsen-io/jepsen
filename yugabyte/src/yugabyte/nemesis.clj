@@ -19,7 +19,8 @@
     (invoke! [this test op]
       (let [nodes (:nodes test)
             nodes (case (:f op)
-                    (:start-master :start-tserver) nodes
+                    :start-tserver nodes
+                    :start-master  (auto/master-nodes test)
 
                     (:stop-tserver :kill-tserver)
                     (util/random-nonempty-subset nodes)
