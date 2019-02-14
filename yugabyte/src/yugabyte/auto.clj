@@ -283,8 +283,8 @@
   [node]
   [; Data files!
    :--fs_data_dirs         ce-data-dir
-   ; Limit memory to 1GB
-   :--memory_limit_hard_bytes 1073741824
+   ; Limit memory to 2GB
+   :--memory_limit_hard_bytes 2147483648
    ; Fewer shards to improve perf
    :--yb_num_shards_per_tserver 4
    ; YB can do weird things with loopback interfaces, so... bind explicitly
