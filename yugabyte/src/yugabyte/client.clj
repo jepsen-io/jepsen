@@ -223,9 +223,9 @@
        (catch NoHostAvailableException e#
          (condp re-find (.getMessage e#)
            #"no host was tried"
-           ((info "All nodes are down - sleeping 2s")
-             (Thread/sleep 2000)
-             (assoc ~op :type :fail :error [:no-host-available (.getMessage e#)]))
+           (do (info "All nodes are down - sleeping 2s")
+               (Thread/sleep 2000)
+               (assoc ~op :type :fail :error [:no-host-available (.getMessage e#)]))
            (assoc ~op :type crash#, :error [:no-host-available (.getMessage e#)])))
 
        (catch DriverException e#
