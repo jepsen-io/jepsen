@@ -6,9 +6,11 @@
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
 			      [clojure.pprint :refer [pprint]]
+            [jepsen [util :as util]]
             [jepsen.control.net :as cn]
             [dom-top.core :as dt]
-            [wall.hack :as wh])
+            [wall.hack :as wh]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.net InetSocketAddress)
            (com.datastax.driver.core Cluster
                                      Cluster$Builder
@@ -33,6 +35,28 @@
            (java.util.concurrent LinkedBlockingQueue
                                  ThreadPoolExecutor
                                  TimeUnit)))
+
+(defmacro with-retry
+  "Retries CQL unavailable/timeout errors for up to 120 seconds. Helpful for
+  setting up initial data; YugaByte loves to throw 10+ second latencies at us
+  early in the test."
+  [& body]
+  `(let [deadline# (+ (util/linear-time-nanos) (util/secs->nanos 120))
+         sleep#    100] ; ms
+     (dt/with-retry []
+       ~@body
+       (catch NoHostAvailableException e#
+         (if (< deadline# (util/linear-time-nanos))
+           (throw e#)
+           (do (info "Timed out, retrying")
+               (Thread/sleep (rand-int sleep#))
+               (~'retry))))
+       (catch OperationTimedOutException e#
+         (if (< deadline# (util/linear-time-nanos))
+           (throw e#)
+           (do (info "Timed out, retrying")
+               (Thread/sleep (rand-int sleep#))
+               (~'retry)))))))
 
 (defn epoll-event-loop-group-constructor
   "Why is this not public?"
@@ -94,11 +118,12 @@
   ([node]
    (connect node {}))
   ([node opts]
-   (let [c (cluster node)]
-     (try (.connect c)
-          (catch DriverException e
-            (.close c)
-            (throw e))))))
+   (with-retry
+     (let [c (cluster node)]
+       (try (.connect c)
+            (catch DriverException e
+              (.close c)
+              (throw e)))))))
 
 (defn execute-with-timeout!
   "Executes a statement on a session, but applies a custom read timeout, in

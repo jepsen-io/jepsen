@@ -27,12 +27,13 @@
                              :balance :bigint
                              :primary-key [:id]}))
     (info "Creating accounts")
-    (cql/insert-with-ks conn keyspace table-name
-                        {:id (first (:accounts test))
-                         :balance (:total-amount test)})
-    (doseq [a (rest (:accounts test))]
-      (cql/insert conn table-name
-                  {:id a, :balance 0})))
+    (c/with-retry
+      (cql/insert-with-ks conn keyspace table-name
+                          {:id (first (:accounts test))
+                           :balance (:total-amount test)})
+      (doseq [a (rest (:accounts test))]
+        (cql/insert conn table-name
+                    {:id a, :balance 0}))))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -78,11 +79,12 @@
                                :primary-key [:id]}))
 
       (info "Populating account" a)
-      (cql/insert-with-ks conn keyspace (str table-name a)
-                          {:id      a
-                           :balance (if (= a (first (:accounts test)))
-                                      (:total-amount test)
-                                      0)})))
+      (c/with-retry
+        (cql/insert-with-ks conn keyspace (str table-name a)
+                            {:id      a
+                             :balance (if (= a (first (:accounts test)))
+                                        (:total-amount test)
+                                        0)}))))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
