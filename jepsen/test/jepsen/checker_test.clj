@@ -249,11 +249,10 @@
               :rate-graph {:valid? true},
               :valid? true})))
 
-    (testing "can render a nemesis region"
-      (let [checker (perf {:nemeses #{{:start #{:start} :stop #{:stop}}}})
-            test    {:name "nemeses regions perf test"
+    (testing "can render a :start :stop nemesis region without opts"
+      (let [checker (perf)
+            test    {:name "nemesis compatibility perf test"
                      :start-time 0}
-            ;; TODO Generate these and oh my god simplify this T.T
             nemesis-ops [{:type :info
                           :process :nemesis
                           :f :start
@@ -280,25 +279,90 @@
                 :rate-graph {:valid? true},
                 :valid? true}))))
 
-    ;; TODO Generate those nemesis ops
-    (testing "can accept arbitrary nemesis options"
+    (testing "can render multiple nemesis regions"
       (let [checker (perf {:nemeses #{{:start #{:start1}
                                        :stop  #{:stop1}}
                                       {:start #{:start2.1 :start2.2}
-                                       :stop  #{:stop2}}
-                                      {:start #{:start3}
-                                       :stop  #{:stop3.1 :stop3.2}}
-                                      {:start #{:start4.1 :start4.2 :start4.3}
-                                       :stop  #{:stop4.1 :stop4.2 :stop4.3}}}})
-            test    {:name "degenerate nemeses regions perf test"
+                                       :stop  #{:stop2}}}})
+            test    {:name "nemeses multiregions perf test"
                      :start-time 0}
 
-            ;; This nemesis behavior in this history is downright absurd.
-            ;; But let's go I guess.
-            history (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
-                         (mapcat #(perf-gen % true))
-                         (take 10000)
-                         vec)]
+            ;; Hnnnnnnnnnng we should simplify this... ugly brute force
+            nemesis-ops [{:type :info
+                          :process :nemesis
+                          :f :start1
+                          :value nil
+                          :time (* 1e9 5)}
+                         {:type :info
+                          :process :nemesis
+                          :f :start1
+                          :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
+                          :time (* 1e9 20)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop1
+                          :value nil
+                          :time (* 1e9 40)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop1
+                          :value :network-healed
+                          :time (* 1e9 60)}
+
+                         {:type :info
+                          :process :nemesis
+                          :f :start2.1
+                          :value nil
+                          :time (* 1e9 30)}
+                         {:type :info
+                          :process :nemesis
+                          :f :start2.2
+                          :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
+                          :time (* 1e9 65)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop2.2
+                          :value nil
+                          :time (* 1e9 45)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop2.1
+                          :value :network-healed
+                          :time (* 1e9 95)}]
+            history (apply conj history nemesis-ops)]
+        (is (= (check checker test history {})
+               {:latency-graph {:valid? true},
+                :rate-graph {:valid? true},
+                :valid? true}))))
+
+    (testing "can render nemeses with custom styling"
+      (let [checker (perf {:nemeses #{{:fill-color "#6DB6FE"
+                                       :transparency 0.5
+                                       :line-color "#6DB6FE"
+                                       :line-width 2}}})
+            test    {:name "nemeses styling perf test"
+                     :start-time 0}
+            nemesis-ops [{:type :info
+                          :process :nemesis
+                          :f :start
+                          :value nil
+                          :time (* 1e9 5)}
+                         {:type :info
+                          :process :nemesis
+                          :f :start
+                          :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
+                          :time (* 1e9 20)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop
+                          :value nil
+                          :time (* 1e9 50)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop
+                          :value :network-healed
+                          :time (* 1e9 90)}]
+            history (apply conj history nemesis-ops)]
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
