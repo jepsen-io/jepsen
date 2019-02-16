@@ -281,9 +281,13 @@
 
     (testing "can render multiple nemesis regions"
       (let [checker (perf {:nemeses #{{:start #{:start1}
-                                       :stop  #{:stop1}}
+                                       :stop  #{:stop1}
+                                       :fill-color "#800080"
+                                       :transparency 0.1}
                                       {:start #{:start2.1 :start2.2}
-                                       :stop  #{:stop2}}}})
+                                       :stop  #{:stop2.1 :stop2.2}
+                                       :fill-color "#87A96B"
+                                       :transparency 0.1}}})
             test    {:name "nemeses multiregions perf test"
                      :start-time 0}
 
