@@ -168,27 +168,32 @@
    :info ['rgb "#FFA400"]
    :fail ['rgb "#FF1E90"]})
 
+(defn x
+  "FIXME Name and docstring"
+  [interval final-time]
+  (let [[start stop] interval]
+    (when start
+      [(-> start :time util/nanos->secs double)
+       (if stop
+         (-> stop :time util/nanos->secs double)
+         final-time)])))
+
 (defn nemesis-intervals
   "Given a history, constructs a sequence of [start-time, stop-time] intervals
   when the nemesis was active, in units of seconds."
   [history]
-  (let [final-time  (-> history
-                         rseq
-                         (->> (filter :time))
-                         first
-                         :time
-                         (or 0)
-                         util/nanos->secs
-                         double)]
-    (->> history
-         util/nemesis-intervals
-         (keep
-           (fn [[start stop]]
-             (when start
-               [(-> start :time util/nanos->secs double)
-                (if stop
-                  (-> stop :time util/nanos->secs double)
-                  final-time)]))))))
+  (let [final-time (-> history
+                       rseq
+                       (->> (filter :time))
+                       first
+                       :time
+                       (or 0)
+                       util/nanos->secs
+                       double)
+        history (util/nemesis-intervals history)
+        history (keep #(x % final-time) history)
+        _ (clojure.pprint/pprint history)]
+    history))
 
 (defn nemesis-regions
   "Emits a sequence of gnuplot commands rendering shaded regions where the

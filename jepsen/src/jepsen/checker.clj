@@ -733,7 +733,8 @@
                 (recur history lower upper pending-reads reads))))))))
 
 (defn latency-graph
-  "Spits out graphs of latencies."
+  "Spits out graphs of latencies. Checker options take precedence over
+  those passed in with this constructor."
   ([]
    (latency-graph {}))
   ([opts]
@@ -745,7 +746,8 @@
          {:valid? true})))))
 
 (defn rate-graph
-  "Spits out graphs of throughput over time."
+  "Spits out graphs of throughput over time. Checker options take precedence over
+  those passed in with this constructor."
   ([]
    (rate-graph {}))
   ([opts]
@@ -756,7 +758,8 @@
          {:valid? true})))))
 
 (defn perf
-  "Assorted performance statistics"
+  "Composes various performance statistics. Checker options take precedence over
+  those passed in with this constructor."
   ([]
    (perf {}))
   ([opts]

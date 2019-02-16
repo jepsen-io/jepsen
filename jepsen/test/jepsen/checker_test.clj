@@ -4,7 +4,8 @@
         clojure.test)
   (:require [knossos [history :as history]
              [model :as model]
-             [core :refer [ok-op invoke-op fail-op]]]
+             [core :refer [ok-op invoke-op fail-op]]
+             [op :as op]]
             [multiset.core :as multiset]
             [jepsen.checker.perf :as cp]
             [jepsen.util :as util]))
@@ -206,7 +207,7 @@
 (defn perf-gen
   ([latency]
    (perf-gen latency nil))
-  ([latency nemesis-regions]
+  ([latency nemesis?]
    (let [f (rand-nth [:write :read])
          proc (rand-int 100)
          time (* 1e9 (rand-int 100))
@@ -248,8 +249,39 @@
               :rate-graph {:valid? true},
               :valid? true})))
 
-    ;; TODO Generate nemesis regions
-    (testing "can accept nemesis regions"
+    (testing "can render a nemesis region"
+      (let [checker (perf {:nemeses #{{:start #{:start} :stop #{:stop}}}})
+            test    {:name "nemeses regions perf test"
+                     :start-time 0}
+            ;; TODO Generate these and oh my god simplify this T.T
+            nemesis-ops [{:type :info
+                          :process :nemesis
+                          :f :start
+                          :value nil
+                          :time (* 1e9 5)}
+                         {:type :info
+                          :process :nemesis
+                          :f :start
+                          :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
+                          :time (* 1e9 20)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop
+                          :value nil
+                          :time (* 1e9 50)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop
+                          :value :network-healed
+                          :time (* 1e9 90)}]
+            history (apply conj history nemesis-ops)]
+        (is (= (check checker test history {})
+               {:latency-graph {:valid? true},
+                :rate-graph {:valid? true},
+                :valid? true}))))
+
+    ;; TODO Generate those nemesis ops
+    (testing "can accept arbitrary nemesis options"
       (let [checker (perf {:nemeses #{{:start #{:start1}
                                        :stop  #{:stop1}}
                                       {:start #{:start2.1 :start2.2}
@@ -258,8 +290,15 @@
                                        :stop  #{:stop3.1 :stop3.2}}
                                       {:start #{:start4.1 :start4.2 :start4.3}
                                        :stop  #{:stop4.1 :stop4.2 :stop4.3}}}})
-            test    {:name "nemeses regions perf test"
-                     :start-time 0}]
+            test    {:name "degenerate nemeses regions perf test"
+                     :start-time 0}
+
+            ;; This nemesis behavior in this history is downright absurd.
+            ;; But let's go I guess.
+            history (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
+                         (mapcat #(perf-gen % true))
+                         (take 10000)
+                         vec)]
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
