@@ -171,65 +171,86 @@
 (defn nemesis-intervals
   "Given a history, constructs a sequence of [start-time, stop-time] intervals
   when the nemesis was active, in units of seconds."
-  [history]
-  (let [final-time  (-> history
-                         rseq
-                         (->> (filter :time))
-                         first
-                         :time
-                         (or 0)
-                         util/nanos->secs
-                         double)]
-    (->> history
-         util/nemesis-intervals
-         (keep
-           (fn [[start stop]]
-             (when start
-               [(-> start :time util/nanos->secs double)
-                (if stop
-                  (-> stop :time util/nanos->secs double)
-                  final-time)]))))))
+  ([history]
+   (nemesis-intervals history {}))
+  ([history opts]
+   (let [final-time (-> history
+                        rseq
+                        (->> (filter :time))
+                        first
+                        :time
+                        (or 0)
+                        util/nanos->secs
+                        double)
+         history (util/nemesis-intervals history opts)]
+     (keep (fn [interval]
+             (let [[start stop] interval]
+               (when start
+                 [(-> start :time util/nanos->secs double)
+                  (if stop
+                    (-> stop :time util/nanos->secs double)
+                    final-time)])))
+           history))))
 
 (defn nemesis-regions
   "Emits a sequence of gnuplot commands rendering shaded regions where the
-  nemesis is active."
-  [history]
-  (->> history
-       nemesis-intervals
-       (map (fn [[start stop]]
-              [:set :obj :rect
-               :from (g/list start [:graph 0])
-               :to   (g/list stop  [:graph 1])
-               :fillcolor :rgb "#000000"
-               :fillstyle :transparent :solid 0.05
-               :noborder]))))
+  nemesis is active. Takes an options map for nemesis regions and styling ex:
+
+  {:start #{:start1 :start2}
+   :stop #{:stop1 :stop2}
+   :fill-color #\"000000\"
+   :transparency 0.05}"
+  ([history]
+   (nemesis-regions history {}))
+  ([history opts]
+   (let [fill-color   (or (:fill-color   opts) "#000000")
+         transparency (or (:transparency opts) 0.05)
+         history (nemesis-intervals history opts)]
+     (->> history
+        (map (fn [[start stop]]
+               [:set :obj :rect
+                :from (g/list start [:graph 0])
+                :to   (g/list stop  [:graph 1])
+                :fillcolor :rgb fill-color
+                :fillstyle :transparent :solid transparency
+                :noborder]))))))
 
 (defn nemesis-events
   "Given a history, constructs a sequence of times, in seconds, marking nemesis
   events other than start/stop pairs."
-  [history]
-  (->> history
-       (filter (fn [op]
-                 (and (= :nemesis (:process op))
-                      (not= :start (:f op))
-                      (not= :stop  (:f op)))))
-       (map (comp double util/nanos->secs :time))))
+  [history keys]
+  (let [start (or (:start keys) #{:start})
+        stop  (or (:stop  keys) #{:stop})]
+    (->> history
+         (filter (fn [op]
+                   (and (= :nemesis (:process op))
+                        (not (start (:f op)))
+                        (not (stop  (:f op))))))
+         (map (comp double util/nanos->secs :time)))))
 
 (defn nemesis-lines
   "Emits a sequence of gnuplot commands rendering vertical lines where nemesis
-  events occurred."
-  [history]
-  (->> history
-       nemesis-events
-       (map (fn [t]
-              [:set :arrow
-               :from (g/list t [:graph 0])
-               :to   (g/list t [:graph 1])
-               ; When gnuplot gets alpha rgb we can use this
-               ; :lc :rgb "#f3000000"
-               :lc :rgb "#dddddd"
-               :lw 1
-               :nohead]))))
+  events occurred. Takes an options map for nemesis regions and styling ex:
+  {:start #{:start1 :start2}
+   :stop #{:stop1 :stop2}
+   :line-color #\"dddddd\"
+   :line-width 1}"
+  ([history]
+   (nemesis-lines history {}))
+  ([history opts]
+   (let [events      (nemesis-events history opts)
+         line-color  (or (:line-color opts) "#dddddd")
+         line-width  (or (:line-width opts) "1")]
+     (map (fn [t]
+            [:set :arrow
+             :from (g/list t [:graph 0])
+             :to   (g/list t [:graph 1])
+             ;; When gnuplot gets alpha rgb we can use this
+             ;; :lc :rgb "#f3000000"
+             :lc :rgb line-color
+             :lw line-width
+             :nohead])
+          events))))
 
 (defn preamble
   "Shared gnuplot preamble"
@@ -250,7 +271,7 @@
 
 (defn point-graph!
   "Writes a plot of raw latency data points."
-  [test history opts]
+  [test history {:keys [subdirectory nemeses] :as opts}]
   (let [history     (util/history->latencies history)
         datasets    (invokes-by-f-type history)
         fs          (util/polysort (keys datasets))
@@ -261,14 +282,17 @@
         plot-order  (->> key-order
                          (sort-by (comp count (partial get-in datasets)))
                          reverse)
-        output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
-                                                    "latency-raw.png"))]
+        output-path (.getCanonicalPath (store/path! test
+                                                    subdirectory
+                                                    "latency-raw.png"))
+        ;; Gotta fudge this with default opts to make sure it runs at least once
+        nemeses (or nemeses #{{}})]
     (when (seq key-order)
       (try
         (g/raw-plot!
           (concat (latency-preamble test output-path)
-                  (nemesis-regions history)
-                  (nemesis-lines history)
+                  (mapcat #(nemesis-regions history %) nemeses)
+                  (mapcat #(nemesis-lines history %)   nemeses)
                   ; Plot ops
                   [['plot (apply g/list
                                  (concat
@@ -304,7 +328,7 @@
 
 (defn quantiles-graph!
   "Writes a plot of latency quantiles, by f, over time."
-  [test history opts]
+  [test history {:keys [subdirectory nemeses]}]
   (let [history     (util/history->latencies history)
         dt          30
         qs          [0.5 0.95 0.99 1]
@@ -321,14 +345,17 @@
         fs->points  (fs->points fs)
         qs->colors  (qs->colors qs)
         output-path (.getCanonicalPath
-                      (store/path! test (:subdirectory opts)
-                                   "latency-quantiles.png"))]
+                     (store/path! test
+                                  subdirectory
+                                  "latency-quantiles.png"))
+        ;; Gotta fudge this with default opts to make sure it runs at least once
+        nemeses (or nemeses #{{}})]
     (when (seq datasets)
       (try
         (g/raw-plot!
           (concat (latency-preamble test output-path)
-                  (nemesis-regions history)
-                  (nemesis-lines history)
+                  (mapcat #(nemesis-regions history %) nemeses)
+                  (mapcat #(nemesis-lines history %)   nemeses)
                   ; Plot ops
                   [['plot (apply g/list
                                  (for [f fs, q qs]
@@ -355,7 +382,7 @@
 
 (defn rate-graph!
   "Writes a plot of operation rate by their completion times."
-  [test history opts]
+  [test history {:keys [subdirectory nemeses]}]
   (let [dt          10
         td          (double (/ dt))
         t-max       (->> history (r/map :time) (reduce max 0) util/nanos->secs)
@@ -374,14 +401,17 @@
                                  {}))
         fs          (util/polysort (keys datasets))
         fs->points  (fs->points fs)
-        output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
-                                                    "rate.png"))]
+        output-path (.getCanonicalPath (store/path! test
+                                                    subdirectory
+                                                    "rate.png"))
+        ;; Gotta fudge this with default opts to make sure it runs at least once
+        nemeses (or nemeses #{{}})]
     (when (seq datasets)
       (try
         (g/raw-plot!
           (concat (rate-preamble test output-path)
-                  (nemesis-regions history)
-                  (nemesis-lines history)
+                  (mapcat #(nemesis-regions history %) nemeses)
+                  (mapcat #(nemesis-lines history %)   nemeses)
                   ; Plot ops
                   [['plot (apply g/list
                                  (for [f fs, t types]

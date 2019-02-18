@@ -633,22 +633,28 @@
 
 (defn nemesis-intervals
   "Given a history where a nemesis goes through :f :start and :f :stop
-  transitions, constructs a sequence of pairs of :start and :stop ops. Since a
+  type transitions, constructs a sequence of pairs of start and stop ops. Since a
   nemesis usually goes :start :start :stop :stop, we construct pairs of the
   first and third, then second and fourth events. Where no :stop op is present,
-  we emit a pair like [start nil]."
-  [history]
-  (let [[pairs starts] (->> history
-                            (filter #(= :nemesis (:process %)))
-                            (reduce (fn [[pairs starts] op]
-                                      (case (:f op)
-                                        :start [pairs (conj starts op)]
-                                        :stop  [(conj pairs [(peek starts)
-                                                             op])
-                                                (pop starts)]
-                                        [pairs starts]))
-                                    [[] (clojure.lang.PersistentQueue/EMPTY)]))]
-    (concat pairs (map vector starts (repeat nil)))))
+  we emit a pair like [start nil]. Optionally, a map of start and stop sets may
+  be provided to match on user-defined :start and :stop keys."
+  ([history]
+   (nemesis-intervals history {}))
+  ([history opts]
+   ;; Default to :start and :stop if no region keys are provided
+   (let [start (or (:start opts) #{:start})
+         stop  (or (:stop  opts) #{:stop})
+         [pairs starts] (->> history
+                             (filter #(= :nemesis (:process %)))
+                             (reduce (fn [[pairs starts] op]
+                                       (cond
+                                         (start (:f op)) [pairs (conj starts op)]
+                                         (stop  (:f op)) [(conj pairs [(peek starts)
+                                                                       op])
+                                                          (pop starts)]
+                                         :else [pairs starts]))
+                                     [[] (clojure.lang.PersistentQueue/EMPTY)]))]
+     (concat pairs (map vector starts (repeat nil))))))
 
 (defn longest-common-prefix
   "Given a collection of sequences, finds the longest sequence which is a

@@ -733,27 +733,38 @@
                 (recur history lower upper pending-reads reads))))))))
 
 (defn latency-graph
-  "Spits out graphs of latencies."
-  []
-  (reify Checker
-    (check [_ test history opts]
-      (perf/point-graph! test history opts)
-      (perf/quantiles-graph! test history opts)
-      {:valid? true})))
+  "Spits out graphs of latencies. Checker options take precedence over
+  those passed in with this constructor."
+  ([]
+   (latency-graph {}))
+  ([opts]
+   (reify Checker
+     (check [_ test history c-opts]
+       (let [o (merge opts c-opts)]
+         (perf/point-graph!     test history o)
+         (perf/quantiles-graph! test history o)
+         {:valid? true})))))
 
 (defn rate-graph
-  "Spits out graphs of throughput over time."
-  []
-  (reify Checker
-    (check [_ test history opts]
-      (perf/rate-graph! test history opts)
-      {:valid? true})))
+  "Spits out graphs of throughput over time. Checker options take precedence over
+  those passed in with this constructor."
+  ([]
+   (rate-graph {}))
+  ([opts]
+   (reify Checker
+     (check [_ test history c-opts]
+       (let [o (merge opts c-opts)]
+         (perf/rate-graph! test history o)
+         {:valid? true})))))
 
 (defn perf
-  "Assorted performance statistics"
-  []
-  (compose {:latency-graph (latency-graph)
-            :rate-graph    (rate-graph)}))
+  "Composes various performance statistics. Checker options take precedence over
+  those passed in with this constructor."
+  ([]
+   (perf {}))
+  ([opts]
+   (compose {:latency-graph (latency-graph opts)
+             :rate-graph    (rate-graph opts)})))
 
 (defn clock-plot
   "Plots clock offsets on all nodes"
