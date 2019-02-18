@@ -411,6 +411,18 @@
   [n gen]
   (Limit. gen (atom (inc n))))
 
+(defgenerator ProcessLimit [gen n procs]
+  [n gen]
+  (op [_ test process]
+      (when (<= (count (swap! procs conj process)) n)
+        (op gen test process))))
+
+(defn process-limit
+  "Takes a generator and returns a generator with bounded concurrency--it emits
+  operations for up to n distinct processes, but no more. Once n+1 processes
+  have requested an operation, emits nil forever."
+  [n gen]
+  (ProcessLimit. gen n (atom #{})))
 
 ; T I M E   L I M I T S
 ;
