@@ -69,12 +69,16 @@
   (->> [[] ; No faults
         [:kill-tserver] ; Just tserver
         [:kill-master]  ; Just master
+        [:pause-tserver] ; Just pause tserver
+        [:pause-master] ; Just pause master
         [:clock-skew]   ; Just clocks
         [:partition-one ; Just partitions
          :partition-half
          :partition-ring]
         [:kill-tserver
          :kill-master
+         :pause-tserver
+         :pause-master
          :clock-skew
          :partition-one
          :partition-half
