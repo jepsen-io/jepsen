@@ -64,8 +64,8 @@
                   (range)
                   (fn [k]
                     (->> (gen/reserve n (gen/mix [w cas cas]) r)
-                         (gen/stagger 0.1)
-                         (gen/limit 100))))
+                         (gen/stagger 1)
+                         (gen/limit 120))))
      :checker (independent/checker
                 (checker/compose
                   {:timeline (timeline/html)

@@ -193,10 +193,15 @@
     (stop-master! db))
   :stopped)
 
+(defn signal!
+  "Sends a signal to a named process by signal number or name."
+  [process-name signal]
+  (meh (c/exec :pkill :--signal signal process-name)))
+
 (defn kill!
   "Kill a process forcibly."
   [process]
-  (meh (c/exec :pkill :-9 process))
+  (signal! process 9)
   (c/exec (c/lit (str "! ps -ce | grep " process)))
   (info process "killed")
   :killed)

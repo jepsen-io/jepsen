@@ -56,6 +56,9 @@
     :kill
     :kill-master
     :kill-tserver
+    :pause-master
+    :pause-tserver
+    :pause
     :stop
     :stop-master
     :stop-tserver
@@ -155,7 +158,18 @@
                                 (gen/log "Waiting for recovery...")
                                 (gen/sleep (:final-recovery-time opts))
                                 (gen/clients (:final-generator workload)))
-                    gen)]
+                    gen)
+        perf (checker/perf
+               {:nemeses #{{:start #{:kill-master :stop-master}
+                            :stop  #{:start-master}}
+                           {:start #{:kill-tserver :stop-tserver}
+                            :stop  #{:start-tserver}}
+                           {:start #{:pause-master}
+                            :stop  #{:resume-master}}
+                           {:start #{:pause-tserver}
+                            :stop  #{:resume-tserver}}
+                           {:start #{:start-partition}
+                            :stop  #{:stop-partition}}}})]
     (merge tests/noop-test
            opts
            (dissoc workload
@@ -167,8 +181,8 @@
            {:client     (:client workload)
             :nemesis    (:nemesis nemesis)
             :generator  gen
-            :checker    (checker/compose {:perf (checker/perf)
-                                          :clock (checker/clock-plot)
+            :checker    (checker/compose {:perf     perf
+                                          :clock    (checker/clock-plot)
                                           :workload (:checker workload)})})))
 
 (defn yb-test

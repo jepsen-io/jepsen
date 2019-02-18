@@ -19,25 +19,29 @@
     (invoke! [this test op]
       (let [nodes (:nodes test)
             nodes (case (:f op)
-                    :start-tserver nodes
-                    :start-master  (auto/master-nodes test)
+                    (:resume-tserver :start-tserver) nodes
+                    (:resume-master :start-master)  (auto/master-nodes test)
 
-                    (:stop-tserver :kill-tserver)
+                    (:stop-tserver :kill-tserver :pause-tserver)
                     (util/random-nonempty-subset nodes)
 
-                    (:stop-master :kill-master)
+                    (:stop-master :kill-master :pause-master)
                     (util/random-nonempty-subset (auto/master-nodes test)))
             db (:db test)]
         (assoc op :value
                (c/on-nodes test nodes
-                           (fn [test node]
-                             (case (:f op)
-                               :start-master  (auto/start-master!  db test node)
-                               :start-tserver (auto/start-tserver! db test node)
-                               :stop-master   (auto/stop-master!   db)
-                               :stop-tserver  (auto/stop-tserver!  db)
-                               :kill-master   (auto/kill-master!   db)
-                               :kill-tserver  (auto/kill-tserver!  db)))))))
+                 (fn [test node]
+                   (case (:f op)
+                     :start-master  (auto/start-master!  db test node)
+                     :start-tserver (auto/start-tserver! db test node)
+                     :stop-master   (auto/stop-master!   db)
+                     :stop-tserver  (auto/stop-tserver!  db)
+                     :kill-master   (auto/kill-master!   db)
+                     :kill-tserver  (auto/kill-tserver!  db)
+                     :pause-master    (auto/signal! "yb-master"   :STOP)
+                     :pause-tserver   (auto/signal! "yb-tserver"  :STOP)
+                     :resume-master   (auto/signal! "yb-master"   :CONT)
+                     :resume-tserver  (auto/signal! "yb-tserver"  :CONT)))))))
 
     (teardown! [this test])))
 
@@ -45,9 +49,11 @@
   "Merges together all nemeses"
   []
   (nemesis/compose
-    {#{:start-master :start-tserver
-       :stop-master  :stop-tserver
-       :kill-master  :kill-tserver}   (process-nemesis)
+    {#{:start-master  :start-tserver
+       :stop-master   :stop-tserver
+       :kill-master   :kill-tserver
+       :pause-master  :pause-tserver
+       :resume-master :resume-tserver} (process-nemesis)
      {:start-partition :start
       :stop-partition  :stop}         (nemesis/partitioner nil)
      {:reset-clock          :reset
@@ -145,6 +151,10 @@
           (o {:kill-master (op :kill-master)
               :stop-master (op :stop-master)}
              (op :start-master))
+          (o {:pause-tserver (op :pause-tserver)}
+             (op :resume-tserver))
+          (o {:pause-master (op :pause-master)}
+             (op :resume-master))
           (o {:partition-one  partition-one-gen
               :partition-half partition-half-gen
               :partition-ring partition-ring-gen}
@@ -166,6 +176,8 @@
   [n]
   (->> (cond-> []
          (:clock-skew n)                          (conj :reset-clock)
+         (:pause-master n)                        (conj :resume-master)
+         (:pause-tserver n)                       (conj :resume-tserver)
          (or (:kill-tserver n) (:stop-tserver n)) (conj :start-tserver)
          (or (:kill-master n)  (:stop-master n))  (conj :start-master)
 
@@ -183,6 +195,8 @@
                      :kill-master true)
     (:stop n) (assoc :stop-tserver true
                      :kill-master true)
+    (:pause n) (assoc :pause-master true
+                      :pause-tserver true)
     (:partition n) (assoc :partition-one true
                           :partition-half true
                           :partition-ring true)))
