@@ -120,6 +120,13 @@
                                          {}))]))
                            (into {}))}))))
 
+(defn ok-reads
+  "Filters a history to just OK reads"
+  [history]
+  (filter #(and (op/ok? %)
+                (= :read (:f %)))
+          history))
+
 (defn by-node
   "Groups operations by node."
   [test history]
@@ -134,13 +141,10 @@
 (defn points
   "Turns a history into a seqeunce of [time total-of-accounts] points."
   [history]
-  (->> history
-       (r/filter op/ok?)
-       (r/filter #(= :read (:f %)))
-       (r/map (fn [op]
-                [(util/nanos->secs (:time op))
-                 (reduce + (remove nil? (vals (:value op))))]))
-       (into [])))
+  (mapv (fn [op]
+          [(util/nanos->secs (:time op))
+           (reduce + (remove nil? (vals (:value op))))])
+        history))
 
 (defn plotter
   "Renders a graph of balances over time"
@@ -148,7 +152,7 @@
   (reify checker/Checker
     (check [this test history opts]
       ; Don't graph empty histories
-      (when (seq history)
+      (when-let [history (seq (ok-reads history))]
         (let [totals (->> history
                           (by-node test)
                           (util/map-vals points))
