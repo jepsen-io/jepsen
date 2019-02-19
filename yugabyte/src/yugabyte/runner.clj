@@ -5,7 +5,8 @@
                      [string :as str]]
             [clojure.tools.logging :refer :all]
             [jepsen [core :as jepsen]
-                    [cli :as cli]]
+                    [cli :as cli]
+                    [store :as store]]
             [yugabyte [core :as core]
                       [nemesis :as nemesis]]))
 
@@ -126,16 +127,45 @@
 																	i         (range (:test-count options))]
                               (-> options
                                   (merge workload)
-                                  (update :nemesis merge nemesis)))]
-									(->> tests
-											 (map-indexed
-												 (fn [i test-opts]
-													 (try
-														 (info "\n\n\nTest " (inc i) "/" (count tests))
-														 (jepsen/run! (core/yb-test test-opts))
-														 (catch Exception e
-															 (warn e "Test crashed; moving on...")))))
-											 dorun)))}})
+                                  (update :nemesis merge nemesis)))
+                      results (->> tests
+                                   (map-indexed
+                                     (fn [i test-opts]
+                                       (let [test (core/yb-test test-opts)]
+                                         (try
+                                           (info "\n\n\nTest "
+                                                 (inc i) "/" (count tests))
+                                           (let [test' (jepsen/run! test)]
+                                             [(.getPath (store/path test'))
+                                              (:valid? (:results test'))])
+                                           (catch Exception e
+                                             (warn e "Test crashed")
+                                             [(:name test) :crashed])))))
+                                   (group-by second))]
+
+                  (println "\n")
+
+                  (when (seq (results true))
+                    (println "\n# Successful tests\n")
+                    (dorun (map (comp println first) (results true))))
+
+                  (when (seq (results :unknown))
+                    (println "\n# Indeterminate tests\n")
+                    (dorun (map (comp println first) (results :unknown))))
+
+                  (when (seq (results :crashed))
+                    (println "\n# Crashed tests\n")
+                    (dorun (map (comp println first) (results :crashed))))
+
+                  (when (seq (results false))
+                    (println "\n# Failed tests\n")
+                    (dorun (map (comp println first) (results false))))
+
+                  (println)
+                  (println (count (results true))      "successes")
+                  (println (count (results :unknown))  "unknown")
+                  (println (count (results :crashed))  "crashed")
+                  (println (count (results false)))    "failures"))}})
 
 (defn -main
   "Handles CLI arguments"
@@ -146,39 +176,3 @@
                                          :opt-spec (concat cli-opts
                                                            single-test-opts)}))
             args))
-
-(comment
-  ; TODO: port the "following tests have been failed" logic forward.
-(defn -main
-  "Handles command line arguments. Can either run a test, or a web server for browsing results."
-  [& args]
-  (cli/run!
-   (merge
-    (merge-with merge
-                (cli/single-test-cmd
-                 {:opt-spec opt-spec
-                  ; :test-fn is required by single-test-cmd to construct :run, but :run will be overridden below in
-                  ; order to support running multiple tests.
-                  :test-fn  yugabyte.core/yugabyte-test})
-                {"test" {:run (fn [{:keys [options]}]
-                                (info "Options:\n" (with-out-str (pprint options)))
-                                (let [invalid-results
-                                      (->>
-                                       (for [i       (range 1 (inc (:test-count options)))
-                                             test-fn (:test options)]
-                                         (let [_ (info :i i)
-                                               test (-> options
-                                                        (dissoc :test)
-                                                        (assoc :nemesis-name (:nemesis options))
-                                                        test-fn
-                                                        (log-test i)
-                                                        jepsen/run!)]
-                                           [(:results test) i]))
-                                       (filter #(->> % first :valid? true? not)))]
-                                  (info :invalid-results invalid-results)
-                                  (when-not (empty? invalid-results)
-                                    ((info "Following tests have been failed:\n" (with-out-str (pprint invalid-results)))
-                                      (System/exit 1)))
-                                  ))}})
-    (cli/serve-cmd))
-   args)))
