@@ -165,7 +165,7 @@
                   (println (count (results true))      "successes")
                   (println (count (results :unknown))  "unknown")
                   (println (count (results :crashed))  "crashed")
-                  (println (count (results false)))    "failures"))}})
+                  (println (count (results false))     "failures")))}})
 
 (defn -main
   "Handles CLI arguments"
