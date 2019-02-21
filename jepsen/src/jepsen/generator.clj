@@ -312,7 +312,7 @@
   [gen-expr]
   `(each- (fn [] ~gen-expr)))
 
-(defgenerator Seq [elements]
+(defgenerator SeqOne [elements]
   ; Don't try to render an infinite sequence
   [(let [es (take 8 (next @elements))]
      (if (<= (count es) 8)
@@ -329,7 +329,39 @@
   from the second, then one from the third, etc. If a generator yields nil,
   immediately moves to the next. Yields nil once coll is exhausted."
   [coll]
-  (Seq. (atom (cons nil coll))))
+  (SeqOne. (atom (cons nil coll))))
+
+(defgenerator SeqAll [elements]
+  ; Don't try to render an infinite sequence
+  [(let [es (take 8 (next @elements))]
+     (if (<= (count es) 8)
+       es
+       (c/concat es ['...])))]
+  (op [this test process]
+      (let [es @elements]
+        (when-let [gen (first es)]
+          (if-let [op (op gen test process)]
+            op
+            ; This generator is exhausted; drop it and move to the next (if
+            ; nobody else has changed the generator already)
+            (do (compare-and-set! elements es (next es))
+                (recur test process)))))))
+
+(defn seq-all
+  "Given a sequence of generators, emits all operations from the first, then
+  all operations from the second, then all from the third, etc. If a generator
+  yields nil, immediately moves to the next. Yields nil once all generators in
+  coll are exhausted.
+
+  Be aware that providing an infinite sequence of generators to seq-all may
+  result in an infinite loop, if every generator returns `nil` immediately.
+  Ensure that at least some, if not all, generators in an infinite sequence
+  actually return operations. You *don't* want to seq-all over an infinite
+  sequence of the same stateful, limited generators; when those generators are
+  exhausted, you'll create an infinite loop going through each of them,
+  obtaining `nil`, and moving to the next."
+  [coll]
+  (SeqAll. (atom coll)))
 
 (defn start-stop
   "A generator which emits a start after a t1 second delay, and then a stop
