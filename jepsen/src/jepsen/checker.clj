@@ -2,7 +2,7 @@
   "Validates that a history is correct with respect to some model."
   (:refer-clojure :exclude [set])
   (:require [clojure.stacktrace :as trace]
-            [clojure.core :as core]
+            [clojure.core :as c]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
@@ -205,7 +205,7 @@
           {:valid? :unknown
            :error  "Set was never read"}
 
-          (let [final-read (core/set final-read)
+          (let [final-read (c/set final-read)
 
                 ; The OK set is every read value which we tried to add
                 ok          (set/intersection final-read attempts)
@@ -355,7 +355,7 @@
   [points c]
   (let [sorted (sort c)]
     (when (seq sorted)
-      (let [n (clojure.core/count sorted)
+      (let [n (c/count sorted)
             extract (fn [point]
                       (let [idx (min (dec n) (int (Math/floor (* n point))))]
                         (nth sorted idx)))]
@@ -503,30 +503,31 @@
                                  :fail   [elements (dissoc reads p op) dups]
                                  :info   [elements reads dups]
                                  :ok
-                                 (do ; We read stuff! Update every element
-                                     (let [inv (get reads (:process op))
-                                           ; Find duplicates
-                                           dups' (->> (frequencies v)
-                                                      (reduce (fn [m [k v]]
-                                                                (if (< v 1)
-                                                                  (assoc m k v)
-                                                                  m))
-                                                              (sorted-map))
-                                                      (merge-with max dups))
-                                           v   (into (sorted-set) v)]
-                                       ; Process visibility of all elements
-                                       [(map-kv (fn update-all [[element state]]
-                                                  [element
-                                                   (if (contains? v element)
-                                                     (set-full-read-present
-                                                       state inv op)
-                                                     (set-full-read-absent
-                                                       state inv op))])
-                                                elements)
-                                        reads
-                                        dups']))))))
-                         [{} {} (sorted-map)]))
-            set-results (set-full-results checker-opts (vals elements))]
+                                 ; We read stuff! Update every element
+                                 (let [inv (get reads (:process op))
+                                       ; Find duplicates
+                                       dups' (->> (frequencies v)
+                                                  (reduce (fn [m [k v]]
+                                                            (if (< v 1)
+                                                              (assoc m k v)
+                                                              m))
+                                                          (sorted-map))
+                                                  (merge-with max dups))
+                                       v   (c/set v)]
+                                   ; Process visibility of all elements
+                                   [(map-kv (fn update-all [[element state]]
+                                              [element
+                                               (if (contains? v element)
+                                                 (set-full-read-present
+                                                   state inv op)
+                                                 (set-full-read-absent
+                                                   state inv op))])
+                                            elements)
+                                    reads
+                                    dups'])))))
+                         [{} {} {}]))
+            set-results (set-full-results checker-opts
+                                          (mapv val (sort elements)))]
         (assoc set-results
                :valid?           (and (empty? dups) (:valid? set-results))
                :duplicated-count (count dups)
@@ -596,7 +597,7 @@
             ; leftovers from some earlier state. Definitely don't want your
             ; queue emitting records from nowhere!
             unexpected (->> dequeues
-                            (remove (core/set (keys (multiset/multiplicities
+                            (remove (c/set (keys (multiset/multiplicities
                                                  attempts))))
                             (into (multiset/multiset)))
 
