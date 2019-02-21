@@ -46,7 +46,7 @@
         (is (= [:a :a :b :b :b] ops))))
 
     (testing "complex"
-      (let [busy  #(gen/time-limit 0.2 (gen/delay-til 0.1 :x))
+      (let [busy  #(gen/limit 2 (gen/delay-til 0.1 :x))
             quiet #(gen/phases (gen/once :shh)
                                (gen/sleep 0.2))
             gen  (gen/time-limit 1 (gen/seq-all
