@@ -131,7 +131,7 @@
     (when (seq gens)
       (gen/mix gens))))
 
-(defn full-generator
+(defn mixed-generator
   "Takes a nemesis options map `n`, and constructs a generator for all nemesis
   operations. This generator is used during normal nemesis operations."
   [n]
@@ -185,6 +185,20 @@
          (conj :stop-partition))
        (map op)
        gen/seq))
+
+(defn full-generator
+  "Takes a nemesis options map `n`. If `n` has a :long-recovery option, builds
+  a generator which alternates between faults (mixed-generator) and long
+  recovery windows (final-generator). Otherwise, just emits faults from
+  mixed-generator."
+  [n]
+  (if (:long-recovery n)
+    (let [mix     #(gen/time-limit 600 (mixed-generator n))
+          recover #(gen/phases (final-generator n)
+                               (gen/sleep 600))]
+      (gen/seq-all (interleave (repeatedly mix)
+                               (repeatedly recover))))
+    (mixed-generator n)))
 
 (defn expand-options
   "We support shorthand options in nemesis maps, like :kill, which expands to
