@@ -16,7 +16,7 @@
                  [http-kit "2.1.18"]
                  [ring "1.6.0-beta5"]
                  [hiccup "1.0.5"]
-                 [org.clojars.achim/multiset "0.1.0"]
+                 [metametadata/multiset "0.1.1"]
                  [byte-streams "0.2.2"]
                  [dom-top "1.0.4"]
                  [slingshot "0.12.2"]
