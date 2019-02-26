@@ -192,46 +192,74 @@
                     final-time)])))
            history))))
 
-(defn nemesis-regions
+(defn nemesis-regions*
   "Emits a sequence of gnuplot commands rendering shaded regions where the
-  nemesis is active. Takes an options map for nemesis regions and styling ex:
+  nemesis is active. We can render a maximum of 12 nemeses; this keeps nemesis
+  size and spacing consistent.
 
-  {:start #{:start1 :start2}
+  {:name \"Your Nemesis Here (TM)\"
+   :start #{:start1 :start2}
    :stop #{:stop1 :stop2}
-   :fill-color #\"000000\"
-   :transparency 0.05}"
+   :fill-color \"#000000\"
+   :transparency 0.05}
+
+  :name must be provided for the nemesis to be displayed in the legend."
   ([history]
-   (nemesis-regions history {}))
+   (nemesis-regions* history {}))
   ([history opts]
-   (let [fill-color   (or (:fill-color   opts) "#000000")
-         transparency (or (:transparency opts) 0.05)
-         history (nemesis-intervals history opts)]
+   (let [fill-color     (or (:fill-color   opts) "#000000")
+         transparency   (or (:transparency opts) 0.1)
+         history        (nemesis-intervals history opts)
+         name           (:name opts)
+         graph-top-edge 1
+         ;; Divide our y-axis space into twelfths
+         height         0.0834
+         padding        0.00615
+         idx            (inc (:idx opts))
+         bot            (- graph-top-edge
+                           (* height idx))
+         top            (+ bot height)]
      (->> history
         (map (fn [[start stop]]
                [:set :obj :rect
-                :from (g/list start [:graph 0])
-                :to   (g/list stop  [:graph 1])
+                :from (g/list start [:graph (+ bot padding)])
+                :to   (g/list stop  [:graph (- top padding)])
                 :fillcolor :rgb fill-color
                 :fillstyle :transparent :solid transparency
                 :noborder]))))))
 
+(defn nemesis-regions
+  "Wraps nemesis-regions* to work with collections of nemeses."
+  [history nemeses]
+  (let [c (count nemeses)
+        f (fn [idx nemesis]
+            (let [nemesis (assoc nemesis
+                                 :idx idx
+                                 :total c)]
+              (nemesis-regions* history nemesis)))
+        x (map-indexed f nemeses)]
+    (apply concat x)))
+
 (defn nemesis-events
   "Given a history, constructs a sequence of times, in seconds, marking nemesis
   events other than start/stop pairs."
-  [history keys]
-  (let [start (or (:start keys) #{:start})
-        stop  (or (:stop  keys) #{:stop})]
+  [history opts]
+  (let [start (or (:start opts) #{:start})
+        stop  (or (:stop  opts) #{:stop})]
     (->> history
-         (filter (fn [op]
-                   (and (= :nemesis (:process op))
+         (remove (fn [op]
+                   (and (not= :nemesis (:process op))
                         (not (start (:f op)))
                         (not (stop  (:f op))))))
          (map (comp double util/nanos->secs :time)))))
 
 (defn nemesis-lines
   "Emits a sequence of gnuplot commands rendering vertical lines where nemesis
-  events occurred. Takes an options map for nemesis regions and styling ex:
-  {:start #{:start1 :start2}
+  events occurred.
+
+  Takes an options map for nemesis regions and styling ex:
+  {:name \"Your Nemesis Here (TM)\"
+   :start #{:start1 :start2}
    :stop #{:stop1 :stop2}
    :line-color #\"dddddd\"
    :line-width 1}"
@@ -251,6 +279,16 @@
              :lw line-width
              :nohead])
           events))))
+
+(defn nemesis-keys
+  "Takes a set of nemeses and renders the keys for the legend"
+  [nemeses]
+  (for [{:keys [name fill-color transparency]} nemeses]
+    ["-"
+     'with       'lines
+     'linecolor  'rgb (or fill-color "#000000")
+     'linewidth  6
+     'title      (str name)]))
 
 (defn preamble
   "Shared gnuplot preamble"
@@ -285,32 +323,38 @@
         output-path (.getCanonicalPath (store/path! test
                                                     subdirectory
                                                     "latency-raw.png"))
-        ;; Gotta fudge this with default opts to make sure it runs at least once
-        nemeses (or nemeses #{{}})]
+        preamble    (latency-preamble test output-path)
+
+        ;; Ensure default nemeses opts for backwards compatiility
+        nemeses     (or nemeses #{{}})
+        nem-regions (nemesis-regions history nemeses)
+        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
+
+        ;; Plot ops
+        ops [['plot (apply g/list
+                           (concat
+                            ;; Plot
+                            (for [[f t] plot-order]
+                              ["-"
+                               'with        'points
+                               'linetype    (type->color t)
+                               'pointtype   (fs->points f)
+                               'notitle])
+                            ;; Key
+                            (for [[f t] key-order]
+                              ["-"
+                               'with        'points
+                               'linetype    (type->color t)
+                               'pointtype   (fs->points f)
+                               'title       (str (util/name+ f) " "
+                                                 (name t))])
+                            (nemesis-keys nemeses)))]]]
+
     (when (seq key-order)
       (try
         (g/raw-plot!
-          (concat (latency-preamble test output-path)
-                  (mapcat #(nemesis-regions history %) nemeses)
-                  (mapcat #(nemesis-lines history %)   nemeses)
-                  ; Plot ops
-                  [['plot (apply g/list
-                                 (concat
-                                   ; Plot
-                                   (for [[f t] plot-order]
-                                     ["-"
-                                      'with        'points
-                                      'linetype    (type->color t)
-                                      'pointtype   (fs->points f)
-                                      'notitle])
-                                   ; Key
-                                   (for [[f t] key-order]
-                                     ["-"
-                                      'with        'points
-                                      'linetype    (type->color t)
-                                      'pointtype   (fs->points f)
-                                      'title       (str (util/name+ f) " "
-                                                        (name t))])))]])
+         (concat preamble nem-regions nem-lines ops)
+
           (concat
             ; Plot
             (for [[f t] plot-order]
@@ -319,7 +363,11 @@
             (for [[f t] key-order]
               (if (seq (get-in datasets [f t]))
                 [[0 -1]] ; Dummy point to force rendering
-                []))))
+                []))
+            ;; Nemeses
+            (for [nem nemeses]
+              ;; Dummy point to force rendering
+              [[0 -1]])))
 
         (catch java.io.IOException _
           (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))
@@ -334,13 +382,13 @@
         qs          [0.5 0.95 0.99 1]
         datasets    (->> history
                          invokes-by-f
-                         ; For each f, emit a map of quantiles to points
+                         ;; For each f, emit a map of quantiles to points
                          (util/map-kv
-                           (fn [[f ops]]
-                             (->> ops
-                                  (map latency-point)
-                                  (latencies->quantiles dt qs)
-                                  (vector f)))))
+                          (fn [[f ops]]
+                            (->> ops
+                                 (map latency-point)
+                                 (latencies->quantiles dt qs)
+                                 (vector f)))))
         fs          (util/polysort (keys datasets))
         fs->points  (fs->points fs)
         qs->colors  (qs->colors qs)
@@ -348,26 +396,35 @@
                      (store/path! test
                                   subdirectory
                                   "latency-quantiles.png"))
+
+        preamble    (latency-preamble test output-path)
+
         ;; Gotta fudge this with default opts to make sure it runs at least once
-        nemeses (or nemeses #{{}})]
+        nemeses     (or nemeses #{{}})
+        nem-regions (nemesis-regions history nemeses)
+        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
+
+        ;; Plot ops
+        ops [['plot (apply g/list
+                           (concat (for [f fs, q qs]
+                                     ["-"
+                                      'with        'linespoints
+                                      'linetype    (qs->colors q)
+                                      'pointtype   (fs->points f)
+                                      'title       (str (util/name+ f) " "
+                                                        q)])
+                                   (nemesis-keys nemeses)))]]]
+
     (when (seq datasets)
       (try
         (g/raw-plot!
-          (concat (latency-preamble test output-path)
-                  (mapcat #(nemesis-regions history %) nemeses)
-                  (mapcat #(nemesis-lines history %)   nemeses)
-                  ; Plot ops
-                  [['plot (apply g/list
-                                 (for [f fs, q qs]
-                                   ["-"
-                                    'with        'linespoints
-                                    'linetype    (qs->colors q)
-                                    'pointtype   (fs->points f)
-                                    'title       (str (util/name+ f) " "
-                                                      q)]))]])
+         (concat preamble nem-regions nem-lines ops)
+         (concat
           (for [f fs, q qs]
-            (get-in datasets [f q])))
-
+            (get-in datasets [f q]))
+          (for [nem nemeses]
+            ;; Dummy point to force rendering
+            [[0 -1]])))
         (catch java.io.IOException _
           (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))
 
@@ -404,27 +461,38 @@
         output-path (.getCanonicalPath (store/path! test
                                                     subdirectory
                                                     "rate.png"))
-        ;; Gotta fudge this with default opts to make sure it runs at least once
-        nemeses (or nemeses #{{}})]
+
+        preable (rate-preamble test output-path)
+
+        ;; Ensure default nemeses opts for backwards compatiility
+        nemeses     (or nemeses #{{}})
+        nem-regions (nemesis-regions history nemeses)
+        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
+
+        ;; Plot ops
+        ops [['plot (apply g/list
+                           (concat
+                            (for [f fs, t types]
+                              ["-"
+                               'with         'linespoints
+                               'linetype     (type->color t)
+                               'pointtype    (fs->points f)
+                               'title        (str (util/name+ f) " "
+                                                  (name t))])
+                            (nemesis-keys nemeses)))]]]
     (when (seq datasets)
       (try
         (g/raw-plot!
-          (concat (rate-preamble test output-path)
-                  (mapcat #(nemesis-regions history %) nemeses)
-                  (mapcat #(nemesis-lines history %)   nemeses)
-                  ; Plot ops
-                  [['plot (apply g/list
-                                 (for [f fs, t types]
-                                   ["-"
-                                    'with         'linespoints
-                                    'linetype     (type->color t)
-                                    'pointtype    (fs->points f)
-                                    'title        (str (util/name+ f) " "
-                                                       (name t))]))]])
-          (for [f fs, t types]
-            (let [m (get-in datasets [f t])]
-              (->> (buckets dt t-max)
-                   (map (juxt identity #(get m % 0)))))))
+          (concat preable nem-regions nem-lines ops)
+
+          (concat
+           (for [f fs, t types]
+             (let [m (get-in datasets [f t])]
+               (->> (buckets dt t-max)
+                    (map (juxt identity #(get m % 0))))))
+           (for [nem nemeses]
+             ;; Dummy point to force rendering
+             [[0 -1]])))
 
         (catch java.io.IOException _
           (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))

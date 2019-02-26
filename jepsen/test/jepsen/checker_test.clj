@@ -280,14 +280,16 @@
                 :valid? true}))))
 
     (testing "can render multiple nemesis regions"
-      (let [checker (perf {:nemeses #{{:start #{:start1}
+      (let [checker (perf {:nemeses #{{:name "1"
+                                       :start #{:start1}
                                        :stop  #{:stop1}
                                        :fill-color "#800080"
-                                       :transparency 0.1}
-                                      {:start #{:start2.1 :start2.2}
+                                       :transparency 0.2}
+                                      {:name "2"
+                                       :start #{:start2.1 :start2.2}
                                        :stop  #{:stop2.1 :stop2.2}
                                        :fill-color "#87A96B"
-                                       :transparency 0.1}}})
+                                       :transparency 0.2}}})
             test    {:name "nemeses multiregions perf test"
                      :start-time 0}
 
@@ -340,7 +342,8 @@
                 :valid? true}))))
 
     (testing "can render nemeses with custom styling"
-      (let [checker (perf {:nemeses #{{:fill-color "#6DB6FE"
+      (let [checker (perf {:nemeses #{{:name "cool nemesis 8)"
+                                       :fill-color "#6DB6FE"
                                        :transparency 0.5
                                        :line-color "#6DB6FE"
                                        :line-width 2}}})
