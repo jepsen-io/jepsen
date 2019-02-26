@@ -63,7 +63,7 @@
               (perf/preamble output-path)
               [[:set :title (str (:name test) " clock skew")]
                [:set :ylabel "Skew (s)"]]
-              (perf/nemesis-regions history)
+              (perf/nemesis-regions* history)
               (perf/nemesis-lines history)
               [['plot (apply g/list
                              (for [node node-names]

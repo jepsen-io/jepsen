@@ -210,12 +210,11 @@
    (let [fill-color     (or (:fill-color   opts) "#000000")
          transparency   (or (:transparency opts) 0.1)
          history        (nemesis-intervals history opts)
-         name           (:name opts)
          graph-top-edge 1
          ;; Divide our y-axis space into twelfths
          height         0.0834
          padding        0.00615
-         idx            (inc (:idx opts))
+         idx            (inc (or (:idx opts) 0))
          bot            (- graph-top-edge
                            (* height idx))
          top            (+ bot height)]
