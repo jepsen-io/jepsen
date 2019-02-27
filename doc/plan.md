@@ -49,3 +49,6 @@
 - Port pure-insert from Cockroach into core
 - Port comments from Cockroach into core (better name?)
 - Port other Hermitage tests to Jepsen?
+
+## Tests
+- Clean up causal test. Drop model and port to workload
