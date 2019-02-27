@@ -5,15 +5,42 @@
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import (com.hazelcast.core Hazelcast)
+           (com.hazelcast.config.cp FencedLockConfig CPSemaphoreConfig)
            (com.hazelcast.config Config
                                  LockConfig
                                  MapConfig
-                                 QuorumConfig)))
+                                 QuorumConfig)
+           ))
 
 (def opt-spec
   [["-m" "--members MEMBER-LIST" "Comma-separated list of peers to connect to"
     :parse-fn (fn [m]
-                (str/split m #"\s*,\s*"))]])
+                  (str/split m #"\s*,\s*"))]])
+
+(defn prepareCPSubsystemConfig
+  "Prepare Hazelcast CPSubsystemConfig"
+  [config members]
+  (let [cpSubsystemConfig (.getCPSubsystemConfig config)
+        raftAlgorithmConfig (.getRaftAlgorithmConfig cpSubsystemConfig)
+        semaphoreConfig (CPSemaphoreConfig. "jepsen.cpSemaphore" false)
+        lockConfig1 (FencedLockConfig. "jepsen.cpLock1" 1)
+        lockConfig2 (FencedLockConfig. "jepsen.cpLock2" 2)
+
+        _ (.setLeaderElectionTimeoutInMillis raftAlgorithmConfig 1000)
+        _ (.setLeaderHeartbeatPeriodInMillis raftAlgorithmConfig 1500)
+        _ (.setCommitIndexAdvanceCountToSnapshot raftAlgorithmConfig 250)
+        _ (.setFailOnIndeterminateOperationState cpSubsystemConfig true)
+
+        _ (.setCPMemberCount cpSubsystemConfig (count members))
+        _ (.setSessionHeartbeatIntervalSeconds cpSubsystemConfig 5)
+        _ (.setSessionTimeToLiveSeconds cpSubsystemConfig 300)
+
+        _ (.addSemaphoreConfig cpSubsystemConfig semaphoreConfig)
+        _ (.addLockConfig cpSubsystemConfig lockConfig1)
+        _ (.addLockConfig cpSubsystemConfig lockConfig2)
+
+      ]
+    cpSubsystemConfig))
 
 (defn -main
   "Go go go"
@@ -23,24 +50,27 @@
                 summary
                 errors]} (cli/parse-opts args opt-spec)
         config  (Config.)
+        members (:members options)
 
         ; Timeouts
-        _ (.setProperty config "hazelcast.client.heartbeat.interval" "1000")
-        _ (.setProperty config "hazelcast.client.heartbeat.timeout" "5000")
-        _ (.setProperty config "hazelcast.client.invocation.timeout.seconds" "5")
+        _ (.setProperty config "hazelcast.client.max.no.heartbeat.seconds" "90")
         _ (.setProperty config "hazelcast.heartbeat.interval.seconds" "1")
-        _ (.setProperty config "hazelcast.master.confirmation.interval.seconds" "1")
         _ (.setProperty config "hazelcast.max.no.heartbeat.seconds" "5")
-        _ (.setProperty config "hazelcast.max.no.master.confirmation.seconds" "10")
         _ (.setProperty config "hazelcast.operation.call.timeout.millis" "5000")
+        _ (.setProperty config "hazelcast.wait.seconds.before.join" "0")
+        _ (.setProperty config "hazelcast.merge.first.run.delay.seconds" "1")
+        _ (.setProperty config "hazelcast.merge.next.run.delay.seconds" "1")
 
         ; Network config
         _       (.. config getNetworkConfig getJoin getMulticastConfig
                     (setEnabled false))
         tcp-ip  (.. config getNetworkConfig getJoin getTcpIpConfig)
-        _       (doseq [member (:members options)]
+        _       (doseq [member members]
                   (.addMember tcp-ip member))
         _       (.setEnabled tcp-ip true)
+
+        ; prepare the CP subsystem
+        _ (prepareCPSubsystemConfig config members)
 
         ; Quorum for split-brain protection
         quorum (doto (QuorumConfig.)
@@ -50,7 +80,6 @@
                                        (/ (inc (count (:members options)))
                                           2))))))
         _ (.addQuorumConfig config quorum)
-
 
         ; Locks
         lock-config (doto (LockConfig.)
@@ -64,7 +93,6 @@
                        (.setBackupCount 2)
                        (.setQuorumName "majority"))
         _ (.addQueueConfig config queue-config)
-
 
         ; Maps with CRDTs
         crdt-map-config (doto (MapConfig.)
