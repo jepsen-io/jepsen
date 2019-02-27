@@ -177,7 +177,7 @@
   independent/checker."
   []
   (reify checker/Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (let [history (r/filter (comp #{:read :inc} :f) history)
             ; Check that register values are monotonic
             value-errs (->> history
@@ -208,7 +208,7 @@
   and register values is globally monotonic."
   []
   (reify checker/Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (let [errs (->> history
                       (r/filter op/ok?)
                       (r/filter (comp #{:read-at :inc} :f))
@@ -292,7 +292,7 @@
   "Plots interesting bits of the value as seen by each process history."
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       ; Identify interesting regions
       (let [; Set aside nemesis operations so we can plot them later
             nemesis-history (r/filter (comp #{:nemesis} :process) history)
@@ -334,7 +334,7 @@
   not-found result. Let's make sure of that."
   []
   (reify checker/Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (let [errs (->> history
                       (r/filter op/fail?)
                       (r/filter (comp #{:not-found} :error))

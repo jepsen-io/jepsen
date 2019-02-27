@@ -262,7 +262,7 @@
   the system was internally inconsistent."
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [errs (->> history
                       (filter op/ok?)
                       (filter (comp :ts :value))
@@ -303,7 +303,7 @@
   like an OK start."
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (try+ (let [order (->> history
                              (r/filter op/ok?)
                              (r/filter (comp #{:read} :f))

@@ -95,7 +95,7 @@
   expressible as the union of some set of adds."
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [adds    (filter #(= :add (:f %)) history)
             invokes (->> adds
                          (r/filter op/invoke?)
