@@ -12,9 +12,6 @@
 - Rework latency plot color scheme to use colors that hint at a continuum
 - Adaptive temporal resolution for rate and latency plots, based on point
   density
-- Nemesis regions are just lines now. Let's bring back shaded regions for :f
-  :start-foo to :stop-foo? Maybe colorize for each type of nemesis f, when
-  they're mixed together?
 - Where plots are dense, make points somewhat transparent to better show
   density?
 
@@ -28,9 +25,6 @@
 
 ## Performance
 
-- Knossos: we should allow users to pass a :time-limit option, and after that
-  many seconds, abort the search. Relying on OOM detection and abort still
-  means plenty of tests spin for hoooours.
 - Knossos: let's make the memoization threshold configurable via options passed
   to the checker.
 
