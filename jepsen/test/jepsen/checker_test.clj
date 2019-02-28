@@ -393,6 +393,42 @@
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
+                :valid? true}))))
+
+    (testing "fill-color bug"
+      (let [checker (perf {:nemeses #{{:name "fill-color bug"
+                                       :fill-color "#6DB6FE"
+                                       :start #{:start-bug}
+                                       :stop #{:stop-bug}}
+                                      {:name "control"
+                                       :start #{:start-control}
+                                       :stop #{:stop-control}}}})
+            test    {:name "nemesis fill-color bug"
+                     :start-time 0}
+            nemesis-ops [{:type :info
+                          :process :nemesis
+                          :f :start-control
+                          :value nil
+                          :time (* 1e9 5)}
+                         {:type :info
+                          :process :nemesis
+                          :f :start-control
+                          :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
+                          :time (* 1e9 20)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop-control
+                          :value nil
+                          :time (* 1e9 50)}
+                         {:type :info
+                          :process :nemesis
+                          :f :stop-control
+                          :value :network-healed
+                          :time (* 1e9 90)}]
+            history (apply conj history nemesis-ops)]
+        (is (= (check checker test history {})
+               {:latency-graph {:valid? true},
+                :rate-graph {:valid? true},
                 :valid? true}))))))
 
 (deftest clock-plot-test
