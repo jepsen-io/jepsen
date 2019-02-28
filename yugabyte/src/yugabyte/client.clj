@@ -233,6 +233,12 @@
                       (.getMessage e#))
            ; Definitely failed
            (assoc ~op :type :fail, :error (.getMessage e#))
+           (throw e#)))
+
+       (catch InvalidQueryException e#
+         ; This can actually mean timeout
+         (if (re-find #"RPC to .+ timed out after ")
+           (assoc ~op :type crash#, :error [:rpc-timed-out (.getMessage e#)])
            (throw e#))))))
 
 (defmacro defclient
