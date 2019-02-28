@@ -193,7 +193,7 @@
   "Checks internal consistency of ops."
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [errors (->> history
                         (r/filter op/ok?)
                         (r/mapcat op-errors)
