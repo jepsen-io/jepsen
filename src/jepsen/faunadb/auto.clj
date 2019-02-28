@@ -147,13 +147,11 @@
 (defn systemd-status
   "Systemd status for FaunaDB"
   []
-  (let [msg (try
+  (let [msg (try+
               (c/su (c/exec :service :faunadb :status))
-              (catch clojure.lang.ExceptionInfo e
-                (let [data (.getData e)]
-                  (if (= 3 (get data :exit))
-                    (.getMessage e)
-                    (throw e)))))
+              (catch [:type :jepsen.control/nonzero-exit :exit 3] {:keys [out]}
+                  out))
+
         [_ state sub] (re-find #"Active: (\w+) \(([^\)]+)\)\s" msg)]
     (when-not (and state sub)
       (throw (RuntimeException. (str "Not sure how to interpret service status:\n"
