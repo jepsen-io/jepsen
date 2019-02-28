@@ -39,6 +39,9 @@
     :validate [#{:community-edition :enterprise-edition}
                "Either community-edition or enterprise edition"]]
 
+   [nil "--experimental-tuning-flags" "Enable some experimental tuning flags which are supposed to help YB recover faster"
+    :default false]
+
    [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
     :default 30
     :parse-fn parse-long
