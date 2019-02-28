@@ -38,7 +38,7 @@
                   (invoke 0 :read nil)
                   (ok     0 :read [1 2 3 4 5])]]
       (is (:valid?      (checker/check c nil valid nil)))
-      (is (:valid? (checker/check c nil one-without-two nil)))
+      (is (:valid?      (checker/check c nil one-without-two nil)))
       (is (not (:valid? (checker/check c nil two-without-one nil))))
       (is (:valid?      (checker/check c nil bigger nil)))))
 
