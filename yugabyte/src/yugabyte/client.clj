@@ -237,7 +237,7 @@
 
        (catch InvalidQueryException e#
          ; This can actually mean timeout
-         (if (re-find #"RPC to .+ timed out after ")
+         (if (re-find #"RPC to .+ timed out after " (.getMessage e#))
            (assoc ~op :type crash#, :error [:rpc-timed-out (.getMessage e#)])
            (throw e#))))))
 
