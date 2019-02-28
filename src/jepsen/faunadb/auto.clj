@@ -149,10 +149,10 @@
   []
   (let [msg (try
               (c/su (c/exec :service :faunadb :status))
-              (catch RuntimeException e
-                (let [m (.getMessage e)]
-                  (if (re-find #"returned non-zero exit status 3" m)
-                    m
+              (catch clojure.lang.ExceptionInfo e
+                (let [data (.getData e)]
+                  (if (= 3 (get data :exit))
+                    (.getMessage e)
                     (throw e)))))
         [_ state sub] (re-find #"Active: (\w+) \(([^\)]+)\)\s" msg)]
     (when-not (and state sub)
