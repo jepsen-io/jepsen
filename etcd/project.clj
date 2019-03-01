@@ -4,6 +4,6 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main jepsen.etcd
   :jvm-opts ["-Dcom.sun.management.jmxremote"]
-  :dependencies [[org.clojure/clojure "1.8.0"]
-                 [jepsen "0.1.9-SNAPSHOT"]
+  :dependencies [[org.clojure/clojure "1.10.0"]
+                 [jepsen "0.1.12-SNAPSHOT"]
                  [verschlimmbesserung "0.1.3"]])
