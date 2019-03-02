@@ -45,23 +45,23 @@
 
 (deftest graph-test
   (testing "Can render a linear partial order"
-    (let [history [(op/ok     0 :read 0)
-                   (op/ok     0 :read 1)]]
+    (let [history [(op/ok 0 :read 0)
+                   (op/ok 0 :read 1)]]
       (is (= (graph history)
              {0 #{1} 1 #{}}))))
 
   (testing "Can render a circular partial order"
-    (let [history [(op/ok     0 :read 0)
-                   (op/ok     0 :read 1)
-                   (op/ok     0 :read 0)]]
+    (let [history [(op/ok 0 :read 0)
+                   (op/ok 0 :read 1)
+                   (op/ok 0 :read 0)]]
       (is (= (graph history)
              {0 #{1} 1 #{0}}))))
 
   (testing "Ignores duplicate sequential reads"
-    (let [history [(op/ok     0 :read 0)
-                   (op/ok     0 :read 1)
-                   (op/ok     0 :read 1)
-                   (op/ok     0 :read 1)]]
+    (let [history [(op/ok 0 :read 0)
+                   (op/ok 0 :read 1)
+                   (op/ok 0 :read 1)
+                   (op/ok 0 :read 1)]]
       (is (= (graph history)
              {0 #{1} 1 #{}})))))
 
@@ -90,32 +90,32 @@
 
 (deftest checker-test
   (testing "Can validate histories"
-    (let [checker   (checker)
-          history   [(op/invoke 0 :read nil)
-                     (op/ok     0 :read 0)
-                     (op/invoke 0 :write 1)
-                     (op/ok     0 :write 1)
-                     (op/invoke 0 :read nil)
-                     (op/ok     0 :read 1)]
+    (let [checker (checker)
+          history [(op/invoke 0 :read nil)
+                   (op/ok     0 :read 0)
+                   (op/invoke 0 :write 1)
+                   (op/ok     0 :write 1)
+                   (op/invoke 0 :read nil)
+                   (op/ok     0 :read 1)]
           r (checker/check checker nil history nil)]
       (is (:valid? r))))
 
   (testing "Can invalidate histories"
-    (let [checker   (checker)
-          history   [(op/invoke 0 :read nil)
-                     (op/ok     0 :read 0)
-                     (op/invoke 0 :read nil)
-                     (op/ok     0 :read 1)
-                     (op/invoke 0 :read nil)
-                     (op/ok     0 :read 0)]
+    (let [checker (checker)
+          history [(op/invoke 0 :read nil)
+                   (op/ok     0 :read 0)
+                   (op/invoke 0 :read nil)
+                   (op/ok     0 :read 1)
+                   (op/invoke 0 :read nil)
+                   (op/ok     0 :read 0)]
           r (checker/check checker nil history nil)]
       (is (not (:valid? r)))))
 
   #_(testing "Can handle large histories"
-    (let [checker   (checker)
-          history   (->> (range)
-                         (mapcat big-history-gen)
-                         (take 10000)
-                         vec)
+    (let [checker (checker)
+          history (->> (range)
+                       (mapcat big-history-gen)
+                       (take 10000)
+                       vec)
           r (time (checker/check checker nil history nil))]
       (is (:valid? r)))))

@@ -64,25 +64,24 @@
           result (reduce sc state nodes)]
       (:sccs result))))
 
-(merge-with clojure.set/union {} {0 #{nil}} {1 #{0}})
-
 (defn graph
   "Takes a history of reads over a single register and returns a graph of the
   states that the register advanced through.
   FIXME Stack overflow on n>10000 histories
-  FIXME Handle multiple registers and transactions of reads"
+  FIXME Handle multiple registers and transactions of reads
+  FIXME This could probably be a reduction"
   [history]
   (loop [graph {}
-         [{:keys [value]} & more :as history] history
+         [{:keys [value]} & more] history
          last nil]
     (if (= value last)
       ;; If the new val is the same as the last, skip.
       graph
-      (let [prev (if last
+      (let [edge (if last
                    {last #{value}}
                    {})
-            next {value #{}}
-            g'   (merge-with set/union graph prev next)]
+            node {value #{}}
+            g'   (merge-with set/union graph edge node)]
         (if more
           (recur g' more value)
           g')))))
@@ -111,7 +110,7 @@
          :errors errors}))))
 
 (defn w [v] {:f :write, :type :invoke, :value v})
-(defn r [v] {:f :read,  :type :invoke})
+(defn r [] {:f :read, :type :invoke})
 
 (defn workload
   []
