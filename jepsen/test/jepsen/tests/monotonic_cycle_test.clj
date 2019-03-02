@@ -55,7 +55,15 @@
                    (op/ok     0 :read 1)
                    (op/ok     0 :read 0)]]
       (is (= (graph history)
-             {0 #{1} 1 #{0}})))))
+             {0 #{1} 1 #{0}}))))
+
+  (testing "Ignores duplicate sequential reads"
+    (let [history [(op/ok     0 :read 0)
+                   (op/ok     0 :read 1)
+                   (op/ok     0 :read 1)
+                   (op/ok     0 :read 1)]]
+      (is (= (graph history)
+             {0 #{1} 1 #{}})))))
 
 (deftest errors-test
   (testing "Flags lööps"
@@ -109,5 +117,5 @@
                          (mapcat big-history-gen)
                          (take 10000)
                          vec)
-          r (checker/check checker nil history nil)]
+          r (time (checker/check checker nil history nil))]
       (is (:valid? r)))))

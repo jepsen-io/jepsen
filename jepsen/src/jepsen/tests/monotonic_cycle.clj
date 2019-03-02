@@ -73,17 +73,19 @@
   FIXME Handle multiple registers and transactions of reads"
   [history]
   (loop [graph {}
-         [op & more :as history] history
+         [{:keys [value]} & more :as history] history
          last nil]
-    (let [val  (:value op)
-          prev (if last
-                 {last #{val}}
-                 {})
-          next {val #{}}
-          g'   (merge-with set/union graph prev next)]
-      (if more
-        (recur g' more val)
-        g'))))
+    (if (= value last)
+      ;; If the new val is the same as the last, skip.
+      graph
+      (let [prev (if last
+                   {last #{value}}
+                   {})
+            next {value #{}}
+            g'   (merge-with set/union graph prev next)]
+        (if more
+          (recur g' more value)
+          g')))))
 
 ;; TODO Can we improve this error output?
 (defn errors
