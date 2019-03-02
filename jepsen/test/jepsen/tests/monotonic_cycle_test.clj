@@ -111,7 +111,7 @@
           r (checker/check checker nil history nil)]
       (is (not (:valid? r)))))
 
-  (testing "Can handle large histories"
+  #_(testing "Can handle large histories"
     (let [checker   (checker)
           history   (->> (range)
                          (mapcat big-history-gen)
