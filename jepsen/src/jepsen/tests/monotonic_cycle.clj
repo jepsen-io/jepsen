@@ -64,38 +64,52 @@
           result (reduce sc state nodes)]
       (:sccs result))))
 
-(defn errors [history expected]
-  (let [;; Only looking at ok reads
-        f (fn [errors op]
-            (let [seen         (:value op)
-                  our-expected (->> seen
-                                    (map expected)
-                                    (reduce set/union))
-                  missing (set/difference our-expected
-                                          seen)]
-              ;; FIXME This is just the contents of causal reverse
-              (if (empty? missing)
-                errors
-                (conj errors
-                      (-> op
-                          (dissoc :value)
-                          (assoc :missing missing)
-                          (assoc :expected-count
-                                 (count our-expected)))))))]
-    (reduce f [] history)))
+(merge-with clojure.set/union {} {0 #{nil}} {1 #{0}})
+
+(defn graph
+  "Takes a history of reads over a single register and returns a graph of the
+  states that the register advanced through.
+  FIXME Stack overflow on n>10000 histories
+  FIXME Handle multiple registers and transactions of reads"
+  [history]
+  (loop [graph {}
+         [op & more :as history] history
+         last nil]
+    (let [val  (:value op)
+          prev (if last
+                 {last #{val}}
+                 {})
+          next {val #{}}
+          g'   (merge-with set/union graph prev next)]
+      (if more
+        (recur g' more val)
+        g'))))
+
+;; TODO Can we improve this error output?
+(defn errors
+  "Takes a set of component-sets from tarjan's results, identifying if any
+  components are strongly connected (more than 1 element per set)."
+  [components]
+  (let [<=2 (fn [set]
+              {set (<= 2 (count set))})]
+    (->> components
+         (map <=2)
+         (reduce merge))))
 
 (defn checker []
   (reify checker/Checker
     (check [this test history opts]
-      ;; TODO How many reads are we looking at at once?
-      (let [h (->> history
-                   (r/filter op/ok?)
-                   (r/filter #(= :read (:f %))))
-            graph []
-            errors (errors h graph)]
-
-        {:valid? (empty? errors)
+      (let [h          (->> history
+                            (filter op/ok?)
+                            (filter #(= :read (:f %))))
+            g          (graph h)
+            components (tarjan (keys g) g)
+            errors     (errors components)]
+        {:valid? (not-any? true? (vals errors))
          :errors errors}))))
+
+(defn w [v] {:f :write, :type :invoke, :value v})
+(defn r [v] {:f :read,  :type :invoke})
 
 (defn workload
   []
