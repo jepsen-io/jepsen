@@ -2,8 +2,14 @@
 FROM       ubuntu:18.04
 MAINTAINER Jacob Romer "https://github.com/jacobmbr"
 
+ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update
-RUN apt-get install -y openssh-server vim sudo
+RUN apt-get install -y openssh-server \
+    curl faketime iproute2 iptables iputils-ping libzip4 \
+    logrotate man man-db net-tools ntpdate psmisc python rsyslog \
+    sudo unzip vim wget apt-transport-https \
+    && apt-get remove -y --purge --auto-remove systemd
+
 RUN mkdir /var/run/sshd
 
 RUN echo 'root:root' |chpasswd
