@@ -166,20 +166,24 @@
         perf (checker/perf
                {:nemeses #{{:name  "kill master"
                             :start #{:kill-master :stop-master}
-                            :stop  #{:start-master}}
-                            ;:fill-color "#E9A4A0"}
+                            :stop  #{:start-master}
+                            :fill-color "#E9A4A0"}
                            {:name  "kill tserver"
                             :start #{:kill-tserver :stop-tserver}
-                            :stop  #{:start-tserver}}
-                            ;:fill-color "#E9C3A0"}
+                            :stop  #{:start-tserver}
+                            :fill-color "#E9C3A0"}
                            {:name  "pause master"
                             :start #{:pause-master}
-                            :stop  #{:resume-master}}
-                            ;:fill-color "#A0B1E9"}
+                            :stop  #{:resume-master}
+                            :fill-color "#A0B1E9"}
                            {:name  "pause tserver"
                             :start #{:pause-tserver}
-                            :stop  #{:resume-tserver}}
-                            ;:fill-color #"#B8A0E9"}
+                            :stop  #{:resume-tserver}
+                            :fill-color "#B8A0E9"}
+                           {:name "clock skew"
+                            :start #{:bump-clock :strobe-clock}
+                            :stop  #{:reset-clock}
+                            :fill-color "#D2E9A0"}
                            {:name "partition"
                             :start #{:start-partition}
                             :stop  #{:stop-partition}
