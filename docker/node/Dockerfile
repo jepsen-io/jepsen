@@ -1,6 +1,5 @@
 # A mashup of tutum:debian and rastasheep/ubuntu-sshd
 FROM       ubuntu:18.04
-MAINTAINER Jacob Romer "https://github.com/jacobmbr"
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update
