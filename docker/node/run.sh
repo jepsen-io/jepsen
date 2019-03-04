@@ -19,6 +19,4 @@ if [ "${AUTHORIZED_KEYS}" != "**None**" ]; then
     done
 fi
 
-echo "nuffin to do"
-
 exec /usr/sbin/sshd -D

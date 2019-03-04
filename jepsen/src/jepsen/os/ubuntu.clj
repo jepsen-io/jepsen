@@ -135,10 +135,10 @@
     (install [:oracle-java8-installer])
     (install [:oracle-java8-set-default])))
 
-(deftype Debian []
+(deftype Ubuntu []
   os/OS
   (setup! [_ test node]
-    (info node "setting up debian")
+    (info node "setting up ubuntu")
 
     (setup-hostfile!)
 
@@ -168,4 +168,4 @@
 
   (teardown! [_ test node]))
 
-(def os "An implementation of the Debian OS." (Debian.))
+  (def os "An implementation of the Ubuntu OS." (Ubuntu.))

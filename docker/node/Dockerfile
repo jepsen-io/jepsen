@@ -10,7 +10,6 @@ RUN echo 'root:root' |chpasswd
 
 RUN sed -ri 's/^#?PermitRootLogin\s+.*/PermitRootLogin yes/' /etc/ssh/sshd_config
 RUN sed -ri 's/^#?UsePAM\s+.*/UsePAM no/' /etc/ssh/sshd_config
-RUN sed -ri 's/UsePAM yes/UsePAM no/g' /etc/ssh/sshd_config # probably not needed
 
 RUN mkdir /root/.ssh
 
