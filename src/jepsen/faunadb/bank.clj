@@ -49,8 +49,10 @@
   "Creates the initial accounts for a test"
   [test conn]
   ; And initial account
-  (f/query conn (f/upsert-by-ref (q/ref accounts (first (:accounts test)))
-                                 {:data {:balance (:total-amount test)}}))
+  (f/query conn (q/let [ref (q/ref accounts (first (:accounts test)))]
+                  (q/when (q/not (q/exists? ref))
+                    (q/create ref {:data {:balance (:total-amount test)}}))))
+
   (when (:fixed-instances test)
     ; Create remaining accounts up front
     (f/query conn
