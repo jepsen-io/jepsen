@@ -1,4 +1,4 @@
-(ns jepsen.os.ubuntu)
+(ns jepsen.os.ubuntu
   "Common tasks for Ubuntu boxes."
   (:use clojure.tools.logging)
   (:require [clojure.set :as set]
