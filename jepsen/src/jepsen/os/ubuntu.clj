@@ -1,5 +1,5 @@
 (ns jepsen.os.ubuntu
-  "Common tasks for Ubuntu boxes."
+  "Common tasks for Ubuntu boxes. Tested against Ubuntu 18.04."
   (:use clojure.tools.logging)
   (:require [clojure.set :as set]
             [jepsen.util :refer [meh]]
