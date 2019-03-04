@@ -37,6 +37,7 @@
                 :iputils-ping
                 :iproute2
                 :rsyslog
+                :sudo
                 :logrotate]))
 
     (meh (net/heal! (:net test) test)))
