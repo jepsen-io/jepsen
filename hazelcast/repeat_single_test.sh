@@ -8,21 +8,5 @@ fi
 test_name=$1
 repeat=$2
 test_duration=$3
-round="1"
 
-while [ ${round} -le ${repeat} ]; do
-
-    echo "round: $round"
-
-    echo "running $test_name test"
-
-    lein run test --workload ${test_name} --time-limit ${test_duration}
-
-    if [ $? != '0' ]; then
-        echo "$test_name test failed"
-        exit 1
-    fi
-
-    round=`expr $round \+ 1`
-
-done
+lein run test --workload ${test_name} --test-count ${repeat} --time-limit ${test_duration}

@@ -50,39 +50,36 @@
 (def pid-file (str dir "/server.pid"))
 (def log-file (str dir "/server.log"))
 
-(def CLIENT_ID_SEPARATOR "xxxxxxxxxx")
-(def REENTRANT_LOCK_ACQUIRE_COUNT 2)
-(def NUMBER_OF_PERMITS 2)
-(def LOGGING_SLEEP_DURATION_MS 1000)
-(def INVALID_FENCE 0)
+(def reentrant-lock-acquire-count 2)
+(def num-permits 2)
+(def invalid-fence 0)
 
 (defn build-server!
   "Ensures the server jar is ready"
   [test node]
   (when (= node (jepsen/primary test))
     (when-not (.exists (io/file local-server-jar))
-    (info "Building server")
-    (let [{:keys [exit out err]} (sh "lein" "uberjar" :dir "server")]
-      (info out)
-      (info err)
-      (info exit)
-      (assert (zero? exit)))))
- )
+      (info "Building server")
+      (let [{:keys [exit out err]} (sh "lein" "uberjar" :dir "server")]
+        (info out)
+        (info err)
+        (info exit)
+        (assert (zero? exit))))))
 
 (defn install!
   "Installs the server on remote nodes."
   []
   (c/cd dir
-        (c/exec :mkdir :-p dir)
-        (c/upload (.getCanonicalPath (io/file local-server-jar))
-                  jar)))
+    (c/exec :mkdir :-p dir)
+    (c/upload (.getCanonicalPath (io/file local-server-jar))
+              jar)))
 
 (defn start!
   "Launch hazelcast server"
   [test node]
   (c/cd dir
         (cu/start-daemon!
-          {:chdir   dir
+          {:chdir dir
            :logfile log-file
            :pidfile pid-file}
           "/usr/bin/java"
@@ -132,8 +129,6 @@
         net (doto (.getNetworkConfig config)
               ; Don't retry operations when network fails (!?)
               (.setRedoOperation false)
-              ; Timeouts
-              (.setConnectionTimeout 5000)
               ; Initial connection limits
               (.setConnectionAttemptPeriod 1000)
               ; Try reconnecting indefinitely
@@ -208,10 +203,7 @@
         :cas (let [[currentV newV] (:value op)]
                (if (.compareAndSet atomic-long currentV newV)
                  (assoc op :type :ok)
-                 (assoc op :type :fail :error :cas-failed)
-                 ))
-        )
-      )
+                 (assoc op :type :fail :error :cas-failed)))))
 
     (teardown! [this test]
       (.shutdown conn))))
@@ -232,10 +224,7 @@
         :cas (let [[currentV newV] (:value op)]
                (if (.compareAndSet atomic-ref currentV newV)
                  (assoc op :type :ok)
-                 (assoc op :type :fail :error :cas-failed)
-                 ))
-        )
-      )
+                 (assoc op :type :fail :error :cas-failed)))))
 
     (teardown! [this test]
       (.shutdown conn))))
@@ -246,8 +235,7 @@
   (reify client/Client
     (setup! [_ test node]
       (let [conn (connect node)]
-        (atomic-ref-id-client conn
-                              (.getAtomicReference conn "jepsen.atomic-ref"))))
+        (atomic-ref-id-client conn (.getAtomicReference conn "jepsen.atomic-ref"))))
 
     (invoke! [this test op]
       (assert (= (:f op) :generate))
@@ -266,8 +254,7 @@
   (reify client/Client
     (setup! [_ test node]
       (let [conn (connect node)]
-        (id-gen-id-client conn
-                          (.getIdGenerator conn "jepsen.id-gen"))))
+        (id-gen-id-client conn (.getIdGenerator conn "jepsen.id-gen"))))
 
     (invoke! [this test op]
       (assert (= (:f op) :generate))
@@ -329,56 +316,26 @@
                          gen/once
                          gen/each)})
 
-(defn log-acquire-ok
-  [clientName op]
-  (do
-    (try (Thread/sleep LOGGING_SLEEP_DURATION_MS) (catch Exception _))
-    (info (str "_" clientName "_acquire_ok " (:value op)))))
+(defn log-ok
+  [clientName op fence]
+  (do (info (str "ok " clientName " -> " (:value op)))
+      (assoc op :type :ok :value {:client clientName :fence fence :uid (:value op)})))
 
-(defn log-acquire-fail
+(defn log-fail
   [clientName op]
-  (do
-    (try (Thread/sleep LOGGING_SLEEP_DURATION_MS) (catch Exception _))
-    (info (str "_" clientName "_acquire_fail " (:value op)))))
+  (do (info (str "fail " clientName " -> " (:value op)))
+      (assoc op :type :fail)))
 
-(defn log-acquire-maybe
+(defn log-maybe
   [clientName op exception]
-  (do
-    (try (Thread/sleep LOGGING_SLEEP_DURATION_MS) (catch Exception _))
-    (info (str "_" clientName "_acquire_maybe " (:value op) " exception: " (.getMessage exception)))))
-
-(defn log-release-ok
-  [clientName op]
-  (do
-    (try (Thread/sleep LOGGING_SLEEP_DURATION_MS) (catch Exception _))
-    (info (str "_" clientName "_release_ok " (:value op)))))
-
-(defn log-release-fail
-  [clientName op]
-  (do
-    (try (Thread/sleep LOGGING_SLEEP_DURATION_MS) (catch Exception _))
-    (info (str "_" clientName "_release_fail " (:value op)))))
-
-(defn log-release-maybe
-  [clientName op exception]
-  (do
-    (try (Thread/sleep LOGGING_SLEEP_DURATION_MS) (catch Exception _))
-    (info (str "_" clientName "_release_maybe " (:value op) " exception: " (.getMessage exception)))))
+  (do (warn (str "maybe " clientName " -> " (:value op) " exception class: " (.getClass exception) " message: " (.getMessage exception)))
+      (assoc op :type :info)))
 
 (defn invoke-acquire [clientName lock op]
   (let [fence (.tryLockAndGetFence lock 5000 TimeUnit/MILLISECONDS)]
-    (if (not= fence INVALID_FENCE)
-      (do
-        (log-acquire-ok clientName op)
-        (assoc op :type :ok :value {:client clientName :fence fence :uid (:value op)})
-        )
-      (do
-        (log-acquire-fail clientName op)
-        (assoc op :type :fail)
-        )
-      )
-    )
-  )
+    (if (not= fence invalid-fence)
+      (log-ok clientName op fence)
+      (log-fail clientName op))))
 
 (defn fenced-lock-client
   ([lock-name] (fenced-lock-client nil nil lock-name))
@@ -386,62 +343,32 @@
    (reify client/Client
      (setup! [_ test node]
        (let [conn (connect node)]
-         (fenced-lock-client conn (.getLock (.getCPSubsystem conn) lock-name) lock-name)
-         )
-       )
+         (fenced-lock-client conn (.getLock (.getCPSubsystem conn) lock-name) lock-name)))
 
      (invoke! [this test op]
        (let [clientName (.getName conn)]
          (try
-           (info (str " " CLIENT_ID_SEPARATOR " " clientName " " CLIENT_ID_SEPARATOR " " op))
+           (info (str " " clientName " -> " op))
+           (swap! (:client-uids-to-client-names test) assoc (:value op) clientName)
            (case (:f op)
              :acquire (invoke-acquire clientName lock op)
              :release (do
                         (.unlock lock)
-                        (log-release-ok clientName op)
-                        (assoc op :type :ok :value {:client clientName :uid (:value op)})
-                        )
-             )
-           (catch IllegalMonitorStateException e
-             (case (:f op) :acquire (log-acquire-fail clientName op) :release (log-release-fail clientName op))
-             (assoc op :type :fail, :error :not-lock-owner)
-             )
+                        (log-ok clientName op invalid-fence)))
+           (catch IllegalMonitorStateException _
+             (assoc (log-fail clientName op) :error :not-lock-owner))
            (catch IOException e
              (condp re-find (.getMessage e)
                ; This indicates that the Hazelcast client doesn't have a remote
                ; peer available, and that the message was never sent.
                #"Packet is not send to owner address"
-               (do
-                 (case (:f op) :acquire (log-acquire-fail clientName op) :release (log-release-fail clientName op))
-                 (assoc op :type :fail, :error :client-down)
-                 )
-               (do
-                 (case (:f op) :acquire (log-acquire-maybe clientName op e) :release (log-release-maybe clientName op e))
-                 (assoc op :type :info, :error :io-exception)
-                 )
-               )
-             )
+               (assoc (log-fail clientName op) :error :client-down)
+               (assoc (log-maybe clientName op e) :error :io-exception)))
            (catch Exception e
-             (case (:f op) :acquire (log-acquire-maybe clientName op e) :release (log-release-maybe clientName op e))
-             (assoc op :type :info, :error :exception)
-             )
-           )
-         )
-       )
+             (assoc (log-maybe clientName op e) :error :exception)))))
 
      (teardown! [this test]
-       (try
-         (.terminate (.getLifecycleService conn))
-         (catch Exception e
-           (warn "exception while client termination")
-           (.printStackTrace e)
-           )
-         )
-       )
-
-     )
-    )
-  )
+       (.terminate (.getLifecycleService conn))))))
 
 (defn cp-semaphore-client
   ([] (cp-semaphore-client nil nil))
@@ -450,70 +377,37 @@
      (setup! [_ test node]
        (let [conn (connect node)
              sem (.getSemaphore (.getCPSubsystem conn) "jepsen.cpSemaphore")
-             _ (.init sem NUMBER_OF_PERMITS)]
-         (cp-semaphore-client conn sem)
-         )
-       )
+             _ (.init sem num-permits)]
+         (cp-semaphore-client conn sem)))
 
      (invoke! [this test op]
        (let [clientName (.getName conn)]
          (try
-           (info (str " " CLIENT_ID_SEPARATOR " " clientName " " CLIENT_ID_SEPARATOR " " op))
+           (info (str clientName " -> " op))
+           (swap! (:client-uids-to-client-names test) assoc (:value op) clientName)
            (case (:f op)
              :acquire (if (.tryAcquire semaphore 5000 TimeUnit/MILLISECONDS)
                         (do
-                          (log-acquire-ok clientName op)
-                          (assoc op :type :ok :value {:client clientName :uid (:value op)})
-                          )
-                        (do
-                          (log-acquire-fail clientName op)
-                          (assoc op :type :fail :debug {:client clientName :uid (:value op)}))
-                        )
+                          (log-ok clientName op invalid-fence))
+                        (assoc (log-fail clientName op) :debug {:client clientName :uid (:value op)}))
              :release (do
                         (.release semaphore)
-                        (log-release-ok clientName op)
-                        (assoc op :type :ok :value {:client clientName :uid (:value op)})
-                        )
+                        (log-ok clientName op invalid-fence))
              )
-           (catch IllegalArgumentException e
-             (case (:f op) :acquire (log-acquire-fail clientName op) :release (log-release-fail clientName op))
-             (assoc op :type :fail :error :not-permit-owner :debug {:client clientName :uid (:value op)})
-             )
+           (catch IllegalArgumentException _
+             (assoc (log-fail clientName op) :error :not-permit-owner :debug {:client clientName :uid (:value op)}))
            (catch IOException e
              (condp re-find (.getMessage e)
                ; This indicates that the Hazelcast client doesn't have a remote
                ; peer available, and that the message was never sent.
                #"Packet is not send to owner address"
-               (do
-                 (case (:f op) :acquire (log-acquire-fail clientName op) :release (log-release-fail clientName op))
-                 (assoc op :type :fail :error :client-down :debug {:client clientName :uid (:value op)})
-                 )
-               (do
-                 (case (:f op) :acquire (log-acquire-maybe clientName op e) :release (log-release-maybe clientName op e))
-                 (assoc op :type :info :error :io-exception :debug {:client clientName :uid (:value op)}))
-               )
-             )
+               (assoc (log-fail clientName op) :error :client-down :debug {:client clientName :uid (:value op)})
+               (assoc (log-maybe clientName op e) :error :io-exception :debug {:client clientName :uid (:value op)})))
            (catch Exception e
-             (case (:f op) :acquire (log-acquire-maybe clientName op e) :release (log-release-maybe clientName op e))
-             (assoc op :type :info :error :exception :debug {:client clientName :uid (:value op)})
-             )
-           )
-         )
-       )
+             (assoc (log-maybe clientName op e) :error :exception :debug {:client clientName :uid (:value op)})))))
 
      (teardown! [this test]
-       (try
-         (.terminate (.getLifecycleService conn))
-         (catch Exception e
-           (warn "exception while client termination")
-           (.printStackTrace e)
-           )
-         )
-       )
-
-     )
-    )
-  )
+       (.terminate (.getLifecycleService conn))))))
 
 (defn lock-client
   ([lock-name] (lock-client nil nil lock-name))
@@ -614,190 +508,145 @@
 
 
 
-(defn parseLine [line]
-  (let
-    [tokens (.split line CLIENT_ID_SEPARATOR)]
-    [(:value (clojure.edn/read-string (nth tokens 2))) (.trim (nth tokens 1))]))
-
-(def clientUidsToClientNames (memoize (fn []
-                            (apply array-map
-                                   (flatten
-                                     (map parseLine
-                                          (.split (:out (sh "grep" CLIENT_ID_SEPARATOR "store/latest/jepsen.log")) "\n")
-                                          ))))))
-
-(defn getClient [op]
+(defn get-client [client-uids-to-client-names-map op]
   (let [val (:value op)]
-    (if (map? val) (:client val) (get (clientUidsToClientNames) (:value op)))))
+    (if (map? val) (:client val) (get @client-uids-to-client-names-map (:value op)))))
 
-(defrecord ReentrantMutex [owner lockCount]
+(defrecord ReentrantMutex [client-uids-to-client-names-map owner lockCount]
   Model
   (step [this op]
-    (let [client (getClient op)]
+    (let [client (get-client client-uids-to-client-names-map op)]
       (if (nil? client)
-        (do
-          (info "no owner!")
-          (knossos.model/inconsistent "no owner!")
-          )
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
-          :acquire (if (and (< lockCount REENTRANT_LOCK_ACQUIRE_COUNT) (or (nil? owner) (= owner client)))
-                     (ReentrantMutex. client (+ lockCount 1))
-                     (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     )
+          :acquire (if (and (< lockCount reentrant-lock-acquire-count) (or (nil? owner) (= owner client)))
+                     (ReentrantMutex. client-uids-to-client-names-map client (+ lockCount 1))
+                     (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
           :release (if (or (nil? owner) (not= owner client))
                      (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     (ReentrantMutex. (if (= lockCount 1) nil owner) (- lockCount 1))
-                     )
-          )
-        )
-      )
-    )
+                     (ReentrantMutex. client-uids-to-client-names-map (if (= lockCount 1) nil owner) (- lockCount 1)))))))
 
   Object
-  (toString [this] (str "owner: " owner ", lockCount: " lockCount)))
+  (toString [this] (str "owner: " owner ", lockCount: " lockCount " client-uids-to-client-names-map: " @client-uids-to-client-names-map)))
 
-(defn createReentrantMutex []
+(defn create-reentrant-mutex [client-uids-to-client-names-map]
   "A single reentrant mutex responding to :acquire and :release messages"
-  (ReentrantMutex. nil 0))
+  (ReentrantMutex. client-uids-to-client-names-map nil 0))
 
 
 
-(defrecord OwnerAwareMutex [owner]
+(defrecord OwnerAwareMutex [client-uids-to-client-names-map owner]
   Model
   (step [this op]
-    (let [client (getClient op)]
+    (let [client (get-client client-uids-to-client-names-map op)]
       (if (nil? client)
-        (do
-          (info "no owner!")
-          (knossos.model/inconsistent "no owner!")
-          )
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (if (nil? owner)
-                     (OwnerAwareMutex. client)
-                     (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     )
+                     (OwnerAwareMutex. client-uids-to-client-names-map client)
+                     (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
           :release (if (or (nil? owner) (not= owner client))
                      (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     (OwnerAwareMutex. nil)
-                     )
-          )
-        )
-      )
-    )
+                     (OwnerAwareMutex. client-uids-to-client-names-map nil))))))
 
   Object
-  (toString [this] (str "owner: " owner)))
+  (toString [this] (str "owner: " owner " client-uids-to-client-names-map: " @client-uids-to-client-names-map)))
 
-(defn createOwnerAwareMutex []
+(defn create-owner-aware-mutex [client-uids-to-client-names-map]
   "A single non-reentrant mutex responding to :acquire and :release messages and tracking mutex owner"
-  (OwnerAwareMutex. nil))
+  (OwnerAwareMutex. client-uids-to-client-names-map nil))
 
 
 
-(defn getFence [op]
+(defn get-fence [op]
   (let [val (:value op)]
-    (if (map? val) (:fence val) INVALID_FENCE)))
+    (if (map? val) (:fence val) invalid-fence)))
 
-(defrecord FencedMutex [owner lockFence prevOwner]
+(defrecord FencedMutex [client-uids-to-client-names-map owner lockFence prevOwner]
   Model
   (step [this op]
-    (let [client (getClient op) fence (getFence op)]
+    (let [client (get-client client-uids-to-client-names-map op) fence (get-fence op)]
       (if (nil? client)
-        (do
-          (info "no owner!")
-          (knossos.model/inconsistent "no owner!")
-          )
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (cond
                      (some? owner) (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     (= fence INVALID_FENCE) (FencedMutex. client lockFence owner)
-                     (> fence lockFence) (FencedMutex. client fence owner)
-                     :else (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     )
+                     (= fence invalid-fence) (FencedMutex. client-uids-to-client-names-map client lockFence owner)
+                     (> fence lockFence) (FencedMutex. client-uids-to-client-names-map client fence owner)
+                     :else (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
           :release (if (or (nil? owner) (not= owner client))
                      (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     (FencedMutex. nil lockFence owner)
-                     )
-          )
-        )
-      )
-    )
+                     (FencedMutex. client-uids-to-client-names-map nil lockFence owner))))))
 
   Object
-  (toString [this] (str "owner: " owner " lock fence: " lockFence " prev owner: " prevOwner)))
+  (toString [this] (str "owner: " owner " lock fence: " lockFence " prev owner: " prevOwner " client-uids-to-client-names-map: " @client-uids-to-client-names-map)))
 
-(defn createFencedMutex []
+(defn create-fenced-mutex [client-uids-to-client-names-map]
   "A fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
-  (FencedMutex. nil INVALID_FENCE nil))
+  (FencedMutex. client-uids-to-client-names-map nil invalid-fence nil))
 
 
 
-(defrecord ReentrantFencedMutex [owner lockCount currentFence highestObservedFence highestObservedFenceOwner]
+(defrecord ReentrantFencedMutex [client-uids-to-client-names-map owner lockCount currentFence highestObservedFence highestObservedFenceOwner]
   Model
   (step [this op]
-    (let [client (getClient op) fence (getFence op)]
+    (let [client (get-client client-uids-to-client-names-map op) fence (get-fence op)]
       (if (nil? client)
-        (do
-          (info "no owner!")
-          (knossos.model/inconsistent "no owner!")
-          )
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
           :acquire (cond
                      ; if the lock is not held
                      (nil? owner)
                       (cond
                         ; I can have an invalid fence or a fence larger than highestObservedFence
-                        (or (= fence INVALID_FENCE) (> fence highestObservedFence))
-                        (ReentrantFencedMutex. client 1 fence (max fence highestObservedFence) highestObservedFenceOwner)
+                        (or (= fence invalid-fence) (> fence highestObservedFence))
+                        (ReentrantFencedMutex. client-uids-to-client-names-map client 1 fence (max fence highestObservedFence) highestObservedFenceOwner)
                         :else
-                        (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                      )
+                        (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
                      ; if the new acquire does not match to the current lock owner, or the lock is already acquired twice, we cannot acquire anymore
-                     (or (not= owner client) (= lockCount REENTRANT_LOCK_ACQUIRE_COUNT)) (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
+                     (or (not= owner client) (= lockCount reentrant-lock-acquire-count)) (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
                      ; if the lock is acquired without a fence, and the new acquire has no fence or a fence larger than highestObservedFence
-                     (= currentFence INVALID_FENCE) (cond (or (= fence INVALID_FENCE) (> fence highestObservedFence))
-                                                      (ReentrantFencedMutex. client 2 fence (max fence highestObservedFence) highestObservedFenceOwner)
+                     (= currentFence invalid-fence) (cond (or (= fence invalid-fence) (> fence highestObservedFence))
+                                                      (ReentrantFencedMutex. client-uids-to-client-names-map client (+ lockCount 1) fence (max fence highestObservedFence) highestObservedFenceOwner)
                                                     :else
                                                       (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
                      ; if the lock is acquired with a fence, and the new acquire has no fence or the same fence
-                     (or (= fence INVALID_FENCE) (= fence currentFence)) (ReentrantFencedMutex. client 2 currentFence highestObservedFence highestObservedFenceOwner)
+                     (or (= fence invalid-fence) (= fence currentFence)) (ReentrantFencedMutex. client-uids-to-client-names-map client (+ lockCount 1) currentFence highestObservedFence highestObservedFenceOwner)
                      :else (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
           :release (if (or (nil? owner) (not= owner client))
                      (knossos.model/inconsistent (str "client: " client " cannot " op " on " this))
-                     (cond (= lockCount 1) (ReentrantFencedMutex. nil 0 INVALID_FENCE highestObservedFence owner)
-                           :else (ReentrantFencedMutex. owner 1 currentFence highestObservedFence highestObservedFenceOwner)))))))
+                     (cond (= lockCount 1) (ReentrantFencedMutex. client-uids-to-client-names-map nil 0 invalid-fence highestObservedFence (if (= currentFence invalid-fence) highestObservedFenceOwner owner))
+                           :else (ReentrantFencedMutex. client-uids-to-client-names-map owner (- lockCount 1) currentFence highestObservedFence highestObservedFenceOwner)))))))
 
   Object
-  (toString [this] (str "owner: " owner " lock count: " lockCount " lock fence: " currentFence " highest observed fence: " highestObservedFence " highest observed fence owner: " highestObservedFenceOwner)))
+  (toString [this] (str "owner: " owner " lock count: " lockCount " lock fence: " currentFence " highest observed fence: " highestObservedFence " highest observed fence owner: " highestObservedFenceOwner " client-uids-to-client-names-map: " @client-uids-to-client-names-map)))
 
-(defn createReentrantFencedMutex []
+(defn create-reentrant-fenced-mutex [client-uids-to-client-names-map]
   "A reentrant fenced mutex responding to :acquire and :release messages and tracking monotonicity of observed fences"
-  (ReentrantFencedMutex. nil 0 INVALID_FENCE INVALID_FENCE nil))
+  (ReentrantFencedMutex. client-uids-to-client-names-map nil 0 invalid-fence invalid-fence nil))
 
 
 
-(defrecord AcquiredPermitsModel [acquired]
+(defrecord AcquiredPermitsModel [client-uids-to-client-names-map acquired]
   Model
   (step [this op]
-    (let [client (getClient op)]
+    (let [client (get-client client-uids-to-client-names-map op)]
       (if (nil? client)
-        (do
-          (info "no owner!")
-          (knossos.model/inconsistent "no owner!"))
+        (knossos.model/inconsistent "no owner!")
         (condp = (:f op)
-          :acquire (if (< (reduce + (vals acquired)) NUMBER_OF_PERMITS)
-                     (AcquiredPermitsModel. (assoc acquired client (+ (get acquired client) 1)))
+          :acquire (if (< (reduce + (vals acquired)) num-permits)
+                     (AcquiredPermitsModel. client-uids-to-client-names-map (assoc acquired client (+ (get acquired client) 1)))
                      (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))
           :release (if (> (get acquired client) 0)
-                     (AcquiredPermitsModel. (assoc acquired client (- (get acquired client) 1)))
+                     (AcquiredPermitsModel. client-uids-to-client-names-map (assoc acquired client (- (get acquired client) 1)))
                      (knossos.model/inconsistent (str "client: " client " cannot " op " on " this)))))))
 
   Object
-  (toString [this] (str "acquired: " acquired)))
+  (toString [this] (str "acquired: " acquired " client-uids-to-client-names-map: " @client-uids-to-client-names-map)))
 
-(defn createAcquiredPermitsModel []
+(defn create-acquired-permits-model [client-uids-to-client-names-map]
   "A model that assign permits to multiple nodes via :acquire and :release messages"
-  (AcquiredPermitsModel. {"n1" 0 "n2" 0 "n3" 0 "n4" 0 "n5" 0}))
+  (AcquiredPermitsModel. client-uids-to-client-names-map {"n1" 0 "n2" 0 "n3" 0 "n4" 0 "n5" 0}))
 
 
 (defn workloads
@@ -812,7 +661,7 @@
   Note that workloads are *stateful*, since they include generators; that's why
   this is a function, instead of a constant--we may need a fresh workload if we
   run more than one test."
-  []
+  [client-uids-to-client-names-map]
   {:crdt-map                     (map-workload {:crdt? true})
    :map                          (map-workload {:crdt? false})
    :lock                         {:client    (lock-client "jepsen.lock")
@@ -839,9 +688,9 @@
                                                   cycle
                                                   gen/seq
                                                   gen/each
-                                                  (gen/stagger 1/10))
+                                                  (gen/stagger 0.5))
                                   :checker   (checker/linearizable)
-                                  :model     (createOwnerAwareMutex)}
+                                  :model     (create-owner-aware-mutex client-uids-to-client-names-map)}
    :reentrant-cp-lock            {:client    (fenced-lock-client "jepsen.cpLock2")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
@@ -850,18 +699,18 @@
                                                   cycle
                                                   gen/seq
                                                   gen/each
-                                                  (gen/stagger 1/10))
+                                                  (gen/stagger 0.5))
                                   :checker   (checker/linearizable)
-                                  :model     (createReentrantMutex)}
+                                  :model     (create-reentrant-mutex client-uids-to-client-names-map)}
    :non-reentrant-fenced-lock    {:client    (fenced-lock-client "jepsen.cpLock1")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                                   cycle
                                                   gen/seq
                                                   gen/each
-                                                  (gen/stagger 1/10))
+                                                  (gen/stagger 1))
                                   :checker   (checker/linearizable)
-                                  :model     (createFencedMutex)}
+                                  :model     (create-fenced-mutex client-uids-to-client-names-map)}
    :reentrant-fenced-lock        {:client    (fenced-lock-client "jepsen.cpLock2")
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
@@ -870,18 +719,18 @@
                                                   cycle
                                                   gen/seq
                                                   gen/each
-                                                  (gen/stagger 1/10))
+                                                  (gen/stagger 1))
                                   :checker   (checker/linearizable)
-                                  :model     (createReentrantFencedMutex)}
+                                  :model     (create-reentrant-fenced-mutex client-uids-to-client-names-map)}
    :cp-semaphore {:client        (cp-semaphore-client)
                                   :generator (->> [{:type :invoke, :f :acquire :value (.toString (UUID/randomUUID))}
                                                    {:type :invoke, :f :release :value (.toString (UUID/randomUUID))}]
                                                   cycle
                                                   gen/seq
                                                   gen/each
-                                                  (gen/stagger 1/10))
+                                                  (gen/stagger 0.5))
                                   :checker   (checker/linearizable)
-                                  :model     (createAcquiredPermitsModel)}
+                                  :model     (create-acquired-permits-model client-uids-to-client-names-map)}
    :cp-id-gen-long               {:client    (cp-atomic-long-id-client nil nil)
                                   :generator (->> {:type :invoke, :f :generate}
                                                 (gen/stagger 0.5))
@@ -921,11 +770,13 @@
 (defn hazelcast-test
   "Constructs a Jepsen test map from CLI options"
   [opts]
-  (let [{:keys [generator
+  (let [client-uids-to-client-names-map (atom {})
+        {:keys [generator
                 final-generator
                 client
                 checker
-                model]} (get (workloads) (:workload opts))
+                model]}
+        (get (workloads client-uids-to-client-names-map) (:workload opts))
         generator (->> generator
                        (gen/nemesis (gen/start-stop 20 20))
                        (gen/time-limit (:time-limit opts)))
@@ -951,14 +802,15 @@
                          {:perf     (checker/perf)
                           :timeline (timeline/html)
                           :workload checker})
-            :model     model})))
+            :model     model
+            :client-uids-to-client-names client-uids-to-client-names-map})))
 
 (def opt-spec
   "Additional command line options"
   [[nil "--workload WORKLOAD" "Test workload to run, e.g. atomic-long-ids."
     :parse-fn keyword
-    :missing (str "--workload " (cli/one-of (workloads)))
-    :validate [(workloads) (cli/one-of (workloads))]]])
+    :missing (str "--workload " (cli/one-of (workloads nil)))
+    :validate [(workloads nil) (cli/one-of (workloads nil))]]])
 
 (defn -main
   "Command line runner."

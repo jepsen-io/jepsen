@@ -17,30 +17,28 @@
     :parse-fn (fn [m]
                   (str/split m #"\s*,\s*"))]])
 
-(defn prepareCPSubsystemConfig
+(defn prepare-cp-subsystem-config
   "Prepare Hazelcast CPSubsystemConfig"
   [config members]
   (let [cpSubsystemConfig (.getCPSubsystemConfig config)
         raftAlgorithmConfig (.getRaftAlgorithmConfig cpSubsystemConfig)
         semaphoreConfig (CPSemaphoreConfig. "jepsen.cpSemaphore" false)
         lockConfig1 (FencedLockConfig. "jepsen.cpLock1" 1)
-        lockConfig2 (FencedLockConfig. "jepsen.cpLock2" 2)
+        lockConfig2 (FencedLockConfig. "jepsen.cpLock2" 2)]
 
-        _ (.setLeaderElectionTimeoutInMillis raftAlgorithmConfig 1000)
-        _ (.setLeaderHeartbeatPeriodInMillis raftAlgorithmConfig 1500)
-        _ (.setCommitIndexAdvanceCountToSnapshot raftAlgorithmConfig 250)
-        _ (.setFailOnIndeterminateOperationState cpSubsystemConfig true)
+       (.setLeaderElectionTimeoutInMillis raftAlgorithmConfig 1000)
+       (.setLeaderHeartbeatPeriodInMillis raftAlgorithmConfig 1500)
+       (.setCommitIndexAdvanceCountToSnapshot raftAlgorithmConfig 250)
+       (.setFailOnIndeterminateOperationState cpSubsystemConfig true)
 
-        _ (.setCPMemberCount cpSubsystemConfig (count members))
-        _ (.setSessionHeartbeatIntervalSeconds cpSubsystemConfig 5)
-        _ (.setSessionTimeToLiveSeconds cpSubsystemConfig 300)
+       (.setCPMemberCount cpSubsystemConfig (count members))
+       (.setSessionHeartbeatIntervalSeconds cpSubsystemConfig 5)
+       (.setSessionTimeToLiveSeconds cpSubsystemConfig 300)
 
-        _ (.addSemaphoreConfig cpSubsystemConfig semaphoreConfig)
-        _ (.addLockConfig cpSubsystemConfig lockConfig1)
-        _ (.addLockConfig cpSubsystemConfig lockConfig2)
-
-      ]
-    cpSubsystemConfig))
+       (.addSemaphoreConfig cpSubsystemConfig semaphoreConfig)
+       (.addLockConfig cpSubsystemConfig lockConfig1)
+       (.addLockConfig cpSubsystemConfig lockConfig2)
+       cpSubsystemConfig))
 
 (defn -main
   "Go go go"
@@ -70,7 +68,7 @@
         _       (.setEnabled tcp-ip true)
 
         ; prepare the CP subsystem
-        _ (prepareCPSubsystemConfig config members)
+        _ (prepare-cp-subsystem-config config members)
 
         ; Quorum for split-brain protection
         quorum (doto (QuorumConfig.)
