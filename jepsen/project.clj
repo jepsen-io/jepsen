@@ -1,4 +1,4 @@
-(defproject org.clojars.jacobmbr/jepsen "0.1.1"
+(defproject org.clojars.jacobmbr/jepsen "0.1.2"
   :description "Distributed systems testing framework."
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
