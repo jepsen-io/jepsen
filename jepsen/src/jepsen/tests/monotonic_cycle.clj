@@ -30,72 +30,133 @@
   like an OK start."
   (:require [jepsen.checker :as checker]
             [knossos.op :as op]
+            [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [clojure.pprint :refer [pprint]]
+            [jepsen.util :as util]))
 
+;; FIXME Stack overflow on n>10000 histories
+;; Discussion of purely functional version.
+;; https://stackoverflow.com/a/15912896
+;;
+;; Parallelized SCC detection algorithms
+;; https://www.cs.vu.nl/~wanf/theses/matei.pdf
+;; if it's O(n) but has a cap... maybe we remove the cap?
+;; Isn't parallelization trying to speed up something that's already fast?
+;; We're trying to increase the upper bound, not the processing speed
+;; parallelization would by nature increase the size.
+;; You'd have to stack share (Matei ?) to parallelize DFS though
 (defn tarjan
   "Returns the strongly connected components of a graph specified by its nodes
   and a successor function (next) succs from node to nodes. An implementation of
   Tarjan's Strongly Connected Components.
   From: http://clj-me.cgrand.net/2013/03/18/tarjans-strongly-connected-components-algorithm/"
-  [nodes succs]
-  ;; Env is a map from nodes to stack length or nil, nil means the node is
-  ;; known to belong to another SCC (Strongly Connected Component) :stack for
-  ;; the current stack and :sccs for the current set of SCCs.
-  (letfn [(sc [env node]
-            (if (contains? env node)
-              env
-              (let [stack (:stack env)
-                    n     (count stack)
-                    env   (assoc env node n :stack (conj stack node))
-                    env   (reduce (fn [env next]
-                                    (let [env (sc env next)]
-                                      (assoc env node (min (or (env next) n) (env node)))))
-                                  env (succs node))]
-                ;; No link below us in the stack, assign to SCCs
-                (if (= n (env node))
-                  (let [nodes (:stack env)
-                        scc (set (take (- (count nodes) n) nodes))
-                        ;; clear all stack lengths for these nodes since this SCC is done
-                        env (reduce #(assoc %1 %2 nil) env scc)]
-                    (assoc env :stack stack :sccs (conj (:sccs env) scc)))
-                  env))))]
-    (let [state  {:stack '() :sccs #{}}
-          result (reduce sc state nodes)]
-      (:sccs result))))
+  [succs]
+  (let [nodes (keys succs)]
+    (letfn [(sc [state node]
+              (if (contains? state node)
+                ;; Skip
+                state
+
+                ;; Algorithm state is namespaced to avoid intersection with graph
+                (let [stack (::stack state)
+                      n     (count stack)
+                      state (assoc state
+                                   node n
+                                   ::stack (conj stack node))
+                      state (reduce (fn [state next]
+                                      (let [state (sc state next)
+                                            x     (min (or (state next) n)
+                                                       (state node))]
+
+                                        (assoc state node x)))
+                                    state
+                                    (succs node))]
+
+                  (if (= n (state node))
+
+                    ;; No link below us in the stack, assign to SCCs
+                    (let [nodes (::stack state)
+                          scc (set (take (- (count nodes) n) nodes))
+                          ;; clear all stack lengths for these nodes since this SCC is done
+                          state (reduce #(assoc %1 %2 nil) state scc)]
+
+                      (assoc state
+                             ::stack stack
+                             ::sccs (conj (::sccs state) scc)))
+
+                    ;; ???
+                    state))))]
+      (let [state  {::stack () ::sccs #{}}
+            result (reduce sc state nodes)]
+        (::sccs result)))))
+
+(defn apply-pair
+  "Takes a map of registers to their last-seen values, a map of registers to
+  their graphs, and a tuple containing a register and its new value. Returns
+  the graph-map with the op applied to the appropriate register's graph."
+  [last graph [k v]]
+  (let [last-v (last k)
+        node {v #{}}
+        edge (if last-v
+               {last-v #{v}}
+               {})
+        g (merge-with set/union (graph k) node edge)]
+    (assoc-in graph [k] g)))
 
 (defn graph
   "Takes a history of reads over a single register and returns a graph of the
-  states that the register advanced through.
-  FIXME Stack overflow on n>10000 histories
-  FIXME Handle multiple registers and transactions of reads
-  FIXME This could probably be a reduction"
+  states that the register advanced through."
   [history]
   (loop [graph {}
-         [{:keys [value]} & more] history
-         last nil]
-    (if (= value last)
-      ;; If the new val is the same as the last, skip.
-      graph
-      (let [edge (if last
-                   {last #{value}}
-                   {})
-            node {value #{}}
-            g'   (merge-with set/union graph edge node)]
-        (if more
-          (recur g' more value)
-          g')))))
+         last  {}
+         ;; This will probably have to be a map of keys to last-seen values
+         [op & more] history]
+    (let [val   (:value op)
+          ;; Single register get a key called :register
+          val   (if-not (map? val)
+                  {:register val}
+                  val)
+          pairs (concat val)
 
-;; TODO Can we improve this error output?
+          ;; Remove values that have not changed
+          new-pairs (set/difference (set pairs)
+                                    (set last))
+
+          ;; Apply new nodes and edges to the graph
+          g' (reduce (partial apply-pair last)
+                     graph
+                     new-pairs)]
+      (if more
+        (recur g' (merge last val) more)
+        g'))))
+
 (defn errors
   "Takes a set of component-sets from tarjan's results, identifying if any
   components are strongly connected (more than 1 element per set)."
   [components]
   (let [<=2 (fn [set]
-              {set (<= 2 (count set))})]
+              {set (<= 2 (count set))})
+        error? (fn [m] (some true? (vals m)))]
     (->> components
          (map <=2)
+         (filter error?)
          (reduce merge))))
+
+(defn valid?
+  "Honestly not very proud of this one. Looks like something I would've written
+  when I first started clojure. But i've been staring at this ns for about 7
+  hours and i'm just gonna pour this one out and leave it for tomorrow FIXME"
+  [errors]
+  (if-not (:register errors)
+    (->> errors
+         (map second)
+         (map vals)
+         (apply concat)
+         (some true?)
+         not)
+    true))
 
 (defn checker []
   (reify checker/Checker
@@ -104,10 +165,14 @@
                             (filter op/ok?)
                             (filter #(= :read (:f %))))
             g          (graph h)
-            components (tarjan (keys g) g)
-            errors     (errors components)]
-        {:valid? (not-any? true? (vals errors))
+            components (util/map-vals tarjan g)
+            errors     (util/map-vals errors components)]
+
+        ;; Auto-validate single-key histories
+        {:valid? (valid? errors)
          :errors errors}))))
+
+{:x {#{0 1} true}, :y nil}
 
 (defn w [v] {:f :write, :type :invoke, :value v})
 (defn r [] {:f :read, :type :invoke})
