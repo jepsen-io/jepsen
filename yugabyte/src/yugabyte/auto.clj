@@ -196,7 +196,8 @@
 (defn signal!
   "Sends a signal to a named process by signal number or name."
   [process-name signal]
-  (meh (c/exec :pkill :--signal signal process-name)))
+  (meh (c/exec :pkill :--signal signal process-name))
+  :signaled)
 
 (defn kill!
   "Kill a process forcibly."
@@ -296,7 +297,17 @@
    :--rpc_bind_addresses (cn/ip node)
    ; Seconds before declaring an unavailable node dead and initiating a raft
    ; membership change
-   ;:--follower_unavailable_considered_failed_sec 10
+   ;:--follower_unavailable_considered_failed_sec 10)
+   ])
+
+(def experimental-tuning-flags
+  ; Speed up recovery from partitions and crashes. Right now it looks like
+  ; these actually make the cluster slower to, or unable to, recover.
+  [:--client_read_write_timeout_ms                2000
+   :--leader_failure_max_missed_heartbeat_periods 2
+   :--leader_failure_exp_backoff_max_delta_ms     5000
+   :--rpc_default_keepalive_time_ms               5000
+   :--rpc_connection_timeout_ms                   1500
    ])
 
 (defn community-edition
@@ -333,6 +344,8 @@
                :chdir   dir}
               ce-master-bin
               (ce-shared-opts node)
+              (when (:experimental-tuning-flags test)
+                experimental-tuning-flags)
               :--master_addresses   (master-addresses test)
               :--replication_factor (:replication-factor test)
               :--v 3)))
@@ -345,6 +358,8 @@
                :chdir   dir}
               ce-tserver-bin
               (ce-shared-opts node)
+              (when (:experimental-tuning-flags test)
+                experimental-tuning-flags)
               :--tserver_master_addrs (master-addresses test)
               ; Tracing
               :--enable_tracing
