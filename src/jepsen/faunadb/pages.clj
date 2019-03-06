@@ -34,6 +34,7 @@
       (f/upsert-class! conn {:name elements-name})
       (f/upsert-index! conn {:name        idx-name
                              :source      elements
+                             :active      true
                              :serialized  (boolean
                                             (:serialized-indices test))
                              ; :partitions 1

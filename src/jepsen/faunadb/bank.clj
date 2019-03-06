@@ -148,6 +148,7 @@
       (client/setup! bank-client test)
       (f/upsert-index! conn {:name idx-name
                              :source accounts
+                             :active true
                              :serialized (boolean (:serialized-indices test))
                              :values [{:field ["ref"]}
                                       {:field ["data" "balance"]}]})

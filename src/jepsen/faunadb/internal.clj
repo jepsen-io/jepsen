@@ -62,6 +62,7 @@
       (f/upsert-class! conn {:name cats-name})
       (f/upsert-index! conn {:name index-name
                              :source cats
+                             :active true
                              :serialized (boolean (:serialized-indices test))
                              :terms [{:field ["data" "type"]}]
                              :values [{:field ["ref"]}

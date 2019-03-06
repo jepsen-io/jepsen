@@ -41,10 +41,12 @@
       (f/upsert-class! conn {:name b-name})
       (f/upsert-index! conn {:name a-index-name
                              :source a
+                             :active true
                              :serialized (boolean (:serialized-indices test))
                              :terms [{:field ["data" "key"]}]})
       (f/upsert-index! conn {:name b-index-name
                              :source b
+                             :active true
                              :serialized (boolean (:serialized-indices test))
                              :terms [{:field ["data" "key"]}]})
       (f/wait-for-index conn a-index)
