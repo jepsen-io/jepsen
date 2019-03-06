@@ -1,0 +1,2 @@
+MAX_HEAP_SIZE="2G"
+#JAVA_OPTS="-agentpath:/tmp/libyjpagent.so"
