@@ -27,6 +27,7 @@
       (f/upsert-class! conn {:name side-effects})
       (f/upsert-index! conn {:name       idx-name
                              :source     (q/class elements)
+                             :active     true
                              :serialized (boolean (:serialized-indices test))
                              :values     [{:field ["data" "value"]}]})
       (f/wait-for-index conn idx)))
