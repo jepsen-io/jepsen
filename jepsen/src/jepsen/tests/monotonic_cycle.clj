@@ -29,68 +29,107 @@
   large, and then it'd be hard to prove where the cycle lies. But this feels
   like an OK start."
   (:require [jepsen.checker :as checker]
+            [jepsen.util :as util]
             [knossos.op :as op]
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
-            [clojure.pprint :refer [pprint]]
-            [jepsen.util :as util]))
+            [jepsen.generator :as gen]))
 
-;; FIXME Stack overflow on n>10000 histories
-;; Discussion of purely functional version.
-;; https://stackoverflow.com/a/15912896
-;;
-;; Parallelized SCC detection algorithms
-;; https://www.cs.vu.nl/~wanf/theses/matei.pdf
-;; if it's O(n) but has a cap... maybe we remove the cap?
-;; Isn't parallelization trying to speed up something that's already fast?
-;; We're trying to increase the upper bound, not the processing speed
-;; parallelization would by nature increase the size.
-;; You'd have to stack share (Matei ?) to parallelize DFS though
 (defn tarjan
-  "Returns the strongly connected components of a graph specified by its nodes
-  and a successor function (next) succs from node to nodes. An implementation of
-  Tarjan's Strongly Connected Components.
-  From: http://clj-me.cgrand.net/2013/03/18/tarjans-strongly-connected-components-algorithm/"
+  "Returns the strongly connected components of a graph specified by its
+  nodes (ints) and a successor function (succs node) from node to nodes.
+  A iterative verison of Tarjan's Strongly Connected Components."
   [succs]
-  (let [nodes (keys succs)]
-    (letfn [(sc [state node]
-              (if (contains? state node)
-                ;; Skip
-                state
+  (let [nodes (keys succs)
+        ;; Ensure there's a table index for every value we could find
+        table-size (->> nodes (apply max) inc)
+        result (loop [index      0
+                      indices    (int-array table-size)
+                      visited    (make-array Boolean/TYPE table-size)
+                      iterator   (.iterator nodes)
+                      iter-stack '()
+                      min-stack  '()
+                      stack      '()
+                      prev-node  nil
+                      sccs       #{}]
+                 ;; Depth-first search
+                 (if-let [node (when (.hasNext iterator)
+                                 (.next iterator))]
+                   ;; Has the  node been visited?
+                   (if-not (aget visited node)
+                     ;; New node! Go down a level
+                     (let [_          (aset indices node index)
+                           _          (aset visited node true)
+                           stack      (conj stack node)
 
-                ;; Algorithm state is namespaced to avoid intersection with graph
-                (let [stack (::stack state)
-                      n     (count stack)
-                      state (assoc state
-                                   node n
-                                   ::stack (conj stack node))
-                      state (reduce (fn [state next]
-                                      (let [state (sc state next)
-                                            x     (min (or (state next) n)
-                                                       (state node))]
+                           m          (aget indices node)
+                           min-stack  (conj min-stack m)
+                           iter-stack (conj iter-stack iterator)
+                           iterator   (.iterator (succs node))
+                           index      (inc index)]
+                       (recur index indices visited iterator iter-stack min-stack stack node sccs))
 
-                                        (assoc state node x)))
-                                    state
-                                    (succs node))]
+                     ;; We've seen this before, update the min stack
+                     (let [min-stack (if (< 0 (count min-stack)) ; Ensure we have a recent minimum
+                                       (let [;; We do, let's grab it
+                                             m         (peek min-stack)
+                                             min-stack (pop min-stack)
+                                             ;; Compare the recent lowest to node's current index
+                                             index (aget indices node)
+                                             ;; Find the smaller of the node's index or last min
+                                             low   (min index m)]
+                                         (conj min-stack low))
+                                       min-stack)]
+                       (recur index indices visited iterator iter-stack min-stack stack node sccs)))
 
-                  (if (= n (state node))
+                   ;; Done checking edges this set of edges,
+                   ;; look at node and see if component
+                   (if (zero? (count iter-stack))
+                     sccs
+                     (let [iterator   (peek iter-stack)
+                           iter-stack (pop iter-stack)
 
-                    ;; No link below us in the stack, assign to SCCs
-                    (let [nodes (::stack state)
-                          scc (set (take (- (count nodes) n) nodes))
-                          ;; clear all stack lengths for these nodes since this SCC is done
-                          state (reduce #(assoc %1 %2 nil) state scc)]
+                           ;; Pop off the latest min
+                           m          (peek min-stack)
+                           min-stack  (pop min-stack)
 
-                      (assoc state
-                             ::stack stack
-                             ::sccs (conj (::sccs state) scc)))
+                           [stack scc] (if (< m (aget indices prev-node))
+                                         (do
+                                           (aset indices prev-node m)
+                                           [stack nil])
+                                         (loop [w     nil
+                                                stack stack
+                                                scc   #{}]
+                                           (let [w (or (peek stack) -1)]
+                                             (if (<= prev-node w)
+                                               (let [stack (try
+                                                             (pop stack)
+                                                             (catch java.lang.IllegalStateException _
+                                                               '()))
+                                                     scc   (conj scc w)]
+                                                 (aset indices w (count nodes))
+                                                 (recur w stack scc))
+                                               [stack scc]))))
 
-                    ;; ???
-                    state))))]
-      (let [state  {::stack () ::sccs #{}}
-            result (reduce sc state nodes)]
-        (::sccs result)))))
+                           ;; SCC good to go sir
+                           sccs (if scc
+                                  (conj sccs scc)
+                                  sccs)
+
+                           ;; Update head of min-stack
+                           min-stack (if (< 0 (count min-stack))
+                                       (let [m         (peek min-stack)
+                                             min-stack (pop min-stack)
+
+                                             i' (aget indices prev-node)
+                                             ;; Find the smaller of the node's index or last min
+                                             low       (min i' m)
+                                             min-stack (conj min-stack low)]
+                                         min-stack))]
+                       (recur index indices visited iterator
+                              iter-stack min-stack stack prev-node sccs)))))]
+    result))
 
 (defn apply-pair
   "Takes a map of registers to their last-seen values, a map of registers to
@@ -145,9 +184,8 @@
          (reduce merge))))
 
 (defn valid?
-  "Honestly not very proud of this one. Looks like something I would've written
-  when I first started clojure. But i've been staring at this ns for about 7
-  hours and i'm just gonna pour this one out and leave it for tomorrow FIXME"
+  "Takes a map of registers to their analyzed components. Returns true if
+  none are invalid. Also auto-validates any single-register history."
   [errors]
   (if-not (:register errors)
     (->> errors
@@ -172,13 +210,23 @@
         {:valid? (valid? errors)
          :errors errors}))))
 
-{:x {#{0 1} true}, :y nil}
+(defn w [k v]
+  {:f :write, :type :invoke, :value {k v}})
 
-(defn w [v] {:f :write, :type :invoke, :value v})
-(defn r [] {:f :read, :type :invoke})
+(defn r [keys]
+  (let [v (->> keys
+               (map (fn [k] [k nil]))
+               (into {}))]
+    {:f :read, :type :invoke, :value v}))
+
 
 (defn workload
-  []
+  "A package of a generator and checker. Options:
+
+    :keys   A set of registers you're going to operate on. Allows us to generate
+            monotonically increasing writes per key, and create reads for n keys.
+    :read-n How many keys to read from at once. Default 2."
+  [{:keys [keys read-n]}]
   {:checker (checker)
-   ;; TODO Gen
-   :generator []})
+   ;; FIXME
+   :generator (gen/mix [w r])})

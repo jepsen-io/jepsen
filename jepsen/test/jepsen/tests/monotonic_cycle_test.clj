@@ -6,43 +6,61 @@
             [clojure.test :refer :all]))
 
 (deftest tarjan-test
-  (testing "Can analyze keyword graphs"
-    ;; Modeled after the example on the wikipedia page
-    (let [graph {:a #{:b}    :b #{:c}
-                 :c #{:a}    :d #{:b :c :e}
-                 :e #{:d :f} :f #{:c :g}
-                 :g #{:f}    :h #{:f :h}}]
-      (is (= (tarjan graph)
-              #{#{:c :b :a} #{:g :f} #{:e :d} #{:h}}))))
-
   (testing "Can analyze integer graphs"
+    ;; From wikipedia
     (let [graph {1 #{2}   2 #{3}
                  3 #{1}   4 #{2 3 5}
                  5 #{4 6} 6 #{3 7}
                  7 #{6}   8 #{7 8}}]
       (is (= (tarjan graph)
-             #{#{3 2 1} #{6 7} #{5 4} #{8}}))))
+             #{#{3 2 1} #{6 7} #{5 4} #{8}})))
 
-  (testing "Can detect when the whole graph is strongly connected"
+    ;; Big lööp
     (let [graph {1 #{2} 2 #{3}
                  3 #{4} 4 #{5}
                  5 #{6} 6 #{7}
                  7 #{8} 8 #{1}}]
       (is (= (tarjan graph)
-             #{#{1 2 3 4 5 6 7 8}}))))
+             #{#{1 2 3 4 5 6 7 8}})))
 
-  (testing "Can verify that no SCCs exist"
-    ;; A node with no strong connections is returned as a single-element set
-    (let [graph {1 #{} 2 #{} 3 #{} 4 #{}
-                 5 #{} 6 #{} 7 #{} 8 #{}}]
+    ;; smol lööps
+    (let [graph {0 #{1} 1 #{0}
+                 2 #{3} 3 #{2}
+                 4 #{5} 5 #{4}
+                 6 #{7} 7 #{6}}]
       (is (= (tarjan graph)
-             #{#{1} #{2} #{3} #{4}
-               #{5} #{6} #{7} #{8}})))
+             #{#{0 1} #{2 3}
+               #{4 5} #{6 7}}))))
 
-    ;; Self connections are equivalent to no connections in this impl.
-    (let [graph {1 #{1} 2 #{2} 3 #{3} 4 #{4}}]
+  (testing "Can flag unlinked as solo sccs"
+    (let [graph {1 #{} 2 #{}
+                 3 #{} 4 #{}}]
       (is (= (tarjan graph)
-             #{#{1} #{2} #{3} #{4}})))))
+             #{#{1} #{2} #{3} #{4}}))))
+
+  (testing "Can flag self-ref as solo sccs"
+    (let [graph {1 #{1} 2 #{2}
+                 3 #{3} 4 #{4}}]
+      (is (= (tarjan graph)
+             #{#{1} #{2} #{3} #{4}}))))
+
+  (testing "can check monotonic loop histories"
+    ;; Linear
+    (let [graph {0 #{1} 1 #{2}
+                 2 #{3} 3 #{}}]
+      (is (= (tarjan graph)
+             #{#{3}})))
+
+    ;; Our register backtracked >:)
+    (let [graph {0 #{1} 1 #{2}
+                 2 #{1} 3 #{}}]
+      (is (= (tarjan graph)
+             #{#{1 2} #{3}}))))
+
+  (testing "can check a one node graph"
+    (let [graph {0 #{}}]
+      (is (= (tarjan graph)
+             #{#{0}})))))
 
 (deftest graph-test
   (testing "Can render a linear partial order"
@@ -160,7 +178,9 @@
                    (op/invoke 0 :read nil)
                    (op/ok     0 :read {:x 1 :y 1})
                    (op/invoke 0 :read nil)
-                   (op/ok     0 :read {:x 0 :y 1})]
+                   (op/ok     0 :read {:x 0 :y 1})
+                   (op/ok     0 :read {:x 2 :y 4})
+                   (op/ok     0 :read {:x 2 :y 4})]
           r (checker/check checker nil history nil)]
       (is (not (:valid? r)))))
 
@@ -190,15 +210,15 @@
     [{:process proc, :type :invoke, :f :read, :value v}
      {:process proc, :type :ok,     :f :read, :value v}]))
 
-;; FIXME Test this on tarjan's directly
-#_(deftest ^:integration stackoverflow-test
+(deftest ^:integration stackoverflow-test
   (testing "just inducing the depth limit problem"
     (let [checker (checker)
           history (->> (range)
-                       (mapcat big-history-gen)
-                       (take 5000)
+                       (mapcat read-only-gen)
+                       (take 1000000)
                        vec)]
       (time
-       (dotimes [n 100]
-         (checker/check checker nil history nil)))
-      (is (:valid? r)))))
+       (dotimes [n 10]
+         (print "Run" n ":")
+         (time (let [r (checker/check checker nil history nil)]
+                 (is (:valid? r)))))))))
