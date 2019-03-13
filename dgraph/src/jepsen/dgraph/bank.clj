@@ -84,12 +84,16 @@
   "Writes back an account map."
   [t account]
   (t/with-trace "write-account"
-    (if (zero? (:amount account))
-      (c/delete! t (assert+ (:uid account)))
-      (let [k (assert+ (:key account))
-            kp (c/gen-pred "key"    pred-count k)
-            ap (c/gen-pred "amount" pred-count k)
-            tp (c/gen-pred "type"   pred-count k)]
+    (let [k (assert+ (:key account))
+          kp (c/gen-pred "key"    pred-count k)
+          ap (c/gen-pred "amount" pred-count k)
+          tp (c/gen-pred "type"   pred-count k)]
+      (if (zero? (:amount account))
+        (c/delete! t (-> account
+                         (select-keys [:uid])
+                         (assoc (keyword tp) nil),
+                         (assoc (keyword kp) nil),
+                         (assoc (keyword ap) nil)))
         (c/mutate! t (-> account
                          (select-keys [:uid])
                          (assoc (keyword tp) (:type account))
@@ -150,12 +154,13 @@
                     (let [op (assoc op
                                     :type :ok
                                     :value (read-accounts t))]
-                      (if-let [error (bank/check-op (set (:accounts test))
-                                                    (:total-amount test)
-                                                    op)]
+                      (if-let [error (let [accts (set (:accounts test))
+                                           total (:total-amount test)
+                                           negative-balances? false]
+                                       (bank/check-op accts total negative-balances? op))]
                         (let [message (merge error (t/context))
                               message (dissoc message :op)]
-                          (t/attribute! {"checker_violation" "true"})
+                          (t/attribute! "checker_violation" "true")
                           (assoc op
                                  :message message
                                  :error :checker-violation))

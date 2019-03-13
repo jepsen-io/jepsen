@@ -14,6 +14,7 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.dgraph.client :as dc]
+            [jepsen.dgraph.trace :as t]
             [clojure.java.io :as io])
   (:import (java.util.concurrent CyclicBarrier)
            (java.io File)))
@@ -66,8 +67,12 @@
           :zero
           :--idx                (node-idx test node)
           :--port_offset        zero-port-offset
+          :--expose_trace
+          :--v 2
           :--replicas           (:replicas test)
           :--rebalance_interval (:rebalance-interval test)
+          (when (:dgraph-jaeger-collector test)
+            [:--jaeger.collector (:dgraph-jaeger-collector test)])
           :--my                 (str node ":" zero-internal-port)
           (when-not (= node (jepsen/primary test))
             [:--peer (str (jepsen/primary test) ":" zero-internal-port)])))
@@ -97,8 +102,11 @@
           binary
           :alpha
           (lru-opt)
-          (when (:dgraph-jaeger-connector test)
-            [:--jaeger.connector (:dgraph-jaeger-connector test)])
+          :--expose_trace
+          :--v 2
+          :--vmodule=groups=3 ;; flag to set -v=3 for worker/groups.go
+          (when (:dgraph-jaeger-collector test)
+            [:--jaeger.collector (:dgraph-jaeger-collector test)])
           (when (:dgraph-jaeger-agent test)
             [:--jaeger.agent (:dgraph-jaeger-agent test)])
           :--idx        (node-idx test node)
@@ -151,22 +159,37 @@
 (defn zero-state
   "Fetches zero /state from the given node."
   [node]
-  (-> (http/get (zero-url node "state")
-                http-opts)
-      :body
-      (json/parse-string (fn [k] (if (re-find #"\A\d+\z" k)
-                                   (Long/parseLong k)
-                                   (keyword k))))))
+  (try
+    (-> (http/get (zero-url node "state")
+                  http-opts)
+        :body
+        (json/parse-string (fn [k] (if (re-find #"\A\d+\z" k)
+                                     (Long/parseLong k)
+                                     (keyword k)))))
+    ;; It's ok if this times out, just move on
+    (catch java.net.SocketTimeoutException e :timeout)))
+
+(defn zero-leader
+  "Takes result of zero-state and returns the node of the zero leader"
+  [state]
+  (let [leader (->> state
+                    :zeros
+                    vals
+                    (filter :leader)
+                    first
+                    :addr)]
+    (first (clojure.string/split leader #":"))))
 
 (defn move-tablet!
   "Given a zero node, asks that node to move a tablet to the given group."
   [node tablet group]
-  (-> (http/get (zero-url node "moveTablet")
-                (assoc http-opts
-                       :socket-timeout 20000
-                       :query-params {:tablet tablet
-                                      :group  group}))
-      :body))
+  (t/with-trace "support.move-tablet!"
+    (-> (http/get (zero-url node "moveTablet")
+                  (assoc http-opts
+                         :socket-timeout 20000
+                         :query-params {:tablet tablet
+                                        :group  group}))
+        :body)))
 
 (defn cluster-ready?
   "Does this zero node think we're ready to start work?"

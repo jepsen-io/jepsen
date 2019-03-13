@@ -3,13 +3,14 @@
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as c]
-                    [generator :as gen]
-                    [net :as net]
-                    [util :as util]
-                    [nemesis :as nemesis]]
+             [generator :as gen]
+             [net :as net]
+             [util :as util]
+             [nemesis :as nemesis]]
             [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
-            [jepsen.dgraph [support :as s]]))
+            [jepsen.dgraph [support :as s]]
+            [jepsen.dgraph.trace :as t]))
 
 (defn alpha-killer
   "Responds to :start by killing alpha on random nodes, and to :stop by
@@ -49,31 +50,37 @@
   "Moves tablets around at random"
   []
   (reify nemesis/Nemesis
-    (setup! [this test] this)
+    (setup! [this test]
+      (t/with-trace "nemesis.tablet-mover.setup!"
+        this))
 
     (invoke! [this test op]
-      (let [state  (s/zero-state (rand-nth (:nodes test)))
-            groups (->> state :groups keys)]
-        (info :state (with-out-str (pprint state)))
-        (->> state
-             :groups
-             vals
-             (map :tablets)
-             (mapcat vals)
-             shuffle
-             (keep (fn [tablet]
-                     (let [pred   (:predicate tablet)
-                           group  (:groupId tablet)
-                           group' (rand-nth groups)]
-                       (when-not (= group group')
-                         ; Actually move tablet
-                         (info "Moving" pred "from" group "to" group')
-                         (s/move-tablet! (rand-nth (:nodes test)) pred group')
-                         (info "Moved" pred "from" group "to" group')
-                         ; Return predicate and new group
-                         [pred [group group']]))))
-             (into (sorted-map))
-             (assoc op :value))))
+      (t/with-trace "nemesis.tablet-mover.invoke!"
+        (let [state  (s/zero-state (rand-nth (:nodes test)))]
+          (info :state (with-out-str (pprint state)))
+          (if (= :timeout state)
+            (assoc op :value :timeout)
+            (let [groups (->> state :groups keys)
+                  node   (s/zero-leader state)]
+              (->> state
+                   :groups
+                   vals
+                   (map :tablets)
+                   (mapcat vals)
+                   shuffle
+                   (keep (fn [tablet]
+                           (let [pred   (:predicate tablet)
+                                 group  (:groupId tablet)
+                                 group' (rand-nth groups)]
+                             (when-not (= group group')
+                               ;; Actually move tablet
+                               (info "Moving" pred "from" group "to" group')
+                               (s/move-tablet! node pred group')
+                               (info "Moved" pred "from" group "to" group')
+                               ;; Return predicate and new group
+                               [pred [group group']]))))
+                   (into (sorted-map))
+                   (assoc op :value)))))))
 
     (teardown! [this test])))
 

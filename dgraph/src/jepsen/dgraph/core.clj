@@ -2,6 +2,7 @@
   (:gen-class)
   (:require [clojure.string :as str]
             [clojure.tools.logging :refer [info warn]]
+            [clojure.java.shell :refer [sh]]
             [clojure.pprint :refer [pprint]]
             [jepsen [cli :as cli]
                     [core :as jepsen]
@@ -56,7 +57,10 @@
   "Builds up a dgraph test map from CLI options."
   [opts]
   (let [version  (if (:local-binary opts)
-                   "unknown"
+                   (let [v (:out (sh (:local-binary opts) "version"))]
+                     (if-let [m (re-find #"Dgraph version   : (v[0-9a-z\.-]+)" v)]
+                       (m 1)
+                       "unknown"))
                    (if-let [p (:package-url opts)]
                      (if-let [m (re-find #"([^/]+)/[^/.]+\.tar\.gz" p)]
                        (m 1)
@@ -132,7 +136,7 @@
    [nil "--retry-db-setup" "Work around Dgraph cluster convergence bugs by retrying the setup process"
     :default false]
    [nil "--tracing URL" "Enables tracing by providing an endpoint to export traces. Jaeger example: http://host.docker.internal:14268/api/traces"]
-   [nil "--dgraph-jaeger-connector CONNECTOR" "Jaeger connector URL to pass to dgraph on startup."]
+   [nil "--dgraph-jaeger-collector COLLECTOR" "Jaeger collector URL to pass to dgraph on startup."]
    [nil "--dgraph-jaeger-agent AGENT" "Jaeger agent URL to pass to dgraph on startup."]])
 
 (def single-test-opts
@@ -187,14 +191,14 @@
                    (info "CLI options:\n" (with-out-str (pprint options)))
                    (let [force-download? (atom true)
                          tests (for [i          (range (:test-count options))
-                                     workload   (remove #{:types}
+                                     workload   (remove #{:types :uid-set}
                                                         (keys workloads))
                                      sequencing [:client :server]
                                      upsert     [false true]
                                      nemesis    [; Nothing
                                                  {:interval         1}
                                                  ; Predicate migrations
-                                                 {:interval         5
+                                                 {:interval         15
                                                   :move-tablet?     true}
                                                  ; Partitions
                                                  {:interval         30
