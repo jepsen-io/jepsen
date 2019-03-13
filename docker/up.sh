@@ -1,4 +1,7 @@
 #!/bin/sh
+# "To provide additional docker-compose config, set the $COMPOSE var. Ex:
+# COMPOSE="-f FILE_PATH_HERE"
+
 set -e # exit on an error
 
 ERROR(){
@@ -47,11 +50,12 @@ for f in $@; do
 done
 
 if [ "$HELP" ]; then
-    echo "usage: $0 [OPTION]"
+    echo "Usage: $0 [OPTION]"
     echo "  --help                                                Display this message"
     echo "  --init-only                                           Initializes the secret, but does not call docker-compose"
     echo "  --daemon                                              Runs docker-compose in the background"
     echo "  --dev                                                 Mounts dir at host's $JEPSEN_ROOT to /jepsen on jepsen-control container, syncing files for development"
+    echo "To provide additional docker-compose config, set the $COMPOSE var. Ex: COMPOSE=\"-f FILE_PATH_HERE\""
     exit 0
 fi
 
@@ -96,10 +100,10 @@ docker-compose build
 
 INFO "Running \`docker-compose up\`"
 if [ "$RUN_AS_DAEMON" ]; then
-    docker-compose -f docker-compose.yml $DEV up -d
+    docker-compose -f docker-compose.yml $DEV $COMPOSE up -d
     INFO "All containers started, run \`docker ps\` to view"
     exit 0
 else
     INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
-    docker-compose -f docker-compose.yml $DEV up
+    docker-compose -f docker-compose.yml $DEV $COMPOSE up
 fi
