@@ -154,9 +154,10 @@
                     (let [op (assoc op
                                     :type :ok
                                     :value (read-accounts t))]
-                      (if-let [error (bank/check-op (set (:accounts test))
-                                                    (:total-amount test)
-                                                    op)]
+                      (if-let [error (let [accts (set (:accounts test))
+                                           total (:total-amount test)
+                                           negative-balances? false]
+                                       (bank/check-op accts total negative-balances? op))]
                         (let [message (merge error (t/context))
                               message (dissoc message :op)]
                           (t/attribute! "checker_violation" "true")
