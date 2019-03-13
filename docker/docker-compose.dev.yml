@@ -3,4 +3,3 @@ services:
   control:
     volumes:
       - ${JEPSEN_ROOT}:/jepsen # Mounts $JEPSEN_ROOT on host to /jepsen control container
-      - ${GOPATH}/bin:/gobin   # Mounts $GOPATH/bin on host to /gobin for easy access to binaries.
