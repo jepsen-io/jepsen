@@ -1,5 +1,5 @@
 #!/bin/sh
-# "To provide additional docker-compose config, set the $COMPOSE var. Ex:
+# "To provide additional docker-compose args, set the $COMPOSE var. Ex:
 # COMPOSE="-f FILE_PATH_HERE"
 
 set -e # exit on an error
@@ -55,7 +55,7 @@ if [ "$HELP" ]; then
     echo "  --init-only                                           Initializes the secret, but does not call docker-compose"
     echo "  --daemon                                              Runs docker-compose in the background"
     echo "  --dev                                                 Mounts dir at host's $JEPSEN_ROOT to /jepsen on jepsen-control container, syncing files for development"
-    echo "To provide additional docker-compose config, set the $COMPOSE var. Ex: COMPOSE=\"-f FILE_PATH_HERE\""
+    echo "To provide additional docker-compose args, set the $COMPOSE var. Ex: COMPOSE=\"-f FILE_PATH_HERE\""
     exit 0
 fi
 
