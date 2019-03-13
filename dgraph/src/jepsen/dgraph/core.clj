@@ -2,6 +2,7 @@
   (:gen-class)
   (:require [clojure.string :as str]
             [clojure.tools.logging :refer [info warn]]
+            [clojure.java.shell :refer [sh]]
             [clojure.pprint :refer [pprint]]
             [jepsen [cli :as cli]
                     [core :as jepsen]
@@ -56,7 +57,10 @@
   "Builds up a dgraph test map from CLI options."
   [opts]
   (let [version  (if (:local-binary opts)
-                   "unknown"
+                   (let [v (:out (sh (:local-binary opts) "version"))]
+                     (if-let [m (re-find #"Dgraph version   : (v[0-9a-z\.-]+)" v)]
+                       (m 1)
+                       "unknown"))
                    (if-let [p (:package-url opts)]
                      (if-let [m (re-find #"([^/]+)/[^/.]+\.tar\.gz" p)]
                        (m 1)
