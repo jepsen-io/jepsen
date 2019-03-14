@@ -1,7 +1,7 @@
 (ns jepsen.dgraph.core
   (:gen-class)
   (:require [clojure.string :as str]
-            [clojure.tools.logging :refer [info warn]]
+            [clojure.tools.logging :refer [info warn error]]
             [clojure.java.shell :refer [sh]]
             [clojure.pprint :refer [pprint]]
             [jepsen [cli :as cli]
@@ -85,8 +85,7 @@
            (dissoc workload :final-generator)
            {:name       (str "dgraph " version " "
                              (name (:workload opts))
-                             " s=" (name (:sequencing opts))
-                               (when (:upsert-schema opts) " upsert")
+                             (when (:upsert-schema opts) " upsert")
                              " nemesis="
                              (->> (dissoc (:nemesis opts) :interval)
                                   (map #(->> % key name butlast (apply str)))
@@ -170,12 +169,10 @@
    ["-f" "--force-download" "Ignore the package cache; download again."
     :default false]
    [nil "--upsert-schema"
-    "If present, tests will use @upsert schema directives."
-    :default false]
-   ["-s" "--sequencing MODE" "Whether to use server or client side sequencing"
-    :default :server
-    :parse-fn keyword
-    :validate [#{:client :server} "Must be either `client` or `server`."]]
+    "If present, tests will use @upsert schema directives. To disable, provide false"
+    :parse-fn (complement #{"false"})
+    :default true]
+   ["-s" "--sequencing MODE" "DEPRECATED: --sequencing flag provided. This will be removed in a future version as server/client sequencing is no longer supported by Dgraph."]
    [nil "--defer-db-teardown" "Wait until user input to tear down DB nodes"
     :default false]])
 
@@ -193,7 +190,6 @@
                          tests (for [i          (range (:test-count options))
                                      workload   (remove #{:types :uid-set}
                                                         (keys workloads))
-                                     sequencing [:client :server]
                                      upsert     [false true]
                                      nemesis    [; Nothing
                                                  {:interval         1}
@@ -215,7 +211,6 @@
                                                   :kill-zero?       true}]]
                                  (assoc options
                                         :workload       workload
-                                        :sequencing     sequencing
                                         :upsert-schema  upsert
                                         :nemesis        nemesis
                                         :force-download @force-download?))]

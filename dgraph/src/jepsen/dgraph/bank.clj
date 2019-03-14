@@ -143,6 +143,7 @@
                     ap (:total-amount test)}]
             (info "Upserting" r)
             (c/upsert! t kp r)))
+        (catch io.grpc.StatusRuntimeException e)
         (catch TxnConflictException e))))
 
   (invoke! [this test op]
@@ -181,10 +182,11 @@
                           (if (neg? (:amount from'))
                             ;; Whoops! Back out! Hey let's write some garbage just
                             ;; to make things fun.
-                            (do (write-account! t (update from' :amount - 1000))
-                                (write-account! t (update to'   :amount - 1000))
-                                (c/abort-txn! t)
-                                (assoc op :type :fail, :error :insufficient-funds))
+                            (do
+                              (write-account! t (update from' :amount - 1000))
+                              (write-account! t (update to'   :amount - 1000))
+                              (c/abort-txn! t)
+                              (assoc op :type :fail, :error :insufficient-funds))
                             (assoc op :type :ok)))))))))
 
   (teardown! [this test])

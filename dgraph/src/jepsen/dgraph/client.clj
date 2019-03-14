@@ -68,6 +68,7 @@
   binds it to that symbol, and evaluates body. Calls commit at the end of
   the body, or discards the transaction if an exception is thrown.
 
+  FIXME Update this docstring if not catching aborts works in all tests
   If you commit or abort the transaction *within* body (e.g. before with-txn
   commits it for you), with-txn will attempt to commit, *not* throw, and return
   the result of `body`."
@@ -75,16 +76,10 @@
   `(let [~txn-sym (.newTransaction ^DgraphClient ~client)]
      (try
        (let [res# (do ~@body)]
-         (try (.commit ~txn-sym)
-              ;; if our trasaction aborts when we try to complete it, we
-              ;; want to pass the value back up
-              (catch io.grpc.StatusRuntimeException e#
-                (if (re-find #"ABORTED" (.getMessage e#))
-                  res#
-                  (throw e#)))
-              ;; If the user manually committed or aborted, that's OK.
-              (catch io.dgraph.TxnFinishedException e#
-                nil))
+         (try
+           (.commit ~txn-sym)
+           ;; If the user manually committed or aborted, that's OK.
+           (catch io.dgraph.TxnFinishedException e#))
          res#)
        (finally
          (.discard ~txn-sym)))))
@@ -157,7 +152,6 @@
               #"This server doesn't serve group id:"
               (assoc ~op :type :fail, :error :server-doesn't-serve-group)
 
-              ;; FIXME For some reason these don't get caught??
               #"ABORTED"
               (assoc ~op :type :fail, :error :transaction-aborted)
 
@@ -349,9 +343,9 @@
                                   "  }\n"
                                   "}")
                            {:a pred-value}))]
-                                        ;(info "Query results:" res)
+        ;;(info "Query results:" res)
         (when (empty? (:all res))
-                                        ;(info "Inserting...")
+          ;;(info "Inserting...")
           (mutate! t record)))
 
       (throw (IllegalArgumentException.
