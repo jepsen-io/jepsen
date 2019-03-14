@@ -168,6 +168,25 @@
   (run-worker!      [worker])
   (teardown-worker! [worker]))
 
+(defn handle-do-worker-catch!
+  [                 t
+                    message
+                    abort!
+   ^CountDownLatch  run-latch
+   ^CountDownLatch  teardown-latch
+   worker]
+  ((warn t message name)
+   (abort! worker)
+   (Thread/interrupted) ; Clear our interrupt state
+   (.countDown teardown-latch)
+   (.await teardown-latch)
+   (try (info "Stopping" name)
+        (teardown-worker! worker)
+        t
+        (catch Throwable t
+          (warn t "Error tearing down" name)
+          t))))
+
 (defn do-worker!
   "Runs a worker through setup, running, and teardown. Returns nil on success,
   or a throwable if any phase threw."
@@ -198,31 +217,20 @@
 
                 (catch Throwable t
                   ; Failure in running
-                  (warn t "Error running" name)
-                  (abort! worker)
-                  (Thread/interrupted) ; Clear our interrupt state
-                  (.countDown teardown-latch)
-                  (.await teardown-latch)
-                  (try (info "Stopping" name)
-                       (teardown-worker! worker)
-                       t
-                       (catch Throwable t
-                         (warn t "Error tearing down" name)
-                         t))))
+                  (handle-do-worker-catch!
+                   t "Error running" abort! run-latch teardown-latch worker)))
+
+           (catch java.util.concurrent.CompletionException t
+             (if (str/includes? (str/lower-case (.getMessage t)) "retry")
+               ; Error indicates to retry so do so.
+               (do-worker! abort! run-latch teardown-latch worker)
+               (handle-do-worker-catch!
+                t "Error setting up" abort! run-latch teardown-latch worker)))
 
            (catch Throwable t
              ; Failure in setup process
-             (warn t "Error setting up" name)
-             (abort! worker)
-             (Thread/interrupted) ; Clear our interrupt state
-             (.countDown teardown-latch)
-             (.await teardown-latch)
-             (try (info "Stopping" name)
-                  (teardown-worker! worker)
-                  t
-                  (catch Throwable t
-                    (warn t "Error tearing down" name)
-                    t)))))))
+             (handle-do-worker-catch!
+              t "Error setting up" abort! run-latch teardown-latch worker))))))
 
 (defn run-workers!
   "Runs a set of workers."
