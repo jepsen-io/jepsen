@@ -184,8 +184,9 @@
                          build))
       (catch io.grpc.StatusRuntimeException e
         (if (and (< i 3)
-                 (re-find #"DEADLINE_EXCEEDED" (.getMessage e)))
-          (do (warn "Alter schema failed due to DEADLINE_EXCEEDED, retrying...")
+                 (or (re-find #"DEADLINE_EXCEEDED" (.getMessage e))
+                     (re-find #"Pending transactions" (.getMessage e))))
+          (do (warn "Alter schema failed due to retriable error, retrying...")
               (retry (inc i)))
           (throw e))))))
 
