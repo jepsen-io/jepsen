@@ -12,6 +12,8 @@ how a system responds to different faults. See
 [jepsen.io](https://jepsen.io/analyses) for examples of the sorts of analyses
 you can carry out with Jepsen.
 
+[![Build Status](https://travis-ci.com/jepsen-io/jepsen.svg?branch=master)](https://travis-ci.com/jepsen-io/jepsen)
+
 ## Documentation
 
 This [tutorial](doc/tutorial/index.md) walks you through writing a Jepsen test

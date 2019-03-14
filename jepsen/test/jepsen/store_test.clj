@@ -8,17 +8,29 @@
             [multiset.core :as multiset]
             [jepsen.tests :refer [noop-test]]))
 
-(deftest roundtrip-test
+(defrecord Kitten [fuzz mew])
+
+(def base-test (assoc noop-test
+                      :name     "store-test"
+                      :record   (Kitten. "fluffy" "smol")
+                      :multiset (into (multiset/multiset)
+                                      [1 1 2 3 5 8])))
+
+(deftest ^:integration roundtrip-test
   (delete! "store-test")
 
-  (let [t (core/run! (assoc noop-test
-                            :name     "store-test"
-                            :multiset (into (multiset/multiset)
-                                            [1 1 2 3 5 8])))]
-    (save-1! t)
+  (let [t (-> base-test
+              core/run!
+              save-1!
+              (assoc-in [:results :kitten] (Kitten. "hi" "there"))
+              save-2!)]
     (let [ts     (tests "store-test")
           [k t'] (first ts)]
       (is (= 1 (count ts)))
       (is (string? k))
-      (is (= @t'
-             (dissoc t :db :os :net :client :checker :nemesis :generator :model))))))
+      (testing "test.fressian"
+        (is (= @t'
+               (dissoc t :db :os :net :client :checker
+                       :nemesis :generator :model))))
+      (testing "results.edn"
+        (is (= (:results t) (load-results "store-test" k)))))))

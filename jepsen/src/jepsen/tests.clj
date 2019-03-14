@@ -21,7 +21,6 @@
    :client    client/noop
    :nemesis   nemesis/noop
    :generator gen/void
-   :model     model/noop
    :checker   (checker/unbridled-optimism)})
 
 (defn atom-db
@@ -35,8 +34,10 @@
   "A CAS client which uses an atom for state."
   [state]
   (reify client/Client
-    (setup!    [this test node] this)
+    (open!     [this test node] this)
+    (setup!    [this test])
     (teardown! [this test])
+    (close!    [this test])
     (invoke!   [this test op]
       (case (:f op)
         :write (do (reset! state   (:value op))

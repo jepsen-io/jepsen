@@ -27,7 +27,7 @@
       (c/cd "/tmp"
             (let [version "3.5.6"
                   file (str "rabbitmq-server_" version "-1_all.deb")]
-              (when-not (cu/file? file)
+              (when-not (cu/exists? file)
                 (info "Fetching deb package")
                 (c/exec :wget (str "http://www.rabbitmq.com/releases/rabbitmq-server/v" version "/" file)))
 
@@ -40,8 +40,10 @@
                        (c/exec :dpkg :-i file)))
 
                 ; Set cookie
-                (when-not (= "jepsen-rabbitmq"
-                             (c/exec :cat "/var/lib/rabbitmq/.erlang.cookie"))
+                (when-not (and
+                           (cu/exists? "/var/lib/rabbitmq/.erlang.cookie")
+                           (= "jepsen-rabbitmq"
+                             (c/exec :cat "/var/lib/rabbitmq/.erlang.cookie")))
                   (info "Setting cookie")
                   (c/exec :service :rabbitmq-server :stop)
                   (c/exec :echo "jepsen-rabbitmq"
@@ -106,11 +108,11 @@
   ; Rabbit+Langohr's auto-ack dynamics mean that even if we issue a dequeue req
   ; then crash, the message should be re-delivered and we can count this as a
   ; failure.
-  (timeout 5000 (assoc op :type :fail :value :timeout)
+  (timeout 5000 (assoc op :type :fail :error :timeout)
            (let [[meta payload] (lb/get ch queue)
                  value          (codec/decode payload)]
              (if (nil? meta)
-               (assoc op :type :fail :value :exhausted)
+               (assoc op :type :fail :error :empty)
                (assoc op :type :ok :value value)))))
 
 (defmacro with-ch
@@ -125,27 +127,26 @@
 
 (defrecord QueueClient [conn]
   client/Client
-  (setup! [_ test node]
+  (open! [client test node]
     (let [conn (rmq/connect {:host (name node)})]
-      (with-ch [ch conn]
-        ; Initialize queue
-        (lq/declare ch queue
-                    :durable     true
-                    :auto-delete false
-                    :exclusive   false))
-
-      ; Return client
+      (assoc client :conn conn)
       (QueueClient. conn)))
 
-  (teardown! [_ test]
-    ; Purge
-    (meh (with-ch [ch conn]
-           (lq/purge ch queue)))
+  (setup! [client test]
+    (with-ch [ch conn]
+      (lq/declare ch queue
+        :durable     true
+        :auto-delete false
+        :exclusive   false)))
 
-    ; Close
+  (teardown! [client test]
+    (meh (with-ch [ch conn]
+           (lq/purge ch queue))))
+
+  (close! [client test]
     (meh (rmq/close conn)))
 
-  (invoke! [this test op]
+  (invoke! [client test op]
     (with-ch [ch conn]
       (case (:f op)
         :enqueue (do
@@ -165,20 +166,11 @@
 
         :dequeue (dequeue! ch op)
 
-        :drain   (do
-                   ; Note that this does more dequeues than strictly necessary
-                   ; owing to lazy sequence chunking.
-                   (->> (repeat op)                  ; Explode drain into
-                        (map #(assoc % :f :dequeue)) ; infinite dequeues, then
-                        (map (partial dequeue! ch))  ; dequeue something
-                        (take-while op/ok?)  ; as long as stuff arrives,
-                        (interleave (repeat op))     ; interleave with invokes
-                        (drop 1)                     ; except the initial one
-                        (map (fn [completion]
-                               (log-op completion)
-                               (core/conj-op! test completion)))
-                        dorun)
-                   (assoc op :type :ok :value :exhausted))))))
+        :drain (loop [values []]
+                 (let [v (dequeue! ch op)]
+                  (if (= (:type v) :ok)
+                    (recur (conj values (:value v)))
+                    (assoc op :type :ok, :value values))))))))
 
 (defn queue-client [] (QueueClient. nil))
 

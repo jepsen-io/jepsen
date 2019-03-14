@@ -53,6 +53,22 @@
     (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, falling back to `jepsen.client/teardown!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
         (client/teardown! nemesis test))))
 
+(defn timeout
+  "Sometimes nemeses are unreliable. If you wrap them in this nemesis, it'll
+  time out their operations with the given timeout, in milliseconds. Timed out
+  operations have :value :timeout."
+  [timeout-ms nemesis]
+  (reify Nemesis
+    (setup! [this test]
+      (timeout timeout-ms (setup! nemesis test)))
+
+    (invoke! [this test op]
+      (util/timeout timeout-ms (assoc op :value :timeout)
+                    (invoke! nemesis test op)))
+
+    (teardown! [this test]
+      (teardown! nemesis test))))
+
 (defn bisect
   "Given a sequence, cuts it in half; smaller half first."
   [coll]

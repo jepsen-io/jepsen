@@ -10,7 +10,7 @@
   Every object may act as a generator, and constantly yields itself.
 
   Big ol box of monads, really."
-  (:refer-clojure :exclude [concat delay seq filter await])
+  (:refer-clojure :exclude [map concat delay seq filter await])
   (:require [jepsen.util :as util]
             [knossos.history :as history]
             [clojure.core :as c]
@@ -139,10 +139,20 @@
   "A generator which terminates immediately"
   (GVoid.))
 
-(defgenerator FMap [f g]
+(defgenerator Map [f g]
   [f g]
   (op [gen test process]
-      (update (op g test process) :f f)))
+      (when-let [op (op g test process)]
+        (try (f op test process)
+             (catch clojure.lang.ArityException e
+               (f op))))))
+
+(defn map
+  "A generator which wraps another generator g, transforming operations it
+  generates with (f op test process), of if that fails, (f op). When the
+  underlying generator yields nil, this generator also returns nil."
+  [f g]
+  (Map. f g))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,
@@ -150,7 +160,7 @@
   according to `f-map`. Useful for composing generators together for use with a
   composed nemesis."
   [f-map g]
-  (FMap. f-map g))
+  (map (fn [op] (update op :f f-map)) g))
 
 (defn sleep-til-nanos
   "High-resolution sleep; takes a time in nanos, relative to System/nanotime."
@@ -166,10 +176,7 @@
 (defgenerator DelayFn [f gen]
   [f gen]
   (op [_ test process]
-      (try
-        (Thread/sleep (* 1000 (f)))
-        (catch InterruptedException e
-          nil))
+      (Thread/sleep (* 1000 (f)))
       (op gen test process)))
 
 (defn delay-fn
@@ -305,7 +312,7 @@
   [gen-expr]
   `(each- (fn [] ~gen-expr)))
 
-(defgenerator Seq [elements]
+(defgenerator SeqOne [elements]
   ; Don't try to render an infinite sequence
   [(let [es (take 8 (next @elements))]
      (if (<= (count es) 8)
@@ -322,7 +329,39 @@
   from the second, then one from the third, etc. If a generator yields nil,
   immediately moves to the next. Yields nil once coll is exhausted."
   [coll]
-  (Seq. (atom (cons nil coll))))
+  (SeqOne. (atom (cons nil coll))))
+
+(defgenerator SeqAll [elements]
+  ; Don't try to render an infinite sequence
+  [(let [es (take 8 (next @elements))]
+     (if (<= (count es) 8)
+       es
+       (c/concat es ['...])))]
+  (op [this test process]
+      (let [es @elements]
+        (when-let [gen (first es)]
+          (if-let [op (op gen test process)]
+            op
+            ; This generator is exhausted; drop it and move to the next (if
+            ; nobody else has changed the generator already)
+            (do (compare-and-set! elements es (next es))
+                (recur test process)))))))
+
+(defn seq-all
+  "Given a sequence of generators, emits all operations from the first, then
+  all operations from the second, then all from the third, etc. If a generator
+  yields nil, immediately moves to the next. Yields nil once all generators in
+  coll are exhausted.
+
+  Be aware that providing an infinite sequence of generators to seq-all may
+  result in an infinite loop, if every generator returns `nil` immediately.
+  Ensure that at least some, if not all, generators in an infinite sequence
+  actually return operations. You *don't* want to seq-all over an infinite
+  sequence of the same stateful, limited generators; when those generators are
+  exhausted, you'll create an infinite loop going through each of them,
+  obtaining `nil`, and moving to the next."
+  [coll]
+  (SeqAll. (atom coll)))
 
 (defn start-stop
   "A generator which emits a start after a t1 second delay, and then a stop
@@ -404,10 +443,22 @@
   [n gen]
   (Limit. gen (atom (inc n))))
 
+(defgenerator ProcessLimit [gen n procs]
+  [n gen]
+  (op [_ test process]
+      (when (<= (count (swap! procs conj process)) n)
+        (op gen test process))))
+
+(defn process-limit
+  "Takes a generator and returns a generator with bounded concurrency--it emits
+  operations for up to n distinct processes, but no more. Once n+1 processes
+  have requested an operation, emits nil forever."
+  [n gen]
+  (ProcessLimit. gen n (atom #{})))
 
 ; T I M E   L I M I T S
 ;
-; Our general approach here is to schedule a task which will interrupt as
+; Our general approach here is to schedule a task which will interrupt
 ; at the deadline. To figure out who to interrupt, we keep a set of
 ; threads currently engaged in this time-limit; the deadline task
 ; interrupts every thread in that set.
@@ -678,7 +729,7 @@
   "Like concat, but requires that all threads finish the first generator before
   moving to the second, and so on."
   [& generators]
-  (apply concat (map synchronize generators)))
+  (apply concat (c/map synchronize generators)))
 
 (defn then
   "Generator B, synchronize, then generator A. Why is this backwards? Because

@@ -633,22 +633,28 @@
 
 (defn nemesis-intervals
   "Given a history where a nemesis goes through :f :start and :f :stop
-  transitions, constructs a sequence of pairs of :start and :stop ops. Since a
+  type transitions, constructs a sequence of pairs of start and stop ops. Since a
   nemesis usually goes :start :start :stop :stop, we construct pairs of the
   first and third, then second and fourth events. Where no :stop op is present,
-  we emit a pair like [start nil]."
-  [history]
-  (let [[pairs starts] (->> history
-                            (filter #(= :nemesis (:process %)))
-                            (reduce (fn [[pairs starts] op]
-                                      (case (:f op)
-                                        :start [pairs (conj starts op)]
-                                        :stop  [(conj pairs [(peek starts)
-                                                             op])
-                                                (pop starts)]
-                                        [pairs starts]))
-                                    [[] (clojure.lang.PersistentQueue/EMPTY)]))]
-    (concat pairs (map vector starts (repeat nil)))))
+  we emit a pair like [start nil]. Optionally, a map of start and stop sets may
+  be provided to match on user-defined :start and :stop keys."
+  ([history]
+   (nemesis-intervals history {}))
+  ([history opts]
+   ;; Default to :start and :stop if no region keys are provided
+   (let [start (or (:start opts) #{:start})
+         stop  (or (:stop  opts) #{:stop})
+         [pairs starts] (->> history
+                             (filter #(= :nemesis (:process %)))
+                             (reduce (fn [[pairs starts] op]
+                                       (cond
+                                         (start (:f op)) [pairs (conj starts op)]
+                                         (stop  (:f op)) [(conj pairs [(peek starts)
+                                                                       op])
+                                                          (pop starts)]
+                                         :else [pairs starts]))
+                                     [[] (clojure.lang.PersistentQueue/EMPTY)]))]
+     (concat pairs (map vector starts (repeat nil))))))
 
 (defn longest-common-prefix
   "Given a collection of sequences, finds the longest sequence which is a
@@ -725,3 +731,50 @@
       clojure.lang.IDeref
       (deref [this]
         (.init this)))))
+
+(defn named-locks
+  "Creates a mutable data structure which backs a named locking mechanism.
+
+  Named locks are helpful when you need to coordinate access to a dynamic pool
+  of resources. For instance, you might want to prohibit multiple threads from
+  executing a command on a remote node at once. Nodes are uniquely identified
+  by a string name, so you could write:
+
+      (defonce node-locks (named-locks))
+
+      ...
+      (defn start-db! [node]
+        (with-named-lock node-locks node
+          (c/exec :service :meowdb :start)))
+
+  Now, concurrent calls to start-db! will not execute concurrently.
+
+  The structure we use to track named locks is an atom wrapping a map, where
+  the map's keys are any object, and the values are canonicalized versions of
+  that same object. We use standard Java locking on the canonicalized versions.
+  This is basically an arbitrary version of string interning."
+  []
+  (atom {}))
+
+(defn get-named-lock!
+  "Given a pool of locks, and a lock name, returns the object used for locking
+  in that pool. Creates the lock if it does not already exist."
+  [locks name]
+  (-> locks
+      (swap! (fn [locks]
+               (if-let [o (get locks name)]
+                 locks
+                 (assoc locks name name))))
+      (get name)))
+
+(defmacro with-named-lock
+  "Given a lock pool, and a name, locks that name in the pool for the duration
+  of the body."
+  [locks name & body]
+  `(locking (get-named-lock! ~locks ~name) ~@body))
+
+(defn contains-many?
+  "Takes a map and any number of keys, returning true if all of the keys are
+  present. Ex. (contains-many? {:a 1 :b 2 :c 3} :a :b :c) => true"
+  [m & ks]
+  (every? #(contains? m %) ks))

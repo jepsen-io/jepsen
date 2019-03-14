@@ -1,4 +1,7 @@
 #!/bin/sh
+# "To provide additional docker-compose args, set the COMPOSE var. Ex:
+# COMPOSE="-f FILE_PATH_HERE"
+
 set -e # exit on an error
 
 ERROR(){
@@ -34,6 +37,9 @@ for f in $@; do
                 DEV="-f docker-compose.dev.yml"
             fi
             ;;
+        '--ubuntu' )
+            UBUNTU="-f docker-compose.ubuntu.yml"
+            ;;
         '--daemon' )
             INFO "Running docker-compose as daemon"
             RUN_AS_DAEMON=1
@@ -47,11 +53,13 @@ for f in $@; do
 done
 
 if [ "$HELP" ]; then
-    echo "usage: $0 [OPTION]"
+    echo "Usage: $0 [OPTION]"
     echo "  --help                                                Display this message"
     echo "  --init-only                                           Initializes the secret, but does not call docker-compose"
     echo "  --daemon                                              Runs docker-compose in the background"
-    echo "  --dev                                                 Mounts dir at host's $JEPSEN_ROOT to /jepsen on jepsen-control container, syncing files for development"
+    echo "  --dev                                                 Mounts dir at host's JEPSEN_ROOT to /jepsen on jepsen-control container, syncing files for development"
+    echo "  --ubuntu                                              Use Ubuntu instead of Debian as the nodes' OS."
+    echo "To provide additional docker-compose args, set the COMPOSE var. Ex: COMPOSE=\"-f FILE_PATH_HERE\" ./up.sh --dev"
     exit 0
 fi
 
@@ -92,14 +100,14 @@ exists docker || { ERROR "Please install docker (https://docs.docker.com/engine/
 exists docker-compose || { ERROR "Please install docker-compose (https://docs.docker.com/compose/install/)"; exit 1; }
 
 INFO "Running \`docker-compose build\`"
-docker-compose build
+docker-compose $UBUNTU -f docker-compose.yml build
 
 INFO "Running \`docker-compose up\`"
 if [ "$RUN_AS_DAEMON" ]; then
-    docker-compose -f docker-compose.yml $DEV up -d
+docker-compose $UBUNTU -f docker-compose.yml $DEV $COMPOSE up -d
     INFO "All containers started, run \`docker ps\` to view"
     exit 0
 else
     INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
-    docker-compose -f docker-compose.yml $DEV up
+docker-compose $UBUNTU -f docker-compose.yml $DEV $COMPOSE up
 fi

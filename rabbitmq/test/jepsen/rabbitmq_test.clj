@@ -5,15 +5,16 @@
         clojure.test
         clojure.pprint)
   (:require [clojure.string   :as str]
-            [jepsen.util      :as util]
-            [jepsen.os.debian :as debian]
             [jepsen.checker   :as checker]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.model     :as model]
+            [jepsen.core :as jepsen]
             [jepsen.generator :as gen]
             [jepsen.nemesis   :as nemesis]
+            [jepsen.os.debian :as debian]
             [jepsen.store     :as store]
-            [jepsen.report    :as report]))
+            [jepsen.report    :as report]
+            [jepsen.util      :as util]
+            [knossos.model    :as model]))
 
 ;(deftest mutex-test
 ;  (let [test (run!
@@ -23,8 +24,8 @@
 ;                 :os        debian/os
 ;                 :db        db
 ;                 :client    (mutex)
-;                 :checker   (checker/compose {:html   (timeline/html)
-;                                              :linear (checker/linearizable)})
+;                 :checker   (checker/compose {:html   timeline/html
+;                                              :linear checker/linearizable})
 ;                 :model     (model/mutex)
 ;                 :nemesis   (nemesis/partition-random-halves)
 ;                 :generator (gen/phases
@@ -44,7 +45,7 @@
 ;    (report/linearizability (:linear (:results test)))))
 
 (deftest rabbit-test
-  (let [test (run!
+  (let [test (jepsen/run!
                (assoc
                  noop-test
                  :name       "rabbitmq-simple-partition"
@@ -72,6 +73,5 @@
                                (gen/sleep 60)
                                (gen/clients
                                  (gen/each
-                                   (gen/once {:type :invoke
-                                              :f    :drain}))))))]
+                                   (gen/once {:type :invoke, :f :drain}))))))]
     (is (:valid? (:results test)))))

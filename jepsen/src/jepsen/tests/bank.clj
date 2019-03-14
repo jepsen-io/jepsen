@@ -56,7 +56,7 @@
 
 (defn check-op
   "Takes a single op and returns errors in its balance"
-  [accts total op]
+  [accts total negative-balances? op]
   (let [ks       (keys (:value op))
         balances (vals (:value op))]
     (cond (not-every? accts ks)
@@ -71,29 +71,33 @@
                          (into {}))
            :op      op}
 
-          (not= total
-                (reduce + balances))
+          (not= total (reduce + balances))
           {:type     :wrong-total
            :total    (reduce + balances)
            :op       op}
 
-          (some neg? balances)
+          (and (not negative-balances?) (some neg? balances))
           {:type     :negative-value
            :negative (filter neg? balances)
            :op       op})))
 
 (defn checker
-  "Balances must all be non-negative and sum to (:total test)."
-  []
+  "Verifies that all reads must sum to (:total test), and, unless
+  :negative-balances? is true, checks that all balances are
+  non-negative."
+  [checker-opts]
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [accts (set (:accounts test))
             total (:total-amount test)
             reads (->> history
                        (r/filter op/ok?)
                        (r/filter #(= :read (:f %))))
             errors (->> reads
-                        (r/map #(check-op accts total %))
+                        (r/map (partial check-op
+                                        accts
+                                        total
+                                        (:negative-balances? checker-opts)))
                         (r/filter identity)
                         (group-by :type))]
         {:valid?      (every? empty? (vals errors))
@@ -116,6 +120,13 @@
                                          {}))]))
                            (into {}))}))))
 
+(defn ok-reads
+  "Filters a history to just OK reads"
+  [history]
+  (filter #(and (op/ok? %)
+                (= :read (:f %)))
+          history))
+
 (defn by-node
   "Groups operations by node."
   [test history]
@@ -130,49 +141,52 @@
 (defn points
   "Turns a history into a seqeunce of [time total-of-accounts] points."
   [history]
-  (->> history
-       (r/filter op/ok?)
-       (r/filter #(= :read (:f %)))
-       (r/map (fn [op]
-                [(util/nanos->secs (:time op))
-                 (reduce + (remove nil? (vals (:value op))))]))
-       (into [])))
+  (mapv (fn [op]
+          [(util/nanos->secs (:time op))
+           (reduce + (remove nil? (vals (:value op))))])
+        history))
 
 (defn plotter
   "Renders a graph of balances over time"
   []
   (reify checker/Checker
-    (check [this test model history opts]
-      (let [totals (->> history
-                        (by-node test)
-                        (util/map-vals points))
-            colors (perf/qs->colors (keys totals))
-            path (.getCanonicalPath
-                   (store/path! test (:subdirectory opts) "bank.png"))]
-        (try
-          (g/raw-plot!
-            (concat (perf/preamble path)
-                    [['set 'title (str (:name test) " bank")]
-                     '[set ylabel "Total of all accounts"]
-                     ['plot (apply g/list
-                                   (for [[node points] totals]
-                                     ["-"
-                                      'with       'points
-                                      'pointtype  2
-                                      'linetype   (colors node)
-                                      'title      (name node)]))]])
-            (vals totals))
-          {:valid? true}
-          (catch java.io.IOException _
-                 (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))))))
+    (check [this test history opts]
+      ; Don't graph empty histories
+      (when-let [history (seq (ok-reads history))]
+        (let [totals (->> history
+                          (by-node test)
+                          (util/map-vals points))
+              colors (perf/qs->colors (keys totals))
+              path (.getCanonicalPath
+                     (store/path! test (:subdirectory opts) "bank.png"))]
+          (try
+            (g/raw-plot!
+              (concat (perf/preamble path)
+                      [['set 'title (str (:name test) " bank")]
+                       '[set ylabel "Total of all accounts"]
+                       ['plot (apply g/list
+                                     (for [[node points] totals]
+                                       ["-"
+                                        'with       'points
+                                        'pointtype  2
+                                        'linetype   (colors node)
+                                        'title      (name node)]))]])
+              (vals totals))
+            {:valid? true}
+            (catch java.io.IOException _
+              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))))
 
 (defn test
   "A partial test; bundles together some default choices for keys and amounts
-  with a generator and checker."
-  []
-  {:max-transfer  5
-   :total-amount  100
-   :accounts      (vec (range 8))
-   :checker       (checker/compose {:SI    (checker)
-                                    :plot  (plotter)})
-   :generator     (generator)})
+  with a generator and checker. Options:
+
+  :negative-balances?   if true, doesn't verify that balances remain positive"
+  ([]
+   (test {:negative-balances? false}))
+  ([opts]
+   {:max-transfer  5
+    :total-amount  100
+    :accounts      (vec (range 8))
+    :checker       (checker/compose {:SI    (checker opts)
+                                     :plot  (plotter)})
+    :generator     (generator)}))
