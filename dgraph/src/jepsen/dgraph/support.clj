@@ -246,66 +246,76 @@
     (reify db/DB
       (setup! [_ test node]
         (c/su
-          (if-let [file (:local-binary test)]
-            (do ; Upload local file
-                (c/exec :mkdir :-p dir)
-                (info "Uploading" file "...")
-                (c/upload file (str dir "/" binary))
-                (c/exec :chmod :+x (str dir "/" binary)))
-            ; Install remote package
-            (cu/install-archive!
-              (or (:package-url test)
-                  (str "https://github.com/dgraph-io/dgraph/releases/download/v"
-                       (:version test) "/dgraph-linux-amd64.tar.gz"))
-              dir
-              (:force-download test)))
+         (if-let [file (:local-binary test)]
+           (do ; Upload local file
+             (c/exec :mkdir :-p dir)
+             (info "Uploading" file "...")
+             (c/upload file (str dir "/" binary))
+             (c/exec :chmod :+x (str dir "/" binary)))
+           ;; Install remote package
+           (cu/install-archive!
+            (or (:package-url test)
+                (str "https://github.com/dgraph-io/dgraph/releases/download/v"
+                     (:version test) "/dgraph-linux-amd64.tar.gz"))
+            dir
+            (:force-download test)))
 
-          (nt/install!)
+         (nt/install!)
 
+         (when (= node (jepsen/primary test))
+           (start-zero! test node)
+           (Thread/sleep 10000))
+
+         (jepsen/synchronize test 120)
+         (when-not (= node (jepsen/primary test))
+           (start-zero! test node))
+
+         (jepsen/synchronize test)
+         (start-alpha! test node)
+         ;; (start-ratel! test node)
+
+         (try+
           (when (= node (jepsen/primary test))
-            (start-zero! test node)
-            ; TODO: figure out how long to block here
-            (Thread/sleep 10000))
+            (wait-for-cluster node test)
+            (info "Cluster converged"))
 
-          (jepsen/synchronize test 120)
-          (when-not (= node (jepsen/primary test))
-            (start-zero! test node))
+          (jepsen/synchronize test 300)
+          (with-retry [attempts 4]
+            (try
+              (let [conn (dc/open node alpha-public-grpc-port)]
+                (try (dc/await-ready conn)
+                     (finally
+                       (dc/close! conn))))
 
-          (jepsen/synchronize test)
-          (start-alpha! test node)
-          ; (start-ratel! test node)
+              (catch io.grpc.StatusRuntimeException e
+                (if (re-find #"error while fetching schema" (.getMessage e))
+                  (do
+                    (info "Error fetching schema, retrying.")
+                    (Thread/sleep 5000)
+                    (retry (dec attempts)))
+                  (throw+ e)))))
 
-          (try+
-            (when (= node (jepsen/primary test))
-              (wait-for-cluster node test)
-              (info "Cluster converged"))
+          (info "GRPC ready")
 
-            (jepsen/synchronize test 300)
-            (let [conn (dc/open node alpha-public-grpc-port)]
-              (try (dc/await-ready conn)
-                   (finally
-                     (dc/close! conn))))
-            (info "GRPC ready")
+          (catch [:type :cluster-failed-to-converge] e
+            (when-not (:retry-db-setup test)
+              (throw+))
 
-            (catch [:type :cluster-failed-to-converge] e
-              (when-not (:retry-db-setup test)
-                (throw+))
+            (warn e "Cluster failed to converge")
+            (throw (ex-info "Cluster failed to converge"
+                            {:type  :jepsen.db/setup-failed
+                             :node  node}
+                            (:throwable &throw-context))))
 
-              (warn e "Cluster failed to converge")
-              (throw (ex-info "Cluster failed to converge"
-                              {:type  :jepsen.db/setup-failed
-                               :node  node}
-                              (:throwable &throw-context))))
+          (catch RuntimeException e ; Welp
+            (when-not (:retry-db-setup test)
+              (throw+))
 
-            (catch RuntimeException e ; Welp
-              (when-not (:retry-db-setup test)
-                (throw+))
-
-              (throw (ex-info "Couldn't get a client"
-                              {:type  :jepsen.db/setup-failed
-                               :node  node}
-                              e)))))
-        (reset! has-setup? true))
+            (throw (ex-info "Couldn't get a client"
+                            {:type  :jepsen.db/setup-failed
+                             :node  node}
+                            e)))))
+         (reset! has-setup? true))
 
       (teardown! [this test node]
         (when (:defer-db-teardown test)
@@ -319,7 +329,7 @@
         (stop-alpha! test node)
         (stop-zero! test node)
         (c/su
-          (c/exec :rm :-rf dir)))
+         (c/exec :rm :-rf dir)))
 
       db/LogFiles
       (log-files [_ test node]
