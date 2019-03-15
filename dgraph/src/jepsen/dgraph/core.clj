@@ -190,7 +190,7 @@
                          tests (for [i          (range (:test-count options))
                                      workload   (remove #{:types :uid-set}
                                                         (keys workloads))
-                                     upsert     [false true]
+                                     upsert     [true]
                                      nemesis    [; Nothing
                                                  {:interval         1}
                                                  ; Predicate migrations
