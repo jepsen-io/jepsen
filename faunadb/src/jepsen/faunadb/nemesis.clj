@@ -115,14 +115,21 @@
                       (c/on-nodes test [v] (fn [test node]
                                              (auto/kill! test node)
                                              (auto/delete-data-files!)))
-                      (c/on-nodes test [(->> (:nodes topo)
-                                             (map :node)
-                                             (remove #{v}) ; Can't remove self
-                                             vec
-                                             rand-nth)]
-                                  (fn [test local-node]
-                                    @(auto/remove-node! v)
-                                    (info :status (auto/status))))
+                      (util/with-retry []
+                        (c/on-nodes test [(->> (:nodes topo)
+                                               (map :node)
+                                               (remove #{v}) ; Can't remove self
+                                               vec
+                                               rand-nth)]
+                                    (fn [test local-node]
+                                      @(auto/remove-node! v)
+                                      (info :status (auto/status))))
+                        ; sometimes we pick a node to perform a removal
+                        ; that is itself already removed, so it fails with
+                        ; "Host is unknown" error message. Here we retry and
+                        ; hope we pick a better host next time.
+                        (catch clojure.lang.ExceptionInfo e (retry))
+                      )
                       [:removed v]))]
 
         ; Go ahead and update the new topology
