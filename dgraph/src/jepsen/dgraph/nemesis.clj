@@ -2,6 +2,7 @@
   "Failure modes!"
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info warn]]
+            [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [control :as c]
              [generator :as gen]
              [net :as net]
@@ -10,7 +11,8 @@
             [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
             [jepsen.dgraph [support :as s]]
-            [jepsen.dgraph.trace :as t]))
+            [jepsen.dgraph.trace :as t]
+            [dom-top.core :refer [with-retry]]))
 
 (defn alpha-killer
   "Responds to :start by killing alpha on random nodes, and to :stop by
@@ -90,7 +92,15 @@
   [dt]
   (reify nemesis/Nemesis
     (setup! [this test]
-      (nt/reset-time! test)
+      (with-retry [attempts 3]
+        (nt/reset-time! test)
+        (catch java.util.concurrent.ExecutionException e
+          (if (< 0 attempts)
+            (do
+              (warn "Error resetting clock with NTP, retrying...")
+              (Thread/sleep (rand-int 2000))
+              (retry (dec attempts)))
+            (throw+ e))))
       this)
 
     (invoke! [this test op]
