@@ -16,7 +16,7 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "type: string @index(exact)"
+    (c/alter-schema! conn (str "jepsen-type: string @index(exact)"
                                (when (:upsert-schema test) " @upsert")
                                " .\n"
                                "value: int .\n")))
@@ -25,11 +25,11 @@
     (c/with-conflict-as-fail op
       (c/with-txn [t conn]
         (case (:f op)
-          :add (let [inserted (c/mutate! t {:type "element",
+          :add (let [inserted (c/mutate! t {:jepsen-type "element",
                                             :value (:value op)})]
                  (assoc op :type :ok, :uid (first (vals inserted))))
 
-          :read (->> (c/query t "{ q(func: eq(type, $type)) { uid, value } }"
+          :read (->> (c/query t "{ q(func: eq(jepsen-type, $type)) { uid, value } }"
                               {:type "element"})
                      :q
                      (map :value)
