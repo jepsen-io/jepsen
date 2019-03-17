@@ -54,7 +54,7 @@
   "Ensures that at most one UID is ever returned from any read."
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [reads       (->> history
                              (filter op/ok?)
                              (filter #(= :read (:f %))))

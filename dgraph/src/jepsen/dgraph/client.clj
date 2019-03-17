@@ -75,16 +75,10 @@
   `(let [~txn-sym (.newTransaction ^DgraphClient ~client)]
      (try
        (let [res# (do ~@body)]
-         (try (.commit ~txn-sym)
-              ;; if our trasaction aborts when we try to complete it, we
-              ;; want to pass the value back up
-              (catch io.grpc.StatusRuntimeException e#
-                (if (re-find #"ABORTED" (.getMessage e#))
-                  res#
-                  (throw e#)))
-              ;; If the user manually committed or aborted, that's OK.
-              (catch io.dgraph.TxnFinishedException e#
-                nil))
+         (try
+           (.commit ~txn-sym)
+           ;; If the user manually committed or aborted, that's OK.
+           (catch io.dgraph.TxnFinishedException e#))
          res#)
        (finally
          (.discard ~txn-sym)))))
@@ -157,7 +151,6 @@
               #"This server doesn't serve group id:"
               (assoc ~op :type :fail, :error :server-doesn't-serve-group)
 
-              ;; FIXME For some reason these don't get caught??
               #"ABORTED"
               (assoc ~op :type :fail, :error :transaction-aborted)
 
@@ -178,16 +171,22 @@
   we can retry, at least in this context?"
   [^DgraphClient client & schemata]
   (t/with-trace "client.alter-schema!"
-    (with-retry [i 0]
+    (with-retry [i 10]
       (.alter client (.. (DgraphProto$Operation/newBuilder)
                          (setSchema (str/join "\n" schemata))
                          build))
-      (catch io.grpc.StatusRuntimeException e
-        (if (and (< i 3)
-                 (re-find #"DEADLINE_EXCEEDED" (.getMessage e)))
-          (do (warn "Alter schema failed due to DEADLINE_EXCEEDED, retrying...")
-              (retry (inc i)))
-          (throw e))))))
+
+      (catch java.util.concurrent.CompletionException e
+        (let [message (.getMessage e)]
+          (if (and (< 0 i)
+                   (or (re-find #"DEADLINE_EXCEEDED" message)
+                       (re-find #"Pending transactions" message)
+                       (re-find #"ABORTED" message)))
+            (do
+              (warn "alter-schema! failed due to retriable error, retrying...")
+              (Thread/sleep (rand-int 5000))
+              (retry (dec i)))
+            (throw e)))))))
 
 (defn ^DgraphProto$Assigned mutate!*
   "Takes a mutation object and applies it to a transaction. Returns an
@@ -348,9 +347,9 @@
                                   "  }\n"
                                   "}")
                            {:a pred-value}))]
-                                        ;(info "Query results:" res)
+        ;;(info "Query results:" res)
         (when (empty? (:all res))
-                                        ;(info "Inserting...")
+          ;;(info "Inserting...")
           (mutate! t record)))
 
       (throw (IllegalArgumentException.

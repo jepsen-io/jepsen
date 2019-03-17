@@ -67,7 +67,7 @@
   record with both a :uid and a :key."
   []
   (reify checker/Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (let [k (:history-key opts)
             reads (->> history
                        (filter (fn [{:keys [f type value]}]
