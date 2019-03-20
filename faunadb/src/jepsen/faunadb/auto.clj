@@ -395,7 +395,8 @@
       (assert v)
       (if (re-find #"\.deb$" v)
         ; Install deb file
-        (do (c/exec :mkdir :-p "/tmp/jepsen")
+        (do (debian/install ["bash-completion"])
+            (c/exec :mkdir :-p "/tmp/jepsen")
             (c/exec :chmod "a+rwx" "/tmp/jepsen")
             (info "Uploading" v)
             (c/upload v "/tmp/jepsen/faunadb.deb")
