@@ -431,7 +431,7 @@
                   {:auth_root_key                  f/root-key
                    :network_coordinator_http_address ip
                    :network_broadcast_address      node
-                   :network_datacenter_name        (topo/replica topo node)
+                   :replica_name                   (topo/replica topo node)
                    :network_host_id                node
                    :network_listen_address         ip}
                   (when (topo/manual-log-config? test)

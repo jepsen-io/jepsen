@@ -1,9 +1,9 @@
 ---
+cluster_name: "fauna"
 network_coordinator_http_address: "127.0.0.1"
 network_coordinator_http_port: 8443
 network_admin_http_address: "127.0.0.1"
 network_admin_http_port: 8444
-network_cluster_name: "fauna"
 network_peer_port: 7500
 network_peer_secure_port: 7501
 log_rotate_size_mb: 131072 # 128GB
