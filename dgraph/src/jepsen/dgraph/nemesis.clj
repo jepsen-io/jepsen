@@ -77,10 +77,22 @@
                              (when-not (= group group')
                                ;; Actually move tablet
                                (info "Moving" pred "from" group "to" group')
-                               (s/move-tablet! node pred group')
-                               (info "Moved" pred "from" group "to" group')
-                               ;; Return predicate and new group
-                               [pred [group group']]))))
+                               (try+
+                                (s/move-tablet! node pred group')
+                                (info "Moved" pred "from" group "to" group')
+                                ;; Return predicate and new group
+                                [pred [group group']]
+                                (catch [:status 500] {:keys [body] :as e}
+                                  (condp re-find body
+                                    #"Unable to move reserved"
+                                    (do
+                                      (info "Unable to move reserved " pred "from" group "to" group')
+                                      [pred [group group']])
+                                    #"Server is not leader of this group"
+                                    (do
+                                      (info "Unable to move reserved " pred "from" group "to" group')
+                                      [pred [group group']])
+                                    (throw+ e))))))))
                    (into (sorted-map))
                    (assoc op :value)))))))
 
