@@ -70,7 +70,6 @@
   [opts]
   (let [n (count (:nodes opts))]
     {:client    (AtomicClient. nil)
-     :model     (model/cas-register 0)
      :generator (indy/concurrent-generator
                   (* 2 n)
                   (range)
@@ -82,4 +81,4 @@
      :checker (indy/checker
                 (checker/compose
                   {:timeline     (timeline/html)
-                   :linearizable (checker/linearizable)}))}))
+                   :linearizable (checker/linearizable {:model (model/cas-register 0)})}))}))
