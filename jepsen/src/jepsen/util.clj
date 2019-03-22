@@ -280,6 +280,7 @@
   "Binds *relative-time-origin* at the start of body."
   [& body]
   `(binding [*relative-time-origin* (linear-time-nanos)]
+     (info "Relative time begins now")
      ~@body))
 
 (defn relative-time-nanos
