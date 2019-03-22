@@ -145,14 +145,15 @@
 
   (setup! [this test]
     (f/with-retry
-      (client/setup! bank-client test)
+      (create-class! test conn)
       (f/upsert-index! conn {:name idx-name
                              :source accounts
                              :active true
                              :serialized (boolean (:serialized-indices test))
                              :values [{:field ["ref"]}
                                       {:field ["data" "balance"]}]})
-      (f/wait-for-index conn idx)))
+      (f/wait-for-index conn idx)
+      (create-accounts! test conn)))
 
   (invoke! [this test op]
     (if (= :read (:f op))
