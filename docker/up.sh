@@ -36,12 +36,11 @@ do
             ;;
         --dev)
             if [ ! "$JEPSEN_ROOT" ]; then
-                INFO "MISSING VAR: --dev requires JEPSEN_ROOT to be set"
-                exit 1
-            else
-                INFO "Running docker-compose with dev config"
-                DEV="-f docker-compose.dev.yml"
+                export JEPSEN_ROOT=$(cd ../ && pwd)
+                INFO "JEPSEN_ROOT is not set, defaulting to: $JEPSEN_ROOT"
             fi
+            INFO "Running docker-compose with dev config"
+            DEV="-f docker-compose.dev.yml"
             shift # past argument
             ;;
         --compose)
