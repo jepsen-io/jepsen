@@ -193,9 +193,9 @@
   mixed-generator."
   [n]
   (if (:long-recovery n)
-    (let [mix     #(gen/time-limit 600 (mixed-generator n))
+    (let [mix     #(gen/time-limit 120 (mixed-generator n))
           recover #(gen/phases (final-generator n)
-                               (gen/sleep 600))]
+                               (gen/sleep 60))]
       (gen/seq-all (interleave (repeatedly mix)
                                (repeatedly recover))))
     (mixed-generator n)))

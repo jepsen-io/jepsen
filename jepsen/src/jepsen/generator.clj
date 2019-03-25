@@ -15,6 +15,7 @@
             [knossos.history :as history]
             [clojure.core :as c]
             [clojure.walk :as walk]
+            [clojure.core.async :as async :refer [<!! timeout]]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [warn info]]
             [slingshot.slingshot :refer [throw+]]
@@ -176,7 +177,10 @@
 (defgenerator DelayFn [f gen]
   [f gen]
   (op [_ test process]
-      (Thread/sleep (* 1000 (f)))
+      (try
+        (<!! (timeout (* 1000 (f))))
+        (catch java.lang.InterruptedException e
+          (info " --- Generator delay interrupted! " gen "\n.")))
       (op gen test process)))
 
 (defn delay-fn

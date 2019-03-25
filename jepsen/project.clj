@@ -1,9 +1,10 @@
-(defproject jepsen "0.1.12-SNAPSHOT"
+(defproject org.clojars.jacobmbr/jepsen "0.1.2"
   :description "Distributed systems testing framework."
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.10.0"]
                  [org.clojure/data.fressian "0.2.1"]
+                 [org.clojure/core.async "0.4.490"]
                  [org.clojure/tools.logging "0.4.1"]
                  [spootnik/unilog "0.7.13"]
                  [org.clojure/tools.cli "0.4.1"]

@@ -39,6 +39,9 @@
     :validate [#{:community-edition :enterprise-edition}
                "Either community-edition or enterprise edition"]]
 
+   [nil "--experimental-tuning-flags" "Enable some experimental tuning flags which are supposed to help YB recover faster"
+    :default false]
+
    [nil "--final-recovery-time SECONDS" "How long to wait for the cluster to stabilize at the end of a test"
     :default 30
     :parse-fn parse-long
@@ -60,6 +63,10 @@
     :parse-fn parse-long
     :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
     :validate [(complement neg?) "should be a non-negative number"]]
+
+   [nil "--nemesis-long-recovery" "Every so often, have a long period of no faults, to see whether the cluster recovers."
+    :default false
+    :assoc-fn (fn [m k v] (update m :nemesis assoc :long-recovery v))]
 
    [nil "--nemesis-schedule SCHEDULE" "Whether to have randomized delays between nemesis actions, or fixed ones."
     :parse-fn keyword

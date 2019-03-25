@@ -164,16 +164,30 @@
                                 (gen/clients (:final-generator workload)))
                     gen)
         perf (checker/perf
-               {:nemeses #{{:start #{:kill-master :stop-master}
-                            :stop  #{:start-master}}
-                           {:start #{:kill-tserver :stop-tserver}
-                            :stop  #{:start-tserver}}
-                           {:start #{:pause-master}
-                            :stop  #{:resume-master}}
-                           {:start #{:pause-tserver}
-                            :stop  #{:resume-tserver}}
-                           {:start #{:start-partition}
-                            :stop  #{:stop-partition}}}})]
+               {:nemeses #{{:name  "kill master"
+                            :start #{:kill-master :stop-master}
+                            :stop  #{:start-master}
+                            :fill-color "#E9A4A0"}
+                           {:name  "kill tserver"
+                            :start #{:kill-tserver :stop-tserver}
+                            :stop  #{:start-tserver}
+                            :fill-color "#E9C3A0"}
+                           {:name  "pause master"
+                            :start #{:pause-master}
+                            :stop  #{:resume-master}
+                            :fill-color "#A0B1E9"}
+                           {:name  "pause tserver"
+                            :start #{:pause-tserver}
+                            :stop  #{:resume-tserver}
+                            :fill-color "#B8A0E9"}
+                           {:name "clock skew"
+                            :start #{:bump-clock :strobe-clock}
+                            :stop  #{:reset-clock}
+                            :fill-color "#D2E9A0"}
+                           {:name "partition"
+                            :start #{:start-partition}
+                            :stop  #{:stop-partition}
+                            :fill-color "#888888"}}})]
     (merge tests/noop-test
            opts
            (dissoc workload
