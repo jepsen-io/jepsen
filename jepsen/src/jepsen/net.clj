@@ -21,7 +21,11 @@
          :mean         (in ms)
          :variance     (in ms)
          :distribution (e.g. :normal)")
-  (flaky! [net test]         "Introduces randomized packet loss")
+  (flaky! [net test]
+          [net test ops]
+          "Introduces randomized packet loss with options:
+
+          :lossiness   (as a percentage)")
   (fast! [net test]          "Removes packet loss and delays."))
 
 ; Top-level API functions
@@ -83,9 +87,13 @@
                   :distribution distribution))))
 
     (flaky! [net test]
+      (flaky! net test {:lossiness 30}))
+
+    (flaky! [net test {:keys [lossiness]
+                       :or   {lossiness 30}}]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
-                  "75%"))))
+        (su (exec tc :qdisc :add :dev :eth0 :root :netem :loss
+                  (str lossiness "%")))))
 
     (fast! [net test]
       (with-test-nodes test
@@ -120,7 +128,7 @@
 
     (slow! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
+        (su (exec tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
                   :10ms :distribution :normal))))
 
     (slow! [net test {:keys [mean variance distribution]
@@ -134,10 +142,14 @@
                   :distribution distribution))))
 
     (flaky! [net test]
+      (flaky! net test {:lossiness 30})
+
+    (flaky! [net test {:keys [lossiness]
+                       :or   {lossiness 30}}]
       (with-test-nodes test
-        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
-                  "75%"))))
+        (su (exec tc :qdisc :add :dev :eth0 :root :netem :loss
+                  (str lossiness "%")))))
 
     (fast! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :del :dev :eth0 :root))))))
+        (su (exec tc :qdisc :del :dev :eth0 :root))))))
