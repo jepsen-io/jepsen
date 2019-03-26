@@ -41,7 +41,7 @@
   top-level generator, and can be expected by every generator, are:
 
       :time           The current Jepsen linear time, in nanoseconds
-      :free-processes A collection of idle processes which could perform work
+      :free-threads   A collection of idle threads which could perform work
       :workers        A map of thread identifiers to process identifiers
 
   ## Fetching an operation
@@ -52,9 +52,10 @@
   The operation can have three forms:
 
   - The generator may return `nil`, which means the generator is done, and
-    there is nothing more to do.
+    there is nothing more to do. Once a generator does this, it must never
+    return anything other than `nil`, even if the context changes.
   - The generator may return :pending, which means there might be more
-    ops later
+    ops later, but it can't tell yet.
   - The generator may return an operation, in which case:
     - If its time is in the past, we can evaluate it now
     - If its time is in the future, we wait until either:
@@ -95,6 +96,15 @@
   - We invoke an operation (e.g. one that the generator just gave us)
   - We complete an operation
 
+  Updates use a context with a specific relationship to the event:
+
+  - The context :time is equal to the event :time
+  - The free processes and worker maps reflect those *prior* to the event
+  taking place. This ensures that generators can examine the worker map to
+  identify which thread performed the given operation.
+
+  TODO: this is not true yet. Fix this.
+
   ## Default implementations
 
   Nil is a valid generator; it ignores updates and always yields nil for
@@ -133,8 +143,9 @@
   - Returning any other generator: the function could be *replaced* by that
   generator, allowing us to compute generators lazily?
   "
-  (:refer-clojure :exclude [concat delay update])
+  (:refer-clojure :exclude [concat delay map update])
   (:require [clojure.core :as c]
+            [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn]]
             [jepsen [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -145,6 +156,43 @@
 
   (op [gen test context]))
 
+;; Helpers
+
+(defn random-int-seq
+  "Generates a reproducible sequence of random longs, given a random seed. If
+  seed is not provided, taken from (rand-int))."
+  ([] (random-int-seq (rand-int Integer/MAX_VALUE)))
+  ([seed]
+   (let [gen (java.util.Random. seed)]
+     (repeatedly #(.nextLong gen)))))
+
+(defn free-processes
+  "Given a context, returns a collection of processes which are not actively
+  processing invocations."
+  [context]
+  (c/map (:workers context) (:free-threads context)))
+
+(defn free-threads
+  "Given a context, returns a collection of threads that are not actively
+  processing invocations."
+  [context]
+  (:free-threads context))
+
+(defn all-threads
+  "Given a context, returns a collection of all threads."
+  [context]
+  (keys (:workers context)))
+
+(defn process->thread
+  "Takes a context and a process, and returns the thread which is executing
+  that process."
+  [context process]
+  (->> (:workers context)
+       (keep (fn [[t p]] (when (= process p) t)))
+       first))
+
+;; Generators!
+
 (extend-protocol Generator
   nil
   (update [gen test ctx event] nil)
@@ -153,7 +201,7 @@
   clojure.lang.IPersistentMap
   (update [this test ctx event] this)
   (op [this test ctx]
-    [(if-let [p (first (:free-processes ctx))]
+    [(if-let [p (first (free-processes ctx))]
        ; Automatically assign type, time, and process from the context, if not
        ; provided.
        (cond-> this
@@ -164,6 +212,20 @@
        ; No process free to accept our request
        :pending)
      this])
+
+  clojure.lang.Seqable
+  ; In the future, we might want to pass updates to... the first element? I'm
+  ; not sure whether that's going to be predictable, so for now let's try not
+  ; propagating any updates.
+  (update [this test ctx event] this)
+  (op [this test ctx]
+    (when (seq this) ; Once we're out of generators, we're done
+      (let [gen (first this)]
+        (if-let [[op gen'] (op gen test ctx)]
+          ; OK, our first gen has an op for us
+          [op (cons gen' (next this))]
+          ; This generator is exhausted; move on
+          (recur (next this) test ctx)))))
 
   clojure.lang.AFunction
   (update [f test ctx event] f)
@@ -179,18 +241,6 @@
         ; ???
         (throw+ {:type :unexpected-return
                  :value x})))))
-
-;; Helpers
-
-(defn random-int-seq
-  "Generates a reproducible sequence of random longs, given a random seed. If
-  seed is not provided, taken from (rand-int))."
-  ([] (random-int-seq (rand-int Integer/MAX_VALUE)))
-  ([seed]
-   (let [gen (java.util.Random. seed)]
-     (repeatedly #(.nextLong gen)))))
-
-;; Generators!
 
 (defrecord Validate [gen]
   Generator
@@ -211,8 +261,9 @@
                          (not (:process op))
                          (conj "no :process")
 
-                         (not-any? #{(:process op)} (:free-processes ctx))
-                         (conj (str "process " (:process op) " is not free"))))]
+                         (not-any? #{(:process op)} (free-processes ctx))
+                         (conj (str "process " (pr-str (:process op))
+                                    " is not free"))))]
         (when (seq problems)
           (throw+ {:type      :invalid-op
                    :generator gen
@@ -231,6 +282,254 @@
   (Validate. gen))
 
 
+(defrecord Map [f gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      [(if (= :pending op) op (f op))
+       (Map. f gen')]))
+
+  (update [_ test ctx event]
+    (Map. f (update gen test ctx event))))
+
+(defn map
+  "A generator which wraps another generator g, transforming operations it
+  generates with (f op test process), of if that fails, (f op). When the
+  underlying generator yields :pending or nil, this generator does too, without
+  calling `f`. Passes updates to underlying generator."
+  [f gen]
+  (Map. f gen))
+
+(defn f-map
+  "Takes a function `f-map` converting op functions (:f op) to other functions,
+  and a generator `g`. Returns a generator like `g`, but where fs are replaced
+  according to `f-map`. Useful for composing generators together for use with a
+  composed nemesis."
+  [f-map g]
+  (map (fn transform [op] (c/update op :f f-map)) g))
+
+
+(defrecord IgnoreUpdates [gen]
+  Generator
+  (op [this test ctx]
+    (op gen test ctx))
+
+  (update [this _ _ _]
+    this))
+
+(defn ignore-updates
+  "Wraps a generator. Any call to `update` is ignored, returning this
+  generator with no changes.
+
+  It's not clear if this actually confers any performance advantage right now."
+  [gen]
+  (IgnoreUpdates. gen))
+
+(defrecord Log [msg]
+  Generator
+  (op [_ _ _]
+    (info msg)
+    nil)
+
+  (update [this _ _ _]
+    this))
+
+(defn log
+  "A generator which, when asked for an operation, logs a message and yields
+  nil."
+  [msg]
+  (Log. msg))
+
+(defn on-threads-context
+  "Helper function to transform contexts for OnThreads."
+  [f ctx]
+  (let [; Filter free threads to just those we want
+        ctx     (c/update ctx :free-threads (partial filter f))
+        ; Update workers to remove threads we won't use
+        ctx (->> (:workers ctx)
+                 (filter (comp f key))
+                 (into {})
+                 (assoc ctx :workers))]
+    ctx))
+
+(defrecord OnThreads [f gen]
+  Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (op gen test (on-threads-context f ctx))]
+      [op (OnThreads. f gen')]))
+
+  (update [this test ctx event]
+    (if (f (process->thread ctx (:process event)))
+      (OnThreads. f (update gen test (on-threads-context f ctx) event))
+      this)))
+
+(defn on-threads
+  "Wraps a generator, restricting threads which can use it to only those
+  threads which satisfy (f thread). Alters the context passed to the underlying
+  generator: it will only include free threads and workers satisfying f.
+  Updates are passed on only when the thread performing the update matches f."
+  [f gen]
+  (OnThreads. f gen))
+
+(def on on-threads)
+
+(defn soonest-op-vec
+  "Takes two [op, ...] vectors, and returns the vector whose op occurs first.
+  Op maps occur before those which are :pending. :pending occurs before `nil`.
+
+  We use vectors here because you may want to pass [op, gen'] pairs, or
+  possibly encode additional information into the vector, so you can, for
+  instance, identify *which* of several generators was the next one."
+  [pair1 pair2]
+  (condp = nil
+    pair1 pair2
+    pair2 pair1
+    (let [op1 (first pair1)
+          op2 (first pair2)]
+      (condp = :pending
+        op1 pair2
+        op2 pair1
+        (if (<= (:time op1) (:time op2))
+          pair1
+          pair2)))))
+
+(defrecord Any [gens]
+  Generator
+  (op [this test ctx]
+    (let [[op gen' i] (->> gens
+                           (map-indexed (fn [i gen]
+                                          (when-let [pair (op gen test ctx)]
+                                            (conj pair i))))
+                           (reduce soonest-op-vec nil))]
+      [op (Any. (assoc gens i gen'))]))
+
+  (update [this test ctx event]
+    (Any. (mapv (fn updater [gen] (update gen test ctx event)) gens))))
+
+(defn any
+  "Takes multiple generators and binds them together. Operations are taken from
+  any generator. Updates are propagated to all generators."
+  [& gens]
+  (condp = (count gens)
+    0 nil
+    1 (first gens)
+      (Any. (vec gens))))
+
+(defrecord EachThread [fresh-gen gens]
+  ; fresh-gen is a generator we use to initialize a thread's state, the first
+  ; time we see it.
+  ; gens is a map of threads to generators.
+  Generator
+  (op [this test ctx]
+    ; As a potential optimization, we could only look at free threads, but then
+    ; we have to think carefully about what happens when all free thread gens
+    ; return `nil` but a non-free thread has more to do. :pending, I think!
+    (let [free-threads (free-threads ctx)
+          all-threads  (all-threads ctx)
+          [op gen' thread :as soonest]
+          (->> free-threads
+               (keep (fn [thread]
+                      (let [gen (get gens thread fresh-gen)
+                            process (get (:workers ctx) thread)
+                            ; Give this generator a context *just* for one
+                            ; thread
+                            ctx (assoc ctx
+                                       :free-threads [thread]
+                                       :workers {thread process})]
+                        (when-let [pair (op gen test ctx)]
+                          (conj pair thread)))))
+               (reduce soonest-op-vec nil))]
+      (cond ; A free thread has an operation
+            soonest [op (EachThread. fresh-gen (assoc gens thread gen'))]
+
+            ; Some thread is busy; we can't tell what to do just yet
+            (not= (count free-threads) (count all-threads))
+            [:pending this]
+
+            ; Every thread is exhausted
+            true
+            nil)))
+
+  (update [this test ctx event]
+    (let [process (:process event)
+          thread (process->thread ctx process)
+          gen    (get gens thread fresh-gen)
+          ctx    (-> ctx
+                     (c/update :free-threads (partial filter #{thread}))
+                     (assoc :workers {thread process}))
+          gen'   (update gen test ctx event)]
+      (EachThread. fresh-gen (assoc gens thread gen')))))
+
+(defn each-thread
+  "Takes a generator. Constructs a generator which maintains independent copies
+  of that generator for every thread. Each generator sees exactly one thread in
+  its free process list. Updates are propagated to the generator for the thread
+  which emitted the operation."
+  [gen]
+  (EachThread. gen {}))
+
+(declare nemesis)
+
+(defn clients
+  "In the single-arity form, wraps a generator such that only clients
+  request operations from it. In its two-arity form, combines a generator of
+  client operations and a generator for nemesis operations into one. When the
+  process requesting an operation is :nemesis, routes to the nemesis generator;
+  otherwise to the client generator."
+  ([client-gen]
+   (on (complement #{:nemesis}) client-gen))
+  ([client-gen nemesis-gen]
+   (any (clients client-gen)
+        (nemesis nemesis-gen))))
+
+(defn nemesis
+  "In the single-arity form, wraps a generator such that only the nemesis
+  requests operations from it. In its two-arity form, combines a generator of
+  client operations and a generator for nemesis operations into one. When the
+  process requesting an operation is :nemesis, routes to the nemesis generator;
+  otherwise to the client generator."
+  ([nemesis-gen]
+   (on #{:nemesis} nemesis-gen))
+  ([nemesis-gen client-gen]
+   (any (nemesis nemesis-gen)
+        (clients client-gen))))
+
+(defn dissoc-vec
+  "Cut a single index out of a vector, returning a vector one shorter, without
+  the element at that index."
+  [v i]
+  (into (subvec v 0 i)
+        (subvec v (inc i))))
+
+(defrecord Mix [i gens]
+  ; i is the next generator index we intend to work with; we reset it randomly
+  ; when emitting ops.
+  Generator
+  (op [_ test ctx]
+    (when (seq gens)
+      (if-let [[op gen'] (op (nth gens i) test ctx)]
+        ; Good, we have an op
+        [op (Mix. (rand-int (count gens)) (assoc gens i gen'))]
+        ; Oh, we're out of ops on this generator. Compact and recur.
+        (op (Mix. (rand-int (dec (count gens))) (dissoc-vec gens i))
+            test ctx))))
+
+  (update [this test ctx event]
+    this))
+
+(defn mix
+  "A random mixture of several generators. Takes a collection of generators and
+  chooses between them uniformly. Ignores updates; some users create broad
+  (hundreds of generators) mixes.
+
+  To be precise, a mix behaves like a sequence of one-time, randomly selected
+  generators from the given collection. This is efficient and prevents multiple
+  generators from competing for the next slot, making it hard to control the
+  mixture of operations."
+  [gens]
+  (Mix. (rand-int (count gens)) gens))
+
+
 (defrecord Limit [remaining gen]
   Generator
   (op [_ test ctx]
@@ -247,11 +546,11 @@
   [remaining gen]
   (Limit. remaining gen))
 
+
 (defn once
   "Emits only a single item from the underlying generator."
   [gen]
   (limit 1 gen))
-
 
 (defrecord TimeLimit [limit cutoff gen]
   Generator
@@ -271,31 +570,145 @@
   [dt gen]
   (TimeLimit. (long (util/secs->nanos dt)) nil gen))
 
-
-(defrecord DelayTil [dt anchor wait-til gen]
+(defrecord Stagger [dts gen]
   Generator
   (op [_ test ctx]
-    (let [[op gen']  (op gen test ctx)
-          ; The next op should occur at time t
-          t         (if wait-til
-                      (max wait-til (:time op))
-                      (:time op))
-          ; Update op
-          op'       (assoc op :time t)
-          ; Initialize our anchor if we don't have one
-          anchor'   (or anchor t)
-          ; And compute the next wait-til time after t
-          wait-til' (+ t (- dt (mod (- t anchor') dt)))
-          ; Our next generator state
-          gen'      (DelayTil. dt anchor' wait-til' gen')]
-      [op' gen']))
+    (when-let [[op gen'] (op gen test ctx)]
+      (let [op (if (= :pending op)
+                 op
+                 (c/update op :time + (first dts)))]
+        [op (Stagger. (next dts) gen')])))
+
+  (update [_ test ctx event]
+    (Stagger. dts (update gen test ctx event))))
+
+(defn stagger
+  "Wraps a generator. Operations from that generator are delayed by a uniform
+  random time between 0 to 2 * dt.
+
+  Note that unlike jepsen's original version of `stagger`, this delay applies
+  to *all* operations, not to each thread independently. If your old stagger
+  dt is 10, and your concurrency is 5, your new stagger dt should be 2."
+  [dt gen]
+  (let [dt (util/secs->nanos (* 2 dt))]
+    (Stagger. (repeatedly #(long (rand dt))) gen)))
+
+; This isn't actually DelayTil. It spreads out *all* requests evenly. Feels
+; like it might be useful later.
+;(defrecord DelayTil [dt anchor wait-til gen]
+;  Generator
+;  (op [_ test ctx]
+;    (when-let [[op gen'] (op gen test ctx)]
+;      (if (= :pending op)
+;        ; You can't delay what's pending!
+;        [op (DelayTil. dt anchor wait-til gen')]
+
+;        ; OK we have an actual op
+;        (let [; The next op should occur at time t
+;              t         (if wait-til
+;                          (max wait-til (:time op))
+;                          (:time op))
+;              ; Update op
+;              op'       (assoc op :time t)
+;              ; Initialize our anchor if we don't have one
+;              anchor'   (or anchor t)
+;              ; And compute the next wait-til time after t
+;              wait-til' (+ t (- dt (mod (- t anchor') dt)))
+;              ; Our next generator state
+;              gen'      (DelayTil. dt anchor' wait-til' gen')]
+;          [op' gen']))))
+
+;  (update [this test ctx event]
+;    (DelayTil. dt anchor wait-til (update gen test ctx event))))
+
+;(defn delay-til
+;  "Given a time dt in seconds, and an underlying generator gen, constructs a
+;  generator which emits operations such that successive invocations are at
+;  least dt seconds apart."
+;  [dt gen]
+;  (DelayTil. (long (util/secs->nanos dt)) nil nil gen))
+
+(defrecord DelayTil [dt anchor gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      (if (= op :pending)
+        ; Just pass these through; we don't know when they'll occur!
+        [op (DelayTil. dt anchor gen')]
+
+        ; OK we have an actual op. Compute its new event time.
+        (let [t      (:time op)
+              anchor (or anchor t)
+              ; A helpful way to test this at the REPL:
+              ; (let [anchor 0 dt 3]
+              ;   (->> (range 20)
+              ;        (map (fn [t]
+              ;          [t (+ t (mod (- dt (mod (- t anchor) dt)) dt))]))))
+              ; We do a second mod here because mod has an off-by-one
+              ; problem in this form; it'll compute offsets that push 10 -> 15,
+              ; rather than letting 10->10.
+              t      (+ t (mod (- dt (mod (- t anchor) dt)) dt))]
+          [(assoc op :time t) (DelayTil. dt anchor gen')]))))
 
   (update [this test ctx event]
-    (DelayTil. dt anchor wait-til (update gen test ctx event))))
+    (DelayTil. dt anchor (update gen test ctx event))))
 
 (defn delay-til
   "Given a time dt in seconds, and an underlying generator gen, constructs a
-  generator which emits operations such that successive invocations are at
-  least dt seconds apart."
+  generator which aligns invocations to intervals of dt seconds."
   [dt gen]
-  (DelayTil. (long (util/secs->nanos dt)) nil nil gen))
+  (DelayTil. (long (util/secs->nanos dt)) nil gen))
+
+(defn sleep
+  "Informally, pauses for dt seconds before yielding `nil` for an operation.
+  Formally, this is sort of a weird one, because everything here is pure, and
+  there's no notion of blocking. We can delay operations, which have times, but
+  delaying *nil*, which does NOT have a time, isn't straightforward.
+
+  What we'll need to do, later, is invent a special type of operation map which
+  delays the scheduler and is *not* passed to clients. Or just refuse to
+  implement this at all. It's nicely readable, but it's semantically kind of
+  weird (Who sleeps? When?) compared to delaying a subsequent operation, which
+  has a well defined behavior."
+  []
+  (assert false "Not implemented!"))
+
+(defrecord Synchronize [gen]
+  Generator
+  (op [this test ctx]
+    (let [free (free-threads ctx)
+          all  (all-threads ctx)]
+      (if (and (= (count free)
+                  (count all))
+               (= (set free)
+                  (set all)))
+        ; We're ready, replace ourselves with the generator
+        (op gen test ctx)
+        ; Not yet
+        [:pending this])))
+
+  (update [_ test ctx event]
+    (Synchronize. (update gen test ctx event))))
+
+(defn synchronize
+  "Takes a generator, and waits for all workers to be free before it begins."
+  [gen]
+  (Synchronize. gen))
+
+(defn phases
+  "Takes several generators, and constructs a generator which evaluates
+  everything from the first generator, then everything from the second, and so
+  on."
+  [& generators]
+  (c/map synchronize generators))
+
+(defn then
+  "Generator A, synchronize, then generator B. Note that this takes its
+  arguments backwards: b comes before a. Why? Because it reads better in ->>
+  composition. You can say:
+
+      (->> (fn [] {:f :write :value 2})
+           (limit 3)
+           (then (once {:f :read})))"
+  [a b]
+  [b (synchronize a)])

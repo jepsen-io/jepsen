@@ -30,9 +30,12 @@
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"
-             ;"-XX:-OmitStackTraceInFastThrow"
+             ; "-XX:-OmitStackTraceInFastThrow"
              ]
-  :test-selectors {:default (complement :integration)
+  :test-selectors {:default (fn [m]
+                              (not (or (:integration m)
+                                       (:logging m))))
+                   :logging     :logging
                    :integration :integration}
   :codox {:output-path "doc/"
           :source-uri "https://github.com/jepsen-io/jepsen/blob/{version}/jepsen/{filepath}#L{line}"
