@@ -1,3 +1,4 @@
+# Based on the deprecated `https://github.com/tutumcloud/tutum-debian`
 FROM debian:stretch
 
 # Install packages
@@ -11,6 +12,9 @@ ADD run.sh /run.sh
 RUN chmod +x /*.sh
 
 ENV AUTHORIZED_KEYS **None**
+
+ADD run.sh /run.sh
+RUN chmod +x /*.sh
 
 RUN apt-get update
 RUN apt install -y apt-transport-https
