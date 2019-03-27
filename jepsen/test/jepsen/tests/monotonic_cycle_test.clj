@@ -215,10 +215,10 @@
     (let [checker (checker)
           history (->> (range)
                        (mapcat read-only-gen)
-                       (take 1000000)
+                       (take 100000000)
                        vec)]
       (time
-       (dotimes [n 10]
+       (dotimes [n 1]
          (print "Run" n ":")
          (time (let [r (checker/check checker nil history nil)]
                  (is (:valid? r)))))))))

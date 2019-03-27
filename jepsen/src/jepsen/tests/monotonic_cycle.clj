@@ -36,18 +36,22 @@
             [clojure.set :as set]
             [jepsen.generator :as gen]))
 
+(set! *warn-on-reflection* true)
+
 (defn tarjan
   "Returns the strongly connected components of a graph specified by its
   nodes (ints) and a successor function (succs node) from node to nodes.
   A iterative verison of Tarjan's Strongly Connected Components."
   [succs]
-  (let [nodes (keys succs)
+  (let [^clojure.lang.APersistentMap$KeySeq
+        nodes (keys succs)
         ;; Ensure there's a table index for every value we could find
         table-size (->> nodes (apply max) inc)
-        result (loop [index      0
-                      indices    (int-array table-size)
-                      visited    (make-array Boolean/TYPE table-size)
-                      iterator   (.iterator nodes)
+        result (loop [index    0
+                      indices  (int-array table-size)
+                      visited  (boolean-array table-size)
+                      ^clojure.lang.PersistentHashMap$ArrayNode$Iter
+                      iterator (.iterator nodes)
                       iter-stack '()
                       min-stack  '()
                       stack      '()
@@ -66,7 +70,8 @@
                            m          (aget indices node)
                            min-stack  (conj min-stack m)
                            iter-stack (conj iter-stack iterator)
-                           iterator   (.iterator (succs node))
+                           ^clojure.lang.PersistentHashMap$ArrayNode$Iter
+                           iterator   (.iterator ^clojure.lang.PersistentHashSet (succs node))
                            index      (inc index)]
                        (recur index indices visited iterator iter-stack min-stack stack node sccs))
 
@@ -83,21 +88,24 @@
                                        min-stack)]
                        (recur index indices visited iterator iter-stack min-stack stack node sccs)))
 
-                   ;; Done checking edges this set of edges,
-                   ;; look at node and see if component
+                   ;; Done checking this set of edges
+                   ;; Are we done?
                    (if (zero? (count iter-stack))
                      sccs
+                     ;; More to search
                      (let [iterator   (peek iter-stack)
                            iter-stack (pop iter-stack)
 
-                           ;; Pop off the latest min
-                           m          (peek min-stack)
+                           ^Integer m (peek min-stack)
                            min-stack  (pop min-stack)
 
+                           ;; Should we start a component?
                            [stack scc] (if (< m (aget indices prev-node))
                                          (do
                                            (aset indices prev-node m)
                                            [stack nil])
+
+                                         ;; SCC good to go sir
                                          (loop [w     nil
                                                 stack stack
                                                 scc   #{}]
@@ -112,7 +120,7 @@
                                                  (recur w stack scc))
                                                [stack scc]))))
 
-                           ;; SCC good to go sir
+                           ;; Add SCC to collection if we have one
                            sccs (if scc
                                   (conj sccs scc)
                                   sccs)
@@ -145,8 +153,7 @@
     (assoc-in graph [k] g)))
 
 (defn graph
-  "Takes a history of reads over a single register and returns a graph of the
-  states that the register advanced through."
+  "TODO Docstring"
   [history]
   (loop [graph {}
          last  {}
@@ -157,10 +164,8 @@
           val   (if-not (map? val)
                   {:register val}
                   val)
-          pairs (concat val)
-
           ;; Remove values that have not changed
-          new-pairs (set/difference (set pairs)
+          new-pairs (set/difference (set val)
                                     (set last))
 
           ;; Apply new nodes and edges to the graph
@@ -210,15 +215,14 @@
         {:valid? (valid? errors)
          :errors errors}))))
 
-(defn w [k v]
-  {:f :write, :type :invoke, :value {k v}})
+(defn inc [k]
+  {:f :inc, :type :invoke, :value (vec k)})
 
 (defn r [keys]
   (let [v (->> keys
                (map (fn [k] [k nil]))
                (into {}))]
     {:f :read, :type :invoke, :value v}))
-
 
 (defn workload
   "A package of a generator and checker. Options:
@@ -229,4 +233,4 @@
   [{:keys [keys read-n]}]
   {:checker (checker)
    ;; FIXME
-   :generator (gen/mix [w r])})
+   :generator (gen/mix [inc r])})
