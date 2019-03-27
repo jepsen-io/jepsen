@@ -12,8 +12,6 @@ RUN chmod +x /*.sh
 
 ENV AUTHORIZED_KEYS **None**
 
-RUN sed -i '/jessie-updates/d' /etc/apt/sources.list
-
 RUN apt-get update
 RUN apt install -y apt-transport-https
 RUN apt install -y software-properties-common
