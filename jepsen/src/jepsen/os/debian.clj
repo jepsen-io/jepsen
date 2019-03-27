@@ -162,7 +162,8 @@
                 :iputils-ping
                 :iproute
                 :rsyslog
-                :logrotate])
+                :logrotate
+                :dirmngr])
       (try+ (install [:libzip4])
             (catch [:exit 100] _
               ; Wrong package name; let's use the old one for jessie
