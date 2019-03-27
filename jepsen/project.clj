@@ -1,5 +1,6 @@
-(defproject jepsen "0.1.13"
+(defproject jepsen "0.1.14-SNAPSHOT"
   :description "Distributed systems testing framework."
+  :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.10.0"]
