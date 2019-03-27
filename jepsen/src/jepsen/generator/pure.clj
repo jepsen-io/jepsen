@@ -504,71 +504,70 @@
   (EachThread. gen {}))
 
 
-(defrecord Reserve [ranges gens]
-  ; ranges is a collection of functions defining sets of threads engaged in
-  ; each generator.
-  ; gens is a collection of generators corresponding to ranges.
-  Generator
-  (op [_ test context]
-    (let [[op gen' i :as soonest]
-          (->> ranges
-               (map-indexed
-                 (fn [i threads]
-                   (let [gen (nth gens i)
-                         ; Restrict context to this range of threads
-                         ctx (on-threads-context threads ctx)]
-                     ; Ask this range's generator for an op
-                     (when-let [pair (op gen test ctx)]
-                       ; Remember our index
-                       (conj pair i)))))
-               (reduce soonest-op-vec nil))]
-      (when soonest
-        ; A range has an operation to do!
-        [op (Reserve. ranges (assoc gen i gen'))])))
+;(defrecord Reserve [ranges gens]
+;  ; ranges is a collection of functions defining sets of threads engaged in
+;  ; each generator.
+;  ; gens is a collection of generators corresponding to ranges.
+;  Generator
+;  (op [_ test context]
+;    (let [[op gen' i :as soonest]
+;          (->> ranges
+;               (map-indexed
+;                 (fn [i threads]
+;                   (let [gen (nth gens i)
+;                         ; Restrict context to this range of threads
+;                         ctx (on-threads-context threads ctx)]
+;                     ; Ask this range's generator for an op
+;                     (when-let [pair (op gen test ctx)]
+;                       ; Remember our index
+;                       (conj pair i)))))
+;               (reduce soonest-op-vec nil))]
+;      (when soonest
+;        ; A range has an operation to do!
+;        [op (Reserve. ranges (assoc gen i gen'))])))
 
-  (update [this test ctx event]
-    (let [process (:process event)
-          thread  (process->thread ctx process)
-          i (reduce (fn red [i threads]
-                      (if (threads thread)
-                        (reduced i)
-                        (inc i)))
-                    0
-                    threads) TODO HERE
+;  (update [this test ctx event]
+;    (let [process (:process event)
+;          thread  (process->thread ctx process)
+;          i (reduce (fn red [i threads]
+;                      (if (threads thread)
+;                        (reduced i)
+;                        (inc i)))
+;                    0
+;                    threads) TODO HERE
 
-    (Reserve. ranges
-              
+;    (Reserve. ranges
 
 
-(defn reserve
-  "Takes a series of count, generator pairs, and a final default generator.
+;(defn reserve
+;  "Takes a series of count, generator pairs, and a final default generator.
 
-  (reserve 5 write 10 cas read)
+;  (reserve 5 write 10 cas read)
 
-  The first 5 threads will call the `write` generator, the next 10 will emit
-  CAS operations, and the remaining threads will perform reads. This is
-  particularly useful when you want to ensure that two classes of operations
-  have a chance to proceed concurrently--for instance, if writes begin
-  blocking, you might like reads to proceed concurrently without every thread
-  getting tied up in a write.
+;  The first 5 threads will call the `write` generator, the next 10 will emit
+;  CAS operations, and the remaining threads will perform reads. This is
+;  particularly useful when you want to ensure that two classes of operations
+;  have a chance to proceed concurrently--for instance, if writes begin
+;  blocking, you might like reads to proceed concurrently without every thread
+;  getting tied up in a write.
 
-  Each generator sees a context which only includes the first 5 worker threads,
+;  Each generator sees a context which only includes the first 5 worker threads,
 
-  [& args]
-  (let [gens (->> args
-                  drop-last
-                  (partition 2)
-                  ; Construct [lower upper gen] tuples defining the range of
-                  ; thread indices covering a given generator, lower
-                  ; inclusive, upper exclusive.
-                  (reduce (fn [[n gens] [thread-count gen]]
-                            (let [n' (+ n thread-count)]
-                              [n' (conj gens [n n' gen])]))
-                          [0 []])
-                  second)
-        default (last args)]
-    (assert default)
-    (Reserve. gens default)))
+;  [& args]
+;  (let [gens (->> args
+;                  drop-last
+;                  (partition 2)
+;                  ; Construct [lower upper gen] tuples defining the range of
+;                  ; thread indices covering a given generator, lower
+;                  ; inclusive, upper exclusive.
+;                  (reduce (fn [[n gens] [thread-count gen]]
+;                            (let [n' (+ n thread-count)]
+;                              [n' (conj gens [n n' gen])]))
+;                          [0 []])
+;                  second)
+;        default (last args)]
+;    (assert default)
+;    (Reserve. gens default)))
 
 (declare nemesis)
 
