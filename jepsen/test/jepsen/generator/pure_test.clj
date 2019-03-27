@@ -70,10 +70,10 @@
 
         ; TODO: the order of updates for worker maps here isn't correct; fix
         ; it.
-
         (if (and (not= :pending invoke)
                  (or (empty? in-flight)
                      (<= (:time invoke) (:time (first in-flight)))))
+
           ; We have an invocation that's not pending, and that invocation is
           ; before every in-flight completion
           (let [thread    (gen/process->thread ctx (:process invoke))
@@ -84,6 +84,7 @@
                 ; Update the generator with this invocation
                 gen'      (gen/update gen' default-test ctx invoke)
                 ; Add the completion to the in-flight set
+                ;_         (prn :invoke invoke)
                 complete  (complete-fn invoke)
                 in-flight (sort-by :time (conj in-flight complete))]
             (recur (conj ops invoke) in-flight gen' ctx))
@@ -98,7 +99,12 @@
                            (update :time max (:time op))
                            (update :free-threads conj thread))
                 ; Update generator with completion
-                gen'   (gen/update gen default-test ctx op)]
+                gen'   (gen/update gen default-test ctx op)
+                ; Update worker mapping if this op crashed
+                ctx    (if (or (= :nemesis thread) (not= :info (:type op)))
+                         ctx
+                         (update ctx :workers
+                                 assoc thread (gen/next-process ctx thread)))]
             (recur (conj ops op) (rest in-flight) gen' ctx)))))))
 
 (def perfect-latency
@@ -115,6 +121,17 @@
               (fn [invoke]
                 (-> invoke
                     (assoc :type :ok)
+                    (update :time + perfect-latency))))))
+
+(defn perfect-info
+  "Simulates the series of ops obtained from a generator where every operation
+  crashes with :info in 10 nanoseconds. Returns only invocations."
+  [gen]
+  (invocations
+    (simulate gen
+              (fn [invoke]
+                (-> invoke
+                    (assoc :type :info)
                     (update :time + perfect-latency))))))
 
 (deftest nil-test
@@ -316,6 +333,16 @@
               gen/once
               perfect))))
 
+(deftest filter-test
+  (is (= [0 2 4 6 8]
+         (->> (range)
+              (map (fn [x] {:value x}))
+              (map gen/once)
+              (gen/limit 10)
+              (gen/filter (comp even? :value))
+              perfect
+              (map :value)))))
+
 (deftest ^:logging log-test
   (is (->> (gen/phases (gen/log :first)
                        (gen/once {:f :a})
@@ -334,3 +361,19 @@
             :b 10}
            (frequencies fs)))
     (is (not= (concat (repeat 5 :a) (repeat 5 :b)) fs))))
+
+(deftest process-limit-test
+  (is (= [[0 0]
+          [1 1]
+          [3 2]
+          [2 3]
+          [4 4]]
+         (->> (range)
+              (map (fn [x] {:value x}))
+              (map gen/once)
+              (gen/process-limit 5)
+              gen/clients
+              perfect-info
+              (map (juxt :process :value))))))
+
+

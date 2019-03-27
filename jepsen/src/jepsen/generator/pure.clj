@@ -143,7 +143,7 @@
   - Returning any other generator: the function could be *replaced* by that
   generator, allowing us to compute generators lazily?
   "
-  (:refer-clojure :exclude [concat delay map update])
+  (:refer-clojure :exclude [concat delay filter map update])
   (:require [clojure.core :as c]
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn]]
@@ -172,6 +172,11 @@
   [context]
   (c/map (:workers context) (:free-threads context)))
 
+(defn all-processes
+  "Given a context, returns all processes currently being executed by threads."
+  [context]
+  (vals (:workers context)))
+
 (defn free-threads
   "Given a context, returns a collection of threads that are not actively
   processing invocations."
@@ -190,6 +195,16 @@
   (->> (:workers context)
        (keep (fn [[t p]] (when (= process p) t)))
        first))
+
+(defn next-process
+  "When a process being executed by a thread crashes, this function returns the
+  next process for a given thread. You should probably only use this with the
+  *global* context, because it relies on the size of the `:workers` map."
+  [context thread]
+  (if (number? thread)
+    (+ (get (:workers context) thread)
+       (count (c/filter number? (all-processes context))))
+    thread))
 
 ;; Generators!
 
@@ -265,11 +280,12 @@
                          (conj (str "process " (pr-str (:process op))
                                     " is not free"))))]
         (when (seq problems)
-          (throw+ {:type      :invalid-op
-                   :generator gen
-                   :context   ctx
-                   :op        op
-                   :problems  problems})))
+          (binding [*print-length* 10]
+            (throw+ {:type      :invalid-op
+                     :generator gen
+                     :context   ctx
+                     :op        op
+                     :problems  problems}))))
       [op (Validate. gen')]))
 
   (update [this test ctx event]
@@ -309,6 +325,28 @@
   (map (fn transform [op] (c/update op :f f-map)) g))
 
 
+(defrecord Filter [f gen]
+  Generator
+  (op [_ test ctx]
+    (loop [gen gen]
+      (when-let [[op gen'] (op gen test ctx)]
+        (if (or (= :pending op) (f op))
+          ; We can let this through
+          [op (Filter. f gen')]
+          ; Next op!
+          (recur gen')))))
+
+  (update [_ test ctx event]
+    (Filter. f (update gen test ctx event))))
+
+(defn filter
+  "A generator which filters operations from an underlying generator, passing
+  on only those which match (f op). Like `map`, :pending and nil operations
+  bypass the filter."
+  [f gen]
+  (Filter. f gen))
+
+
 (defrecord IgnoreUpdates [gen]
   Generator
   (op [this test ctx]
@@ -344,10 +382,10 @@
   "Helper function to transform contexts for OnThreads."
   [f ctx]
   (let [; Filter free threads to just those we want
-        ctx     (c/update ctx :free-threads (partial filter f))
+        ctx     (c/update ctx :free-threads (partial c/filter f))
         ; Update workers to remove threads we won't use
         ctx (->> (:workers ctx)
-                 (filter (comp f key))
+                 (c/filter (comp f key))
                  (into {})
                  (assoc ctx :workers))]
     ctx))
@@ -421,9 +459,6 @@
   ; gens is a map of threads to generators.
   Generator
   (op [this test ctx]
-    ; As a potential optimization, we could only look at free threads, but then
-    ; we have to think carefully about what happens when all free thread gens
-    ; return `nil` but a non-free thread has more to do. :pending, I think!
     (let [free-threads (free-threads ctx)
           all-threads  (all-threads ctx)
           [op gen' thread :as soonest]
@@ -455,7 +490,7 @@
           thread (process->thread ctx process)
           gen    (get gens thread fresh-gen)
           ctx    (-> ctx
-                     (c/update :free-threads (partial filter #{thread}))
+                     (c/update :free-threads (partial c/filter #{thread}))
                      (assoc :workers {thread process}))
           gen'   (update gen test ctx event)]
       (EachThread. fresh-gen (assoc gens thread gen')))))
@@ -467,6 +502,73 @@
   which emitted the operation."
   [gen]
   (EachThread. gen {}))
+
+
+(defrecord Reserve [ranges gens]
+  ; ranges is a collection of functions defining sets of threads engaged in
+  ; each generator.
+  ; gens is a collection of generators corresponding to ranges.
+  Generator
+  (op [_ test context]
+    (let [[op gen' i :as soonest]
+          (->> ranges
+               (map-indexed
+                 (fn [i threads]
+                   (let [gen (nth gens i)
+                         ; Restrict context to this range of threads
+                         ctx (on-threads-context threads ctx)]
+                     ; Ask this range's generator for an op
+                     (when-let [pair (op gen test ctx)]
+                       ; Remember our index
+                       (conj pair i)))))
+               (reduce soonest-op-vec nil))]
+      (when soonest
+        ; A range has an operation to do!
+        [op (Reserve. ranges (assoc gen i gen'))])))
+
+  (update [this test ctx event]
+    (let [process (:process event)
+          thread  (process->thread ctx process)
+          i (reduce (fn red [i threads]
+                      (if (threads thread)
+                        (reduced i)
+                        (inc i)))
+                    0
+                    threads) TODO HERE
+
+    (Reserve. ranges
+              
+
+
+(defn reserve
+  "Takes a series of count, generator pairs, and a final default generator.
+
+  (reserve 5 write 10 cas read)
+
+  The first 5 threads will call the `write` generator, the next 10 will emit
+  CAS operations, and the remaining threads will perform reads. This is
+  particularly useful when you want to ensure that two classes of operations
+  have a chance to proceed concurrently--for instance, if writes begin
+  blocking, you might like reads to proceed concurrently without every thread
+  getting tied up in a write.
+
+  Each generator sees a context which only includes the first 5 worker threads,
+
+  [& args]
+  (let [gens (->> args
+                  drop-last
+                  (partition 2)
+                  ; Construct [lower upper gen] tuples defining the range of
+                  ; thread indices covering a given generator, lower
+                  ; inclusive, upper exclusive.
+                  (reduce (fn [[n gens] [thread-count gen]]
+                            (let [n' (+ n thread-count)]
+                              [n' (conj gens [n n' gen])]))
+                          [0 []])
+                  second)
+        default (last args)]
+    (assert default)
+    (Reserve. gens default)))
 
 (declare nemesis)
 
@@ -534,7 +636,7 @@
   Generator
   (op [_ test ctx]
     (when (pos? remaining)
-      (let [[op gen'] (op gen test ctx)]
+      (when-let [[op gen'] (op gen test ctx)]
         [op (Limit. (dec remaining) gen')])))
 
   (update [this test ctx event]
@@ -546,11 +648,38 @@
   [remaining gen]
   (Limit. remaining gen))
 
-
 (defn once
   "Emits only a single item from the underlying generator."
   [gen]
   (limit 1 gen))
+
+
+(defrecord ProcessLimit [n procs gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      (if (= :pending op)
+        [op (ProcessLimit. n procs gen')]
+        (let [procs' (into procs (all-processes ctx))]
+          (when (<= (count procs') n)
+            [op (ProcessLimit. n procs' gen')])))))
+
+  (update [_ test ctx event]
+    (ProcessLimit. n procs (update gen test ctx event))))
+
+(defn process-limit
+  "Takes a generator and returns a generator with bounded concurrency--it emits
+  operations for up to n distinct processes, but no more.
+
+  Specifically, we track the set of all processes in a context's `workers` map:
+  the underlying generator can return operations only from contexts such that
+  the union of all processes across all such contexts has cardinality at most
+  `n`. Tracking the union of all *possible* processes, rather than just those
+  processes actually performing operations, prevents the generator from
+  \"trickling\" at the end of a test, i.e. letting only one or two processes
+  continue to perform ops, rather than the full concurrency of the test."
+  [n gen]
+  (ProcessLimit. n #{} gen))
 
 (defrecord TimeLimit [limit cutoff gen]
   Generator
@@ -712,3 +841,4 @@
            (then (once {:f :read})))"
   [a b]
   [b (synchronize a)])
+
