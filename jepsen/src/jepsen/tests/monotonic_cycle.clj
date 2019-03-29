@@ -34,7 +34,8 @@
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
-            [jepsen.generator :as gen]))
+            [jepsen.generator :as gen]
+            [fipp.edn :refer [pprint]]))
 
 (set! *warn-on-reflection* true)
 
@@ -47,11 +48,11 @@
         nodes (keys succs)
         ;; Ensure there's a table index for every value we could find
         table-size (->> nodes (apply max) inc)
-        result (loop [index    0
-                      indices  (int-array table-size)
-                      visited  (boolean-array table-size)
+        result (loop [index      0
+                      indices    (int-array table-size)
+                      visited    (boolean-array table-size)
                       ^clojure.lang.PersistentHashMap$ArrayNode$Iter
-                      iterator (.iterator nodes)
+                      iterator   (.iterator nodes)
                       iter-stack '()
                       min-stack  '()
                       stack      '()
@@ -70,8 +71,9 @@
                            m          (aget indices node)
                            min-stack  (conj min-stack m)
                            iter-stack (conj iter-stack iterator)
-                           ^clojure.lang.PersistentHashMap$ArrayNode$Iter
-                           iterator   (.iterator ^clojure.lang.PersistentHashSet (succs node))
+                           ^clojure.lang.PersistentHashSet
+                           edges      (succs node)
+                           iterator   (.iterator edges)
                            index      (inc index)]
                        (recur index indices visited iterator iter-stack min-stack stack node sccs))
 
@@ -139,67 +141,67 @@
                               iter-stack min-stack stack prev-node sccs)))))]
     result))
 
-(defn apply-pair
-  "Takes a map of registers to their last-seen values, a map of registers to
-  their graphs, and a tuple containing a register and its new value. Returns
-  the graph-map with the op applied to the appropriate register's graph."
-  [last graph [k v]]
-  (let [last-v (last k)
-        node {v #{}}
-        edge (if last-v
-               {last-v #{v}}
-               {})
-        g (merge-with set/union (graph k) node edge)]
-    (assoc-in graph [k] g)))
+(defn merge-merge-union
+  "Return a partial function which merges and unions maps containing maps
+  of sets. Ex.
+  {:x {0 #{1 2 3}}}
+  {:x {0 #{4 5 6}}}
+  {:x {1 #{7 8 9}}}
+  =>
+  {:x {0 #{1 2 3 4 5 6}
+       1 #{7 8 9}}}"
+  []
+  (partial merge-with (partial merge-with clojure.set/union)))
 
-(defn graph
-  "TODO Docstring"
+(defn key-index
+  "Takes an empty map or key-index map and an op, merging the op into the
+  key-index. A key-index is a per-key map of values to the transactions that
+  have observed that value.
+  Ex:
+  (key-index {:x {0 #{1}}}, {:index 4 :f :read :value {:x 3 :y 7}})
+  => {:x {0 #{1}
+          3 #{4}}
+      :y {7 #{4}}}"
+  ([values {:keys [index value]}]
+   (let [indices (map (fn [[k v]] {k (sorted-map v #{index})})
+                      value)]
+     (apply (merge-merge-union) values indices))))
+
+(defn key-orders
+  "Takes an key-index, an empty map or key-order map, and an op representing
+  a read transaction. Looks up the transactions that succeed this one, on the
+  key-index and merges the txn and its succs into the key-order.
+  Ex:
+  (key-orders {:x {0 #{1} 1 #{2}}}, {} {:index 3 :f :read :value {:x 3}})
+  => {:x {0 #{1}
+          1 #{2}
+          2 #{3}}}"
+  [key-index orders {:keys [index value]}]
+  (let [succs (map (fn [[k v]]
+                     (let [idx (key-index k)]
+                       (loop [v' (inc v)]
+                         (let [succs (idx v')]
+                           (cond
+                             ;; No more succs, we're done with the graph
+                             (< (count idx) (dec v')) {k {index #{}}}
+                             ;; Found succs
+                             (<= 1 (count succs)) {k {index succs}}
+                             ;; Missing vals, keep incrementing
+                             :else (recur (inc v')))))))
+                   value)]
+    (apply (merge-merge-union) orders succs)))
+
+(defn precedence-graph
+  "Takes a history of read txns and returns a single precedence graph of the
+  transactions across all keys."
   [history]
-  (loop [graph {}
-         last  {}
-         ;; This will probably have to be a map of keys to last-seen values
-         [op & more] history]
-    (let [val   (:value op)
-          ;; Single register get a key called :register
-          val   (if-not (map? val)
-                  {:register val}
-                  val)
-          ;; Remove values that have not changed
-          new-pairs (set/difference (set val)
-                                    (set last))
+  (let [idx        (r/reduce key-index {} history)
+        key-orders (r/reduce (partial key-orders idx) {} history)]
 
-          ;; Apply new nodes and edges to the graph
-          g' (reduce (partial apply-pair last)
-                     graph
-                     new-pairs)]
-      (if more
-        (recur g' (merge last val) more)
-        g'))))
-
-(defn errors
-  "Takes a set of component-sets from tarjan's results, identifying if any
-  components are strongly connected (more than 1 element per set)."
-  [components]
-  (let [<=2 (fn [set]
-              {set (<= 2 (count set))})
-        error? (fn [m] (some true? (vals m)))]
-    (->> components
-         (map <=2)
-         (filter error?)
-         (reduce merge))))
-
-(defn valid?
-  "Takes a map of registers to their analyzed components. Returns true if
-  none are invalid. Also auto-validates any single-register history."
-  [errors]
-  (if-not (:register errors)
-    (->> errors
-         (map second)
-         (map vals)
-         (apply concat)
-         (some true?)
-         not)
-    true))
+    ;; Merge all of our key-orders together into a precedence graph
+    (->> key-orders
+         vals
+         (apply merge-with clojure.set/union))))
 
 (defn checker []
   (reify checker/Checker
@@ -207,19 +209,19 @@
       (let [h          (->> history
                             (filter op/ok?)
                             (filter #(= :read (:f %))))
-            g          (graph h)
-            components (util/map-vals tarjan g)
-            errors     (util/map-vals errors components)]
+            g          (precedence-graph h)
+            components (tarjan g)
+            errors     (filter #(< 1 (count %)) components)]
 
         ;; Auto-validate single-key histories
-        {:valid? (valid? errors)
+        {:valid? (empty? errors)
          :errors errors}))))
 
-(defn inc [k]
-  {:f :inc, :type :invoke, :value (vec k)})
+(defn w-inc [ks]
+  {:f :inc, :type :invoke, :value (vec ks)})
 
-(defn r [keys]
-  (let [v (->> keys
+(defn r [ks]
+  (let [v (->> ks
                (map (fn [k] [k nil]))
                (into {}))]
     {:f :read, :type :invoke, :value v}))
@@ -233,4 +235,4 @@
   [{:keys [keys read-n]}]
   {:checker (checker)
    ;; FIXME
-   :generator (gen/mix [inc r])})
+   :generator (gen/mix [w-inc r])})
