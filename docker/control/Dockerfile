@@ -11,6 +11,7 @@ RUN apt-get -y -q update && \
     add-apt-repository ppa:openjdk-r/ppa && \
     apt-get -y -q update && \
     apt-get install -qqy \
+        dos2unix \
         openjdk-8-jdk \
         libjna-java \
         git \
@@ -29,6 +30,7 @@ RUN cd /jepsen/jepsen && lein install
 
 ADD ./bashrc /root/.bashrc
 ADD ./init.sh /init.sh
-RUN chmod +x /init.sh
+RUN dos2unix /init.sh /root/.bashrc \
+    && chmod +x /init.sh
 
 CMD /init.sh
