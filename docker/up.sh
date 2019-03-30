@@ -100,14 +100,15 @@ else
     INFO "No need to generate key pair"
 fi
 
+# Make sure folders referenced in control Dockerfile exist and don't contain leftover files
+rm -rf ./control/jepsen
+mkdir -p ./control/jepsen/jepsen
 # Copy the jepsen directory if we're not mounting the JEPSEN_ROOT
 if [ ! "$DEV" ]; then
     # Dockerfile does not allow `ADD ..`. So we need to copy it here in setup.
     INFO "Copying .. to control/jepsen"
     (
-        rm -rf ./control/jepsen
-        mkdir ./control/jepsen
-        (cd ..; tar --exclude=./docker --exclude=./.git -cf - .)  | tar Cxf ./control/jepsen -
+        (cd ..; tar --exclude=./docker --exclude=./.git --exclude-ignore=.gitignore -cf - .)  | tar Cxf ./control/jepsen -
     )
 fi
 
