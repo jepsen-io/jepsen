@@ -6,7 +6,7 @@
 
   This problem is equivalent to cycle detection: we have a set of partial
   orders <x, <y, ..., each of which relates states based on whether x increases
-  or not. We're trying to determine whether these orders are *compatible*.
+  or not. We're trying to determine whether these orders(not ) are *compatible*.
 
   Imagine an order <x as a graph over states, and likewise for <y, <z, etc.
   Take the union of these graphs. If all these orders are compatible, there
@@ -39,6 +39,36 @@
 
 (set! *warn-on-reflection* true)
 
+;; TODO Remove later, just keeping it around to compare results
+(defn recur-tarjan
+  "Returns the strongly connected components of a graph specified by its nodes
+   and a successor function succs from node to nodes.
+   The used algorithm is Tarjan's one."
+  [succs]
+  (let [nodes (keys succs)]
+    (letfn [(sc [env node]
+              ;; env is a map from nodes to stack length or nil,
+              ;; nil means the node is known to belong to another SCC
+              ;; there are two special keys: ::stack for the current stack
+              ;; and ::sccs for the current set of SCCs
+              (if (contains? env node)
+                env
+                (let [stack (::stack env)
+                      n (count stack)
+                      env (assoc env node n ::stack (conj stack node))
+                      env (reduce (fn [env succ]
+                                    (let [env (sc env succ)]
+                                      (assoc env node (min (or (env succ) n) (env node)))))
+                                  env (succs node))]
+                  (if (= n (env node)) ; no link below us in the stack, call it a SCC
+                    (let [nodes (::stack env)
+                          scc (set (take (- (count nodes) n) nodes))
+                          ;; clear all stack lengths for these nodes since this SCC is done
+                          env (reduce #(assoc %1 %2 nil) env scc)]
+                      (assoc env ::stack stack ::sccs (conj (::sccs env) scc)))
+                    env))))]
+      (::sccs (reduce sc {::stack () ::sccs #{}} nodes)))))
+
 (defn tarjan
   "Returns the strongly connected components of a graph specified by its
   nodes (ints) and a successor function (succs node) from node to nodes.
@@ -49,33 +79,35 @@
         ;; Ensure there's a table index for every value we could find
         table-size (->> nodes (apply max) inc)
         result (loop [index      0
-                      indices    (int-array table-size)
+                      prev-node  nil
+                      low        (int-array table-size)
                       visited    (boolean-array table-size)
                       ^clojure.lang.PersistentHashMap$ArrayNode$Iter
                       iterator   (.iterator nodes)
                       iter-stack '()
                       min-stack  '()
                       stack      '()
-                      prev-node  nil
                       sccs       #{}]
+                 (pprint {:index index :iter-stack (count iter-stack)
+                          :min-stack min-stack :stack stack :sccs sccs})
                  ;; Depth-first search
                  (if-let [node (when (.hasNext iterator)
                                  (.next iterator))]
-                   ;; Has the  node been visited?
+                   ;; Has the node been visited?
                    (if-not (aget visited node)
                      ;; New node! Go down a level
-                     (let [_          (aset indices node index)
+                     (let [_          (aset low node index)
                            _          (aset visited node true)
                            stack      (conj stack node)
-
-                           m          (aget indices node)
+                           m          (aget low node)
                            min-stack  (conj min-stack m)
                            iter-stack (conj iter-stack iterator)
                            ^clojure.lang.PersistentHashSet
                            edges      (succs node)
                            iterator   (.iterator edges)
                            index      (inc index)]
-                       (recur index indices visited iterator iter-stack min-stack stack node sccs))
+                       (recur index node low visited iterator
+                              iter-stack min-stack stack sccs))
 
                      ;; We've seen this before, update the min stack
                      (let [min-stack (if (< 0 (count min-stack)) ; Ensure we have a recent minimum
@@ -83,16 +115,19 @@
                                              m         (peek min-stack)
                                              min-stack (pop min-stack)
                                              ;; Compare the recent lowest to node's current index
-                                             index (aget indices node)
+                                             i' (aget low prev-node)
                                              ;; Find the smaller of the node's index or last min
-                                             low   (min index m)]
+                                             low   (min i' m)]
                                          (conj min-stack low))
                                        min-stack)]
-                       (recur index indices visited iterator iter-stack min-stack stack node sccs)))
+                       (recur index node low visited iterator
+                              iter-stack min-stack stack sccs)))
 
                    ;; Done checking this set of edges
                    ;; Are we done?
                    (if (zero? (count iter-stack))
+                     ;; No more large components, let's drain the non-components
+                     ;; nodes at the end
                      sccs
                      ;; More to search
                      (let [iterator   (peek iter-stack)
@@ -102,28 +137,32 @@
                            min-stack  (pop min-stack)
 
                            ;; Should we start a component?
-                           [stack scc] (if (< m (aget indices prev-node))
+                           [stack scc] (if (< m (aget low prev-node))
                                          (do
-                                           (aset indices prev-node m)
-                                           [stack nil])
+                                           (aset low prev-node m)
+                                           [stack #{}])
 
                                          ;; SCC good to go sir
-                                         (loop [w     nil
-                                                stack stack
+                                         (loop [w     (or (peek stack) prev-node)
+                                                stack (try
+                                                        (pop stack)
+                                                        (catch java.lang.IllegalStateException _
+                                                          '()))
                                                 scc   #{}]
-                                           (let [w (or (peek stack) -1)]
-                                             (if (<= prev-node w)
-                                               (let [stack (try
-                                                             (pop stack)
-                                                             (catch java.lang.IllegalStateException _
-                                                               '()))
-                                                     scc   (conj scc w)]
-                                                 (aset indices w (count nodes))
-                                                 (recur w stack scc))
-                                               [stack scc]))))
+                                           (pprint {:w w :prev-node prev-node :scc scc})
+                                           (if (not= prev-node w)
+                                             (let [scc (conj scc w)
+                                                   _   (aset low w (count nodes))
+                                                   w'  (or (peek stack) prev-node)
+                                                   stack (try
+                                                           (pop stack)
+                                                           (catch java.lang.IllegalStateException _
+                                                             '()))]
+                                               (recur w' stack scc))
+                                             [stack (conj scc w)])))
 
                            ;; Add SCC to collection if we have one
-                           sccs (if scc
+                           sccs (if (< 0 (count scc))
                                   (conj sccs scc)
                                   sccs)
 
@@ -132,13 +171,14 @@
                                        (let [m         (peek min-stack)
                                              min-stack (pop min-stack)
 
-                                             i' (aget indices prev-node)
+                                             i' (aget low prev-node)
                                              ;; Find the smaller of the node's index or last min
                                              low       (min i' m)
                                              min-stack (conj min-stack low)]
-                                         min-stack))]
-                       (recur index indices visited iterator
-                              iter-stack min-stack stack prev-node sccs)))))]
+                                         min-stack)
+                                       min-stack)]
+                       (recur index prev-node low visited iterator
+                              iter-stack min-stack stack sccs)))))]
     result))
 
 (defn merge-merge-union
