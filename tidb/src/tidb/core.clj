@@ -12,6 +12,7 @@
             [tidb.nemesis :as nemesis]
             [tidb.bank :as bank]
             [tidb.sets :as sets]
+            [tidb.adya :as adya]
             [tidb.register :as register]))
 
 (def tests
@@ -19,6 +20,7 @@
   {"bank"            bank/test
    "bank-multitable" bank/multitable-test
    "sets"            sets/test
+   "g2"              adya/g2-test
    "register"        register/test})
 
 (def oses
