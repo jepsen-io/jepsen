@@ -73,6 +73,6 @@
   `(timeout 5000 (assoc ~op :type :info, :value :timed-out)
            (with-error-handling ~op
              (with-txn-retries
-               (j/with-db-transaction [~c (conn-spec ~node) :isolation :serializable]
+               (j/with-db-transaction [~c (conn-spec ~node)]
                  (j/execute! ~c ["start transaction with consistent snapshot"])
                  ~@body)))))
