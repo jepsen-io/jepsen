@@ -24,7 +24,7 @@ get_time() {
     fi
 }
 
-for test in "bank" "sets" "register"
+for test in "bank" "bank-multitable" "sets" "register"
 do
     for nemesis in "none" "parts" "majority-ring" "start-stop-2" "start-kill-2"
         do
