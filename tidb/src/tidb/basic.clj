@@ -29,5 +29,5 @@
                   (gen/log "Waiting for quiescence")
                   (gen/sleep (:recovery-time opts))
                   (gen/clients (:final (:client opts))))
-    }
+     :keyrange (atom {})}
     (dissoc opts :name :client :nemesis)))
