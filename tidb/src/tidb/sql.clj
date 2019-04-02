@@ -1,8 +1,13 @@
 (ns tidb.sql
   (:require [clojure.string :as str]
-            [jepsen
-             [util :refer [timeout]]]
-            [clojure.java.jdbc :as j]))
+            [jepsen [util :as util :refer [timeout]]]
+            [clojure.java.jdbc :as j]
+            [clojure.tools.logging :refer [info warn]]
+            [slingshot.slingshot :refer [try+ throw+]]))
+
+(def connect-timeout 120000)
+(def socket-timeout  10000)
+(def login-timeout   5000)
 
 (defn conn-spec
   "jdbc connection spec for a node."
@@ -11,7 +16,60 @@
    :subprotocol "mariadb"
    :subname     (str "//" (name node) ":4000/test")
    :user        "root"
-   :password    ""})
+   :password    ""
+   :loginTimeout   (/ login-timeout 1000)
+   :connectTimeout (/ connect-timeout 1000)
+   :socketTimeout  (/ socket-timeout 1000)})
+
+(defn open
+  "Opens a connection to the given node."
+  [node]
+  (timeout connect-timeout
+           (throw+ {:type :connect-timed-out
+                    :node node})
+           (util/retry 1
+                       (try
+                         (let [spec   (conn-spec node)
+                               conn   (j/get-connection spec)
+                               spec'  (j/add-connection spec conn)]
+                           (assert spec')
+                           spec')
+                         (catch Throwable t
+                           (info t "caught, retrying")
+                           (throw t))))))
+
+(defn close!
+  "Given a JDBC connection, closes it and returns the underlying spec."
+  [conn]
+  (when-let [c (j/db-find-connection conn)]
+    (.close c))
+  (dissoc conn :connection))
+
+(def await-id
+  "Used to generate unique identifiers for awaiting cluster stabilization"
+  (atom 0))
+
+(defn await-node
+  "Waits for a node to become ready by opening a connection, creating a table,
+  and inserting a record."
+  [node]
+  (info "Waiting for" node)
+  (if (let [c (open node)]
+        (try
+          (info "Creating table")
+          (j/execute! c ["create table if not exists jepsen_await
+                         (id int primary key, val int)"])
+          (info "Inserting record")
+          (j/insert! c "jepsen_await" {:id (swap! await-id inc) :val (rand-int 5)})
+          true
+          (catch java.sql.SQLNonTransientConnectionException e
+            (if (re-find #"Last packet not finished" (.getMessage e))
+              (info "Last packet not finished, retrying")
+              (throw e)))
+          (finally
+            (close! c))))
+    (info node "ready")
+    (recur node)))
 
 (def rollback-msg
   "mariadb drivers have a few exception classes that use this message"
@@ -80,4 +138,3 @@
        (throw (ex-info "Connection not yet ready."
                        {:type :conn-not-ready})))
      ~@body))
-
