@@ -215,4 +215,3 @@
            :model {:n 5 :total 50}
            :client (multitable-bank-client 5 10 " FOR UPDATE" false)}
           opts)))
->>>>>>> 6aac9c8ac120dc848c6221089cc35044514a62ef

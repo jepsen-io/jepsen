@@ -65,11 +65,11 @@
                                       (gen/delay-til 1/2)
                                       (gen/stagger 0.1)
                                       (gen/limit 100))))}
-       :model       (model/cas-register 0)
        :checker     (checker/compose
                       {:perf   (checker/perf)
                        :indep (independent/checker
-                                  (checker/compose
-                                    {:timeline (timeline/html)
-                                     :linear   checker/linearizable}))})}
+                                (checker/compose
+                                  {:timeline (timeline/html)
+                                   :linear   (checker/linearizable
+                                               {:model (model/cas-register 0)})}))})}
       opts)))

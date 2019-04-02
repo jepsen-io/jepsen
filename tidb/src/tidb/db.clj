@@ -4,11 +4,8 @@
             [jepsen
               [core :as jepsen]
               [control :as c]
-              [db :as db]
-            ]
-            [jepsen.control.util :as cu]
-  )
-)
+              [db :as db]]
+            [jepsen.control.util :as cu]))
 
 (def tidb-dir "/opt/tidb")
 (def pd "./bin/pd-server")
@@ -220,6 +217,8 @@
     )
 
     db/LogFiles
-    (log-files [_ test node] [log-file])
-  )
-)
+    (log-files [_ test node]
+      [dblogfile
+       kvlogfile
+       pdlogfile
+       log-file])))
