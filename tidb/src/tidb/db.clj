@@ -134,7 +134,7 @@
     (setup! [_ test node]
       (c/su
         (info node "installing TiDB")
-        (cu/install-tarball! node (:tarball test) tidb-dir)
+        (cu/install-archive! (:tarball test) tidb-dir)
 
         (c/exec :echo "[replication]\nmax-replicas=5" :> pdconfigfile)
         (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"" :> tikvconfigfile)
@@ -168,7 +168,7 @@
           :--config                pdconfigfile
         )
 
-        (jepsen/synchronize test)
+        (jepsen/synchronize test 120)
         (Thread/sleep 10000)
 
         ; ./bin/tikv-server --pd="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379"
