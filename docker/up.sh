@@ -36,12 +36,11 @@ do
             ;;
         --dev)
             if [ ! "$JEPSEN_ROOT" ]; then
-                INFO "MISSING VAR: --dev requires JEPSEN_ROOT to be set"
-                exit 1
-            else
-                INFO "Running docker-compose with dev config"
-                DEV="-f docker-compose.dev.yml"
+                export JEPSEN_ROOT=$(cd ../ && pwd)
+                INFO "JEPSEN_ROOT is not set, defaulting to: $JEPSEN_ROOT"
             fi
+            INFO "Running docker-compose with dev config"
+            DEV="-f docker-compose.dev.yml"
             shift # past argument
             ;;
         --compose)
@@ -101,14 +100,15 @@ else
     INFO "No need to generate key pair"
 fi
 
+# Make sure folders referenced in control Dockerfile exist and don't contain leftover files
+rm -rf ./control/jepsen
+mkdir -p ./control/jepsen/jepsen
 # Copy the jepsen directory if we're not mounting the JEPSEN_ROOT
 if [ ! "$DEV" ]; then
     # Dockerfile does not allow `ADD ..`. So we need to copy it here in setup.
     INFO "Copying .. to control/jepsen"
     (
-        rm -rf ./control/jepsen
-        mkdir ./control/jepsen
-        (cd ..; tar --exclude=./docker --exclude=./.git -cf - .)  | tar Cxf ./control/jepsen -
+        (cd ..; tar --exclude=./docker --exclude=./.git --exclude-ignore=.gitignore -cf - .)  | tar Cxf ./control/jepsen -
     )
 fi
 

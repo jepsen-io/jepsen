@@ -11,25 +11,22 @@
             [jepsen.core :as jepsen]
             [tidb.nemesis :as nemesis]
             [tidb.bank :as bank]
+            [tidb.sequential :as sequential]
             [tidb.sets :as sets]
-            [tidb.register :as register]
-  )
-)
+            [tidb.register :as register]))
 
 (def tests
   "A map of test names to test constructors."
-  {"bank" bank/test
-   "sets" sets/test
-   "register" register/test
-  }
-)
+  {"bank"            bank/test
+   "bank-multitable" bank/multitable-test
+   "sets"            sets/test
+   "sequential"      sequential/test
+   "register"        register/test})
 
 (def oses
   "Supported operating systems"
   {"debian" debian/os
-   "none"   os/noop
-  }
-)
+   "none"   os/noop})
 
 (def nemeses
   "Supported nemeses"
@@ -37,14 +34,11 @@
    "parts"                      `(nemesis/parts)
    "majority-ring"              `(nemesis/majring)
    "start-stop-2"               `(nemesis/startstop 2)
-   "start-kill-2"               `(nemesis/startkill 2)
-  }
-)
+   "start-kill-2"               `(nemesis/startkill 2)})
 
 (def opt-spec
   "Command line options for tools.cli"
-  [
-   (jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
+  [(jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
                     [`(nemesis/none)]
                     nemeses)
 
@@ -65,9 +59,7 @@
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
-    (jc/tarball-opt "http://download.pingcap.org/tidb-latest-linux-amd64.tar.gz")
-  ]
-)
+   (jc/tarball-opt "http://download.pingcap.org/tidb-latest-linux-amd64.tar.gz")])
 
 (defn log-test
   [t]

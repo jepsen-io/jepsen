@@ -1,11 +1,8 @@
 (ns tidb.sql
   (:require [clojure.string :as str]
             [jepsen
-              [util :refer [timeout]]
-            ]
-            [clojure.java.jdbc :as j]
-  )
-)
+             [util :refer [timeout]]]
+            [clojure.java.jdbc :as j]))
 
 (defn conn-spec
   "jdbc connection spec for a node."
@@ -14,9 +11,7 @@
    :subprotocol "mariadb"
    :subname     (str "//" (name node) ":4000/test")
    :user        "root"
-   :password    ""
-  }
-)
+   :password    ""})
 
 (def rollback-msg
   "mariadb drivers have a few exception classes that use this message"
@@ -71,8 +66,18 @@
   conflicts and handling common errors."
   [op [c node] & body]
   `(timeout 5000 (assoc ~op :type :info, :value :timed-out)
-           (with-error-handling ~op
-             (with-txn-retries
-               (j/with-db-transaction [~c (conn-spec ~node) :isolation :serializable]
-                 (j/execute! ~c ["start transaction with consistent snapshot"])
-                 ~@body)))))
+            (with-error-handling ~op
+              (with-txn-retries
+                (j/with-db-transaction [~c (conn-spec ~node)]
+                  (j/execute! ~c ["start transaction with consistent snapshot"])
+                  ~@body)))))
+
+(defmacro with-conn
+  [[c node] & body]
+  `(j/with-db-connection [~c (conn-spec ~node)]
+     (when (.isClosed (j/db-find-connection ~c))
+       (Thread/sleep 1000)
+       (throw (ex-info "Connection not yet ready."
+                       {:type :conn-not-ready})))
+     ~@body))
+
