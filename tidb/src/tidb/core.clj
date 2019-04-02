@@ -11,6 +11,7 @@
             [jepsen.core :as jepsen]
             [tidb.nemesis :as nemesis]
             [tidb.bank :as bank]
+            [tidb.sequential :as sequential]
             [tidb.sets :as sets]
             [tidb.register :as register]))
 
@@ -19,6 +20,7 @@
   {"bank"            bank/test
    "bank-multitable" bank/multitable-test
    "sets"            sets/test
+   "sequential"      sequential/test
    "register"        register/test})
 
 (def oses
