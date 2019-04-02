@@ -157,13 +157,13 @@
           :db (db "v3.1.5")
           :client (client nil)
           :nemesis (nemesis/partition-random-halves)
-          :model  (model/cas-register)
           :checker (checker/compose
                      {:perf     (checker/perf)
                       :indep (independent/checker
                                (checker/compose
                                  {:timeline (timeline/html)
-                                  :linear   (checker/linearizable)}))})
+                                  :linear   (checker/linearizable
+                                              {:model (model/cas-register)})}))})
           :generator (->> (independent/concurrent-generator
                             10
                             (range)
@@ -172,9 +172,9 @@
                                    (gen/stagger 1/30)
                                    (gen/limit 300))))
                           (gen/nemesis
-                            (gen/seq (cycle [(gen/sleep 5)
+                            (gen/seq (cycle [(gen/sleep 10)
                                              {:type :info, :f :start}
-                                             (gen/sleep 5)
+                                             (gen/sleep 10)
                                              {:type :info, :f :stop}])))
                           (gen/time-limit (:time-limit opts)))}
          opts))

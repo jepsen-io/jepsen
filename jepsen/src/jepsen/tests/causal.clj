@@ -90,9 +90,9 @@
   of 5 read (r) and write (w) operations (r w r w r) against a register (key).
   All operations in this CO must appear to execute in the order provided by
   the issuing site (process). We also look for anomalies, such as unexpected values"
-  []
+  [model]
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [completed (filter op/ok? history)]
         (loop [s model
                history completed]
@@ -116,8 +116,7 @@
 (defn cw2 [_ _] {:type :invoke, :f :write, :value 2})
 
 (defn test [opts]
-  {:model (causal-register)
-   :checker (independent/checker (check))
+  {:checker (independent/checker (check (causal-register)))
    :generator (->> (independent/concurrent-generator
                     1
                     (range)

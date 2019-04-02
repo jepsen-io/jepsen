@@ -9,24 +9,87 @@ developers or their documentation.
 
 ## What is being tested?
 
-The tests run concurrent operations to some shared data from different nodes in a YugaByteDB cluster and checks that
-the operations preserve the consistency properties defined in each test. During the tests, various combinations of
-nemeses can be added to interfere with the database operations and exercise the database's consistency protocols.
+The tests run concurrent operations on different nodes in a YugaByteDB cluster
+and checks that the operations preserve the consistency properties defined in
+each test. During the tests, various combinations of nemeses can be added to
+interfere with the database operations and exercise the database's consistency
+protocols.
 
 ## Running
 
-### Prerequisites for CentOS 7
+### Debian Jessie, with the Community Edition
+
+Quickstart:
+
+To run a single workload, use `lein run test`:
+
+```
+lein run test -o debian --version 1.1.14 -w set --nemesis partition
+```
+
+This command runs the set test against version 1.1.14, with network partitions, assuming nodes run Debian Jessie.
+
+To run a full suite of tests, with various workloads and nemeses, use `lein run
+test-all`
+
+```
+lein run test-all -o debian --version 1.1.15.0-b16 --url https://s3-us-west-2.amazonaws.com/downloads.yugabyte.com/new/yugabyte-ee-1.1.15.0-b16-centos-x86_64.tar.gz --concurrency 4n --time-limit 300 --only-workloads-expected-to-pass
+```
+
+Here, we're testing a specific pre-release tarball of version 1.1.15.0-b16.
+We're running 4 clients per node, running for 300 seconds per test, and
+constraining our run to only those workloads we think should pass.
+
+The following workloads are available with `-w`:
+
+- `set` - inserts single records and concurrently reads all of them back.
+- `set-index` - like set, but reads from a small pool of indices
+- `long-fork` - looks for a snapshot isolation violation due to incompatible read orders.
+- `single-key-acid` - concurrent read, write, update if operations on a single row.
+- `multi-key-acid` - concurrent writes to 2 different keys with the same value and reads.
+- `counter` - concurrent counter increments.
+- `bank` - concurrent transfers between rows of a shared table.
+- `bank-multitable` - like bank, but across different tables.
+
+The following nemeses are available with `--nemesis`. Nemeses can be combined
+with commas, like `--nemesis partition,clock-skew`:
+
+- `none` - no failures
+- `clock-skew` - jumps and strobes in clocks, up to hundreds of seconds
+- `partition`  - all kinds of network partitions
+- `partition-half` - cuts the network into two halves, one with a majority
+- `partition-one` - isolate a single node
+- `partition-ring` - every node sees a majority, but no node sees the same set
+- `kill` - kills and restarts tservers and masters
+- `kill-tserver` - kill and restart tservers
+- `kill-master` - kill and restart masters
+- `stop` - stops and restarts tservers and masters
+- `stop-tserver` - stops and restarts tservers
+- `stop-master` - stops and restarts masters
+- `pause` - pauses (with SIGSTOP) and resumes (with SIGCONT) tservers and masters
+- `pause-tserver` - pauses tservers
+- `pause-master` - pauses masters
+
+
+### CentOS 7, Enterprise Edition
+
+YugaByte's original version of these tests ran on CentOS 7, and used a
+pre-installed Enterprise Edition cluster. We've preserved those codepaths in
+this version of the tests (see `jepsen.auto`), but they haven't been tested,
+and likely need some additional polish to work.
 
 Install [https://leiningen.org](https://leiningen.org):
+
 ```bash
 mkdir ~/bin
 curl https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein -o /home/centos/bin/lein \
   && chmod +x ~/bin/lein
 ```
 
-Add `~/bin` to `$PATH`. 
+Add `~/bin` to `$PATH`.
 
 Install Cassaforte driver:
+
 ```bash
 mkdir ~/code
 git clone https://github.com/YugaByte/cassaforte ~/code/cassaforte
@@ -34,24 +97,14 @@ cd ~/code/cassaforte
 git checkout driver-3.0-yb
 lein install
 ```
-Install Knossos library:
-```bash
-git clone https://github.com/YugaByte/knossos ~/code/knossos
-cd ~/code/knossos
-lein install
-```
-Install Jepsen framework:
-```bash
-git clone https://github.com/YugaByte/jepsen ~/code/jepsen
-cd ~/code/jepsen/jepsen
-lein install
-```
+
 Install gnuplot:
+
 ```bash
 sudo yum install gnuplot
 ```
 
-### YugaByteDB cluster setup
+#### YugaByteDB cluster setup
 
 - Create YugaByteDB cluster with 5 nodes and replication factor of 3.
 - Create text file `~/code/jepsen/nodes` and list all cluster nodes there - one per line, for example:
@@ -67,7 +120,11 @@ yb-test-jepsen-n5
 ~/code/jepsen/yugabyte/setup-jepsen.sh
 ```
 
-### Running tests
+#### Wrapper scripts
+
+These wrapper scripts were written for YugaByte's version of these tests, and
+may no longer work correctly. They're preserved here in case anyone would like
+to use them going forward. They aren't necessary to run the tests; the CLI interface for these tests can run all tests automatically.
 
 All commands described below should be run in `~/code/jepsen/yugabyte` directory.
 
@@ -94,36 +151,3 @@ sub-directories:
 - *valid-unknown* - test results checker wasn't able to determine whether results are valid. 
 - *invalid* - history of operations is inconsisent.
 
-The following tests are implemented:
-
-- `single-row-inserts` - concurrent row inserts into single table.
-- `single-key-acid` - concurrent read, write, update if operations on a single row.
-- `multi-key-acid` - concurrent writes to 2 different keys with the same value and reads.
-- `counter-inc` - concurrent counter increments.
-- `counter-inc-dec` - concurrent counter increments and decrements.
-- `bank` - concurrent transfers between rows of a shared table.
-
-Nemeses:
-
-- `start-stop-tserver` - stops tserver process on a random node and then restarts.
-- `start-kill-tserver` - kills tserver process on a random node and then restarts.
-- `start-stop-master` - stops master process on a random node and then restarts.
-- `start-kill-master` - kills master process on a random node and then restarts.
-- `start-stop-node` - stops both tserver and master processes on a random node and then restarts.
-- `start-kill-node` - kills both tserver and master processes on a random node and then restarts.
-- `partition-random-halves` - cuts the network into randomly chosen halves.
-- `partition-random-node` - isolates a single node from the rest of the network.
-- `partition-majorities-ring` - random network partition where each node sees a majority of other nodes.
-- `small-skew` - clock skews up to 100 ms.
-- `medium-skew` - clock skews up to 250 ms.
-- `large-skew` - clock skews up to 500 ms.
-- `xlarge-skew` - clock skews up to 1000 ms.
-
-## Examples
-
-To demonstrate a rare case of lost inserts (this might take several runs):
-
-```
-git checkout 5804dd00964f72184c4ae5c62c5630adc92fe980
-lein run test -o debian --version 1.1.10.0 --test set --nemesis partition-random-halves --time-limit 500 --concurrency 6n --test-count 10
-```

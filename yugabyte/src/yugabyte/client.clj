@@ -6,8 +6,11 @@
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
 			      [clojure.pprint :refer [pprint]]
+            [jepsen [util :as util]]
+            [jepsen.control.net :as cn]
             [dom-top.core :as dt]
-            [wall.hack :as wh])
+            [wall.hack :as wh]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.net InetSocketAddress)
            (com.datastax.driver.core Cluster
                                      Cluster$Builder
@@ -33,6 +36,28 @@
                                  ThreadPoolExecutor
                                  TimeUnit)))
 
+(defmacro with-retry
+  "Retries CQL unavailable/timeout errors for up to 120 seconds. Helpful for
+  setting up initial data; YugaByte loves to throw 10+ second latencies at us
+  early in the test."
+  [& body]
+  `(let [deadline# (+ (util/linear-time-nanos) (util/secs->nanos 120))
+         sleep#    100] ; ms
+     (dt/with-retry []
+       ~@body
+       (catch NoHostAvailableException e#
+         (if (< deadline# (util/linear-time-nanos))
+           (throw e#)
+           (do (info "Timed out, retrying")
+               (Thread/sleep (rand-int sleep#))
+               (~'retry))))
+       (catch OperationTimedOutException e#
+         (if (< deadline# (util/linear-time-nanos))
+           (throw e#)
+           (do (info "Timed out, retrying")
+               (Thread/sleep (rand-int sleep#))
+               (~'retry)))))))
+
 (defn epoll-event-loop-group-constructor
   "Why is this not public?"
   []
@@ -56,15 +81,18 @@
     (withPoolingOptions (doto (PoolingOptions.)
                           (.setCoreConnectionsPerHost HostDistance/LOCAL 1)
                           (.setMaxConnectionsPerHost  HostDistance/LOCAL 1)))
-    (addContactPoint node)
+    ; This is sort of a hack; we're allowed to call cn/ip here without an SSH
+    ; connection because it memoizes, and we already called it during setup.
+    (addContactPoint (cn/ip node))
     (withRetryPolicy (policies/retry-policy :no-retry-on-client-timeout))
     (withReconnectionPolicy (policies/constant-reconnection-policy 1000))
     (withSocketOptions (.. (SocketOptions.)
                          (setConnectTimeoutMillis 1000)
-                         (setReadTimeoutMillis 2000)))
+                         (setReadTimeoutMillis 5000)))
     (withLoadBalancingPolicy (WhiteListPolicy.
                                (RoundRobinPolicy.)
-                               [(InetSocketAddress. node 9042)]))
+                               ; Same story: memoized.
+                               [(InetSocketAddress. (cn/ip node) 9042)]))
     (withThreadingOptions (proxy [ThreadingOptions] []
                             (createExecutor [cluster-name]
                               (doto (ThreadPoolExecutor.
@@ -90,11 +118,12 @@
   ([node]
    (connect node {}))
   ([node opts]
-   (let [c (cluster node)]
-     (try (.connect c)
-          (catch DriverException e
-            (.close c)
-            (throw e))))))
+   (with-retry
+     (let [c (cluster node)]
+       (try (.connect c)
+            (catch DriverException e
+              (.close c)
+              (throw e)))))))
 
 (defn execute-with-timeout!
   "Executes a statement on a session, but applies a custom read timeout, in
@@ -124,7 +153,7 @@
   "Table creation is fairly slow in YB, so we need to run it with a custom
   timeout. Works just like cql/create-table."
   [conn & table-args]
-  (execute-with-timeout! conn 10000 (apply q/create-table table-args)))
+  (execute-with-timeout! conn 30000 (apply q/create-table table-args)))
 
 (defn create-index
   "Index creation is also slow in YB, so we run it with a custom timeout. Works
@@ -139,7 +168,7 @@
                            (string? (first index-args)))
                     (first index-args)
                     (apply q/create-index index-args))]
-    (try (execute-with-timeout! conn 10000 statement)
+    (try (execute-with-timeout! conn 30000 statement)
          (catch InvalidQueryException e
            (if (re-find #"Target index already exists" (.getMessage e))
              :already-exists
@@ -194,9 +223,9 @@
        (catch NoHostAvailableException e#
          (condp re-find (.getMessage e#)
            #"no host was tried"
-           ((info "All nodes are down - sleeping 2s")
-             (Thread/sleep 2000)
-             (assoc ~op :type :fail :error [:no-host-available (.getMessage e#)]))
+           (do (info "All nodes are down - sleeping 2s")
+               (Thread/sleep 2000)
+               (assoc ~op :type :fail :error [:no-host-available (.getMessage e#)]))
            (assoc ~op :type crash#, :error [:no-host-available (.getMessage e#)])))
 
        (catch DriverException e#
@@ -204,6 +233,12 @@
                       (.getMessage e#))
            ; Definitely failed
            (assoc ~op :type :fail, :error (.getMessage e#))
+           (throw e#)))
+
+       (catch InvalidQueryException e#
+         ; This can actually mean timeout
+         (if (re-find #"RPC to .+ timed out after " (.getMessage e#))
+           (assoc ~op :type crash#, :error [:rpc-timed-out (.getMessage e#)])
            (throw e#))))))
 
 (defmacro defclient
@@ -292,9 +327,9 @@
         (info "Zero?, tries " tries)
         (throw (RuntimeException.
                  "Client gave up waiting for cluster setup.")))
+
       (let [conn (connect node)]
         (try
-
           ; We need to do this serially to avoid a race in table creation
           (locking await-setup
             ; This... doesn't actually seem to guarantee that subsequent
@@ -321,7 +356,7 @@
 
       (catch com.datastax.driver.core.exceptions.InvalidQueryException e
         (condp re-find (.getMessage e)
-          #"SQL error: Invalid Table Definition. Invalid argument: Error creating table .+? num_tablets should be greater than 0. Client would need to wait for master leader get heartbeats from tserver"
+          #"num_tablets should be greater than 0"
           (do (info "Waiting for cluster setup: num_tablets was 0")
               (retry (dec tries)))
 

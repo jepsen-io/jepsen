@@ -2,7 +2,7 @@
   "Validates that a history is correct with respect to some model."
   (:refer-clojure :exclude [set])
   (:require [clojure.stacktrace :as trace]
-            [clojure.core :as core]
+            [clojure.core :as c]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
@@ -47,7 +47,7 @@
           valids))
 
 (defprotocol Checker
-  (check [checker test model history opts]
+  (check [checker test history opts]
          "Verify the history is correct. Returns a map like
 
          {:valid? true}
@@ -61,16 +61,27 @@
          Opts is a map of options controlling checker execution. Keys include:
 
          :subdirectory - A directory within this test's store directory where
-                         output files should be written. Defaults to nil."))
+                         output files should be written. Defaults to nil.
+
+          DEPRECATED Checkers should now implement the 4-arity check method
+          without model. If the checker still needs a model, provide it at
+          construction rather than as an argument to `Checker/check`. See the
+          queue and linearizable checkers for examples."))
+
+(defn noop
+  "An empty checker that only returns nil."
+  []
+  (reify Checker
+    (check [_ _ _ _])))
 
 (defn check-safe
   "Like check, but wraps exceptions up and returns them as a map like
 
   {:valid? :unknown :error \"...\"}"
-  ([checker test model history]
-   (check-safe checker test model history {}))
-  ([checker test model history opts]
-   (try (check checker test model history opts)
+  ([checker test history]
+   (check-safe checker test history {}))
+  ([checker test history opts]
+   (try (check checker test history opts)
         (catch Exception t
           (warn t "Error while checking history:")
           {:valid? :unknown
@@ -83,10 +94,10 @@
   valid."
   [checker-map]
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [results (->> checker-map
                          (pmap (fn [[k checker]]
-                                 [k (check-safe checker test model history opts)]))
+                                 [k (check-safe checker test history opts)]))
                          (into {}))]
         (assoc results :valid? (merge-valid (map :valid? (vals results))))))))
 
@@ -101,9 +112,9 @@
   ; often.
   (let [sem (Semaphore. limit true)]
     (reify Checker
-      (check [this test model history opts]
+      (check [this test history opts]
         (try (.acquire sem)
-             (check checker test model history opts)
+             (check checker test history opts)
              (finally
                (.release sem)))))))
 
@@ -111,34 +122,40 @@
   "Everything is awesoooommmmme!"
   []
   (reify Checker
-    (check [this test model history opts] {:valid? true})))
+    (check [this test history opts] {:valid? true})))
 
 (defn linearizable
   "Validates linearizability with Knossos. Defaults to the competition checker,
-  but can be controlled by passing either :linear or :wgl."
-  ([]
-   (linearizable :competition))
-  ([algorithm]
-     (reify Checker
-       (check [this test model history opts]
-         (let [a ((case algorithm
-                    :competition  competition/analysis
-                    :linear       linear/analysis
-                    :wgl          wgl/analysis)
-                  model history)]
-           (when-not (:valid? a)
-             (try
-               ; Renderer can't handle really broad concurrencies yet
-               (linear.report/render-analysis!
-                 history a (.getCanonicalPath
-                             (store/path! test (:subdirectory opts)
-                                          "linear.svg")))
-               (catch Throwable e
-                 (warn e "Error rendering linearizability analysis"))))
-           ; Writing these can take *hours* so we truncate
-           (assoc a
-                  :final-paths (take 10 (:final-paths a))
-                  :configs     (take 10 (:configs a))))))))
+  but can be controlled by passing either :linear or :wgl.
+
+  Takes an options map for arguments, ex.
+  {:model (model/cas-register)
+   :algorithm :wgl}"
+  [{:keys [algorithm model]}]
+  (assert model
+          (str "The linearizable checker requires a model. It received: "
+               model
+               " instead."))
+  (reify Checker
+    (check [this test history opts]
+      (let [a ((case algorithm
+                 :linear       linear/analysis
+                 :wgl          wgl/analysis
+                 competition/analysis)
+               model history)]
+        (when-not (:valid? a)
+          (try
+            ;; Renderer can't handle really broad concurrencies yet
+            (linear.report/render-analysis!
+             history a (.getCanonicalPath
+                        (store/path! test (:subdirectory opts)
+                                     "linear.svg")))
+            (catch Throwable e
+              (warn e "Error rendering linearizability analysis"))))
+        ;; Writing these can take *hours* so we truncate
+        (assoc a
+               :final-paths (take 10 (:final-paths a))
+               :configs     (take 10 (:configs a)))))))
 
 (defn queue
   "Every dequeue must come from somewhere. Validates queue operations by
@@ -146,16 +163,16 @@
   then reducing the model with that history. Every subhistory of every queue
   should obey this property. Should probably be used with an unordered queue
   model, because we don't look for alternate orderings. O(n)."
-  []
+  [model]
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [final (->> history
                        (r/filter (fn select [op]
                                    (condp = (:f op)
                                      :enqueue (op/invoke? op)
                                      :dequeue (op/ok? op)
                                      false)))
-                                 (reduce model/step model))]
+                       (reduce model/step model))]
         (if (model/inconsistent? final)
           {:valid? false
            :error  (:msg final)}
@@ -168,7 +185,7 @@
   contains only elements for which an add was attempted."
   []
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [attempts (->> history
                           (r/filter op/invoke?)
                           (r/filter #(= :add (:f %)))
@@ -180,15 +197,15 @@
                       (r/map :value)
                       (into #{}))
             final-read (->> history
-                          (r/filter op/ok?)
-                          (r/filter #(= :read (:f %)))
-                          (r/map :value)
-                          (reduce (fn [_ x] x) nil))]
+                            (r/filter op/ok?)
+                            (r/filter #(= :read (:f %)))
+                            (r/map :value)
+                            (reduce (fn [_ x] x) nil))]
         (if-not final-read
           {:valid? :unknown
            :error  "Set was never read"}
 
-          (let [final-read (core/set final-read)
+          (let [final-read (c/set final-read)
 
                 ; The OK set is every read value which we tried to add
                 ok          (set/intersection final-read attempts)
@@ -338,7 +355,7 @@
   [points c]
   (let [sorted (sort c)]
     (when (seq sorted)
-      (let [n (clojure.core/count sorted)
+      (let [n (c/count sorted)
             extract (fn [point]
                       (let [idx (min (dec n) (int (Math/floor (* n point))))]
                         (nth sorted idx)))]
@@ -459,7 +476,7 @@
    (set-full {:linearizable? false}))
   ([checker-opts]
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       ; Build up a map of elements to element states. We track the current set
       ; of ongoing reads as well, so we can map completions back to
       ; invocations. Finally we track a map of duplicates: elements to maximum
@@ -486,30 +503,31 @@
                                  :fail   [elements (dissoc reads p op) dups]
                                  :info   [elements reads dups]
                                  :ok
-                                 (do ; We read stuff! Update every element
-                                     (let [inv (get reads (:process op))
-                                           ; Find duplicates
-                                           dups' (->> (frequencies v)
-                                                      (reduce (fn [m [k v]]
-                                                                (if (< v 1)
-                                                                  (assoc m k v)
-                                                                  m))
-                                                              (sorted-map))
-                                                      (merge-with max dups))
-                                           v   (into (sorted-set) v)]
-                                       ; Process visibility of all elements
-                                       [(map-kv (fn update-all [[element state]]
-                                                  [element
-                                                   (if (contains? v element)
-                                                     (set-full-read-present
-                                                       state inv op)
-                                                     (set-full-read-absent
-                                                       state inv op))])
-                                                elements)
-                                        reads
-                                        dups']))))))
-                         [{} {} (sorted-map)]))
-            set-results (set-full-results checker-opts (vals elements))]
+                                 ; We read stuff! Update every element
+                                 (let [inv (get reads (:process op))
+                                       ; Find duplicates
+                                       dups' (->> (frequencies v)
+                                                  (reduce (fn [m [k v]]
+                                                            (if (< v 1)
+                                                              (assoc m k v)
+                                                              m))
+                                                          (sorted-map))
+                                                  (merge-with max dups))
+                                       v   (c/set v)]
+                                   ; Process visibility of all elements
+                                   [(map-kv (fn update-all [[element state]]
+                                              [element
+                                               (if (contains? v element)
+                                                 (set-full-read-present
+                                                   state inv op)
+                                                 (set-full-read-absent
+                                                   state inv op))])
+                                            elements)
+                                    reads
+                                    dups'])))))
+                         [{} {} {}]))
+            set-results (set-full-results checker-opts
+                                          (mapv val (sort elements)))]
         (assoc set-results
                :valid?           (and (empty? dups) (:valid? set-results))
                :duplicated-count (count dups)
@@ -555,7 +573,7 @@
   draining them completely. O(n)."
   []
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [history  (expand-queue-drain-ops history)
             attempts (->> history
                           (r/filter op/invoke?)
@@ -579,7 +597,7 @@
             ; leftovers from some earlier state. Definitely don't want your
             ; queue emitting records from nowhere!
             unexpected (->> dequeues
-                            (remove (core/set (keys (multiset/multiplicities
+                            (remove (c/set (keys (multiset/multiplicities
                                                  attempts))))
                             (into (multiset/multiset)))
 
@@ -624,7 +642,7 @@
        :range               [lowest-id highest-id]}"
   []
   (reify Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       (let [attempted-count (->> history
                                  (filter op/invoke?)
                                  (filter #(= :generate (:f %)))
@@ -661,116 +679,98 @@
 (defn counter
   "A counter starts at zero; add operations should increment it by that much,
   and reads should return the present value. This checker validates that at
-  each read, the value is at greater than the sum of all :ok increments and
+  each read, the value is greater than the sum of all :ok increments and
   attempted decrements, and lower than the sum of all attempted increments and
   :ok decrements.
-
-  Since we know a :fail increment did not occur, we should decrement the
-  counter by the appropriate amount.
-
-  TODO: filter out failed operations in an initial pass.
 
   Returns a map:
 
   {:valid?              Whether the counter remained within bounds
    :reads               [[lower-bound read-value upper-bound] ...]
    :errors              [[lower-bound read-value upper-bound] ...]
+   :max-absolute-error  The [lower read upper] where read falls furthest outside
+   :max-relative-error  Same, but with error computed as a fraction of the mean}
   "
   []
   (reify Checker
-    (check [this test model history opts]
-      (loop [history            (seq (history/complete history))
-             ; Current lower bound on counter.
-             lower              0
-             ; Upper bound on counter value.
-             upper              0
-             ; Map: process ID -> list of [lower upper] pairs for the pending read operation invoked by the process.
-             ; Last pair in the list is most recent one and reflects the current counter possible range.
-             ; List is cleared once read operation is completed.
-             pending-reads      {}
-             ; Completed reads: list of [lower val upper] tuples - one tuple for each successful read.
-             ; Once read operation returns value val - we select first pair [lower upper] from pending-reads for which
-             ; lower <= val <= upper, or just the first pair if no such pair is found (that means we've found an
-             ; inconsistency, because val is out of any of possible ranges).
-             ; TODO: probably we can use single union range instead of list of ranges and that will makes reads and
-             ; errors reporting better.
-             reads              []]
-        (if (nil? history)
-          ; We're done here
-          (let [errors (remove (partial apply <=) reads)]
-            {:valid?             (empty? errors)
-             :reads              reads
-             :errors             errors})
-          ; But wait, there's more
-          (let [op      (first history)
-                process-id (:process op)
-                history (next history)]
-            (case [(:type op) (:f op)]
-              [:invoke :read]
-              (recur history lower upper
-                     (assoc pending-reads process-id [[lower upper]])
-                     reads)
-
-              [:ok :read]
-              (let [read-ranges (get pending-reads process-id)
-                    v (:value op)
-                    [l' u'] (first read-ranges)
-                    read (or (some (fn [[l u]] (when (<= l v u) [l v u])) read-ranges)
-                             [l' v u'])]
+    (check [this test history opts]
+      ; pre-process our history so failed adds do not get applied
+      (loop [history         (->> history
+                                  history/complete
+                                  (remove :fails?)
+                                  (remove op/fail?)
+                                  seq)
+             lower              0             ; Current lower bound on counter
+             upper              0             ; Upper bound on counter value
+             pending-reads      {}            ; Process ID -> [lower read-val]
+             reads              []]           ; Completed [lower val upper]s
+          (if (nil? history)
+            ; We're done here
+            (let [errors (remove (partial apply <=) reads)]
+              {:valid?             (empty? errors)
+               :reads              reads
+               :errors             errors})
+            ; But wait, there's more
+            (let [op      (first history)
+                  history (next history)]
+              (case [(:type op) (:f op)]
+                [:invoke :read]
                 (recur history lower upper
-                       (dissoc pending-reads process-id)
-                       (conj reads read)))
+                       (assoc pending-reads (:process op) [lower (:value op)])
+                       reads)
 
-              [:invoke :add]
-              (let [value (:value op)
-                    [l' u'] (if (> value 0) [lower (+ upper value)] [(+ lower value) upper])]
-                (recur history l' u'
-                       (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
-                       reads))
+                [:ok :read]
+                (let [r (get pending-reads (:process op))]
+                  (recur history lower upper
+                         (dissoc pending-reads (:process op))
+                         (conj reads (conj r upper))))
 
-              [:fail :add]
-              (let [value (:value op)
-                    [l' u'] (if (> value 0) [lower (- upper value)] [(- lower value) upper])]
-                (recur history l' u'
-                       (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
-                       reads))
+                [:invoke :add]
+                (recur history lower (+ upper (:value op)) pending-reads reads)
 
-              [:ok :add]
-              (let [value (:value op)
-                    [l' u'] (if (> value 0) [(+ lower value) upper] [lower (+ upper value)])]
-                (recur history l' u'
-                       (reduce-kv #(assoc %1 %2 (conj %3 [l' u'])) {} pending-reads)
-                       reads))
+                [:ok :add]
+                (recur history (+ lower (:value op)) upper pending-reads reads)
 
-              (recur history lower upper pending-reads reads))))))))
+                (recur history lower upper pending-reads reads))))))))
 
 (defn latency-graph
-  "Spits out graphs of latencies."
-  []
-  (reify Checker
-    (check [_ test model history opts]
-      (perf/point-graph! test history opts)
-      (perf/quantiles-graph! test history opts)
-      {:valid? true})))
+  "Spits out graphs of latencies. Checker options take precedence over
+  those passed in with this constructor."
+  ([]
+   (latency-graph {}))
+  ([opts]
+   (reify Checker
+     (check [_ test history c-opts]
+       (let [o (merge opts c-opts)]
+         (perf/point-graph!     test history o)
+         (perf/quantiles-graph! test history o)
+         {:valid? true})))))
 
 (defn rate-graph
-  "Spits out graphs of throughput over time."
-  []
-  (reify Checker
-    (check [_ test model history opts]
-      (perf/rate-graph! test history opts)
-      {:valid? true})))
+  "Spits out graphs of throughput over time. Checker options take precedence over
+  those passed in with this constructor."
+  ([]
+   (rate-graph {}))
+  ([opts]
+   (reify Checker
+     (check [_ test history c-opts]
+       (let [o (merge opts c-opts)]
+         (perf/rate-graph! test history o)
+         {:valid? true})))))
 
 (defn perf
-  "Assorted performance statistics"
-  []
-  (compose {:latency-graph (latency-graph)
-            :rate-graph    (rate-graph)}))
+  "Composes various performance statistics. Checker options take precedence over
+  those passed in with this constructor."
+  ([]
+   (perf {}))
+  ([opts]
+   (compose {:latency-graph (latency-graph opts)
+             :rate-graph    (rate-graph opts)})))
 
 (defn clock-plot
   "Plots clock offsets on all nodes"
   []
   (reify Checker
-    (check [_ test model history opts]
+    (check [_ test history opts]
       (clock/plot! test history opts)
       {:valid? true})))

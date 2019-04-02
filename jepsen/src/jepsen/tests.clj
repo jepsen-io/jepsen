@@ -21,7 +21,6 @@
    :client    client/noop
    :nemesis   nemesis/noop
    :generator gen/void
-   :model     model/noop
    :checker   (checker/unbridled-optimism)})
 
 (defn atom-db

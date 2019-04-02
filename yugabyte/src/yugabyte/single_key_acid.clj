@@ -11,21 +11,18 @@
                                      [query :refer :all]
                                      [policies :refer :all]
                                      [cql :as cql]]
-            [yugabyte [auto :as auto]
-                      [client :as c]
-                      [core :refer :all]]))
+            [yugabyte [client :as c]]))
 
 (def keyspace "jepsen")
 (def table-name "single_key_acid")
 
 (c/defclient CQLSingleKey keyspace []
   (setup! [this test]
-    (cql/use-keyspace conn keyspace)
-    (cql/create-table conn table-name
-                      (if-not-exists)
-                      (column-definitions {:id :int
-                                           :val :int
-                                           :primary-key [:id]})))
+    (c/create-table conn table-name
+                    (if-not-exists)
+                    (column-definitions {:id :int
+                                         :val :int
+                                         :primary-key [:id]})))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -58,25 +55,19 @@
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defn test
+(defn workload
   [opts]
   (let [n (count (:nodes opts))]
-    (yugabyte-test
-      (merge opts
-             {:name "singe-key-acid"
-              :client (->CQLSingleKey)
-              :concurrency (max 10 (:concurrency opts))
-              :client-generator (independent/concurrent-generator
-                                  (* 2 n)
-                                  (range)
-                                  (fn [k]
-                                    (->> (gen/reserve n (gen/mix [w cas cas]) r)
-                                         (gen/stagger 0.1)
-                                         (gen/limit 100))))
-              :model (model/cas-register 0)
-              :checker (checker/compose
-                         {:perf (checker/perf)
-                          :indep (independent/checker
-                                   (checker/compose
-                                     {:timeline (timeline/html)
-                                      :linear   (checker/linearizable)}))})}))))
+    {:client (->CQLSingleKey)
+     :generator (independent/concurrent-generator
+                  (* 2 n)
+                  (range)
+                  (fn [k]
+                    (->> (gen/reserve n (gen/mix [w cas cas]) r)
+                         (gen/stagger 1)
+                         (gen/process-limit 20))))
+     :checker (independent/checker
+                (checker/compose
+                  {:timeline (timeline/html)
+                   :linear   (checker/linearizable
+                               {:model (model/cas-register 0)})}))}))

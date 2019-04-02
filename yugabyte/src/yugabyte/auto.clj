@@ -11,7 +11,8 @@
             [jepsen [control :as c]
                     [db :as db]
                     [util :as util :refer [meh timeout]]]
-            [jepsen.control.util :as cu]
+            [jepsen.control [net :as cn]
+                            [util :as cu]]
             [jepsen.os [debian :as debian]
                        [centos :as centos]]
             [yugabyte.client :as yc])
@@ -53,8 +54,8 @@
 ; this protocol directly.
 (defprotocol Auto
   (install!       [db test])
-  (start-master!  [db test])
-  (start-tserver! [db test])
+  (start-master!  [db test node])
+  (start-tserver! [db test node])
   (stop-master!   [db])
   (stop-tserver!  [db])
   (wipe!          [db]))
@@ -167,6 +168,8 @@
       (condp re-find (.getMessage e)
         #"Leader not yet ready to serve requests"   (retry (dec tries))
         #"This leader has not yet acquired a lease" (retry (dec tries))
+        #"Could not locate the leader master"       (retry (dec tries))
+        #"Leader not yet replicated NoOp"           (retry (dec tries))
         #"Not the leader"                           (retry (dec tries))
         (throw e)))))
 
@@ -174,10 +177,10 @@
   "Start both master and tserver. Only starts master if this node is a master
   node. Waits for masters and tservers."
   (when (master-node? test node)
-    (start-master! db test)
+    (start-master! db test node)
     (await-masters test))
 
-  (start-tserver! db test)
+  (start-tserver! db test node)
   (await-tservers test)
 
   (yc/await-setup node)
@@ -189,6 +192,32 @@
   (when (master-node? test node)
     (stop-master! db))
   :stopped)
+
+(defn signal!
+  "Sends a signal to a named process by signal number or name."
+  [process-name signal]
+  (meh (c/exec :pkill :--signal signal process-name))
+  :signaled)
+
+(defn kill!
+  "Kill a process forcibly."
+  [process]
+  (signal! process 9)
+  (c/exec (c/lit (str "! ps -ce | grep " process)))
+  (info process "killed")
+  :killed)
+
+(defn kill-tserver!
+  "Kills the tserver"
+  [db]
+  (kill! "yb-tserver")
+  (stop-tserver! db))
+
+(defn kill-master!
+  "Kills the master"
+  [db]
+  (kill! "yb-master")
+  (stop-master! db))
 
 (defn wait-for-recovery
   "Waits for the driver to report all nodes are up"
@@ -255,17 +284,30 @@
 (def ce-tserver-logfile (str ce-tserver-log-dir "/stdout"))
 (def ce-tserver-pidfile (str dir "/tserver.pid"))
 
-(def ce-shared-opts
+(defn ce-shared-opts
   "Shared options for both master and tserver"
+  [node]
   [; Data files!
    :--fs_data_dirs         ce-data-dir
-   ; Limit memory to 4GB
-   :--memory_limit_hard_bytes 4294967296
+   ; Limit memory to 2GB
+   :--memory_limit_hard_bytes 2147483648
    ; Fewer shards to improve perf
    :--yb_num_shards_per_tserver 4
+   ; YB can do weird things with loopback interfaces, so... bind explicitly
+   :--rpc_bind_addresses (cn/ip node)
    ; Seconds before declaring an unavailable node dead and initiating a raft
    ; membership change
-   ;:--follower_unavailable_considered_failed_sec 10
+   ;:--follower_unavailable_considered_failed_sec 10)
+   ])
+
+(def experimental-tuning-flags
+  ; Speed up recovery from partitions and crashes. Right now it looks like
+  ; these actually make the cluster slower to, or unable to, recover.
+  [:--client_read_write_timeout_ms                2000
+   :--leader_failure_max_missed_heartbeat_periods 2
+   :--leader_failure_exp_backoff_max_delta_ms     5000
+   :--rpc_default_keepalive_time_ms               5000
+   :--rpc_connection_timeout_ms                   1500
    ])
 
 (defn community-edition
@@ -274,46 +316,50 @@
   (reify
     Auto
     (install! [db test]
-      (c/cd dir
-            ; Post-install takes forever, so let's try and skip this on
-            ; subsequent runs
-            (let [url (or (:url test) (get-ce-url (:version test)))
-                  installed-url (get-installed-url)
-                  ]
-              (when-not (= url installed-url)
-                (info "Replacing version" installed-url "with" url)
-              (install-python! (:os test))
-              (assert (re-find #"Python 2\.7"
-                               (c/exec :python :--version (c/lit "2>&1"))))
+      (c/su
+        (c/cd dir
+              ; Post-install takes forever, so let's try and skip this on
+              ; subsequent runs
+              (let [url (or (:url test) (get-ce-url (:version test)))
+                    installed-url (get-installed-url)]
+                (when-not (= url installed-url)
+                  (info "Replacing version" installed-url "with" url)
+                  (install-python! (:os test))
+                  (assert (re-find #"Python 2\.7"
+                                   (c/exec :python :--version (c/lit "2>&1"))))
 
-              (info "Installing tarball")
-                (cu/install-archive! url dir)
-              (c/su (info "Post-install script")
-                    (c/exec "./bin/post_install.sh")
+                  (info "Installing tarball")
+                  (cu/install-archive! url dir)
+                  (c/su (info "Post-install script")
+                        (c/exec "./bin/post_install.sh")
 
-                      (c/exec :echo url (c/lit (str ">>" installed-url-file)))
-                      (info "Done with setup"))))))
+                        (c/exec :echo url (c/lit (str ">>" installed-url-file)))
+                        (info "Done with setup")))))))
 
-
-    (start-master! [db test]
+    (start-master! [db test node]
       (c/su (c/exec :mkdir :-p ce-master-log-dir)
             (cu/start-daemon!
               {:logfile ce-master-logfile
                :pidfile ce-master-pidfile
                :chdir   dir}
               ce-master-bin
-              ce-shared-opts
+              (ce-shared-opts node)
+              (when (:experimental-tuning-flags test)
+                experimental-tuning-flags)
               :--master_addresses   (master-addresses test)
-              :--replication_factor (:replication-factor test))))
+              :--replication_factor (:replication-factor test)
+              :--v 3)))
 
-    (start-tserver! [db test]
+    (start-tserver! [db test node]
       (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
             (cu/start-daemon!
               {:logfile ce-tserver-logfile
                :pidfile ce-tserver-pidfile
                :chdir   dir}
               ce-tserver-bin
-              ce-shared-opts
+              (ce-shared-opts node)
+              (when (:experimental-tuning-flags test)
+                experimental-tuning-flags)
               :--tserver_master_addrs (master-addresses test)
               ; Tracing
               :--enable_tracing
@@ -364,11 +410,11 @@
       ; We assume the DB is already installed
       )
 
-    (start-master! [db test]
+    (start-master! [db test node]
       (info "Starting master")
       (info (c/exec (c/lit "if [[ -e /home/yugabyte/master/master.out ]]; then /home/yugabyte/bin/yb-server-ctl.sh master start; fi"))))
 
-    (start-tserver! [db test]
+    (start-tserver! [db test node]
       (info "Starting tserver")
       (info (c/exec (c/lit "/home/yugabyte/bin/yb-server-ctl.sh tserver start"))))
 

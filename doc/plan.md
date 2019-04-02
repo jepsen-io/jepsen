@@ -4,9 +4,6 @@
 
 - Knossos: Better error messages when users pass models that fail on the
   first op (I think there's a ticket about this? Null pointer exception for i?)
-- Jepsen.control: let's throw Slingshot errors so that it's possible for
-  everyone to catch specific shell exceptions, and include
-  cmd/stdin/stdout/stderr as fields, so users can figure out what went wrong.
 
 ## Visualizations
 
@@ -15,9 +12,6 @@
 - Rework latency plot color scheme to use colors that hint at a continuum
 - Adaptive temporal resolution for rate and latency plots, based on point
   density
-- Nemesis regions are just lines now. Let's bring back shaded regions for :f
-  :start-foo to :stop-foo? Maybe colorize for each type of nemesis f, when
-  they're mixed together?
 - Where plots are dense, make points somewhat transparent to better show
   density?
 
@@ -31,18 +25,11 @@
 
 ## Performance
 
-- Knossos: we should allow users to pass a :time-limit option, and after that
-  many seconds, abort the search. Relying on OOM detection and abort still
-  means plenty of tests spin for hoooours.
 - Knossos: let's make the memoization threshold configurable via options passed
   to the checker.
 
 ## Core
 
-- Deprecate model argument in checker; these should be arguments to checker
-  constructors instead.
-- Clean up checker/counter: remove failed ops in an initial pre-pass, rather
-  than adding them then undoing those adds.
 - Macro like (synchronize-nodes test), which enforces a synchronization
   barrier where (count nodes threads) must come to sync on the test map.
 - Generator/each works on each *process*, not each *thread*, but almost always,
@@ -62,3 +49,6 @@
 - Port pure-insert from Cockroach into core
 - Port comments from Cockroach into core (better name?)
 - Port other Hermitage tests to Jepsen?
+
+## Tests
+- Clean up causal test. Drop model and port to workload

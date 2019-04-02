@@ -9,8 +9,7 @@
             [jepsen [checker    :as checker]
                     [generator  :as gen]]
             [jepsen.tests.long-fork :as lf]
-            [yugabyte [client :as c]
-                      [core :refer [yugabyte-test]]]))
+            [yugabyte [client :as c]]))
 
 (def keyspace "jepsen")
 (def table "long_fork")
@@ -38,7 +37,7 @@
                       ; Look up values by the value index
                       vs (->> (cql/select conn table
                                           (q/columns :key2 :val)
-                                          (q/where [[:in :val ks]]))
+                                          (q/where [[:in :key2 ks]]))
                               (map (juxt :key2 :val))
                               (into (sorted-map)))
                       ; Rewrite txn to use those values
@@ -58,14 +57,7 @@
 
   (teardown! [this test]))
 
-(defn index-test
+(defn workload
   [opts]
-  (let [w (lf/workload 3)]
-    (yugabyte-test
-      (merge opts
-             {:name             "long-fork-index"
-              :client           (->CQLLongForkIndexClient)
-              :client-generator (->> (:generator w)
-                                     (gen/stagger 1))
-              :checker (checker/compose {:perf (checker/perf)
-                                         :long-fork (:checker w)})}))))
+  (assoc (lf/workload 3)
+         :client  (->CQLLongForkIndexClient)))

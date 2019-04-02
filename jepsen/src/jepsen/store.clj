@@ -397,7 +397,10 @@
 
 (defn start-logging!
   "Starts logging to a file in the test's directory. Also updates current
-  symlink."
+  symlink. Test may include a :logging key, which should be a map with the
+  following optional options:
+
+      {:overrides   A map of packages to log level keywords}"
   [test]
   (unilog/start-logging!
     {:level   "info"
@@ -406,7 +409,8 @@
                  {:appender :file
                   :encoder :pattern
                   :pattern "%d{ISO8601}{GMT}\t%p\t[%t] %c: %m%n"
-                  :file (.getCanonicalPath (path! test "jepsen.log"))}]})
+                  :file (.getCanonicalPath (path! test "jepsen.log"))}]
+     :overrides (:overrides (:logging test))})
   (update-current-symlink! test))
 
 (defn stop-logging!

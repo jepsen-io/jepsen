@@ -137,11 +137,11 @@ will take precedence over whatever in `opts`. Now, without `-q`, our test can
 find errors again:
 
 ```bash
-$ lein ruin test --time-limit 60 --concurrency 100 -q
+$ lein run test --time-limit 60 --concurrency 100 -q
 ...
 Everything looks good! ヽ(‘ー`)ノ
 
-$ lein ruin test --time-limit 60 --concurrency 100
+$ lein run test --time-limit 60 --concurrency 100
 ...
 Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
 ```

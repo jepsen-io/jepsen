@@ -1,0 +1,20 @@
+language: clojure
+lein: lein
+dist: trusty
+jdk:
+   - oraclejdk8
+branches:
+  only:
+    - master
+addons:
+  apt:
+    packages:
+      - gnuplot
+      - gnuplot-x11
+before_install:
+  - cd ${TRAVIS_BUILD_DIR}/jepsen
+script: lein do clean, test
+notifications:
+  email:
+    on_success: never
+    on_failure: never

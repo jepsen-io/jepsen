@@ -3,7 +3,7 @@
         clojure.pprint
         clojure.tools.logging)
   (:require [jepsen.generator :as gen]
-            [tea-time.core :as tt]
+            [tea-time [core :as tt]]
             [clojure.set :as set]))
 
 (def nodes [:a :b :c :d :e])
@@ -37,6 +37,23 @@
   (is (= (set (ops (:nodes a-test)
                    (gen/seq (range 100))))
          (set (range 100)))))
+
+(deftest seq-all-test
+  (tt/with-threadpool
+    (testing "fixed sequences"
+      (let [ops (ops [1] (gen/seq-all [(gen/limit 2 :a)
+                                       (gen/limit 3 :b)]))]
+        (is (= [:a :a :b :b :b] ops))))
+
+    (testing "complex"
+      (let [busy  #(gen/limit 2 (gen/delay-til 0.1 :x))
+            quiet #(gen/phases (gen/once :shh)
+                               (gen/sleep 0.2))
+            gen  (gen/time-limit 1 (gen/seq-all
+                                     (interleave (repeatedly busy)
+                                                 (repeatedly quiet))))
+            ops   (ops [1] gen)]
+        (is (= [:x :x :shh :x :x :shh :x :x] ops))))))
 
 (deftest complex-test
   (let [ops (ops (:nodes a-test)
@@ -95,7 +112,6 @@
            [:start :start :nem
             :* :* :* :* :*
             :c :d]))))
-
 
 (deftest time-limit-test
   (tt/with-threadpool

@@ -10,12 +10,9 @@
             [jepsen.checker.timeline :as timeline]
             [knossos.op :as op]
             [clojurewerkz.cassaforte [client :as cassandra]
-             [query :refer :all]
-             [policies :refer :all]
-             [cql :as cql]]
-            [yugabyte [client :as c]
-                      [core :refer :all]
-                      [auto :as auto]]))
+             [query :as q :refer :all]
+             [cql   :as cql]]
+            [yugabyte [client :as c]]))
 
 (def setup-lock (Object.))
 (def keyspace   "jepsen")
@@ -23,19 +20,20 @@
 
 (c/defclient CQLBank keyspace []
   (setup! [this test]
-      (info "Creating table")
-      (cassandra/execute conn (str "CREATE TABLE IF NOT EXISTS "
-                                   keyspace "." table-name
-                                   " (id INT PRIMARY KEY, balance BIGINT)"
-                                   " WITH transactions = { 'enabled' : true }"))
-
-      (info "Creating accounts")
+    (c/create-transactional-table
+      conn table-name
+      (q/if-not-exists)
+      (q/column-definitions {:id      :int
+                             :balance :bigint
+                             :primary-key [:id]}))
+    (info "Creating accounts")
+    (c/with-retry
       (cql/insert-with-ks conn keyspace table-name
                           {:id (first (:accounts test))
                            :balance (:total-amount test)})
       (doseq [a (rest (:accounts test))]
-        (cql/insert-with-ks conn keyspace table-name
-                            {:id a, :balance 0})))
+        (cql/insert conn table-name
+                    {:id a, :balance 0}))))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -62,24 +60,10 @@
 
   (teardown! [this test]))
 
-(defn bank-test-base
+(defn workload
   [opts]
-  (let [workload (bank/test {:negative-balances? true})]
-    (yugabyte-test
-      (merge (dissoc workload :generator)
-             {:client-generator (:generator workload)
-              :checker          (checker/compose
-                                  {:perf     (checker/perf)
-                                   ;:timeline (timeline/html)
-                                   :details  (:checker workload)})}
-             opts))))
-
-(defn test
-  [opts]
-  (bank-test-base
-    (merge {:name   "cql-bank"
-            :client (->CQLBank)}
-           opts)))
+  (assoc (bank/test {:negative-balances? true})
+         :client    (->CQLBank)))
 
 ;; Shouldn't be used until we support transactions with selects.
 (c/defclient CQLMultiBank keyspace []
@@ -87,16 +71,20 @@
     (info "Creating accounts")
     (doseq [a (:accounts test)]
       (info "Creating table" a)
-      (cassandra/execute conn (str "CREATE TABLE IF NOT EXISTS "
-                                   keyspace "." table-name a
-                                   " (id INT PRIMARY KEY, balance BIGINT)"
-                                   " WITH transactions = { 'enabled' : true }"))
+      (c/create-transactional-table
+        conn (str table-name a)
+        (q/if-not-exists)
+        (q/column-definitions {:id          :int
+                               :balance     :bigint
+                               :primary-key [:id]}))
+
       (info "Populating account" a)
-      (cql/insert-with-ks conn keyspace (str table-name a)
-                          {:id      a
-                           :balance (if (= a (first (:accounts test)))
-                                      (:total-amount test)
-                                      0)})))
+      (c/with-retry
+        (cql/insert-with-ks conn keyspace (str table-name a)
+                            {:id      a
+                             :balance (if (= a (first (:accounts test)))
+                                        (:total-amount test)
+                                        0)}))))
 
   (invoke! [this test op]
     (c/with-errors op #{:read}
@@ -130,9 +118,7 @@
 
   (teardown! [this test]))
 
-(defn multitable-test
+(defn multitable-workload
   [opts]
-  (bank-test-base
-    (merge {:name   "cql-bank-multitable"
-            :client (->CQLMultiBank)}
-           opts)))
+  (assoc (workload opts)
+         :client (->CQLMultiBank)))
