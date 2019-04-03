@@ -176,19 +176,10 @@
         (configure!)
 
         (start-pd! test node)
-        ;(Thread/sleep 40000)
-        ;(jepsen/synchronize test)
-
         (start-kv! test node)
-        ;(Thread/sleep 20000)
-        ;(jepsen/synchronize test)
-
         (start-db! test node)
-        (sql/await-node node)
-        (jepsen/synchronize test)
-        (info "Waiting AGAIN")
-        (sql/await-node node)
-        ))
+
+        (sql/await-node node)))
 
     (teardown! [_ test node]
       (c/su
