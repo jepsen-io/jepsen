@@ -128,7 +128,7 @@
   (merge (nemesis-single-gen)
          {:name (str "startstop" (if (> n 1) n ""))
           :client (nemesis/hammer-time
-                    (comp (partial take n) shuffle) (nth [db/pdbin db/tikvbin db/tidbbin] (rand-int 3)))
+                    (comp (partial take n) shuffle) (nth [db/pd-bin db/kv-bin db/db-bin] (rand-int 3)))
           :clocks false}))
 
 (defn startkill
@@ -137,7 +137,7 @@
          {:name (str "startkill" (if (> n 1) n ""))
           :client (nemesis/node-start-stopper (comp (partial take n) shuffle)
                                               db/stop!
-                                              db/quickstart!)
+                                              db/start!)
           :clocks false}))
 
 ;; majorities ring
