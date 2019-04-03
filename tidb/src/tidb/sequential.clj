@@ -1,16 +1,15 @@
 (ns tidb.sequential
   (:refer-clojure :exclude [test])
   (:require [jepsen [client :as client]
-             [checker :as checker]
-             [core :as jepsen]
-             [generator :as gen]
-             [independent :as independent]
-             [util :as util :refer [meh]]
-             [reconnect :as rc]]
+                    [checker :as checker]
+                    [core :as jepsen]
+                    [generator :as gen]
+                    [independent :as independent]
+                    [util :as util :refer [meh]]]
             [clojure.java.jdbc :as j]
             [clojure.set :as set]
             [clojure.tools.logging :refer :all]
-            [tidb.sql :refer :all]
+            [tidb.sql :as c :refer :all]
             [tidb.basic :as basic]
             [knossos.model :as model]
             [knossos.op :as op]
@@ -33,46 +32,49 @@
   [key-count k]
   (mapv (partial str k "_") (range key-count)))
 
-(defrecord SequentialClient [table-count tbl-created? node]
+(defrecord SequentialClient [table-count tbl-created? conn]
   client/Client
-  (setup! [this test node]
+  (open! [this test node]
+    (assoc this :conn (c/open node)))
+
+  (setup! [this test]
     (Thread/sleep 2000)
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
         ; use first node to exec ddl
-        (j/with-db-connection [c (conn-spec (first (:nodes test)))]
-          (info "Creating tables" (pr-str (table-names table-count)))
-          (doseq [t (table-names table-count)]
-            (j/execute! c [(str "drop table if exists " t)])
-            (j/execute! c [(str "create table if not exists " t
-                                " (tkey varchar(255) primary key)")])
-            (info "Created table" t)))))
-    (assoc this :node node))
+        (info "Creating tables" (pr-str (table-names table-count)))
+        (doseq [t (table-names table-count)]
+          (j/execute! conn [(str "drop table if exists " t)])
+          (j/execute! conn [(str "create table if not exists " t
+                                 " (tkey varchar(255) primary key)")])
+          (info "Created table" t)))))
 
   (invoke! [this test op]
-    (with-conn [c node]
-      (let [ks (subkeys (:key-count test) (:value op))]
-        (case (:f op)
-          :write
-          (do (doseq [k ks]
-                (let [table (key->table table-count k)]
-                  (with-txn-retries
-                    (j/insert! c table {:tkey k}))))
-              (assoc op :type :ok))
-          :read
-          (->> ks
-               reverse
-               (mapv (fn [k]
-                       (first
-                        (with-txn-retries
-                          (j/query c [(str "select tkey from "
-                                           (key->table table-count k)
-                                           " where tkey = ?") k]
-                                   :row-fn :tkey)))))
-               (vector (:value op))
-               (assoc op :type :ok, :value))))))
+    (let [ks (subkeys (:key-count test) (:value op))]
+      (case (:f op)
+        :write
+        (do (doseq [k ks]
+              (let [table (key->table table-count k)]
+                (with-txn-retries
+                  (j/insert! conn table {:tkey k}))))
+            (assoc op :type :ok))
+        :read
+        (->> ks
+             reverse
+             (mapv (fn [k]
+                     (first
+                       (with-txn-retries
+                         (j/query conn [(str "select tkey from "
+                                             (key->table table-count k)
+                                             " where tkey = ?") k]
+                                  :row-fn :tkey)))))
+             (vector (:value op))
+             (assoc op :type :ok, :value)))))
 
-  (teardown! [this test]))
+  (teardown! [this test])
+
+  (close! [this test]
+    (c/close! conn)))
 
 (defn trailing-nil?
   "Does the given sequence contain a nil anywhere after a non-nil element?"

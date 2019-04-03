@@ -9,7 +9,7 @@
             [jepsen.checker.timeline :as timeline]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer :all]
-            [tidb.sql :refer :all]
+            [tidb.sql :as c :refer :all]
             [tidb.basic :as basic]
             [knossos.model :as model]))
 
@@ -17,19 +17,19 @@
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defrecord AtomicClient [node]
+(defrecord AtomicClient [conn]
   client/Client
 
-  (setup! [this test node]
-    (j/with-db-connection [c (conn-spec (first (:nodes test)))]
-      (j/execute! c ["drop table if exists test"])
-      (j/execute! c ["create table if not exists test
-                     (id int primary key, val int)"]))
+  (open! [this test node]
+    (assoc this :conn (c/open node)))
 
-    (assoc this :node node))
+  (setup! [this test]
+    (j/execute! conn ["drop table if exists test"])
+    (j/execute! conn ["create table if not exists test
+                      (id int primary key, val int)"]))
 
   (invoke! [this test op]
-    (with-txn op [c node]
+    (with-txn op [c conn]
       (try
         (let [id   (key (:value op))
               val' (val (:value op))
@@ -49,7 +49,10 @@
                                      :fail
                                      :ok))))))))
 
-  (teardown! [this test]))
+  (teardown! [this test])
+
+  (close! [this test]
+    (c/close! conn)))
 
 (defn test
   [opts]

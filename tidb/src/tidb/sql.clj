@@ -121,11 +121,11 @@
 (defmacro with-txn
   "Executes body in a transaction, with a timeout, automatically retrying
   conflicts and handling common errors."
-  [op [c node] & body]
-  `(timeout 5000 (assoc ~op :type :info, :value :timed-out)
+  [op [c conn] & body]
+  `(timeout (+ 1000 socket-timeout) (assoc ~op :type :info, :value :timed-out)
             (with-error-handling ~op
               (with-txn-retries
-                (j/with-db-transaction [~c (conn-spec ~node)]
+                (j/with-db-transaction [~c ~conn]
                   (j/execute! ~c ["start transaction with consistent snapshot"])
                   ~@body)))))
 
