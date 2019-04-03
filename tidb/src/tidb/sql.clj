@@ -64,7 +64,9 @@
           true
           (catch java.sql.SQLNonTransientConnectionException e
             (if (re-find #"Last packet not finished" (.getMessage e))
-              (info "Last packet not finished, retrying")
+              (do (info "Last packet not finished, retrying")
+                  (Thread/sleep 1000)
+                  false)
               (throw e)))
           (finally
             (close! c))))

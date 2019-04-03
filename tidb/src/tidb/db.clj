@@ -12,17 +12,19 @@
 (def pd-bin         "pd-server")
 (def kv-bin         "tikv-server")
 (def db-bin         "tidb-server")
-(def pd-logfile     (str tidb-dir "/pd.log"))
+(def pd-config-file (str tidb-dir "/pd.conf"))
+(def pd-log-file    (str tidb-dir "/pd.log"))
 (def pd-stdout      (str tidb-dir "/pd.stdout"))
-(def pd-pidfile     (str tidb-dir "/pd.pid"))
-(def kv-logfile     (str tidb-dir "/kv.log"))
+(def pd-pid-file    (str tidb-dir "/pd.pid"))
+(def pd-data-dir    (str tidb-dir "/data/pd"))
+(def kv-config-file (str tidb-dir "/tikv.conf"))
+(def kv-log-file    (str tidb-dir "/kv.log"))
 (def kv-stdout      (str tidb-dir "/kv.stdout"))
-(def kv-pidfile     (str tidb-dir "/kv.pid"))
-(def db-logfile     (str tidb-dir "/db.log"))
+(def kv-pid-file    (str tidb-dir "/kv.pid"))
+(def kv-data-dir    (str tidb-dir "/data/kv"))
+(def db-log-file    (str tidb-dir "/db.log"))
 (def db-stdout      (str tidb-dir "/db.stdout"))
-(def db-pidfile     (str tidb-dir "/db.pid"))
-(def pd-configfile  (str tidb-dir "/pd.conf"))
-(def kv-configfile  (str tidb-dir "/tikv.conf"))
+(def db-pid-file    (str tidb-dir "/db.pid"))
 
 (def client-port 2379)
 (def peer-port   2380)
@@ -69,13 +71,13 @@
   "Writes configuration file for placement driver"
   []
   (c/su
-    (c/exec :echo "[replication]\nmax-replicas=5" :> pd-configfile)))
+    (c/exec :echo "[replication]\nmax-replicas=5" :> pd-config-file)))
 
 (defn configure-kv!
   "Writes configuration file for tikv"
   []
   (c/su
-    (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"\nraft_store_max_leader_lease=\"900ms\"\nraft_base_tick_interval=\"100ms\"\nraft_heartbeat_ticks=3\nraft_election_timeout_ticks=10" :> kv-configfile)))
+    (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"\nraft_store_max_leader_lease=\"900ms\"\nraft_base_tick_interval=\"100ms\"\nraft_heartbeat_ticks=3\nraft_election_timeout_ticks=10" :> kv-config-file)))
 
 (defn configure!
   "Write all config files."
@@ -89,19 +91,19 @@
   (c/su
     (cu/start-daemon!
       {:logfile pd-stdout
-       :pidfile pd-pidfile
+       :pidfile pd-pid-file
        :chdir   tidb-dir
        }
       (str "./bin/" pd-bin)
       :--name                  (get-in tidb-map [node :pd])
-      :--data-dir              (get-in tidb-map [node :pd])
+      :--data-dir              pd-data-dir
       :--client-urls           (str "http://0.0.0.0:" client-port)
       :--peer-urls             (str "http://0.0.0.0:" peer-port)
       :--advertise-client-urls (client-url node)
       :--advertise-peer-urls   (peer-url node)
       :--initial-cluster       (initial-cluster test)
-      :--log-file              pd-logfile
-      :--config                pd-configfile)))
+      :--log-file              pd-log-file
+      :--config                pd-config-file)))
 
 (defn start-kv!
   "Starts the TiKV daemon"
@@ -109,16 +111,16 @@
   (c/su
     (cu/start-daemon!
       {:logfile kv-stdout
-       :pidfile kv-pidfile
+       :pidfile kv-pid-file
        :chdir   tidb-dir
        }
       (str "./bin/" kv-bin)
       :--pd             (pd-endpoints test)
       :--addr           (str "0.0.0.0:20160")
       :--advertise-addr (str (name node) ":" "20160")
-      :--data-dir       (get-in tidb-map [node :kv])
-      :--log-file       kv-logfile
-      :--config         kv-configfile)))
+      :--data-dir       kv-data-dir
+      :--log-file       kv-log-file
+      :--config         kv-config-file)))
 
 (defn start-db!
   "Starts the TiDB daemon"
@@ -126,13 +128,13 @@
   (c/su
     (cu/start-daemon!
       {:logfile db-stdout
-       :pidfile db-pidfile
+       :pidfile db-pid-file
        :chdir   tidb-dir
        }
       (str "./bin/" db-bin)
       :--store     (str "tikv")
       :--path      (pd-endpoints test)
-      :--log-file  db-logfile)))
+      :--log-file  db-log-file)))
 
 (defn start!
   "Starts all daemons."
@@ -144,9 +146,25 @@
 (defn stop!
   "Stops all daemons"
   [test node]
-  (cu/stop-daemon! db-bin db-pidfile)
-  (cu/stop-daemon! kv-bin kv-pidfile)
-  (cu/stop-daemon! pd-bin pd-pidfile))
+  (cu/stop-daemon! db-bin db-pid-file)
+  (cu/stop-daemon! kv-bin kv-pid-file)
+  (cu/stop-daemon! pd-bin pd-pid-file))
+
+(defn install!
+  "Downloads archive and extracts it to our local tidb-dir, if it doesn't exist
+  already. If test contains a :force-reinstall key, we always install a fresh
+  copy.
+
+  Calls `sync`; this tarball is *massive* (1.1G), and when we start tidb, it'll
+  try to fsync, and cause, like, 60s stalls on single nodes, wrecking the
+  cluster."
+  [test node]
+  (c/su
+    (when (or (:force-reinstall test) (not (cu/exists? tidb-dir)))
+      (info node "installing TiDB")
+      (cu/install-archive! (:tarball test) tidb-dir)
+      (info "Syncing disks to avoid slow fsync on db start")
+      (c/exec :sync))))
 
 (defn db
   "TiDB"
@@ -154,34 +172,39 @@
   (reify db/DB
     (setup! [_ test node]
       (c/su
-        (info node "installing TiDB")
-        (cu/install-archive! (:tarball test) tidb-dir)
-
+        (install! test node)
         (configure!)
 
         (start-pd! test node)
-        (Thread/sleep 40000)
-        (jepsen/synchronize test)
+        ;(Thread/sleep 40000)
+        ;(jepsen/synchronize test)
 
-        ;(start-kv! test node)
+        (start-kv! test node)
         ;(Thread/sleep 20000)
         ;(jepsen/synchronize test)
 
-        ;(start-db! test node)
-        ;(sql/await-node node)))
+        (start-db! test node)
+        (sql/await-node node)
+        (jepsen/synchronize test)
+        (info "Waiting AGAIN")
+        (sql/await-node node)
         ))
 
     (teardown! [_ test node]
       (c/su
         (info node "tearing down TiDB")
         (stop! test node)
-        (c/exec :rm :-rf tidb-dir)))
+        ; Delete everything but bin/
+        (->> (cu/ls tidb-dir)
+             (remove #{"bin"})
+             (map (partial str tidb-dir "/"))
+             (c/exec :rm :-rf))))
 
     db/LogFiles
     (log-files [_ test node]
-      [db-logfile
+      [db-log-file
        db-stdout
-       kv-logfile
+       kv-log-file
        kv-stdout
-       pd-logfile
+       pd-log-file
        pd-stdout])))
