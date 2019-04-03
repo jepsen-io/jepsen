@@ -59,6 +59,18 @@
     :parse-fn #(Long/parseLong %)
     :validate [pos? "Must be positive"]]
 
+   [nil "--read-lock TYPE"
+    "What kind of read locks, if any, should we acquire? Default is none; may
+    also be 'update'."
+    :default nil
+    :parse-fn {"update" "FOR UPDATE"}
+    :validate #{nil "FOR UPDATE"}]
+
+   [nil "--update-in-place"
+    "If true, performs updates (on some workloads) in place, rather than
+    separating read and write operations."
+    :default false]
+
    (jc/tarball-opt "http://download.pingcap.org/tidb-v2.1.7-linux-amd64.tar.gz")])
 
 (defn log-test

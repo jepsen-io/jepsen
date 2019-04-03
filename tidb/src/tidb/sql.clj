@@ -6,7 +6,7 @@
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def connect-timeout 10000)
-(def socket-timeout  10000)
+(def socket-timeout  20000)
 (def open-timeout
   "How long will we wait for an open call?"
   100000)
