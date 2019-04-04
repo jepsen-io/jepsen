@@ -31,8 +31,6 @@
   [conn test]
   (j/execute! conn ["set @@global.tidb_disable_txn_auto_retry = ?"
                     (if (:auto-retry test) 0 1)])
-  (info :auto-retry (j/query conn
-                             ["select @@global.tidb_disable_txn_auto_retry"]))
   conn)
 
 (defn open

@@ -38,7 +38,7 @@
 
 (def opt-spec
   "Command line options for tools.cli"
-  [[nil "--auto-retry" "Enables automatic retries"
+  [[nil "--auto-retry" "Enables automatic retries (the default for TiDB)"
     :default false]
 
    (jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
