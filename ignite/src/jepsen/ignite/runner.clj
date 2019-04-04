@@ -4,8 +4,6 @@
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]
             [jepsen.cli :as jc]
-            [jepsen.os [debian :as debian]
-                       [centos :as centos]]
             [jepsen.nemesis :as nemesis]
             [jepsen.core :as jepsen]
             [jepsen.ignite  [register :as register]
@@ -47,13 +45,8 @@
    "REPEATABLE_READ" TransactionIsolation/REPEATABLE_READ})
 
 (def nemesis-types
-  {"NOOP"                   nemesis/noop
-  "PARTITION-RANDOM-HALVES" nemesis/partition-random-halves})
-
-(def os-types
-  {"NOOP" jepsen.os/noop
-   "DEBIAN" debian/os
-   "CENTOS" centos/os})
+  {"noop"                   nemesis/noop
+  "partition-random-halves" nemesis/partition-random-halves})
 
 (def opt-spec
   "Command line options for tools.cli"
@@ -102,11 +95,10 @@
    ["-v" "--version VERSION"
     "What version of Apache Ignite to install"
     :default "2.7.0"]
-   ["-os" "--os Operating System"
-    "What OS to use"
-    :default jepsen.os/noop
-    :parse-fn os-types
-    :validate [identity (jc/one-of os-types)]]
+   ["-o" "--os NAME" "Operating system: either centos or debian."
+    :default  :noop
+    :parse-fn keyword
+    :validate [#{:centos :debian :noop} "One of `centos` or `debian` or 'noop'"]]
    ["-nemesis" "--nemesis Nemesis"
     "What Nemesis to use"
     :default nemesis/noop

@@ -13,6 +13,6 @@ lein run test \
   --transaction-concurrency OPTIMISTIC \
   --transaction-isolation SERIALIZABLE \
   --backups 3 \
-  --os NOOP \
-  --nemesis NOOP \
+  --os noop \
+  --nemesis noop \
   --version 2.7.0
