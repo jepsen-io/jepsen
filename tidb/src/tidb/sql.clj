@@ -29,7 +29,7 @@
 
   Returns conn."
   [conn test]
-  (j/execute! conn ["set @@global.tidb_disable_txn_auto_retry = ?"
+  (j/execute! conn ["set @@tidb_disable_txn_auto_retry = ?"
                     (if (:auto-retry test) 0 1)])
   conn)
 
