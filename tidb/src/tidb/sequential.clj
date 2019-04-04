@@ -35,7 +35,7 @@
 (defrecord SequentialClient [table-count tbl-created? conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (c/open node)))
+    (assoc this :conn (c/open node test)))
 
   (setup! [this test]
     (Thread/sleep 2000)

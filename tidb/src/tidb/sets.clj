@@ -11,7 +11,7 @@
 (defrecord SetClient [conn]
   client/Client
   (open! [this test node]
-    (assoc this :conn (c/open node)))
+    (assoc this :conn (c/open node test)))
 
   (setup! [this test]
     (j/execute! conn ["create table if not exists sets

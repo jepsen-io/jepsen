@@ -22,9 +22,22 @@
    :connectTimeout  connect-timeout
    :socketTimeout   socket-timeout})
 
+(defn init-conn!
+  "Sets initial variables on a connection, based on test options. Options are:
+
+  :auto-retry   - If true, automatically retries transactions.
+
+  Returns conn."
+  [conn test]
+  (j/execute! conn ["set @@global.tidb_disable_txn_auto_retry = ?"
+                    (if (:auto-retry test) 0 1)])
+  (info :auto-retry (j/query conn
+                             ["select @@global.tidb_disable_txn_auto_retry"]))
+  conn)
+
 (defn open
   "Opens a connection to the given node."
-  [node]
+  [node test]
   (timeout open-timeout
            (throw+ {:type :connect-timed-out
                     :node node})
@@ -34,7 +47,7 @@
                                conn   (j/get-connection spec)
                                spec'  (j/add-connection spec conn)]
                            (assert spec')
-                           spec')
+                           (init-conn! spec' test))
                          (catch java.sql.SQLNonTransientConnectionException e
                            ; Conn refused
                            (throw e))
@@ -58,7 +71,7 @@
   and inserting a record."
   [node]
   (info "Waiting for" node)
-  (if (let [c (open node)]
+  (if (let [c (open node {})]
         (try
           (j/execute! c ["create table if not exists jepsen_await
                          (id int primary key, val int)"])

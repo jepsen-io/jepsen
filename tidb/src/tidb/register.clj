@@ -21,7 +21,7 @@
   client/Client
 
   (open! [this test node]
-    (assoc this :conn (c/open node)))
+    (assoc this :conn (c/open node test)))
 
   (setup! [this test]
     (j/execute! conn ["drop table if exists test"])

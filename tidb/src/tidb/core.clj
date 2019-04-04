@@ -38,7 +38,10 @@
 
 (def opt-spec
   "Command line options for tools.cli"
-  [(jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
+  [[nil "--auto-retry" "Enables automatic retries"
+    :default false]
+
+   (jc/repeated-opt nil "--nemesis NAME" "Which nemeses to use"
                     [`(nemesis/none)]
                     nemeses)
 
