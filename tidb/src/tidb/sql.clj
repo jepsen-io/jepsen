@@ -98,8 +98,9 @@
             ::abort
             (throw e#)))
         (catch java.sql.SQLException e#
-          (if (re-find #"can not retry select for update statement" (.getMessage e#))
-            ::abort
+          (condp re-find (.getMessage e#)
+            #"can not retry select for update statement" ::abort
+            #"\[try again later\]" ::abort
             (throw e#)))))
 
 (defmacro with-txn-retries
@@ -116,7 +117,7 @@
   [op & body]
   `(let [res# (capture-txn-abort ~@body)]
      (if (= ::abort res#)
-       (assoc ~op :type :fail)
+       (assoc ~op :type :fail, :error :conflict)
        res#)))
 
 (defmacro with-error-handling
