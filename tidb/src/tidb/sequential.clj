@@ -1,11 +1,26 @@
 (ns tidb.sequential
+  "A sequential consistency test.
+
+  Verify that client order is consistent with DB order by performing queries
+  (in four distinct transactions) like
+
+  A: insert x
+  A: insert y
+  B: read y
+  B: read x
+
+  A's process order enforces that x must be visible before y, so we should
+  always read both or neither.
+
+  Splits keys up onto different tables to make sure they fall in different
+  shard ranges"
   (:refer-clojure :exclude [test])
   (:require [jepsen [client :as client]
-                    [checker :as checker]
-                    [core :as jepsen]
-                    [generator :as gen]
-                    [independent :as independent]
-                    [util :as util :refer [meh]]]
+             [checker :as checker]
+             [core :as jepsen]
+             [generator :as gen]
+             [independent :as independent]
+             [util :as util :refer [meh]]]
             [clojure.java.jdbc :as j]
             [clojure.set :as set]
             [clojure.tools.logging :refer :all]
@@ -136,14 +151,15 @@
 
 (defn test
   [opts]
-  (let [gen       (gen 10)
+  (let [c         (:concurrency opts)
+        gen       (gen (/ c 2))
         keyrange (atom {})]
     (basic/basic-test
      (merge
       {:name "sequential"
        :key-count 5
        :keyrange  keyrange
-       :client {:client (SequentialClient. 10 (atom false) nil)
+       :client {:client (SequentialClient. c (atom false) nil)
                 :during (gen/stagger 1/100 gen)
                 :final nil}
        :checker (checker/compose
