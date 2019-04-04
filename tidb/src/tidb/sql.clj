@@ -125,8 +125,31 @@
   `(timeout (+ 1000 socket-timeout) (assoc ~op :type :info, :value :timed-out)
             (with-error-handling ~op
               (with-txn-retries
+                ; PingCAP says that the default isolation level for
+                ; transactions is snapshot isolation
+                ; (https://github.com/pingcap/docs/blob/master/sql/transaction.md),
+                ; and also that TiDB uses repeatable read to mean SI
+                ; (https://github.com/pingcap/docs/blob/master/sql/transaction-isolation.md).
+                ; I've tried testing both with an explicitly provided
+                ; repeatable read isolation level, and without an explicit
+                ; level; both report the current transaction isolation level as
+                ; 4 (repeatable read), and have identical effects.
+                ;(j/with-db-transaction [~c ~conn :isolation :repeatable-read]
                 (j/with-db-transaction [~c ~conn]
-                  (j/execute! ~c ["start transaction with consistent snapshot"])
+                  ; PingCAP added this start-transaction statement below. I
+                  ; have concerns about this--it's not clear to me whether
+                  ; starting, and not committing, this nested transaction does
+                  ; the right thing. In particular, PingCAP has some docs
+                  ; (https://github.com/pingcap/docs/blob/master/sql/transaction.md)
+                  ; which say "If at this time, the current Session is in the
+                  ; process of a transaction, a new transaction is started
+                  ; after the current transaction is committed." which does NOT
+                  ; seem like it's what we want, because at this point, we're
+                  ; already inside a transaction!
+                  ; (j/execute! ~c ["start transaction with consistent snapshot"])
+                  ;(info :isolation (-> ~c
+                  ;                     j/db-find-connection
+                  ;                     .getTransactionIsolation))
                   ~@body)))))
 
 (defmacro with-conn
