@@ -5,6 +5,7 @@
              [client :as client]
              [generator :as gen]
              [checker :as checker]]
+            [jepsen.tests.bank :as bank]
             [knossos.op :as op]
             [clojure.core.reducers :as r]
             [clojure.java.jdbc :as j]
@@ -12,7 +13,7 @@
             [tidb.basic :as basic]
             [clojure.tools.logging :refer :all]))
 
-(defrecord BankClient [conn n starting-balance]
+(defrecord BankClient [conn]
   client/Client
   (open! [this test node]
     (assoc this :conn (c/open node)))
@@ -21,20 +22,24 @@
     (j/execute! conn ["create table if not exists accounts
                       (id     int not null primary key,
                       balance bigint not null)"])
-    (dotimes [i n]
+    (doseq [a (:accounts test)]
       (try
         (with-txn-retries
-          (j/insert! conn :accounts {:id i, :balance starting-balance}))
+          (j/insert! conn :accounts {:id      a
+                                     :balance (if (= a (first (:accounts test)))
+                                                (:total-amount test)
+                                                0)}))
         (catch java.sql.SQLIntegrityConstraintViolationException e nil))))
 
   (invoke! [this test op]
-    (info (:read-lock test))
     (with-txn op [c conn]
       (try
         (case (:f op)
           :read (->> (j/query c [(str "select * from accounts")])
-                     (mapv :balance)
+                     (map (juxt :id :balance))
+                     (into (sorted-map))
                      (assoc op :type :ok, :value))
+
           :transfer
           (let [{:keys [from to amount]} (:value op)
                 b1 (-> c
@@ -68,81 +73,24 @@
   (close! [_ test]
     (c/close! conn)))
 
-(defn bank-client
-  "Simulates bank account transfers between n accounts, each starting with
-  starting-balance."
-  [n starting-balance]
-  (BankClient. nil n starting-balance))
-
-(defn bank-read
-  "Reads the current state of all accounts without any synchronization."
-  [_ _]
-  {:type :invoke, :f :read})
-
-(defn bank-transfer
-  "Transfers a random amount between two randomly selected accounts."
-  [test process]
-  (let [n (-> test :client :n)]
-    {:type  :invoke
-     :f     :transfer
-     :value {:from   (rand-int n)
-             :to     (rand-int n)
-             :amount (rand-int 5)}}))
-
-(def bank-diff-transfer
-  "Like transfer, but only transfers between *different* accounts."
-  (gen/filter (fn [op] (not= (-> op :value :from)
-                             (-> op :value :to)))
-              bank-transfer))
-
-(defn bank-checker
-  "Balances must all be non-negative and sum to the model's total."
-  [model]
-  (reify checker/Checker
-    (check [this test history opts]
-      (let [bad-reads (->> history
-                           (r/filter op/ok?)
-                           (r/filter #(= :read (:f %)))
-                           (r/map (fn [op]
-                                    (let [balances (:value op)]
-                                      (cond (not= (:n model) (count balances))
-                                            {:type :wrong-n
-                                             :expected (:n model)
-                                             :found    (count balances)
-                                             :op       op}
-                                            (not= (:total model)
-                                                  (reduce + balances))
-                                            {:type :wrong-total
-                                             :expected (:total model)
-                                             :found    (reduce + balances)
-                                             :op       op}))))
-                           (r/filter identity)
-                           (into []))]
-        {:valid? (empty? bad-reads)
-         :bad-reads bad-reads}))))
-
 (defn bank-test-base
   [opts]
   (basic/basic-test
     (merge
-      {:client      {:client (:client opts)
-                     :during (->> (gen/mix [bank-read bank-diff-transfer])
-                                  (gen/clients))
-                     :final (gen/clients (gen/once bank-read))}
-       :checker     (checker/compose
-                      {:perf    (checker/perf)
-                       :details (bank-checker {:n 5 :total 50})})}
+      (dissoc (bank/test) :generator)
+      {:client {:client (:client opts)
+                :during (:generator (bank/test))}}
       (dissoc opts :client))))
 
 (defn test
   [opts]
   (bank-test-base
     (merge {:name   "bank"
-            :client (bank-client 5 10)}
+            :client (BankClient. nil)}
            opts)))
 
 ; One bank account per table
-(defrecord MultiBankClient [conn tbl-created? n starting-balance]
+(defrecord MultiBankClient [conn tbl-created?]
   client/Client
   (open! [this test node]
     (assoc this :conn (c/open node)))
@@ -150,19 +98,19 @@
   (setup! [this test]
     (locking tbl-created?
       (when (compare-and-set! tbl-created? false true)
-        (dotimes [i n]
-          (Thread/sleep 500)
-          (info "Creating table accounts" i)
-          (j/execute! conn [(str "create table if not exists accounts" i
+        (doseq [a (:accounts test)]
+          (info "Creating table accounts" a)
+          (j/execute! conn [(str "create table if not exists accounts" a
                                  "(id     int not null primary key,"
                                  "balance bigint not null)")])
-          (Thread/sleep 500)
           (try
-            (Thread/sleep 500)
-            (info "Populating account" i)
+            (info "Populating account" a)
             (with-txn-retries
-              (j/insert! conn (str "accounts" i)
-                         {:id 0, :balance starting-balance}))
+              (j/insert! conn (str "accounts" a)
+                         {:id 0
+                          :balance (if (= a (first (:accounts test)))
+                                     (:total-amount test)
+                                     0)}))
             (catch java.sql.SQLIntegrityConstraintViolationException e nil))))))
 
   (invoke! [this test op]
@@ -170,13 +118,15 @@
       (try
         (case (:f op)
           :read
-          (->> (range n)
-               (mapv (fn [x]
-                       (->> (j/query
-                             c [(str "select balance from accounts" x)]
-                             :row-fn :balance)
-                            first)))
+          (->> (:accounts test)
+               (map (fn [x]
+                      [x (->> (j/query c [(str "select balance from accounts"
+                                               x)]
+                                       :row-fn :balance)
+                              first)]))
+               (into (sorted-map))
                (assoc op :type :ok, :value))
+
           :transfer
           (let [{:keys [from to amount]} (:value op)
                 from (str "accounts" from)
@@ -212,14 +162,9 @@
   (close! [_ test]
     (c/close! conn)))
 
-(defn multitable-bank-client
-  [n starting-balance]
-  (MultiBankClient. nil (atom false) n starting-balance))
-
 (defn multitable-test
   [opts]
   (bank-test-base
-   (merge {:name "bank-multitable"
-           :model {:n 5 :total 50}
-           :client (multitable-bank-client 5 10)}
-          opts)))
+    (merge {:name   "bank-multitable"
+            :client (MultiBankClient. nil (atom false))}
+           opts)))
