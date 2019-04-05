@@ -220,6 +220,13 @@
                   (handle-do-worker-catch!
                    t "Error running" abort! run-latch teardown-latch worker)))
 
+           (catch java.util.concurrent.CompletionException t
+             (if (str/includes? (str/lower-case (.getMessage t)) "retry")
+               ; Error indicates to retry so do so.
+               (do-worker! abort! run-latch teardown-latch worker)
+               (handle-do-worker-catch!
+                t "Error setting up" abort! run-latch teardown-latch worker)))
+
            (catch Throwable t
              ; Failure in setup process
              (handle-do-worker-catch!
