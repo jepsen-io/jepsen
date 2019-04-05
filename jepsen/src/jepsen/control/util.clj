@@ -266,5 +266,5 @@
 (defn signal!
   "Sends a signal to a named process by signal number or name."
   [process-name signal]
-  (meh (c/exec :pkill :--signal signal process-name))
+  (meh (exec :pkill :--signal signal process-name))
   :signaled)
