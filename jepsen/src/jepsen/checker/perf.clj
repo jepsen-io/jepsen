@@ -1,6 +1,7 @@
 (ns jepsen.checker.perf
   "Supporting functions for performance analysis."
   (:require [clojure.stacktrace :as trace]
+            [fipp.edn :refer [pprint]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
@@ -12,6 +13,9 @@
             [knossos.core :as knossos]
             [knossos.op :as op]
             [knossos.history :as history]))
+
+(def default-nemesis-color "#cccccc")
+(def nemesis-alpha 0.6)
 
 (defn bucket-scale
   "Given a bucket size dt, and a bucket number (e.g. 0, 1, ...), returns the
@@ -207,8 +211,8 @@
   ([history]
    (nemesis-regions* history {}))
   ([history opts]
-   (let [fill-color     (or (:fill-color   opts) "#000000")
-         transparency   (or (:transparency opts) 0.1)
+   (let [fill-color     (or (:fill-color   opts) default-nemesis-color)
+         transparency   (or (:transparency opts) nemesis-alpha)
          history        (nemesis-intervals history opts)
          graph-top-edge 1
          ;; Divide our y-axis space into twelfths
@@ -227,16 +231,35 @@
                 :fillstyle :transparent :solid transparency
                 :noborder]))))))
 
+(defn active-nemeses
+  "Given a history and nemesis specs, returns just those which actually
+  participated in this history."
+  [history nemeses]
+  ; Build a map of fs to nemesis specifications
+  (let [index (->> nemeses
+                   (map (fn [nemesis]
+                          (zipmap (concat (:start nemesis) (:stop nemesis))
+                                  (repeat nemesis))))
+                   (reduce merge {}))]
+    ; Figure out which nemeses are present
+    (->> history
+         (filter #(= :nemesis (:process %)))
+         (map :f)
+         (keep index)
+         distinct
+         (sort-by name))))
+
 (defn nemesis-regions
   "Wraps nemesis-regions* to work with collections of nemeses."
   [history nemeses]
-  (let [c (count nemeses)
-        f (fn [idx nemesis]
-            (let [nemesis (assoc nemesis
-                                 :idx idx
-                                 :total c)]
-              (nemesis-regions* history nemesis)))
-        x (map-indexed f nemeses)]
+  (let [nemeses (active-nemeses history nemeses)
+        c       (count nemeses)
+        f       (fn [idx nemesis]
+                  (let [nemesis (assoc nemesis
+                                       :idx idx
+                                       :total c)]
+                    (nemesis-regions* history nemesis)))
+        x       (map-indexed f nemeses)]
     (apply concat x)))
 
 (defn nemesis-events
@@ -266,7 +289,7 @@
    (nemesis-lines history {}))
   ([history opts]
    (let [events      (nemesis-events history opts)
-         line-color  (or (:line-color opts) "#dddddd")
+         line-color  (or (:line-color opts) default-nemesis-color)
          line-width  (or (:line-width opts) "1")]
      (map (fn [t]
             [:set :arrow
@@ -279,15 +302,20 @@
              :nohead])
           events))))
 
-(defn nemesis-keys
-  "Takes a set of nemeses and renders the keys for the legend"
-  [nemeses]
-  (for [{:keys [name fill-color transparency]} nemeses]
-    ["-"
-     'with       'lines
-     'linecolor  'rgb (or fill-color "#000000")
-     'linewidth  6
-     'title      (str name)]))
+(defn nemesis-series
+  "Given a history and a specification for nemeses, constructs the series
+  required to show every present nemesis' activity in the legend. We do this by
+  constructing dummy data, and a key that will match the way that nemesis's
+  activity is rendered."
+  [history nemeses]
+  (->> (active-nemeses history nemeses)
+       ; Convert to series
+       (map (fn [n]
+              {:title     (:name n)
+               :with      :lines
+               :linecolor ['rgb (:fill-color n default-nemesis-color)]
+               :linewidth 6
+               :data      [[0 -1]]}))))
 
 (defn preamble
   "Shared gnuplot preamble"
@@ -306,6 +334,84 @@
           '[[set ylabel "Latency (ms)"]
             [set logscale y]]))
 
+(defn legend-part
+  "Takes a series map and returns the list of gnuplot commands to render that
+  series."
+  [series]
+  (remove nil?
+          ["-"
+           'with      (:with series)
+           (when-let [t (:linetype series)]  ['linetype t])
+           (when-let [c (:linecolor series)] ['linecolor c])
+           (when-let [t (:pointtype series)] ['pointtype t])
+           (when-let [w (:linewidth series)] ['linewidth w])
+           (if-let [t (:title series)]       ['title t]       'notitle)]))
+
+(defn plot!
+  "Renders a gnuplot plot. Takes an option map:
+
+    :preamble             Gnuplot commands to send first
+    :series               A vector of series maps
+    :draw-fewer-on-top?   If passed, renders series with fewer points on top
+
+  A series map is a map with:
+
+    :data       A sequence of data points to render, e,g. [[0 0] [1 2] [2 4]]
+    :with       How to draw this series, e.g. 'points
+    :linetype   What kind of line to use
+    :pointtype  What kind of point to use
+    :title      A string, or nil, to label this series map
+  "
+  [opts]
+  ; (info :plotting (with-out-str (pprint opts)))
+  (assert (every? seq (map :data (:series opts)))
+          (str "Series has no :data points\n"
+               (with-out-str (pprint (remove (comp seq :data)
+                                             (:series opts))))))
+  (if (:draw-fewer-on-top? opts)
+    ; We're going to transform our series in two ways: one, in their normal
+    ; order, but with only a single dummy point, and second, those with the
+    ; most points first, but without titles, so they don't appear in the
+    ; legend.
+    (let [series (:series opts)
+          series (concat (->> series
+                              (sort-by (comp count :data))
+                              reverse
+                              (map #(dissoc % :title)))
+                         ; Then, the normal series, but with dummy points
+                         (->> series
+                              (map #(assoc % :data [[0 -1]]))))]
+      ; OK, go ahead and render that
+      (recur (assoc opts
+                    :series series
+                    :draw-fewer-on-top? false)))
+
+    ; OK, normal rendering
+    (let [series     (:series opts)
+          ; The plot command
+          plot        [['plot (apply g/list (map legend-part series))]]
+          ; All commands
+          commands    (concat (:preamble opts) plot)
+          ; Datasets
+          data        (map :data series)]
+      ; Go!
+      ;(pprint commands)
+      ;(pprint (map (partial take 2) data))
+      (try (g/raw-plot! commands data)
+           (catch java.io.IOException _
+             (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))
+
+(defn with-nemeses
+  "Augments a plot map to render nemesis activity"
+  [plot test history nemeses]
+  (let [nemeses     (or nemeses #{{}})
+        nem-regions (nemesis-regions history nemeses)
+        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
+        series      (nemesis-series history nemeses)]
+    (-> plot
+        (update :preamble concat nem-regions nem-lines)
+        (update :series concat series))))
+
 (defn point-graph!
   "Writes a plot of raw latency data points."
   [test history {:keys [subdirectory nemeses] :as opts}]
@@ -313,65 +419,24 @@
         datasets    (invokes-by-f-type history)
         fs          (util/polysort (keys datasets))
         fs->points  (fs->points fs)
-        ; Order for the key
-        key-order   (for [f (util/polysort fs), t types] [f t])
-        ; Order for points
-        plot-order  (->> key-order
-                         (sort-by (comp count (partial get-in datasets)))
-                         reverse)
         output-path (.getCanonicalPath (store/path! test
                                                     subdirectory
                                                     "latency-raw.png"))
         preamble    (latency-preamble test output-path)
-
-        ;; Ensure default nemeses opts for backwards compatiility
-        nemeses     (or nemeses #{{}})
-        nem-regions (nemesis-regions history nemeses)
-        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
-
-        ;; Plot ops
-        ops [['plot (apply g/list
-                           (concat
-                            ;; Plot
-                            (for [[f t] plot-order]
-                              ["-"
-                               'with        'points
-                               'linetype    (type->color t)
-                               'pointtype   (fs->points f)
-                               'notitle])
-                            ;; Key
-                            (for [[f t] key-order]
-                              ["-"
-                               'with        'points
-                               'linetype    (type->color t)
-                               'pointtype   (fs->points f)
-                               'title       (str (util/name+ f) " "
-                                                 (name t))])
-                            (nemesis-keys nemeses)))]]]
-
-    (when (seq key-order)
-      (try
-        (g/raw-plot!
-         (concat preamble nem-regions nem-lines ops)
-
-          (concat
-            ; Plot
-            (for [[f t] plot-order]
-              (map latency-point (get-in datasets [f t])))
-            ; Key
-            (for [[f t] key-order]
-              (if (seq (get-in datasets [f t]))
-                [[0 -1]] ; Dummy point to force rendering
-                []))
-            ;; Nemeses
-            (for [nem nemeses]
-              ;; Dummy point to force rendering
-              [[0 -1]])))
-
-        (catch java.io.IOException _
-          (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))
-
-      output-path)))
+        series      (->> (for [f fs, t types]
+                           (when-let [data (seq (get-in datasets [f t]))]
+                             {:title     (str (util/name+ f) " " (name t))
+                              :with      'points
+                              :linetype  (type->color t)
+                              :pointtype (fs->points f)
+                              :data      (map latency-point data)}))
+                         (remove nil?))]
+    (-> {:preamble           preamble
+         :draw-fewer-on-top? true
+         :series             series}
+        (with-nemeses test history nemeses)
+        plot!)
+    output-path))
 
 (defn quantiles-graph!
   "Writes a plot of latency quantiles, by f, over time."
@@ -397,37 +462,16 @@
                                   "latency-quantiles.png"))
 
         preamble    (latency-preamble test output-path)
-
-        ;; Gotta fudge this with default opts to make sure it runs at least once
-        nemeses     (or nemeses #{{}})
-        nem-regions (nemesis-regions history nemeses)
-        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
-
-        ;; Plot ops
-        ops [['plot (apply g/list
-                           (concat (for [f fs, q qs]
-                                     ["-"
-                                      'with        'linespoints
-                                      'linetype    (qs->colors q)
-                                      'pointtype   (fs->points f)
-                                      'title       (str (util/name+ f) " "
-                                                        q)])
-                                   (nemesis-keys nemeses)))]]]
-
-    (when (seq datasets)
-      (try
-        (g/raw-plot!
-         (concat preamble nem-regions nem-lines ops)
-         (concat
-          (for [f fs, q qs]
-            (get-in datasets [f q]))
-          (for [nem nemeses]
-            ;; Dummy point to force rendering
-            [[0 -1]])))
-        (catch java.io.IOException _
-          (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable"))))
-
-      output-path)))
+        series      (for [f fs, q qs]
+                      {:title     (str (util/name+ f) " " q)
+                       :with      'linespoints
+                       :linetype  (qs->colors q)
+                       :pointtype  (fs->points f)
+                       :data      (get-in datasets [f q])})]
+    (-> {:preamble preamble
+         :series   series}
+        (with-nemeses test history nemeses)
+        plot!)))
 
 (defn rate-preamble
   "Gnuplot commands for setting up a rate plot."
@@ -461,37 +505,16 @@
                                                     subdirectory
                                                     "rate.png"))
 
-        preable (rate-preamble test output-path)
-
-        ;; Ensure default nemeses opts for backwards compatiility
-        nemeses     (or nemeses #{{}})
-        nem-regions (nemesis-regions history nemeses)
-        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
-
-        ;; Plot ops
-        ops [['plot (apply g/list
-                           (concat
-                            (for [f fs, t types]
-                              ["-"
-                               'with         'linespoints
-                               'linetype     (type->color t)
-                               'pointtype    (fs->points f)
-                               'title        (str (util/name+ f) " "
-                                                  (name t))])
-                            (nemesis-keys nemeses)))]]]
-    (when (seq datasets)
-      (try
-        (g/raw-plot!
-          (concat preable nem-regions nem-lines ops)
-
-          (concat
-           (for [f fs, t types]
-             (let [m (get-in datasets [f t])]
-               (->> (buckets dt t-max)
-                    (map (juxt identity #(get m % 0))))))
-           (for [nem nemeses]
-             ;; Dummy point to force rendering
-             [[0 -1]])))
-
-        (catch java.io.IOException _
-          (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))
+        preamble (rate-preamble test output-path)
+        series   (for [f fs, t types]
+                   {:title     (str (util/name+ f) " " (name t))
+                    :with      'linespoints
+                    :linetype  (type->color t)
+                    :pointtype (fs->points f)
+                    :data      (let [m (get-in datasets [f t])]
+                                 (map (juxt identity #(get m % 0))
+                                      (buckets dt t-max)))})]
+    (-> {:preamble  preamble
+         :series    series}
+        (with-nemeses test history nemeses)
+        plot!)))
