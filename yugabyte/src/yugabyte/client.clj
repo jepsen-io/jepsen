@@ -162,7 +162,9 @@
 
   Also you, like, literally *can't* tell Cassaforte (or maybe Cassandra's
   client or CQL or YB?) to create an index if it doesn't exist, so we're
-  swallowing the duplicate table execeptions here"
+  swallowing the duplicate table execeptions here.
+  TODO: update YB Cassaforte fork, so we can use `CREATE INDEX IF NOT EXISTS`.
+  "
   [conn & index-args]
   (let [statement (if (and (= 1 (count index-args))
                            (string? (first index-args)))
@@ -170,7 +172,7 @@
                     (apply q/create-index index-args))]
     (try (execute-with-timeout! conn 30000 statement)
          (catch InvalidQueryException e
-           (if (re-find #"Target index already exists" (.getMessage e))
+           (if (re-find #"already exists" (.getMessage e))
              :already-exists
              (throw e))))))
 
