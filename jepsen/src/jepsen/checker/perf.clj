@@ -83,6 +83,16 @@
                      buckets)))
          (zipmap qs))))
 
+(defn first-invoke-time
+  "Takes a history and returns the first invoke :time in it, in seconds, as a
+  double."
+  [history]
+  (when-let [t (->> history
+                    (filter op/invoke?)
+                    (keep :time)
+                    first)]
+    (double (util/nanos->secs t))))
+
 (defn invokes-by-type
   "Splits up a sequence of invocations into ok, failed, and crashed ops by
   looking at their corresponding completions."
@@ -264,16 +274,23 @@
 
 (defn nemesis-events
   "Given a history, constructs a sequence of times, in seconds, marking nemesis
-  events other than start/stop pairs."
+  events other than start/stop pairs.
+
+  Nemesis operations may happen significantly later than the last operation in
+  the history, but we typically only size our plots relative to the data we're
+  plotting in the history. To prevent drawing outside the plot region, we
+  constrain our nemesis events to those before the final client :invoke op."
   [history opts]
   (let [start (or (:start opts) #{:start})
-        stop  (or (:stop  opts) #{:stop})]
+        stop  (or (:stop  opts) #{:stop})
+        tmax  (or (first-invoke-time (rseq history)) 0)]
     (->> history
          (remove (fn [op]
                    (and (not= :nemesis (:process op))
                         (not (start (:f op)))
                         (not (stop  (:f op))))))
-         (map (comp double util/nanos->secs :time)))))
+         (map (comp double util/nanos->secs :time))
+         (take-while (partial >= tmax)))))
 
 (defn nemesis-lines
   "Emits a sequence of gnuplot commands rendering vertical lines where nemesis
@@ -326,11 +343,19 @@
             [set xlabel "Time (s)"]
             [set key outside top right]]))
 
+(defn xrange
+  "Computes the xrange for a history."
+  [history]
+  (let [xmin (or (first-invoke-time history)        (g/lit "*"))
+        xmax (or (first-invoke-time (rseq history)) (g/lit "*"))]
+    (g/range xmin xmax)))
+
 (defn latency-preamble
   "Gnuplot commands for setting up a latency plot."
   [test output-path]
   (concat (preamble output-path)
-          [[:set :title (str (:name test) " latency")]]
+          [[:set :title (str (:name test) " latency")]
+           [:set :xrange (xrange (:history test))]]
           '[[set ylabel "Latency (ms)"]
             [set logscale y]]))
 
