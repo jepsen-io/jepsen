@@ -26,20 +26,28 @@
     :nodes            A set of nodes you're going to operate on. We only care
                       about the count, so we can figure out how many workers
                       to use per key.
-    :per-key-limit    Maximum number of ops per key. Default 128."
+    :model            A model for checking. Default is (model/cas-register).
+    :per-key-limit    Maximum number of ops per key.
+    :process-limit    Maximum number of processes that can interact with a
+                      given key. Default 20."
   [opts]
   {:checker (independent/checker
               (checker/compose
-               {:linearizable (checker/linearizable {:model (model/cas-register)})
+               {:linearizable (checker/linearizable
+                                {:model (:model opts (model/cas-register))})
                 :timeline     (timeline/html)}))
    :generator (let [n (count (:nodes opts))]
                 (independent/concurrent-generator
                   (* 2 n)
                   (range)
                   (fn [k]
-                    (->> (gen/reserve n r (gen/mix [w cas cas]))
+                    (cond->> (gen/reserve n r (gen/mix [w cas cas]))
                          ; We randomize the limit a bit so that over time, keys
                          ; become misaligned, which prevents us from lining up
                          ; on Significant Event Boundaries.
+                         (:per-key-limit opts)
                          (gen/limit (* (+ (rand 0.1) 0.9)
-                                       (:per-key-limit opts 128)))))))})
+                                       (:per-key-limit opts )))
+
+                         true
+                         (gen/process-limit (:process-limit opts 20))))))})
