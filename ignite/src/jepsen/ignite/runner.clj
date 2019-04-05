@@ -4,6 +4,7 @@
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]
             [jepsen.cli :as jc]
+            [jepsen.nemesis :as nemesis]
             [jepsen.core :as jepsen]
             [jepsen.ignite  [register :as register]
                             [bank     :as bank]])
@@ -42,6 +43,10 @@
   {"SERIALIZABLE"    TransactionIsolation/SERIALIZABLE
    "READ_COMMITTED"  TransactionIsolation/READ_COMMITTED
    "REPEATABLE_READ" TransactionIsolation/REPEATABLE_READ})
+
+(def nemesis-types
+  {"noop"                   nemesis/noop
+  "partition-random-halves" nemesis/partition-random-halves})
 
 (def opt-spec
   "Command line options for tools.cli"
@@ -89,7 +94,16 @@
     :validate [pos? "Must be positive"]]
    ["-v" "--version VERSION"
     "What version of Apache Ignite to install"
-    :default "2.7.0"]])
+    :default "2.7.0"]
+   ["-o" "--os NAME" "Operating system: either centos or debian."
+    :default  :noop
+    :parse-fn keyword
+    :validate [#{:centos :debian :noop} "One of `centos` or `debian` or 'noop'"]]
+   ["-nemesis" "--nemesis Nemesis"
+    "What Nemesis to use"
+    :default nemesis/noop
+    :parse-fn nemesis-types
+    :validate [identity (jc/one-of nemesis-types)]]])
 
 (defn log-test
   [t]
