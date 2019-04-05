@@ -44,16 +44,10 @@
   []
   {:type :invoke, :f :read, :value nil})
 
-(defn test
+(defn workload
   [opts]
   (let [c (:concurrency opts)]
-    (basic/basic-test
-      (merge
-        {:name "set"
-         :client {:client (SetClient. nil)
-                  :during (->> (gen/reserve (/ c 2) (adds) (reads))
-                               (gen/stagger 1/10))}
-         :checker (checker/compose
-                    {:perf (checker/perf)
-                     :set  (checker/set-full)})}
-        opts))))
+    {:client (SetClient. nil)
+     :generator (->> (gen/reserve (/ c 2) (adds) (reads))
+                     (gen/stagger 1/10))
+     :checker (checker/set-full)}))

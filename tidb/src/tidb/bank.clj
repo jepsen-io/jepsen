@@ -73,21 +73,10 @@
   (close! [_ test]
     (c/close! conn)))
 
-(defn bank-test-base
+(defn workload
   [opts]
-  (basic/basic-test
-    (merge
-      (dissoc (bank/test) :generator)
-      {:client {:client (:client opts)
-                :during (:generator (bank/test))}}
-      (dissoc opts :client))))
-
-(defn test
-  [opts]
-  (bank-test-base
-    (merge {:name   "bank"
-            :client (BankClient. nil)}
-           opts)))
+  (assoc (bank/test)
+         :client (BankClient. nil)))
 
 ; One bank account per table
 (defrecord MultiBankClient [conn tbl-created?]
@@ -162,9 +151,7 @@
   (close! [_ test]
     (c/close! conn)))
 
-(defn multitable-test
+(defn multitable-workload
   [opts]
-  (bank-test-base
-    (merge {:name   "bank-multitable"
-            :client (MultiBankClient. nil (atom false))}
-           opts)))
+  (assoc (workload opts)
+         :client (MultiBankClient. nil (atom false))))

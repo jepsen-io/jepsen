@@ -1,12 +1,13 @@
 (ns tidb.register
   "Single atomic register test"
-  (:refer-clojure :exclude [test])
+  (:refer-clojure :exclude [test read])
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]
                     [independent :as independent]
                     [util :refer [meh]]]
             [jepsen.checker.timeline :as timeline]
+            [jepsen.tests.linearizable-register :as lr]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer :all]
             [tidb.sql :as c :refer :all]
@@ -62,25 +63,9 @@
   (close! [this test]
     (c/close! conn)))
 
-(defn test
+(defn workload
   [opts]
-  (let [n (count (:nodes opts))]
-    (basic/basic-test
-      (merge
-        {:name   "register"
-         :client {:client (AtomicClient. nil)
-                  :during (independent/concurrent-generator
-                            (* 2 n)
-                            (range)
-                            (fn [k]
-                              (->> (gen/reserve n (gen/mix [w cas cas]) r)
-                                   (gen/stagger 1/10)
-                                   (gen/process-limit 20))))}
-         :checker (checker/compose
-                    {:perf  (checker/perf)
-                     :indep (independent/checker
-                              (checker/compose
-                                {:timeline (timeline/html)
-                                 :linear   (checker/linearizable
-                                             {:model (model/cas-register 0)})}))})}
-        opts))))
+  (let [w (lr/test (assoc opts :model (model/cas-register 0)))]
+    (-> w
+        (assoc :client (AtomicClient. nil))
+        (update :generator (partial gen/stagger 1/10)))))

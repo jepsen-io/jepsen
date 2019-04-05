@@ -143,12 +143,16 @@
   (start-kv! test node)
   (start-db! test node))
 
+(defn stop-pd! [test node] (cu/stop-daemon! pd-bin pd-pid-file))
+(defn stop-kv! [test node] (cu/stop-daemon! kv-bin kv-pid-file))
+(defn stop-db! [test node] (cu/stop-daemon! db-bin db-pid-file))
+
 (defn stop!
   "Stops all daemons"
   [test node]
-  (cu/stop-daemon! db-bin db-pid-file)
-  (cu/stop-daemon! kv-bin kv-pid-file)
-  (cu/stop-daemon! pd-bin pd-pid-file))
+  (stop-db! test node)
+  (stop-kv! test node)
+  (stop-pd! test node))
 
 (defn install!
   "Downloads archive and extracts it to our local tidb-dir, if it doesn't exist
@@ -168,7 +172,7 @@
 
 (defn db
   "TiDB"
-  [opts]
+  []
   (reify db/DB
     (setup! [_ test node]
       (c/su

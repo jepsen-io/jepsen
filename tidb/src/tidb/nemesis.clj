@@ -6,8 +6,8 @@
              [nemesis :as nemesis]
              [net :as net]
              [generator :as gen]
-             [reconnect :as rc]
              [util :as util :refer [letr]]]
+            [jepsen.control.util :as cu]
             [jepsen.nemesis.time :as nt]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -15,135 +15,209 @@
             [tidb.db :as db]
             [clojure.tools.logging :refer :all]))
 
-;; duration between interruptions
-(def nemesis-delay 5) ; seconds
-
-;; duration of an interruption
-(def nemesis-duration 5) ; seconds
-
-;;;;;;;;;;;;;;;;;;; Common definitions ;;;;;;;;;;;;;;;;;;;;;;
-
-(defn nemesis-no-gen
+(defn process-nemesis
+  "A nemesis that can pause, resume, start, stop, and kill tidb, tikv, and pd."
   []
-  {:during gen/void
-   :final gen/void})
+  (reify nemesis/Nemesis
+    (setup! [this test] this)
 
-(defn nemesis-single-gen
+    (invoke! [this test op]
+      (let [nodes (:nodes test)
+            nodes (case (:f op)
+                    ; When resuming, resume all nodes
+                    (:resume-pd :resume-kv :resume-db
+                     :start-pd  :start-kv  :start-db) nodes
+
+                    (util/random-nonempty-subset nodes))]
+        (assoc op :value
+               (c/on-nodes test nodes
+                           (fn [test node]
+                             (case (:f op)
+                               :start-pd  (db/start-pd! test node)
+                               :start-kv  (db/start-kv! test node)
+                               :start-db  (db/start-db! test node)
+                               :kill-pd   (db/stop-pd!  test node)
+                               :kill-kv   (db/stop-kv!  test node)
+                               :kill-db   (db/stop-db!  test node)
+                               :pause-pd  (cu/signal! db/pd-bin :STOP)
+                               :pause-kv  (cu/signal! db/kv-bin :STOP)
+                               :pause-db  (cu/signal! db/db-bin :STOP)
+                               :resume-pd (cu/signal! db/pd-bin :CONT)
+                               :resume-kv (cu/signal! db/kv-bin :CONT)
+                               :resume-db (cu/signal! db/db-bin :CONT)))))))
+
+    (teardown! [this test])))
+
+(defn full-nemesis
+  "Merges together all nemeses"
   []
-  {:during (gen/seq (cycle [(gen/sleep nemesis-delay)
-                            {:type :info, :f :start}
-                            (gen/sleep nemesis-duration)
-                            {:type :info, :f :stop}]))
-   :final (gen/once {:type :info, :f :stop})})
+  (nemesis/compose
+    {#{:start-pd  :start-kv  :start-db
+       :kill-pd   :kill-kv   :kill-db
+       :pause-pd  :pause-kv  :pause-db
+       :resume-pd :resume-kv :resume-db}    (process-nemesis)
+     {:start-partition :start
+      :stop-partition  :stop}               (nemesis/partitioner nil)
+     {:reset-clock          :reset
+      :strobe-clock         :strobe
+      :check-clock-offsets  :check-offsets
+      :bump-clock           :bump}          (nt/clock-nemesis)}))
 
-(defn nemesis-double-gen
-  []
-  {:during (gen/seq (cycle [(gen/sleep nemesis-delay)
-                            {:type :info, :f :start1}
-                            (gen/sleep (/ nemesis-duration 2))
-                            {:type :info, :f :start2}
-                            (gen/sleep (/ nemesis-duration 2))
-                            {:type :info, :f :stop1}
-                            (gen/sleep (/ nemesis-duration 2))
-                            {:type :info, :f :stop2}
-                            (gen/sleep nemesis-delay)
-                            {:type :info, :f :start2}
-                            (gen/sleep (/ nemesis-duration 2))
-                            {:type :info, :f :start1}
-                            (gen/sleep (/ nemesis-duration 2))
-                            {:type :info, :f :stop2}
-                            (gen/sleep (/ nemesis-duration 2))
-                            {:type :info, :f :stop1}
-                            ]))
-   :final (gen/seq [{:type :info, :f :stop1}
-                    {:type :info, :f :stop2}])})
+; Generators
 
-(defn compose
-  "Takes a collection of nemesis maps, each with a :name, :during and :final
-  generators, and a :client. Creates a merged nemesis map, with a generator
-  that emits a mix of operations destined for each nemesis, and a composed
-  nemesis that maps those back to their originals."
-  [nemeses]
-  (let [nemeses (remove nil? nemeses)]
-    (assert (distinct? (map :names nemeses)))
-    (let [; unwrap :f [name, inner] -> :f inner
-          nemesis (->> nemeses
-                       (map (fn [nem]
-                              (let [my-name (:name nem)]
-                                ; Function that selects our specific ops
-                                [(fn f-select [[name f]]
-                                   (when (= name my-name)
-                                     (assert (not (nil? f)))
-                                     f))
-                                 (:client nem)])))
-                       (into {})
-                       ((fn [x] (pprint [:nemesis-map x]) x))
-                       nemesis/compose)
-          ; wrap :f inner -> :f [name, inner]
-          during (->> nemeses
-                      (map (fn [nemesis]
-                             (let [gen  (:during nemesis)
-                                   name (:name nemesis)]
-                               (reify gen/Generator
-                                 (op [_ test process]
-                                   (when-let [op (gen/op gen test process)]
-                                     (update op :f (partial vector name))))))))
-                      gen/mix)
-          final (->> nemeses
-                     (map (fn [nemesis]
-                            (let [gen  (:final nemesis)
-                                  name (:name nemesis)]
-                              (reify gen/Generator
-                                (op [_ test process]
-                                   (when-let [op (gen/op gen test process)]
-                                     (update op :f (partial vector name))))))))
-                     (apply gen/concat))]
-      {:name   (str/join "+" (map :name nemeses))
-       :clocks (reduce #(or %1 %2) (map :clocks nemeses))
-       :client nemesis
-       :during during
-       :final  final})))
+(defn op
+  "Shorthand for constructing a nemesis op"
+  ([f]
+   (op f nil))
+  ([f v]
+   {:type :info, :f f, :value v})
+  ([f v & args]
+   (apply assoc (op f v) args)))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;; Nemesis definitions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn partition-one-gen
+  "A generator for a partition that isolates one node."
+  [test process]
+  (op :start-partition
+     (->> test :nodes nemesis/split-one nemesis/complete-grudge)
+     :partition-type :single-node))
 
-;; empty nemesis
-(defn none
-  []
-  (merge (nemesis-no-gen)
-         {:name "blank"
-          :client nemesis/noop
-          :clocks false}))
+(defn partition-half-gen
+  "A generator for a partition that cuts the network in half."
+  [test process]
+  (op :start-partition
+      (->> test :nodes shuffle nemesis/bisect nemesis/complete-grudge)
+      :partition-type :half))
 
-;; random partitions
-(defn parts
-  []
-  (merge (nemesis-single-gen)
-  {:name "parts"
-   :client (nemesis/partition-random-halves)
-   :clocks false}))
+(defn partition-ring-gen
+  "A generator for a partition that creates overlapping majority rings"
+  [test process]
+  (op :start-partition
+      (->> test :nodes nemesis/majorities-ring)
+      :partition-type :ring))
 
-;; start/stop server
-(defn startstop
+(defn clock-gen
+	"A mixture of clock operations."
+	[]
+	(->> (nt/clock-gen)
+			 (gen/f-map {:check-offsets  :check-clock-offsets
+									 :reset          :reset-clock
+									 :strobe         :strobe-clock
+									 :bump           :bump-clock})))
+
+(defn flip-flop
+  "Switches between ops from two generators: a, b, a, b, ..."
+  [a b]
+  (gen/seq (cycle [a b])))
+
+(defn opt-mix
+  "Given a nemesis map n, and a map of options to generators to use if that
+  option is present in n, constructs a mix of generators for those options. If
+  no options match, returns `nil`."
+  [n possible-gens]
+  (let [gens (reduce (fn [gens [option gen]]
+                       (if (option n)
+                         (conj gens gen)
+                         gens))
+                     []
+                     possible-gens)]
+    (when (seq gens)
+      (gen/mix gens))))
+
+(defn mixed-generator
+  "Takes a nemesis options map `n`, and constructs a generator for all nemesis
+  operations. This generator is used during normal nemesis operations."
   [n]
-  (merge (nemesis-single-gen)
-         {:name (str "startstop" (if (> n 1) n ""))
-          :client (nemesis/hammer-time
-                    (comp (partial take n) shuffle) (nth [db/pd-bin db/kv-bin db/db-bin] (rand-int 3)))
-          :clocks false}))
+  ; Shorthand: we're going to have a bunch of flip-flops with various types of
+  ; failure conditions and a single recovery.
+  (let [o (fn [possible-gens recovery]
+            ; We return nil when mix does to avoid generating flip flops when
+            ; *no* options are present in the nemesis opts.
+            (when-let [mix (opt-mix n possible-gens)]
+              (flip-flop mix recovery)))]
 
-(defn startkill
+    ; Mix together our different types of process crashes, partitions, and
+    ; clock skews.
+    (->> [(o {:kill-pd (op :kill-pd)}
+             (op :start-pd))
+          (o {:kill-kv (op :kill-kv)}
+             (op :start-kv))
+          (o {:kill-db (op :kill-db)}
+             (op :start-db))
+          (o {:pause-pd (op :pause-pd)}
+             (op :resume-pd))
+          (o {:pause-kv (op :pause-kv)}
+             (op :resume-kv))
+          (o {:pause-db (op :pause-db)}
+             (op :resume-db))
+          (o {:partition-one  partition-one-gen
+              :partition-half partition-half-gen
+              :partition-ring partition-ring-gen}
+             (op :stop-partition))
+          (opt-mix n {:clock-skew (clock-gen)})]
+         ; For all options relevant for this nemesis, mix them together
+         (remove nil?)
+         gen/mix
+         ; Introduce either random or fixed delays between ops
+         ((case (:schedule n)
+            (nil :random)    gen/stagger
+            :fixed           gen/delay-til)
+          (:interval n)))))
+
+(defn final-generator
+  "Takes a nemesis options map `n`, and constructs a generator to stop all
+  problems. This generator is called at the end of a test, before final client
+  operations."
   [n]
-  (merge (nemesis-single-gen)
-         {:name (str "startkill" (if (> n 1) n ""))
-          :client (nemesis/node-start-stopper (comp (partial take n) shuffle)
-                                              db/stop!
-                                              db/start!)
-          :clocks false}))
+  (->> (cond-> []
+         (:clock-skew n)  (conj :reset-clock)
+         (:pause-pd n)    (conj :resume-pd)
+         (:pause-kv n)    (conj :resume-kv)
+         (:pause-db n)    (conj :resume-db)
+         (:kill-pd n)			(conj :start-pd)
+         (:kill-kv n)   	(conj :start-kv)
+         (:kill-db n)   	(conj :start-db)
 
-;; majorities ring
-(defn majring
-  []
-  (merge (nemesis-single-gen)
-         {:name "majring"
-          :client (nemesis/partition-majorities-ring)
-          :clocks false}))
+         (some n [:partition-one :partition-half :partition-ring])
+         (conj :stop-partition))
+       (map op)
+       gen/seq))
+
+(defn full-generator
+  "Takes a nemesis options map `n`. If `n` has a :long-recovery option, builds
+  a generator which alternates between faults (mixed-generator) and long
+  recovery windows (final-generator). Otherwise, just emits faults from
+  mixed-generator."
+  [n]
+  (if (:long-recovery n)
+    (let [mix     #(gen/time-limit 120 (mixed-generator n))
+          recover #(gen/phases (final-generator n)
+                               (gen/sleep 60))]
+      (gen/seq-all (interleave (repeatedly mix)
+                               (repeatedly recover))))
+    (mixed-generator n)))
+
+(defn expand-options
+  "We support shorthand options in nemesis maps, like :kill, which expands to
+  :kill-pd, :kill-kv, and :kill-db. This function expands those."
+  [n]
+  (cond-> n
+    (:kill n) (assoc :kill-pd true
+                     :kill-kv true
+										 :kill-db true)
+    (:stop n) (assoc :stop-pd true
+                     :kill-kv true
+                     :kill-db true)
+    (:pause n) (assoc :pause-pd true
+                      :pause-kv true
+                      :pause-db true)
+    (:partition n) (assoc :partition-one true
+                          :partition-half true
+                          :partition-ring true)))
+
+(defn nemesis
+  "Composite nemesis and generator, given test options."
+  [opts]
+  (let [n (expand-options (:nemesis opts))]
+    {:nemesis         (full-nemesis)
+     :generator       (full-generator n)
+     :final-generator (final-generator n)}))

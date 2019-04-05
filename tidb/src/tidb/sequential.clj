@@ -149,20 +149,13 @@
     (gen/reserve n (writes last-written)
                  (reads last-written))))
 
-(defn test
+(defn workload
   [opts]
   (let [c         (:concurrency opts)
         gen       (gen (/ c 2))
         keyrange (atom {})]
-    (basic/basic-test
-     (merge
-      {:name "sequential"
-       :key-count 5
+      {:key-count 5
        :keyrange  keyrange
-       :client {:client (SequentialClient. c (atom false) nil)
-                :during (gen/stagger 1/100 gen)
-                :final nil}
-       :checker (checker/compose
-                 {:perf (checker/perf)
-                  :sequential (checker)})}
-      opts))))
+       :client    (SequentialClient. c (atom false) nil)
+       :generator (gen/stagger 1/100 gen)
+       :checker   (checker)}))
