@@ -83,12 +83,10 @@
                      buckets)))
          (zipmap qs))))
 
-(defn first-invoke-time
-  "Takes a history and returns the first invoke :time in it, in seconds, as a
-  double."
+(defn first-time
+  "Takes a history and returns the first :time in it, in seconds, as a double."
   [history]
   (when-let [t (->> history
-                    (filter op/invoke?)
                     (keep :time)
                     first)]
     (double (util/nanos->secs t))))
@@ -283,7 +281,7 @@
   [history opts]
   (let [start (or (:start opts) #{:start})
         stop  (or (:stop  opts) #{:stop})
-        tmax  (or (first-invoke-time (rseq history)) 0)]
+        tmax  (or (first-time (filter op/invoke? (rseq history))) 0)]
     (->> history
          (remove (fn [op]
                    (and (not= :nemesis (:process op))
@@ -332,7 +330,7 @@
                :with      :lines
                :linecolor ['rgb (:fill-color n default-nemesis-color)]
                :linewidth 6
-               :data      [[0 -1]]}))))
+               :data      [[-1 -1]]}))))
 
 (defn preamble
   "Shared gnuplot preamble"
@@ -344,18 +342,20 @@
             [set key outside top right]]))
 
 (defn xrange
-  "Computes the xrange for a history."
-  [history]
-  (let [xmin (or (first-invoke-time history)        (g/lit "*"))
-        xmax (or (first-invoke-time (rseq history)) (g/lit "*"))]
-    (g/range xmin xmax)))
+  "Computes the xrange for a history. Optionally, filters the history with f."
+  ([history]
+   (xrange identity history))
+  ([f history]
+  (let [xmin (or (first-time (filter f history))        (g/lit "*"))
+        xmax (or (first-time (filter f (rseq history))) (g/lit "*"))]
+    (g/range xmin xmax))))
 
 (defn latency-preamble
   "Gnuplot commands for setting up a latency plot."
   [test output-path]
   (concat (preamble output-path)
           [[:set :title (str (:name test) " latency")]
-           [:set :xrange (xrange (:history test))]]
+           [:set :xrange (xrange op/invoke? (:history test))]]
           '[[set ylabel "Latency (ms)"]
             [set logscale y]]))
 
@@ -440,7 +440,8 @@
 (defn point-graph!
   "Writes a plot of raw latency data points."
   [test history {:keys [subdirectory nemeses] :as opts}]
-  (let [history     (util/history->latencies history)
+  (let [nemeses     (or nemeses (:nemeses (:plot test)))
+        history     (util/history->latencies history)
         datasets    (invokes-by-f-type history)
         fs          (util/polysort (keys datasets))
         fs->points  (fs->points fs)
@@ -466,7 +467,8 @@
 (defn quantiles-graph!
   "Writes a plot of latency quantiles, by f, over time."
   [test history {:keys [subdirectory nemeses]}]
-  (let [history     (util/history->latencies history)
+  (let [nemeses     (or nemeses (:nemeses (:plot test)))
+        history     (util/history->latencies history)
         dt          30
         qs          [0.5 0.95 0.99 1]
         datasets    (->> history
@@ -508,7 +510,8 @@
 (defn rate-graph!
   "Writes a plot of operation rate by their completion times."
   [test history {:keys [subdirectory nemeses]}]
-  (let [dt          10
+  (let [nemeses     (or nemeses (:nemeses (:plot test)))
+        dt          10
         td          (double (/ dt))
         t-max       (->> history (r/map :time) (reduce max 0) util/nanos->secs)
         datasets    (->> history
