@@ -109,17 +109,20 @@
   [opts]
   ((re-find #"v(\d+\.\d+\.\d+)" (:tarball opts)) 1))
 
-(def nemesis-checker-spec
-  "Specification for how to render nemesis operations in plots"
-  {:nemeses #{{:name  "kill pd"
-               :start #{:kill-pd}
-               :stop  #{:start-pd}}
-              {:name  "kill kv"
-               :start #{:kill-kv}
-               :stop  #{:start-kv}}
-              {:name  "kill db"
-               :start #{:kill-db}
-               :stop  #{:start-db}}}})
+(def plot-spec
+  "Specification for how to render operations in plots"
+  {:nemeses #{{:name        "kill pd"
+               :fill-color  "#E9A4A0"
+               :start       #{:kill-pd}
+               :stop        #{:start-pd}}
+              {:name        "kill kv"
+               :fill-color  "#D1A0AB"
+               :start       #{:kill-kv}
+               :stop        #{:start-kv}}
+              {:name        "kill db"
+               :fill-color  "#D3A4B5"
+               :start       #{:kill-db}
+               :stop        #{:start-db}}}})
 
 (defn test
   "Constructs a test from a map of CLI options."
@@ -162,8 +165,9 @@
             :client     (:client workload)
             :nemesis    (:nemesis nemesis)
             :generator  gen
+            :plot       plot-spec
             :checker    (checker/compose
-                          {:perf        (checker/perf nemesis-checker-spec)
+                          {:perf        (checker/perf)
                            :clock-skew  (checker/clock-plot)
                            :workload    (:checker workload)})})))
 
