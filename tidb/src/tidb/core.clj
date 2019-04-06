@@ -43,9 +43,10 @@
    :bank-multitable {:auto-retry      [true false]
                      :update-in-place [true false]
                      :read-lock       [nil "FOR UPDATE"]}
-   :register        {}
-   :set             {}
-   :sequential      {}})
+   :register        {:auto-retry      [true false]
+                     :read-lock       [nil "FOR UPDATE"]}
+   :set             {:auto-retry      [true false]}
+   :sequential      {:auto-retry      [true false]}})
 
 (def workload-options-expected-to-pass
   "Workload options restricted to only those we expect to pass."
@@ -128,14 +129,15 @@
   "Constructs a test from a map of CLI options."
   [opts]
   (let [name (str "TiDB " (parse-version opts)
+                  " " (name (:workload opts))
                   (when (:auto-retry opts)
                     " auto-retry")
                   (when (:update-in-place opts)
                     " update-in-place")
                   (when (:read-lock opts)
-                    " rlock: " (:read-lock opts))
+                    [" select " (:read-lock opts)])
                   (when-not (= [:interval] (keys (:nemesis opts)))
-                    (str " nemesis: " (->> (dissoc (:nemesis opts)
+                    (str " nemesis " (->> (dissoc (:nemesis opts)
                                                    :interval
                                                    :schedule
                                                    :long-recovery)
