@@ -212,14 +212,16 @@
   {:name \"Your Nemesis Here (TM)\"
    :start #{:start1 :start2}
    :stop #{:stop1 :stop2}
-   :fill-color \"#000000\"
+   :color \"#abcabc\"
+   :fill-color \"#cbacba\"
    :transparency 0.05}
 
   :name must be provided for the nemesis to be displayed in the legend."
   ([history]
    (nemesis-regions* history {}))
   ([history opts]
-   (let [fill-color     (or (:fill-color   opts) default-nemesis-color)
+   (let [color          (:color opts default-nemesis-color)
+         fill-color     (:fill-color opts color)
          transparency   (or (:transparency opts) nemesis-alpha)
          history        (nemesis-intervals history opts)
          graph-top-edge 1
@@ -298,13 +300,15 @@
   {:name \"Your Nemesis Here (TM)\"
    :start #{:start1 :start2}
    :stop #{:stop1 :stop2}
+   :color \"#aaaaaa\"
    :line-color #\"dddddd\"
    :line-width 1}"
   ([history]
    (nemesis-lines history {}))
   ([history opts]
    (let [events      (nemesis-events history opts)
-         line-color  (or (:line-color opts) default-nemesis-color)
+         color       (:color opts default-nemesis-color)
+         line-color  (:line-color opts color)
          line-width  (or (:line-width opts) "1")]
      (map (fn [t]
             [:set :arrow
