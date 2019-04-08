@@ -243,6 +243,11 @@
   [[nil "--auto-retry" "Enables automatic retries (the default for TiDB)"
     :default false]
 
+   [nil "--auto-retry-limit COUNT" "How many automatic retries can we execute?"
+    :default 10
+    :parse-fn parse-long
+    :validate [(complement neg?) "Must not be negative"]]
+
    [nil "--read-lock TYPE"
     "What kind of read locks, if any, should we acquire? Default is none; may
     also be 'update'."
