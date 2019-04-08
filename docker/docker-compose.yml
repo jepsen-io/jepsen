@@ -1,4 +1,10 @@
-version: '2'
+version: '3.7'
+x-node:
+  &default-node
+  build: ./node
+  env_file: ./secret/node.env
+  privileged: true
+
 services:
   control:
     container_name: jepsen-control
@@ -14,28 +20,23 @@ services:
       - n3
       - n4
       - n5
-  node:
-    container_name: jepsen-node
-    build: ./node
-    env_file: ./secret/node.env
-    privileged: true
   n1:
-    extends: node
+    << : *default-node
     container_name: jepsen-n1
     hostname: n1
   n2:
-    extends: node
+    << : *default-node
     container_name: jepsen-n2
     hostname: n2
   n3:
-    extends: node
+    << : *default-node
     container_name: jepsen-n3
     hostname: n3
   n4:
-    extends: node
+    << : *default-node
     container_name: jepsen-n4
     hostname: n4
   n5:
-    extends: node
+    << : *default-node
     container_name: jepsen-n5
     hostname: n5
