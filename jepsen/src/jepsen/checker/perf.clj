@@ -255,7 +255,7 @@
          (map :f)
          (keep index)
          distinct
-         (sort-by name))))
+         (sort-by :name))))
 
 (defn nemesis-regions
   "Wraps nemesis-regions* to work with collections of nemeses."
@@ -346,7 +346,10 @@
   ([history]
    (xrange identity history))
   ([f history]
-  (let [xmin (or (first-time (filter f history))        (g/lit "*"))
+  (let [history (if (instance? clojure.lang.Reversible history)
+                  history
+                  (vec history))
+        xmin (or (first-time (filter f history))        (g/lit "*"))
         xmax (or (first-time (filter f (rseq history))) (g/lit "*"))]
     (g/range xmin xmax))))
 
