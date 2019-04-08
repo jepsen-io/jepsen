@@ -57,8 +57,8 @@
 (def workload-options-expected-to-pass
   "Workload options restricted to only those we expect to pass."
   (-> (util/map-vals #(assoc %
-                             :auto-retry [false]
-                             :auto-retry-limit 0)
+                             :auto-retry        [false]
+                             :auto-retry-limit  [0])
                      workload-options)))
 
 (defn all-combos
@@ -120,15 +120,15 @@
 (def plot-spec
   "Specification for how to render operations in plots"
   {:nemeses #{{:name        "kill pd"
-               :fill-color  "#E9A4A0"
+               :color       "#E9A4A0"
                :start       #{:kill-pd}
                :stop        #{:start-pd}}
               {:name        "kill kv"
-               :fill-color  "#D1A0AB"
+               :color       "#D1A0AB"
                :start       #{:kill-kv}
                :stop        #{:start-kv}}
               {:name        "kill db"
-               :fill-color  "#D3A4B5"
+               :color       "#D3A4B5"
                :start       #{:kill-db}
                :stop        #{:start-db}}}})
 
@@ -138,11 +138,13 @@
   (let [name (str "TiDB " (parse-version opts)
                   " " (name (:workload opts))
                   (when (:auto-retry opts)
-                    " auto-retry")
+                    " auto-retry ")
+                  (when (not= 0 (:auto-retry-limit opts))
+                    (str " auto-retry-limit " (:auto-retry-limit opts)))
                   (when (:update-in-place opts)
                     " update-in-place")
                   (when (:read-lock opts)
-                    [" select " (:read-lock opts)])
+                    (str " select " (:read-lock opts)))
                   (when-not (= [:interval] (keys (:nemesis opts)))
                     (str " nemesis " (->> (dissoc (:nemesis opts)
                                                    :interval

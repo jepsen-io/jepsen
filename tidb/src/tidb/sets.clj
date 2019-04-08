@@ -14,9 +14,10 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (j/execute! conn ["create table if not exists sets
-                      (id     int not null primary key auto_increment,
-                       value  bigint not null)"]))
+    (c/with-conn-failure-retry conn
+      (j/execute! conn ["create table if not exists sets
+                        (id     int not null primary key auto_increment,
+                        value  bigint not null)"])))
 
   (invoke! [this test op]
     (c/with-error-handling op

@@ -53,16 +53,16 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (Thread/sleep 2000)
-    (locking tbl-created?
-      (when (compare-and-set! tbl-created? false true)
-        ; use first node to exec ddl
-        (info "Creating tables" (pr-str (table-names table-count)))
-        (doseq [t (table-names table-count)]
-          (j/execute! conn [(str "drop table if exists " t)])
-          (j/execute! conn [(str "create table if not exists " t
-                                 " (tkey varchar(255) primary key)")])
-          (info "Created table" t)))))
+    (c/with-conn-failure-retry conn
+      (locking tbl-created?
+        (when (compare-and-set! tbl-created? false true)
+          ; use first node to exec ddl
+          (info "Creating tables" (pr-str (table-names table-count)))
+          (doseq [t (table-names table-count)]
+            (j/execute! conn [(str "drop table if exists " t)])
+            (j/execute! conn [(str "create table if not exists " t
+                                   " (tkey varchar(255) primary key)")])
+            (info "Created table" t))))))
 
   (invoke! [this test op]
     (let [ks (subkeys (:key-count test) (:value op))]

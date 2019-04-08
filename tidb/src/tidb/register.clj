@@ -32,8 +32,9 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (j/execute! conn ["create table if not exists test
-                      (id int primary key, val int)"]))
+    (c/with-conn-failure-retry conn
+      (j/execute! conn ["create table if not exists test
+                        (id int primary key, val int)"])))
 
   (invoke! [this test op]
     (c/with-error-handling op

@@ -1,5 +1,6 @@
 (ns tidb.sql
   (:require [clojure.string :as str]
+            [dom-top.core :as dt]
             [jepsen [util :as util :refer [timeout]]]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer [info warn]]
@@ -46,7 +47,9 @@
                     :node node})
            (util/retry 1
                        (try
-                         (let [spec   (conn-spec node)
+                         (let [spec   (assoc (conn-spec node)
+                                             ::node node
+                                             ::test test)
                                conn   (j/get-connection spec)
                                spec'  (j/add-connection spec conn)]
                            (assert spec')
@@ -64,6 +67,12 @@
   (when-let [c (j/db-find-connection conn)]
     (.close c))
   (dissoc conn :connection))
+
+(defn reopen!
+  "Closes a connection and returns a new one based on the given connection."
+  [conn]
+  (close! conn)
+  (open (::node conn) (::test conn)))
 
 (def await-id
   "Used to generate unique identifiers for awaiting cluster stabilization"
@@ -89,6 +98,23 @@
 (def rollback-msg
   "mariadb drivers have a few exception classes that use this message"
   "Deadlock found when trying to get lock; try restarting transaction")
+
+(defmacro with-conn-failure-retry
+ "TiDB tends to be flaky for a few seconds after starting up, which can wind
+  up breaking our setup code. This macro adds a little bit of backoff and retry
+  for those conditions."
+ [conn & body]
+ (assert (symbol? conn))
+ `(dt/with-retry [conn#   ~conn
+                  tries#  5]
+    (let [~conn conn#] ; Rebind the conn symbol to our current connection
+      ~@body)
+    (catch java.sql.SQLNonTransientConnectionException e#
+      (when (zero? tries#)
+        (throw e#))
+      (info "Connection failure; retrying...")
+      (Thread/sleep (rand-int 2000))
+      (~'retry (reopen! conn#) (dec tries#)))))
 
 (defmacro capture-txn-abort
   "Converts aborted transactions to an ::abort keyword"

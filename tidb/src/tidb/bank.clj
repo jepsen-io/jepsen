@@ -19,17 +19,18 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (j/execute! conn ["create table if not exists accounts
-                      (id     int not null primary key,
-                      balance bigint not null)"])
-    (doseq [a (:accounts test)]
-      (try
-        (with-txn-retries
-          (j/insert! conn :accounts {:id      a
-                                     :balance (if (= a (first (:accounts test)))
-                                                (:total-amount test)
-                                                0)}))
-        (catch java.sql.SQLIntegrityConstraintViolationException e nil))))
+    (c/with-conn-failure-retry conn
+      (j/execute! conn ["create table if not exists accounts
+                        (id     int not null primary key,
+                        balance bigint not null)"])
+      (doseq [a (:accounts test)]
+        (try
+          (with-txn-retries conn
+            (j/insert! conn :accounts {:id      a
+                                       :balance (if (= a (first (:accounts test)))
+                                                  (:total-amount test)
+                                                  0)}))
+          (catch java.sql.SQLIntegrityConstraintViolationException e nil)))))
 
   (invoke! [this test op]
     (with-txn op [c conn]
@@ -85,22 +86,24 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (locking tbl-created?
-      (when (compare-and-set! tbl-created? false true)
-        (doseq [a (:accounts test)]
-          (info "Creating table accounts" a)
-          (j/execute! conn [(str "create table if not exists accounts" a
-                                 "(id     int not null primary key,"
-                                 "balance bigint not null)")])
-          (try
-            (info "Populating account" a)
-            (with-txn-retries
-              (j/insert! conn (str "accounts" a)
-                         {:id 0
-                          :balance (if (= a (first (:accounts test)))
-                                     (:total-amount test)
-                                     0)}))
-            (catch java.sql.SQLIntegrityConstraintViolationException e nil))))))
+    (c/with-conn-failure-retry conn
+      (locking tbl-created?
+        (with-txn-retries conn
+          (when (compare-and-set! tbl-created? false true)
+            (doseq [a (:accounts test)]
+              (info "Creating table accounts" a)
+              (j/execute! conn [(str "create table if not exists accounts" a
+                                     "(id     int not null primary key,"
+                                     "balance bigint not null)")])
+              (try
+                (info "Populating account" a)
+                (j/insert! conn (str "accounts" a)
+                           {:id 0
+                            :balance (if (= a (first (:accounts test)))
+                                       (:total-amount test)
+                                       0)})
+              (catch java.sql.SQLIntegrityConstraintViolationException e
+                nil))))))))
 
   (invoke! [this test op]
     (with-txn op [c conn]
