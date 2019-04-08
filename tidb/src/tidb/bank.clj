@@ -45,14 +45,14 @@
                 b1 (-> c
                        (j/query [(str "select * from accounts where id = ? "
                                       (:read-lock test)) from]
-                                :row-fn :balance)
+                                {:row-fn :balance})
                        first
                        (- amount))
                 b2 (-> c
                        (j/query [(str "select * from accounts where id = ? "
                                       (:read-lock test))
                                  to]
-                                :row-fn :balance)
+                                {:row-fn :balance})
                        first
                        (+ amount))]
             (cond (neg? b1)
@@ -111,7 +111,7 @@
                (map (fn [x]
                       [x (->> (j/query c [(str "select balance from accounts"
                                                x)]
-                                       :row-fn :balance)
+                                       {:row-fn :balance})
                               first)]))
                (into (sorted-map))
                (assoc op :type :ok, :value))
@@ -124,13 +124,13 @@
                        (j/query
                         [(str "select balance from " from
                               " " (:read-lock test))]
-                        :row-fn :balance)
+                        {:row-fn :balance})
                        first
                        (- amount))
                 b2 (-> c
                        (j/query [(str "select balance from " to
                                       " " (:read-lock test))]
-                                :row-fn :balance)
+                                {:row-fn :balance})
                        first
                        (+ amount))]
             (cond (neg? b1)
