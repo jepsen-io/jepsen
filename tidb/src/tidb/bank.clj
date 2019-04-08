@@ -86,10 +86,10 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (c/with-conn-failure-retry conn
-      (locking tbl-created?
+    (locking tbl-created?
+      (when (compare-and-set! tbl-created? false true)
         (with-txn-retries conn
-          (when (compare-and-set! tbl-created? false true)
+          (c/with-conn-failure-retry conn
             (doseq [a (:accounts test)]
               (info "Creating table accounts" a)
               (j/execute! conn [(str "create table if not exists accounts" a
@@ -102,8 +102,8 @@
                             :balance (if (= a (first (:accounts test)))
                                        (:total-amount test)
                                        0)})
-              (catch java.sql.SQLIntegrityConstraintViolationException e
-                nil))))))))
+                (catch java.sql.SQLIntegrityConstraintViolationException e
+                  nil))))))))
 
   (invoke! [this test op]
     (with-txn op [c conn]
