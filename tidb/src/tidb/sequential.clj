@@ -82,7 +82,7 @@
                          (j/query conn [(str "select tkey from "
                                              (key->table table-count k)
                                              " where tkey = ?") k]
-                                  :row-fn :tkey)))))
+                                  {:row-fn :tkey})))))
              (vector (:value op))
              (assoc op :type :ok, :value)))))
 
