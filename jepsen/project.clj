@@ -26,8 +26,6 @@
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
             [lein-codox "0.10.3"]]
-  :aot [jepsen.cli clojure.tools.logging.impl]
-;        clojure.tools.logging.impl]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
              "-XX:+UseFastAccessorMethods" "-server"
@@ -40,4 +38,5 @@
                    :integration :integration}
   :codox {:output-path "doc/"
           :source-uri "https://github.com/jepsen-io/jepsen/blob/{version}/jepsen/{filepath}#L{line}"
-          :metadata {:doc/format :markdown}})
+          :metadata {:doc/format :markdown}}
+  :profiles {:uberjar {:aot :all}})
