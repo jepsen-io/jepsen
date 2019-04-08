@@ -11,7 +11,8 @@
                     [core :as jepsen]
                     [generator :as gen]
                     [os :as os]
-                    [tests :as tests]]
+                    [tests :as tests]
+                    [util :as util]]
             [jepsen.os.debian :as debian]
             [tidb [bank :as bank]
                   [db :as db]
@@ -37,22 +38,28 @@
 (def workload-options
   "For each workload, a map of workload options to all values that option
   supports."
-  {:bank            {:auto-retry      [true false]
-                     :update-in-place [true false]
-                     :read-lock       [nil "FOR UPDATE"]}
-   :bank-multitable {:auto-retry      [true false]
-                     :update-in-place [true false]
-                     :read-lock       [nil "FOR UPDATE"]}
-   :register        {:auto-retry      [true false]
-                     :read-lock       [nil "FOR UPDATE"]}
-   :set             {:auto-retry      [true false]}
-   :sequential      {:auto-retry      [true false]}})
+  {:bank            {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :update-in-place   [true false]
+                     :read-lock         [nil "FOR UPDATE"]}
+   :bank-multitable {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :update-in-place   [true false]
+                     :read-lock         [nil "FOR UPDATE"]}
+   :register        {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :read-lock         [nil "FOR UPDATE"]}
+   :set             {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]}
+   :sequential      {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]}})
 
 (def workload-options-expected-to-pass
   "Workload options restricted to only those we expect to pass."
-  (-> workload-options
-      (assoc-in [:bank            :auto-retry]    [false])
-      (assoc-in [:bank-multitable :auto-retry]    [false])))
+  (-> (util/map-vals #(assoc %
+                             :auto-retry [false]
+                             :auto-retry-limit 0)
+                     workload-options)))
 
 (defn all-combos
   "Takes a map of options to collections of values for that option. Computes a
