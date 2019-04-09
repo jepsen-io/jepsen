@@ -151,3 +151,13 @@
       @f2
       (is (= 1 @calls))
       (is (= 2 @a)))))
+
+(deftest nemesis-intervals-test
+  (let [s1 {:process :nemesis, :f :start, :value 1}
+        s2 {:process :nemesis, :f :start, :value 2}
+        s3 {:process :nemesis, :f :start, :value 3}
+        s4 {:process :nemesis, :f :start, :value 4}
+        e1 {:process :nemesis, :f :stop, :value 1}
+        e2 {:process :nemesis, :f :stop, :value 2}]
+    (is (= [[s1 e1] [s2 e2] [s3 e1] [s4 e2]]
+           (nemesis-intervals [s1 s2 s3 s4 e1 e2])))))
