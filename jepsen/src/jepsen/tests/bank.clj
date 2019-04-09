@@ -162,9 +162,7 @@
                      (store/path! test (:subdirectory opts) "bank.png"))
               preamble (concat (perf/preamble path)
                                [['set 'title (str (:name test) " bank")]
-                                ['set 'xrange (perf/xrange reads)]
                                 '[set ylabel "Total of all accounts"]])
-              _ (prn :xrange (perf/xrange reads))
               series (for [[node data] totals]
                        {:title      node
                         :with       :points
@@ -173,7 +171,8 @@
                         :data       data})]
           (-> {:preamble  preamble
                :series    series}
-              (perf/with-nemeses test history (:nemeses (:plot test)))
+              (perf/with-range)
+              (perf/with-nemeses history (:nemeses (:plot test)))
               perf/plot!)
           {:valid? true})))))
 

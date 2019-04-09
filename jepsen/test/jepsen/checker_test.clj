@@ -249,6 +249,7 @@
               :rate-graph {:valid? true},
               :valid? true})))
 
+    (println "\n\n\n=============")
     (testing "can render a :start :stop nemesis region without opts"
       (let [checker (perf)
             test    {:name "nemesis compatibility perf test"

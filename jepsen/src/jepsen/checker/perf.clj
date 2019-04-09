@@ -180,189 +180,179 @@
    :info ['rgb "#FFA400"]
    :fail ['rgb "#FF1E90"]})
 
-(defn nemesis-intervals
-  "Given a history, constructs a sequence of [start-time, stop-time] intervals
-  when the nemesis was active, in units of seconds."
-  ([history]
-   (nemesis-intervals history {}))
-  ([history opts]
-   (let [final-time (-> history
-                        rseq
-                        (->> (filter :time))
-                        first
-                        :time
-                        (or 0)
-                        util/nanos->secs
-                        double)
-         history (util/nemesis-intervals history opts)]
-     (keep (fn [interval]
-             (let [[start stop] interval]
-               (when start
-                 [(-> start :time util/nanos->secs double)
-                  (if stop
-                    (-> stop :time util/nanos->secs double)
-                    final-time)])))
-           history))))
-
-(defn nemesis-regions*
-  "Emits a sequence of gnuplot commands rendering shaded regions where the
-  nemesis is active. We can render a maximum of 12 nemeses; this keeps nemesis
-  size and spacing consistent.
-
-  {:name \"Your Nemesis Here (TM)\"
-   :start #{:start1 :start2}
-   :stop #{:stop1 :stop2}
-   :color \"#abcabc\"
-   :fill-color \"#cbacba\"
-   :transparency 0.05}
-
-  :name must be provided for the nemesis to be displayed in the legend."
-  ([history]
-   (nemesis-regions* history {}))
-  ([history opts]
-   (let [color          (:color opts default-nemesis-color)
-         fill-color     (:fill-color opts color)
-         transparency   (or (:transparency opts) nemesis-alpha)
-         history        (nemesis-intervals history opts)
-         graph-top-edge 1
-         ;; Divide our y-axis space into twelfths
-         height         0.0834
-         padding        0.00615
-         idx            (inc (or (:idx opts) 0))
-         bot            (- graph-top-edge
-                           (* height idx))
-         top            (+ bot height)]
-     (->> history
-        (map (fn [[start stop]]
-               [:set :obj :rect
-                :from (g/list start [:graph (+ bot padding)])
-                :to   (g/list stop  [:graph (- top padding)])
-                :fillcolor :rgb fill-color
-                :fillstyle :transparent :solid transparency
-                :noborder]))))))
-
-(defn active-nemeses
-  "Given a history and nemesis specs, returns just those which actually
-  participated in this history."
-  [history nemeses]
-  ; Build a map of fs to nemesis specifications
+(defn nemesis-ops
+  "Given a history and a nemeses specification, partitions the set of nemesis
+  operations in the history into different nemeses, as per the spec. Returns
+  the nemesis spec, restricted to just those nemeses taking part in this
+  history, and with each spec augmented with an :ops key, which contains all
+  operations that nemesis performed."
+  [nemeses history]
+  ; Build an index mapping :fs to nemeses.
+  ; TODO: verify no nemesis fs overlap
+  (assert (every? :name nemeses))
+  (assert (= (distinct (map :name nemeses)) (map :name nemeses)))
   (let [index (->> nemeses
                    (map (fn [nemesis]
-                          (zipmap (concat (:start nemesis) (:stop nemesis))
-                                  (repeat nemesis))))
-                   (reduce merge {}))]
-    ; Figure out which nemeses are present
-    (->> history
-         (filter #(= :nemesis (:process %)))
-         (map :f)
-         (keep index)
-         distinct
-         (sort-by :name))))
+                          (zipmap (concat (:start nemesis   [:start])
+                                          (:stop  nemesis   [:stop])
+                                          (:fs    nemesis))
+                                  (repeat (:name nemesis)))))
+                   (reduce merge {}))
+        ; Go through the history and build up a map of names to ops.
+        ops-by-nemesis (->> history
+                            (filter #(= :nemesis (:process %)))
+                            (group-by (comp index :f)))
+        ; And zip that together with the nemesis spec
+        nemeses (keep (fn [n]
+                        (when-let [ops (ops-by-nemesis (:name n))]
+                          (assoc n :ops ops)))
+                      nemeses)
+        ; And add a default for any unmatched ops
+        nemeses (if-let [ops (ops-by-nemesis nil)]
+                  (conj nemeses {:name "nemesis"
+                                 :ops  ops})
+                  nemeses)]
+    nemeses))
+
+(defn nemesis-activity
+  "Given a nemesis specification and a history, partitions the set of nemesis
+  operations in the history into different nemeses, as per the spec. Returns
+  the spec, restricted to just those nemeses taking part in this history, and
+  with each spec augmented with two keys:
+
+    :ops        All operations the nemeses performed
+    :intervals  A set of [start end] paired ops."
+  [nemeses history]
+  (->> history
+       (nemesis-ops nemeses)
+       (map (fn [nemesis]
+              (assoc nemesis :intervals
+                     (util/nemesis-intervals (:ops nemesis) nemesis))))))
+
+(defn interval->times
+  "Given an interval of two operations [a b], returns the times [time-a time-b]
+  covering the interval. If b is missing, uses +infinity."
+  [[a b]]
+  [(double (util/nanos->secs (:time a)))
+   (if b
+     (double (util/nanos->secs (:time b)))
+     Double/POSITIVE_INFINITY)])
 
 (defn nemesis-regions
-  "Wraps nemesis-regions* to work with collections of nemeses."
-  [history nemeses]
-  (let [nemeses (active-nemeses history nemeses)
-        c       (count nemeses)
-        f       (fn [idx nemesis]
-                  (let [nemesis (assoc nemesis
-                                       :idx idx
-                                       :total c)]
-                    (nemesis-regions* history nemesis)))
-        x       (map-indexed f nemeses)]
-    (apply concat x)))
-
-(defn nemesis-events
-  "Given a history, constructs a sequence of times, in seconds, marking nemesis
-  events other than start/stop pairs.
-
-  Nemesis operations may happen significantly later than the last operation in
-  the history, but we typically only size our plots relative to the data we're
-  plotting in the history. To prevent drawing outside the plot region, we
-  constrain our nemesis events to those before the final client :invoke op."
-  [history opts]
-  (let [start (or (:start opts) #{:start})
-        stop  (or (:stop  opts) #{:stop})
-        tmax  (or (first-time (filter op/invoke? (rseq history))) 0)]
-    (->> history
-         (remove (fn [op]
-                   (and (not= :nemesis (:process op))
-                        (not (start (:f op)))
-                        (not (stop  (:f op))))))
-         (map (comp double util/nanos->secs :time))
-         (take-while (partial >= tmax)))))
+  "Given nemesis activity, emits a sequence of gnuplot commands rendering
+  shaded regions where each nemesis was active. We can render a maximum of 12
+  nemeses; this keeps size and spacing consistent."
+  [plot nemeses]
+  (->> nemeses
+       (map-indexed
+         (fn [i n]
+           (let [color           (or (:fill-color n)
+                                     (:color n)
+                                     default-nemesis-color)
+                 transparency    (:transparency n nemesis-alpha)
+                 graph-top-edge  1
+                 ; Divide our y-axis space into twelfths
+                 height          0.0834
+                 padding         0.00615
+                 bot             (- graph-top-edge
+                                    (* height (inc i)))
+                 top             (+ bot height)]
+             (->> (:intervals n)
+                  (map interval->times)
+                  (map (fn [[start stop]]
+                         [:set :obj :rect
+                          :from (g/list start [:graph (+ bot padding)])
+                          :to   (g/list stop  [:graph (- top padding)])
+                          :fillcolor :rgb color
+                          :fillstyle :transparent :solid transparency
+                          :noborder]))))))
+       (reduce concat)))
 
 (defn nemesis-lines
-  "Emits a sequence of gnuplot commands rendering vertical lines where nemesis
-  events occurred.
-
-  Takes an options map for nemesis regions and styling ex:
-  {:name \"Your Nemesis Here (TM)\"
-   :start #{:start1 :start2}
-   :stop #{:stop1 :stop2}
-   :color \"#aaaaaa\"
-   :line-color #\"dddddd\"
-   :line-width 1}"
-  ([history]
-   (nemesis-lines history {}))
-  ([history opts]
-   (let [events      (nemesis-events history opts)
-         color       (:color opts default-nemesis-color)
-         line-color  (:line-color opts color)
-         line-width  (or (:line-width opts) "1")]
-     (map (fn [t]
-            [:set :arrow
-             :from (g/list t [:graph 0])
-             :to   (g/list t [:graph 1])
-             ;; When gnuplot gets alpha rgb we can use this
-             ;; :lc :rgb "#f3000000"
-             :lc :rgb line-color
-             :lw line-width
-             :nohead])
-          events))))
+  "Given nemesis activity, emits a sequence of gnuplot commands rendering
+  vertical lines where nemesis events occurred."
+  [plot nemeses]
+  (let [tfilter (if-let [[xmin xmax] (:xrange plot)]
+                  (fn [t] (<= xmin t xmax))
+                  identity)]
+    (->> nemeses
+         (mapcat (fn [n]
+                   (let [color (or (:line-color n)
+                                   (:color n)
+                                   default-nemesis-color)
+                         width (:line-width n "1")]
+                     (->> (:ops n)
+                          (map (comp double util/nanos->secs :time))
+                          (filter tfilter)
+                          (map (fn [t]
+                                 [:set :arrow
+                                  :from (g/list t [:graph 0])
+                                  :to   (g/list t [:graph 1])
+                                  :lc :rgb color
+                                  :lw width
+                                  :nohead])))))))))
 
 (defn nemesis-series
-  "Given a history and a specification for nemeses, constructs the series
-  required to show every present nemesis' activity in the legend. We do this by
-  constructing dummy data, and a key that will match the way that nemesis's
-  activity is rendered."
-  [history nemeses]
-  (->> (active-nemeses history nemeses)
-       ; Convert to series
+  "Given nemesis activity, constructs the series required to show every present
+  nemesis' activity in the legend. We do this by constructing dummy data, and a
+  key that will match the way that nemesis's activity is rendered."
+  [plot nemeses]
+  (->> nemeses
        (map (fn [n]
               {:title     (:name n)
                :with      :lines
-               :linecolor ['rgb (:fill-color n default-nemesis-color)]
+               :linecolor ['rgb (or (:fill-color n)
+                                    (:color n)
+                                    default-nemesis-color)]
                :linewidth 6
                :data      [[-1 -1]]}))))
+
+(defn with-nemeses
+  "Augments a plot map to render nemesis activity. Takes a nemesis
+  specification: a collection of nemesis spec maps, each of which has keys:
+
+    :name   A string uniquely naming this nemesis
+    :color  What color to use for drawing this nemesis (e.g. \"#abcd01\")
+    :start  A set of :f's which begin this nemesis' activity
+    :stop   A set of :f's which end this nemesis' activity
+    :fs     A set of :f's otherwise related to this nemesis"
+  [plot history nemeses]
+  (let [nemeses (nemesis-activity nemeses history)]
+    (-> plot
+        (update :series   concat (nemesis-series  plot nemeses))
+        (update :preamble concat (nemesis-regions plot nemeses)
+                                 (nemesis-lines   plot nemeses)))))
 
 (defn preamble
   "Shared gnuplot preamble"
   [output-path]
   (concat [[:set :output output-path]
            [:set :term :png, :truecolor, :size (g/list 900 400)]]
-          '[[set autoscale]
-            [set xlabel "Time (s)"]
+          '[[set xlabel "Time (s)"]
             [set key outside top right]]))
 
-(defn xrange
-  "Computes the xrange for a history. Optionally, filters the history with f."
-  ([history]
-   (xrange identity history))
-  ([f history]
-  (let [history (if (instance? clojure.lang.Reversible history)
-                  history
-                  (vec history))
-        xmin (or (first-time (filter f history))        (g/lit "*"))
-        xmax (or (first-time (filter f (rseq history))) (g/lit "*"))]
-    (g/range xmin xmax))))
+(defn with-range
+  "Takes a plot object. Where xrange or yrange are not provided, fills them in
+  by iterating over each series :data."
+  [plot]
+  (let [data    (mapcat :data (:series plot))
+        [x0 y0] (first data)
+        [xmin xmax ymin ymax] (reduce (fn [[xmin xmax ymin ymax] [x y :as pair]]
+                                             [(min xmin x)
+                                              (max xmax x)
+                                              (min ymin y)
+                                              (max ymax y)])
+                                      [x0 x0 y0 y0]
+                                      data)]
+    (assoc plot
+           :xrange (or (:xrange plot) [xmin xmax])
+           :yrange (or (:yrange plot) [ymin ymax]))))
 
 (defn latency-preamble
   "Gnuplot commands for setting up a latency plot."
   [test output-path]
   (concat (preamble output-path)
-          [[:set :title (str (:name test) " latency")]
-           [:set :xrange (xrange op/invoke? (:history test))]]
+          [[:set :title (str (:name test) " latency")]]
           '[[set ylabel "Latency (ms)"]
             [set logscale y]]))
 
@@ -385,6 +375,8 @@
     :preamble             Gnuplot commands to send first
     :series               A vector of series maps
     :draw-fewer-on-top?   If passed, renders series with fewer points on top
+    :xrange               A pair [xmin xmax] which controls the xrange
+    :yrange               Ditto, for the y axis
 
   A series map is a map with:
 
@@ -419,11 +411,18 @@
                     :draw-fewer-on-top? false)))
 
     ; OK, normal rendering
-    (let [series     (:series opts)
+    (let [series      (:series opts)
+          preamble    (:preamble opts)
+          xrange      (:xrange opts)
+          yrange      (:yrange opts)
           ; The plot command
           plot        [['plot (apply g/list (map legend-part series))]]
           ; All commands
-          commands    (concat (:preamble opts) plot)
+          commands    (cond-> []
+                        preamble  (into preamble)
+                        xrange    (conj [:set :xrange (apply g/range xrange)])
+                        yrange    (conj [:set :yrange (apply g/range yrange)])
+                        true      (concat plot))
           ; Datasets
           data        (map :data series)]
       ; Go!
@@ -432,17 +431,6 @@
       (try (g/raw-plot! commands data)
            (catch java.io.IOException _
              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))
-
-(defn with-nemeses
-  "Augments a plot map to render nemesis activity"
-  [plot test history nemeses]
-  (let [nemeses     (or nemeses #{{}})
-        nem-regions (nemesis-regions history nemeses)
-        nem-lines   (mapcat #(nemesis-lines history %) nemeses)
-        series      (nemesis-series history nemeses)]
-    (-> plot
-        (update :preamble concat nem-regions nem-lines)
-        (update :series concat series))))
 
 (defn point-graph!
   "Writes a plot of raw latency data points."
@@ -467,7 +455,8 @@
     (-> {:preamble           preamble
          :draw-fewer-on-top? true
          :series             series}
-        (with-nemeses test history nemeses)
+        (with-range)
+        (with-nemeses history nemeses)
         plot!)
     output-path))
 
@@ -504,7 +493,8 @@
                        :data      (get-in datasets [f q])})]
     (-> {:preamble preamble
          :series   series}
-        (with-nemeses test history nemeses)
+        (with-range)
+        (with-nemeses history nemeses)
         plot!)))
 
 (defn rate-preamble
@@ -551,5 +541,6 @@
                                       (buckets dt t-max)))})]
     (-> {:preamble  preamble
          :series    series}
-        (with-nemeses test history nemeses)
+        (with-range)
+        (with-nemeses history nemeses)
         plot!)))

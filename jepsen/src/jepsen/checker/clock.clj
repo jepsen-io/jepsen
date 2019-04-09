@@ -57,19 +57,13 @@
           output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
                                                       "clock-skew.png"))]
       (when (seq nodes)
-        (try
-          (g/raw-plot!
-            (concat
-              (perf/preamble output-path)
-              [[:set :title (str (:name test) " clock skew")]
-               [:set :ylabel "Skew (s)"]]
-              (perf/nemesis-regions* history)
-              (perf/nemesis-lines history)
-              [['plot (apply g/list
-                             (for [node node-names]
-                               ["-"
-                                'with 'steps
-                                'title node]))]])
-            (map datasets nodes))
-          (catch java.io.IOException _
-            (throw (IllegalStateException. "Error rendering plot. Check that gnuplot is installed and reachable?"))))))))
+        (-> {:preamble (concat (perf/preamble output-path)
+                               [[:set :title (str (:name test) " clock skew")]
+                                [:set :ylabel "Skew (s)"]])
+             :series   (for [node node-names]
+                         {:title node
+                          :with  :steps
+                          :data  (get datasets node)})}
+            (perf/with-range)
+            (perf/with-nemeses history (:nemeses (:plot test)))
+            (perf/plot!))))))
