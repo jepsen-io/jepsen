@@ -1,11 +1,13 @@
 (ns tidb.db
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
+            [dom-top.core :refer [with-retry]]
             [jepsen
               [core :as jepsen]
               [control :as c]
               [db :as db]]
             [jepsen.control.util :as cu]
+            [slingshot.slingshot :refer [try+ throw+]]
             [tidb.sql :as sql]))
 
 (def tidb-dir       "/opt/tidb")
@@ -77,13 +79,26 @@
   "Writes configuration file for tikv"
   []
   (c/su
-    (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"\nraft_store_max_leader_lease=\"900ms\"\nraft_base_tick_interval=\"100ms\"\nraft_heartbeat_ticks=3\nraft_election_timeout_ticks=10" :> kv-config-file)))
+    (c/exec :echo "[server]\nstatus-addr=\"0.0.0.0:20180\"\n[raftstore]\npd-heartbeat-tick-interval=\"5s\"\nraft_store_max_leader_lease=\"900ms\"\nraft_base_tick_interval=\"100ms\"\nraft_heartbeat_ticks=3\nraft_election_timeout_ticks=10" :> kv-config-file)))
 
 (defn configure!
   "Write all config files."
   []
   (configure-pd!)
   (configure-kv!))
+
+(defn wait-page
+  "Waits a status page available"
+  [url]
+  (with-retry [tries 20]
+    (c/exec :curl :--fail url)
+    (catch Throwable e
+      (info "Waiting page" url)
+      (if (pos? tries)
+          (do (Thread/sleep 1000)
+              (retry (dec tries)))
+          (throw+ {:type "wait-page"
+                  :url url})))))
 
 (defn start-pd!
   "Starts the placement driver daemon"
@@ -103,7 +118,8 @@
       :--advertise-peer-urls   (peer-url node)
       :--initial-cluster       (initial-cluster test)
       :--log-file              pd-log-file
-      :--config                pd-config-file)))
+      :--config                pd-config-file))
+  (wait-page (str "http://127.0.0.1:" client-port "/health")))
 
 (defn start-kv!
   "Starts the TiKV daemon"
@@ -120,7 +136,8 @@
       :--advertise-addr (str (name node) ":" "20160")
       :--data-dir       kv-data-dir
       :--log-file       kv-log-file
-      :--config         kv-config-file)))
+      :--config         kv-config-file))
+  (wait-page "http://127.0.0.1:20180/status"))
 
 (defn start-db!
   "Starts the TiDB daemon"
@@ -134,7 +151,8 @@
       (str "./bin/" db-bin)
       :--store     (str "tikv")
       :--path      (pd-endpoints test)
-      :--log-file  db-log-file)))
+      :--log-file  db-log-file))
+  (wait-page "http://127.0.0.1:10080/status"))
 
 (defn start!
   "Starts all daemons."
