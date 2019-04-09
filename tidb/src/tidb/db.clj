@@ -87,19 +87,6 @@
   (configure-pd!)
   (configure-kv!))
 
-(defn wait-page
-  "Waits a status page available"
-  [url]
-  (with-retry [tries 20]
-    (c/exec :curl :--fail url)
-    (catch Throwable e
-      (info "Waiting page" url)
-      (if (pos? tries)
-          (do (Thread/sleep 1000)
-              (retry (dec tries)))
-          (throw+ {:type "wait-page"
-                  :url url})))))
-
 (defn start-pd!
   "Starts the placement driver daemon"
   [test node]
@@ -118,8 +105,7 @@
       :--advertise-peer-urls   (peer-url node)
       :--initial-cluster       (initial-cluster test)
       :--log-file              pd-log-file
-      :--config                pd-config-file))
-  (wait-page (str "http://127.0.0.1:" client-port "/health")))
+      :--config                pd-config-file)))
 
 (defn start-kv!
   "Starts the TiKV daemon"
@@ -136,8 +122,7 @@
       :--advertise-addr (str (name node) ":" "20160")
       :--data-dir       kv-data-dir
       :--log-file       kv-log-file
-      :--config         kv-config-file))
-  (wait-page "http://127.0.0.1:20180/status"))
+      :--config         kv-config-file)))
 
 (defn start-db!
   "Starts the TiDB daemon"
@@ -151,15 +136,30 @@
       (str "./bin/" db-bin)
       :--store     (str "tikv")
       :--path      (pd-endpoints test)
-      :--log-file  db-log-file))
-  (wait-page "http://127.0.0.1:10080/status"))
+      :--log-file  db-log-file)))
+
+(defn wait-page
+  "Waits for a status page to become available"
+  [url]
+  (with-retry [tries 20]
+    (c/exec :curl :--fail url)
+    (catch Throwable e
+      (info "Waiting for page" url)
+      (if (pos? tries)
+          (do (Thread/sleep 1000)
+              (retry (dec tries)))
+          (throw+ {:type  :wait-page
+                   :url   url})))))
 
 (defn start!
-  "Starts all daemons."
+  "Starts all daemons, waiting for each one's health page in turn."
   [test node]
   (start-pd! test node)
+  (wait-page (str "http://127.0.0.1:" client-port "/health"))
   (start-kv! test node)
-  (start-db! test node))
+  (wait-page "http://127.0.0.1:20180/status")
+  (start-db! test node)
+  (wait-page "http://127.0.0.1:10080/status"))
 
 (defn stop-pd! [test node] (cu/stop-daemon! pd-bin pd-pid-file))
 (defn stop-kv! [test node] (cu/stop-daemon! kv-bin kv-pid-file))
