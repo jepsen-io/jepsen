@@ -112,11 +112,6 @@
         [:kill :pause :clock-skew :partitions]]
        (map (fn [faults] (zipmap faults (repeat true))))))
 
-(defn parse-version
-  "Finds the version of TiDB from CLI opts by parsing :tarball"
-  [opts]
-  ((re-find #"v(\d+\.\d+\.\d+)" (:tarball opts)) 1))
-
 (def plot-spec
   "Specification for how to render operations in plots"
   {:nemeses #{{:name        "kill pd"
@@ -156,7 +151,7 @@
 (defn test
   "Constructs a test from a map of CLI options."
   [opts]
-  (let [name (str "TiDB " (parse-version opts)
+  (let [name (str "TiDB " (:version opts)
                   " " (name (:workload opts))
                   (when (:auto-retry opts)
                     " auto-retry ")
@@ -254,7 +249,11 @@
     :parse-fn parse-long
     :validate [pos? "Must be positive"]]
 
-   (jc/tarball-opt "http://download.pingcap.org/tidb-v2.1.7-linux-amd64.tar.gz")])
+   ["-v" "--version VERSION" "What version of TiDB should to install"
+    :default "v3.0.0-beta.1"]
+
+   [nil "--tarball-url URL" "URL to TiDB tarball to install, has precedence over --version"
+    :default nil]])
 
 (def test-all-opts
   "CLI options for running the entire test suite."
