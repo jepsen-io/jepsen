@@ -231,7 +231,7 @@
    ["-v" "--version VERSION" "What version of TiDB should to install"
     :default "v3.0.0-beta.1"]
 
-   [nil "--tarball-url URL" "URL to TiDB tarball to install, has precedenc over --version"
+   [nil "--tarball-url URL" "URL to TiDB tarball to install, has precedence over --version"
     :default nil]])
 
 (def test-all-opts
