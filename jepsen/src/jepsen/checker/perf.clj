@@ -331,6 +331,31 @@
           '[[set xlabel "Time (s)"]
             [set key outside top right]]))
 
+(defn broaden-range
+  "Given a [lower upper] range for a plot, returns [lower' upper'], which
+  covers the original range, but slightly expanded, to fall nicely on integral
+  boundaries."
+  [[a b]]
+  (if (= a b)
+    ; If it's a zero-width interval, give it exactly 1 on either side.
+    [(dec a) (inc a)]
+    (let [; How big is the range?
+          size (Math/abs (- b a))
+          ; Divide the range into tenths
+          grid (/ size 10)
+          ; What's the nearest power of 10?
+          scale (->> grid Math/log10 Math/round (Math/pow 10))
+          ; Clamp
+          a' (- a (mod a scale))
+          b' (let [m (mod b scale)]
+               ; If b is suuuuper close to the scale tick already...
+               (if (< (/ m scale) 0.001)
+                 b                                ; Just use b as is
+                 (+ scale (- b (mod b scale)))))  ; Push b up to the next tick
+          a' (min a a')
+          b' (max b b')]
+      [a' b'])))
+
 (defn with-range
   "Takes a plot object. Where xrange or yrange are not provided, fills them in
   by iterating over each series :data."
@@ -344,10 +369,16 @@
                                               (min ymin y)
                                               (max ymax y)])
                                       [x0 x0 y0 y0]
-                                      data)]
+                                      data)
+        xrange (broaden-range [xmin xmax])
+        yrange (if (= :y (:logscale plot))
+                 ; Don't broaden logscale plots; we'll probably expand the
+                 ; bounds to 0.
+                 [ymin ymax]
+                 (broaden-range [ymin ymax]))]
     (assoc plot
-           :xrange (or (:xrange plot) [xmin xmax])
-           :yrange (or (:yrange plot) [ymin ymax]))))
+           :xrange (:xrange plot xrange)
+           :yrange (:yrange plot yrange))))
 
 (defn latency-preamble
   "Gnuplot commands for setting up a latency plot."
@@ -378,6 +409,7 @@
     :draw-fewer-on-top?   If passed, renders series with fewer points on top
     :xrange               A pair [xmin xmax] which controls the xrange
     :yrange               Ditto, for the y axis
+    :logscale             e.g. :y
 
   A series map is a map with:
 
@@ -416,19 +448,22 @@
           preamble    (:preamble opts)
           xrange      (:xrange opts)
           yrange      (:yrange opts)
+          logscale    (:logscale opts)
           ; The plot command
           plot        [['plot (apply g/list (map legend-part series))]]
           ; All commands
           commands    (cond-> []
                         preamble  (into preamble)
+                        logscale  (conj [:set :logscale logscale])
                         xrange    (conj [:set :xrange (apply g/range xrange)])
                         yrange    (conj [:set :yrange (apply g/range yrange)])
                         true      (concat plot))
           ; Datasets
           data        (map :data series)]
       ; Go!
-      ;(pprint commands)
-      ;(pprint (map (partial take 2) data))
+      (info (with-out-str
+              (pprint commands)
+              (pprint (map (partial take 2) data))))
       (try (g/raw-plot! commands data)
            (catch java.io.IOException _
              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))
@@ -455,6 +490,7 @@
                          (remove nil?))]
     (-> {:preamble           preamble
          :draw-fewer-on-top? true
+         :logscale           :y
          :series             series}
         (with-range)
         (with-nemeses history nemeses)
@@ -493,7 +529,8 @@
                        :pointtype  (fs->points f)
                        :data      (get-in datasets [f q])})]
     (-> {:preamble preamble
-         :series   series}
+         :series   series
+         :logscale :y}
         (with-range)
         (with-nemeses history nemeses)
         plot!)))
