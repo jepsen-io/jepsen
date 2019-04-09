@@ -97,7 +97,9 @@
     :pause-pd
     :pause-kv
     :pause-db
-    :clock-skew})
+    :clock-skew
+    ; Special-case generators
+    :restart-kv-without-pd})
 
 (def all-nemeses
   "All nemesis specs to run as a part of a complete test suite."

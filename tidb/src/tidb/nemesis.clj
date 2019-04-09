@@ -28,7 +28,9 @@
                     (:resume-pd :resume-kv :resume-db
                      :start-pd  :start-kv  :start-db) nodes
 
-                    (util/random-nonempty-subset nodes))]
+                    (util/random-nonempty-subset nodes))
+            ; If the op wants to give us nodes, that's great
+            nodes (or (:value op) nodes)]
         (assoc op :value
                (c/on-nodes test nodes
                            (fn [test node]
@@ -182,19 +184,36 @@
        (map op)
        gen/seq))
 
+(defn restart-kv-without-pd-generator
+  "A special generator which pauses all PD nodes, restarts all KV nodes, waits
+  a bit, and unpauses PD; the cluster should recover, but a finite retry loop
+  causes it to fail."
+  []
+  (gen/seq [(gen/sleep 10)
+            (fn [test _] {:type :info, :f :kill-kv,  :value (:nodes test)})
+            (fn [test _] {:type :info, :f :pause-pd, :value (:nodes test)})
+            (op :start-kv)
+            (gen/sleep 70)
+            (op :resume-pd)]))
+
 (defn full-generator
   "Takes a nemesis options map `n`. If `n` has a :long-recovery option, builds
   a generator which alternates between faults (mixed-generator) and long
   recovery windows (final-generator). Otherwise, just emits faults from
-  mixed-generator."
+  mixed-generator, or whatever special-case generator we choose."
   [n]
-  (if (:long-recovery n)
-    (let [mix     #(gen/time-limit 120 (mixed-generator n))
-          recover #(gen/phases (final-generator n)
-                               (gen/sleep 60))]
-      (gen/seq-all (interleave (repeatedly mix)
-                               (repeatedly recover))))
-    (mixed-generator n)))
+  (cond (:restart-kv-without-pd n)
+        (restart-kv-without-pd-generator)
+
+        (:long-recovery n)
+        (let [mix     #(gen/time-limit 120 (mixed-generator n))
+              recover #(gen/phases (final-generator n)
+                                   (gen/sleep 60))]
+          (gen/seq-all (interleave (repeatedly mix)
+                                   (repeatedly recover))))
+
+        true
+        (mixed-generator n)))
 
 (defn expand-options
   "We support shorthand options in nemesis maps, like :kill, which expands to
