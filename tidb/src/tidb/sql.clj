@@ -41,7 +41,7 @@
 
 (defn open
   "Opens a connection to the given node."
-  [node test]
+  ([node test]
   (timeout open-timeout
            (throw+ {:type :connect-timed-out
                     :node node})
@@ -59,7 +59,7 @@
                            (throw e))
                          (catch Throwable t
                            (info t "Unexpected connection error, retrying")
-                           (throw t))))))
+                           (throw t)))))))
 
 (defn close!
   "Given a JDBC connection, closes it and returns the underlying spec."

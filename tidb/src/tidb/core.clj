@@ -124,13 +124,34 @@
                :start       #{:kill-pd}
                :stop        #{:start-pd}}
               {:name        "kill kv"
-               :color       "#D1A0AB"
+               :color       "#E9A0B9"
                :start       #{:kill-kv}
                :stop        #{:start-kv}}
               {:name        "kill db"
-               :color       "#D3A4B5"
+               :color       "#E9A0CF"
                :start       #{:kill-db}
-               :stop        #{:start-db}}}})
+               :stop        #{:start-db}}
+              {:name        "pause pd"
+               :color       "#C5A0E9"
+               :start       #{:pause-pd}
+               :stop        #{:resume-pd}}
+              {:name        "pause kv"
+               :color       "#B2A0E9"
+               :start       #{:pause-kv}
+               :stop        #{:resume-kv}}
+              {:name        "pause db"
+               :color       "#A6A0E9"
+               :start       #{:pause-db}
+               :stop        #{:resume-db}}
+              {:name        "partition"
+               :color       "#A0C8E9"
+               :start       #{:start-partition}
+               :stop        #{:stop-partition}}
+              {:name        "clock"
+               :color       "#A0E9DB"
+               :start       #{:strobe-clock :bump-clock}
+               :stop        #{:reset-clock}
+               :fs          #{:check-clock-offsets}}}})
 
 (defn test
   "Constructs a test from a map of CLI options."
