@@ -1,4 +1,3 @@
-# Based on the deprecated `https://github.com/tutumcloud/tutum-debian`
 FROM debian:stretch
 
 # Install packages
