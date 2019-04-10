@@ -1,6 +1,7 @@
 (ns tidb.db
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
+            [clojure.java.io :as io]
             [dom-top.core :refer [with-retry]]
             [jepsen
               [core :as jepsen]
@@ -79,7 +80,7 @@
   "Writes configuration file for tikv"
   []
   (c/su
-    (c/exec :echo "[server]\nstatus-addr=\"0.0.0.0:20180\"\n[raftstore]\npd-heartbeat-tick-interval=\"5s\"\nraft_store_max_leader_lease=\"900ms\"\nraft_base_tick_interval=\"100ms\"\nraft_heartbeat_ticks=3\nraft_election_timeout_ticks=10" :> kv-config-file)))
+    (c/exec :echo (slurp (io/resource "tikv.conf")) :> kv-config-file)))
 
 (defn configure!
   "Write all config files."

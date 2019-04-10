@@ -46,5 +46,5 @@
 
 (defn workload
   [opts]
-  (assoc (lf/workload 3)
+  (assoc (lf/workload 10)
          :client (TxnClient. nil)))
