@@ -16,6 +16,7 @@
             [jepsen.os.debian :as debian]
             [tidb [bank :as bank]
                   [db :as db]
+                  [long-fork :as long-fork]
                   [nemesis :as nemesis]
                   [register :as register]
                   [sequential :as sequential]
@@ -31,6 +32,7 @@
   workloads."
   {:bank            bank/workload
    :bank-multitable bank/multitable-workload
+   :long-fork       long-fork/workload
    :register        register/workload
    :set             set/workload
    :sequential      sequential/workload})
@@ -46,6 +48,8 @@
                      :auto-retry-limit  [10 0]
                      :update-in-place   [true false]
                      :read-lock         [nil "FOR UPDATE"]}
+   :long-fork       {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]}
    :register        {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :read-lock         [nil "FOR UPDATE"]}

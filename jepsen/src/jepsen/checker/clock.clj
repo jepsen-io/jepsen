@@ -56,14 +56,16 @@
           node-names  (short-node-names nodes)
           output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
                                                       "clock-skew.png"))]
-      (when (seq nodes)
+      (when (some seq (vals datasets))
         (-> {:preamble (concat (perf/preamble output-path)
                                [[:set :title (str (:name test) " clock skew")]
                                 [:set :ylabel "Skew (s)"]])
-             :series   (for [node node-names]
-                         {:title node
-                          :with  :steps
-                          :data  (get datasets node)})}
+             :series   (remove nil?
+                               (for [node node-names]
+                                 (when (seq (get datasets node))
+                                   {:title node
+                                    :with  :steps
+                                    :data  (get datasets node)})))}
             (perf/with-range)
             (perf/with-nemeses history (:nemeses (:plot test)))
             (perf/plot!))))))
