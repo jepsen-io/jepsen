@@ -73,7 +73,7 @@
   "Writes configuration file for placement driver"
   []
   (c/su
-    (c/exec :echo "tick-interval=\"50ms\"\nelection-interval=\"300ms\"\nlease=1\n[replication]\nmax-replicas=5" :> pd-config-file)))
+    (c/exec :echo "tick-interval=\"50ms\"\nelection-interval=\"300ms\"\nlease=1\ntso-save-interval=\"1s\"\n[replication]\nmax-replicas=5" :> pd-config-file)))
 
 (defn configure-kv!
   "Writes configuration file for tikv"
