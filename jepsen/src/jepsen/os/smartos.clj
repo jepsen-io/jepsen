@@ -6,7 +6,7 @@
             [jepsen.os :as os]
             [jepsen.control :as c]
             [jepsen.control.util :as cu]
-            [jepsen.control.net :as net]
+            [jepsen.net :as net]
             [clojure.string :as str]))
 
 (defn setup-hostfile!
@@ -127,6 +127,6 @@
       (c/su
        (c/exec :svcadm :enable :-r :ipfilter))
 
-      (meh (net/heal)))
+      (meh (net/heal! (:net test) test)))
 
     (teardown! [_ test node])))

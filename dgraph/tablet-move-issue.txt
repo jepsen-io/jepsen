@@ -1,0 +1,1125 @@
+"Query received: query:"query all($type: string) { q(func: eq(type_0, $type)) {\nkey_0\namount_0}}" vars:<key:"$type" value:"account" > lin_read:<> "
+
+ponse = {"q":[{"key_0":3,"amount_0":8},{"key_0":0,"amount_0":40},{"key_0":5,"amount_0":15},{"key_0":1,"amount_0":29},{"key_0":7,"amount_0":6}]}"
+
+@5590
+
+
+3 -> 8
+0 -> 40
+5 -> 15
+1 -> 29
+7 -> 6
+
+98
+
+@5590
+
+6906
+
+amount_0 was moved at 4266
+amount_0 was moved at 6900
+
+I0117 04:35:48.555944    1250 predicate_move.go:190] Move predicate request: predicate:"amount_0" source_gid:1 dest_gid:2 txn_ts:5569
+
+There was a move at 5569. At that time, the amount_0 was adding up to 100.
+But, at 5590, one of them got deleted.
+
+dgraph debug -p p -o=false -r amount_0 --at=5590 -l=000008616d6f756e745f30000000000000000279 -y
+Opening DB: p
+badger 2019/01/16 21:07:18 INFO: All 1 tables opened in 2ms
+badger 2019/01/16 21:07:18 INFO: Replaying file id: 0 at offset: 1071446
+badger 2019/01/16 21:07:18 INFO: Replay took: 33.473µs
+ts: 5586 {item}{deleted}
+
+ts: 5569 {item}{discard}{complete}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "2"
+ Num uids = 1. Size = 16
+ Uid = 18446744073709551615
+
+UID was 633 for these.
+
+Also, the corresponding key_0 at n2 was deleted at 5586.
+
+$ dgraph debug -p p -o=false --at=5590 -l=0000056b65795f30000000000000000279 -y                             ~/jep/n2/tmp/jepsen-dgraph-data
+Opening DB: p
+badger 2019/01/16 21:12:12 INFO: All 1 tables opened in 1ms
+badger 2019/01/16 21:12:12 INFO: Replaying file id: 0 at offset: 954108
+badger 2019/01/16 21:12:12 INFO: Replay took: 25.457µs
+ts: 5586 {item}{deleted}
+
+ts: 5521 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "4"
+
+
+STart: 5583. Commit at 5586.
+
+"Query received: query:"query all($key: int) { q(func: eq(key_0, $key)) { uid key_0 amount_0 } } " vars:<key:"$key" value:"4" > lin_read:<> "
+ponse = {"q":[{"uid":"0x279","key_0":4,"amount_0":2}]}"
+
+0x279 -> 633. So, that matches up.
+
+"Query received: query:"query all($key: int) { q(func: eq(key_0, $key)) { uid key_0 amount_0 } } " vars:<key:"$key" value:"0" > start_ts:5583 lin_read:<> "
+
+"Response = {"q":[{"uid":"0x1a0","key_0":0,"amount_0":40}]}"
+
+"Applying mutations: start_ts:5583 edges:<entity:633 attr:"_STAR_ALL" value:"_STAR_ALL" op:DEL > "
+
+Got JSON Mutation: {"uid":"0x1a0","type_0":null,"key_0":0,"amount_0":42}"
+
+0x1a0 -> 416
+
+ts: 5586 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "42"
+
+$ dgraph debug -p p -o=false --at=5590 -l=0000056b65795f300000000000000001a0 -y                             ~/jep/n2/tmp/jepsen-dgraph-data
+Opening DB: p
+badger 2019/01/16 21:20:05 INFO: All 1 tables opened in 3ms
+badger 2019/01/16 21:20:05 INFO: Replaying file id: 0 at offset: 954108
+badger 2019/01/16 21:20:05 INFO: Replay took: 30.435µs
+ts: 5586 {item}{delta}
+ Uid: 18446744073709551615 Op: 1  Type: INT.  String Value: "0"
+
+
+ISSUE. N5, belonging to group 1, didn't realize that the group no longer serves amount_0. So, it
+serves wrong data.
+
+"value": "ProcessTaskOverNetwork. attr: amount_0 gid: 1, readTs: 5590, node id: 5"
+
+---
+
+{
+    "data": [
+        {
+            "traceID": "e49212daece268af53535c6ff336d4fe",
+            "spans": [
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "18bbbed7ca9a4ab4",
+                    "flags": 1,
+                    "operationName": "Server.Query",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "e49212daece268af53535c6ff336d4fe",
+                            "spanID": "e7c5c438f681fc04"
+                        }
+                    ],
+                    "startTime": 1547699749385428,
+                    "duration": 68471,
+                    "tags": [
+                        {
+                            "key": "status.code",
+                            "type": "int64",
+                            "value": 0
+                        },
+                        {
+                            "key": "status.message",
+                            "type": "string",
+                            "value": ""
+                        }
+                    ],
+                    "logs": [
+                        {
+                            "timestamp": 1547699749385433,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Query received: query:\"query all($type: string) { q(func: eq(type_0, $type)) {\\nkey_0\\namount_0}}\" vars:\u003ckey:\"$type\" value:\"account\" \u003e lin_read:\u003c\u003e "
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749389206,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": ""
+                                },
+                                {
+                                    "key": "startTs",
+                                    "type": "int64",
+                                    "value": 5590
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749389213,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 613562802
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessQuery"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749389229,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Query parsed"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749389261,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1701810059
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessGraph.q.type_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749389270,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "ProcessTaskOverNetwork. attr: type_0 gid: 1, readTs: 5590, node id: 5"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749389279,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1526919882
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "processTasktype_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749389281,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Waiting for startTs: 5590"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452427,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Done waiting for maxAssigned. Attr: \"type_0\" ReadTs: 5590 Max: 5591"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452484,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "handleUidPostings"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452487,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 87032653
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleUidPostings"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452490,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Number of uids: 1. args.srcFn: \u0026{tokens:[\u0002account] geoQuery:\u003cnil\u003e intersectDest:false ineqValue:{Tid:9 Value:account} eqTokens:[{Tid:9 Value:account}] ineqValueToken:\u0002account n:1 threshold:0 uidPresent:0 fname:eq fnType:2 regex:\u003cnil\u003e isFuncAtRoot:false isStringFn:true atype:9}"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452514,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Width: 1. NumGo: 1"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452657,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "default"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452692,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 87032653
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleUidPostings"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 202.007µs"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452698,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "handleCompareFunction"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452700,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1331952537
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleCompareFunction"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452709,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Number of uids: 1. args.srcFn: \u0026{tokens:[\u0002account] geoQuery:\u003cnil\u003e intersectDest:false ineqValue:{Tid:9 Value:account} eqTokens:[{Tid:9 Value:account}] ineqValueToken:\u0002account n:1 threshold:0 uidPresent:0 fname:eq fnType:2 regex:\u003cnil\u003e isFuncAtRoot:false isStringFn:true atype:9}"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452724,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Attr: type_0. Fname: eq"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452728,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Tokenizer: exact, Lossy: false"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452730,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1331952537
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleCompareFunction"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 22.097µs"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452734,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1526919882
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "processTasktype_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 63.453261ms"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452745,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1655625855
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "expandSubgraph: type_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452748,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1655625855
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "expandSubgraph: type_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 1.149µs"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452779,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1580381026
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessGraph.amount_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452784,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "ProcessTaskOverNetwork. attr: amount_0 gid: 1, readTs: 5590, node id: 5"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452788,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1581627164
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "processTaskamount_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452789,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Waiting for startTs: 5590"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452791,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Done waiting for maxAssigned. Attr: \"amount_0\" ReadTs: 5590 Max: 5591"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452798,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "handleValuePostings"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452799,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1953770817
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessGraph.key_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452800,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 2092856304
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleValuePostings"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452808,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "ProcessTaskOverNetwork. attr: key_0 gid: 1, readTs: 5590, node id: 5"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452820,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 450668738
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "processTaskkey_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452822,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Waiting for startTs: 5590"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452824,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Done waiting for maxAssigned. Attr: \"key_0\" ReadTs: 5590 Max: 5591"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452834,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "handleValuePostings"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452835,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 249948519
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleValuePostings"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Start."
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452808,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Number of uids: 5. args.srcFn: \u0026{tokens:[] geoQuery:\u003cnil\u003e intersectDest:false ineqValue:{Tid:0 Value:\u003cnil\u003e} eqTokens:[] ineqValueToken: n:5 threshold:0 uidPresent:0 fname: fnType:0 regex:\u003cnil\u003e isFuncAtRoot:false isStringFn:false atype:2}"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452848,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Width: 5. NumGo: 1"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452837,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Number of uids: 5. args.srcFn: \u0026{tokens:[] geoQuery:\u003cnil\u003e intersectDest:false ineqValue:{Tid:0 Value:\u003cnil\u003e} eqTokens:[] ineqValueToken: n:5 threshold:0 uidPresent:0 fname: fnType:0 regex:\u003cnil\u003e isFuncAtRoot:false isStringFn:false atype:2}"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749452889,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Width: 5. NumGo: 1"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453735,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 2092856304
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleValuePostings"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 926.91µs"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453741,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1581627164
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "processTaskamount_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 951.44µs"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453745,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Zero uids for \"amount_0\""
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453748,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1580381026
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessGraph.amount_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 968.202µs"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453820,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 249948519
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "handleValuePostings"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 983.239µs"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453828,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 450668738
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "processTaskkey_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 1.006694ms"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453835,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Zero uids for \"key_0\""
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453838,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1953770817
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessGraph.key_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 1.034997ms"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453844,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 1701810059
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessGraph.q.type_0"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 64.579996ms"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453853,
+                            "fields": [
+                                {
+                                    "key": "funcId",
+                                    "type": "int64",
+                                    "value": 613562802
+                                },
+                                {
+                                    "key": "funcName",
+                                    "type": "string",
+                                    "value": "query.ProcessQuery"
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "End. Took 64.637746ms"
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453893,
+                            "fields": [
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "Response = {\"q\":[{\"key_0\":3,\"amount_0\":8},{\"key_0\":0,\"amount_0\":40},{\"key_0\":5,\"amount_0\":15},{\"key_0\":1,\"amount_0\":29},{\"key_0\":7,\"amount_0\":6}]}"
+                                }
+                            ]
+                        }
+                    ],
+                    "processID": "p1",
+                    "warnings": null
+                },
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "e7c5c438f681fc04",
+                    "flags": 1,
+                    "operationName": "Recv.api.Dgraph.Query",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "e49212daece268af53535c6ff336d4fe",
+                            "spanID": "b80dbec6adeb5973"
+                        }
+                    ],
+                    "startTime": 1547699749385314,
+                    "duration": 68724,
+                    "tags": [
+                        {
+                            "key": "Client",
+                            "type": "bool",
+                            "value": false
+                        },
+                        {
+                            "key": "FailFast",
+                            "type": "bool",
+                            "value": false
+                        },
+                        {
+                            "key": "status.code",
+                            "type": "int64",
+                            "value": 0
+                        },
+                        {
+                            "key": "status.message",
+                            "type": "string",
+                            "value": ""
+                        }
+                    ],
+                    "logs": [],
+                    "processID": "p1",
+                    "warnings": null
+                },
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "543c1194f671b008",
+                    "flags": 1,
+                    "operationName": "client.query",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "e49212daece268af53535c6ff336d4fe",
+                            "spanID": "dbca84e4d6be8f8a"
+                        }
+                    ],
+                    "startTime": 1547699749383299,
+                    "duration": 71753,
+                    "tags": [],
+                    "logs": [],
+                    "processID": "p2",
+                    "warnings": null
+                },
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "dbca84e4d6be8f8a",
+                    "flags": 1,
+                    "operationName": "read-accounts ",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "e49212daece268af53535c6ff336d4fe",
+                            "spanID": "e0be71f0d9d95296"
+                        }
+                    ],
+                    "startTime": 1547699749383078,
+                    "duration": 72061,
+                    "tags": [],
+                    "logs": [],
+                    "processID": "p2",
+                    "warnings": null
+                },
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "e0be71f0d9d95296",
+                    "flags": 1,
+                    "operationName": "read-accounts",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "e49212daece268af53535c6ff336d4fe",
+                            "spanID": "3021a7077e3e4b79"
+                        }
+                    ],
+                    "startTime": 1547699749383030,
+                    "duration": 72232,
+                    "tags": [],
+                    "logs": [],
+                    "processID": "p2",
+                    "warnings": null
+                },
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "3021a7077e3e4b79",
+                    "flags": 1,
+                    "operationName": "bank.invoke.read",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "e49212daece268af53535c6ff336d4fe",
+                            "spanID": "68d76f75debea5c2"
+                        }
+                    ],
+                    "startTime": 1547699749383026,
+                    "duration": 72413,
+                    "tags": [
+                        {
+                            "key": "checker_violation",
+                            "type": "string",
+                            "value": "true"
+                        }
+                    ],
+                    "logs": [],
+                    "processID": "p2",
+                    "warnings": null
+                },
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "68d76f75debea5c2",
+                    "flags": 1,
+                    "operationName": "bank.invoke",
+                    "references": [],
+                    "startTime": 1547699749383000,
+                    "duration": 72476,
+                    "tags": [],
+                    "logs": [],
+                    "processID": "p2",
+                    "warnings": null
+                },
+                {
+                    "traceID": "e49212daece268af53535c6ff336d4fe",
+                    "spanID": "b80dbec6adeb5973",
+                    "flags": 1,
+                    "operationName": "Sent.api.Dgraph.Query",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "e49212daece268af53535c6ff336d4fe",
+                            "spanID": "543c1194f671b008"
+                        }
+                    ],
+                    "startTime": 1547699749383390,
+                    "duration": 70991,
+                    "tags": [],
+                    "logs": [
+                        {
+                            "timestamp": 1547699749383587,
+                            "fields": [
+                                {
+                                    "key": "compressed_size",
+                                    "type": "int64",
+                                    "value": 94
+                                },
+                                {
+                                    "key": "id",
+                                    "type": "int64",
+                                    "value": 0
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "sent message"
+                                },
+                                {
+                                    "key": "uncompressed_size",
+                                    "type": "int64",
+                                    "value": 94
+                                }
+                            ]
+                        },
+                        {
+                            "timestamp": 1547699749453522,
+                            "fields": [
+                                {
+                                    "key": "compressed_size",
+                                    "type": "int64",
+                                    "value": 158
+                                },
+                                {
+                                    "key": "id",
+                                    "type": "int64",
+                                    "value": 0
+                                },
+                                {
+                                    "key": "message",
+                                    "type": "string",
+                                    "value": "received message"
+                                },
+                                {
+                                    "key": "uncompressed_size",
+                                    "type": "int64",
+                                    "value": 0
+                                }
+                            ]
+                        }
+                    ],
+                    "processID": "p2",
+                    "warnings": null
+                }
+            ],
+            "processes": {
+                "p1": {
+                    "serviceName": "dgraph.alpha",
+                    "tags": []
+                },
+                "p2": {
+                    "serviceName": "jepsen",
+                    "tags": []
+                }
+            },
+            "warnings": null
+        }
+    ],
+    "total": 0,
+    "limit": 0,
+    "offset": 0,
+    "errors": null
+}

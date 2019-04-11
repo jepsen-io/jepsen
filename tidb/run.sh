@@ -24,13 +24,13 @@ get_time() {
     fi
 }
 
-for test in "bank" "sets" "register"
+for test in "bank" "bank-multitable" "sets" "register" "sequential"
 do
     for nemesis in "none" "parts" "majority-ring" "start-stop-2" "start-kill-2"
         do
             get_time $test $nemesis
             t=$?
-	        lein run test --test ${test} --nemesis ${nemesis} --time-limit ${t} --concurrency 10 --tarball $1
+	        lein run test --test ${test} --nemesis ${nemesis} --time-limit ${t} --concurrency 30 --tarball $1
             if [ $? -ne 0 ]
             then
                 echo ${test} ${nemesis}

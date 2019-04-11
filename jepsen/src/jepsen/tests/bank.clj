@@ -121,11 +121,13 @@
                            (into {}))}))))
 
 (defn ok-reads
-  "Filters a history to just OK reads"
+  "Filters a history to just OK reads. Returns nil if there are none."
   [history]
-  (filter #(and (op/ok? %)
-                (= :read (:f %)))
-          history))
+  (let [h (filter #(and (op/ok? %)
+                        (= :read (:f %)))
+                  history)]
+    (when (seq h)
+      (vec h))))
 
 (defn by-node
   "Groups operations by node."
@@ -151,30 +153,28 @@
   []
   (reify checker/Checker
     (check [this test history opts]
-      ; Don't graph empty histories
-      (when-let [history (seq (ok-reads history))]
-        (let [totals (->> history
+      (when-let [reads (ok-reads history)]
+        (let [totals (->> reads
                           (by-node test)
                           (util/map-vals points))
               colors (perf/qs->colors (keys totals))
               path (.getCanonicalPath
-                     (store/path! test (:subdirectory opts) "bank.png"))]
-          (try
-            (g/raw-plot!
-              (concat (perf/preamble path)
-                      [['set 'title (str (:name test) " bank")]
-                       '[set ylabel "Total of all accounts"]
-                       ['plot (apply g/list
-                                     (for [[node points] totals]
-                                       ["-"
-                                        'with       'points
-                                        'pointtype  2
-                                        'linetype   (colors node)
-                                        'title      (name node)]))]])
-              (vals totals))
-            {:valid? true}
-            (catch java.io.IOException _
-              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))))
+                     (store/path! test (:subdirectory opts) "bank.png"))
+              preamble (concat (perf/preamble path)
+                               [['set 'title (str (:name test) " bank")]
+                                '[set ylabel "Total of all accounts"]])
+              series (for [[node data] totals]
+                       {:title      node
+                        :with       :points
+                        :pointtype  2
+                        :linetype   (colors node)
+                        :data       data})]
+          (-> {:preamble  preamble
+               :series    series}
+              (perf/with-range)
+              (perf/with-nemeses history (:nemeses (:plot test)))
+              perf/plot!)
+          {:valid? true})))))
 
 (defn test
   "A partial test; bundles together some default choices for keys and amounts

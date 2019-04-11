@@ -262,3 +262,9 @@
     (try (exec :ps :-o "pid=" :-p pid)
          (catch RuntimeException e
            false))))
+
+(defn signal!
+  "Sends a signal to a named process by signal number or name."
+  [process-name signal]
+  (meh (exec :pkill :--signal signal process-name))
+  :signaled)

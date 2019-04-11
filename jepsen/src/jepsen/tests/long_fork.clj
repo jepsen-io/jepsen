@@ -243,7 +243,7 @@
 (defn op-read-keys
   "Given a read op, returns the set of keys read."
   [op]
-  (->> op :value (map mop/key)))
+  (->> op :value (map mop/key) set))
 
 (defn groups
   "Given a group size n, and a set of read ops, partitions those read

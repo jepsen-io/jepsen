@@ -61,7 +61,7 @@
   "Checks to make sure that things we write come back out the same way"
   []
   (reify checker/Checker
-    (check [this test model history opts]
+    (check [this test history opts]
       ; First pass: figure out what we supposedly wrote to the DB
       (let [state (->> history
                        (r/filter op/ok?)

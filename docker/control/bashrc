@@ -1,3 +1,6 @@
+eval $(ssh-agent) &> /dev/null
+ssh-add /root/.ssh/id_rsa &> /dev/null
+
 cat <<EOF
 Welcome to Jepsen on Docker
 ===========================

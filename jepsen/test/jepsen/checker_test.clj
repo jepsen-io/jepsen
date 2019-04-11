@@ -172,6 +172,25 @@
           :b {:valid? true}
           :valid? true})))
 
+(deftest broaden-range-test
+  (are [a b, a' b'] (= [a' b'] (cp/broaden-range [a b]))
+       ; Broadening identical points
+        0  0 -1  1
+       -1 -1 -2  0
+        4  4  3  5
+       ; Normal integers
+        0  1  0.0  1
+        1  2  1.0  2
+        9 10  9.0 10
+        0 10  0.0 10
+        ; Bigger integers
+        1000 10000  1000.0  10000
+        1234  5678  1000.0   6000.0
+        ; Tiny numbers
+        ; I don't like these answers but whatever
+        0.03415 0.03437 0.034140000000000004 0.034370000000000005
+       ))
+
 (deftest bucket-points-test
   (is (= (cp/bucket-points 2
                            [[1 :a]
