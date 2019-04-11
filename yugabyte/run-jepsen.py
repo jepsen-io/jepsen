@@ -26,32 +26,39 @@ CmdResult = namedtuple('CmdResult',
                        ['returncode',
                         'timed_out'])
 
-TIMEOUT = 1200
+SINGLE_TEST_RUN_TIME = 600 # Only for workload, doesn't include test results analysis.
+TEST_TIMEOUT = 1200 # Includes test results analysis.
 NODES_FILE = os.path.expanduser("~/code/jepsen/nodes")
+URL = "https://downloads.yugabyte.com/yugabyte-ce-1.2.4.0-linux.tar.gz"
+
 TESTS = [
-    "single-row-inserts",
-    "single-key-acid",
-    "multi-key-acid",
-    "counter-inc",
-    "counter-inc-dec",
-    "bank",
+   "single-key-acid",
+   "multi-key-acid",
+   "counter-inc",
+   "counter-inc-dec",
+   "bank",
+   "set",
+   "set-index",
+   "long-fork"
 ]
 NEMESES = [
     "none",
-    "start-stop-tserver",
-    "start-kill-tserver",
-    "start-stop-master",
-    "start-kill-master",
-    "start-stop-node",
-    "start-kill-node",
-    "partition-random-halves",
-    "partition-random-node",
-    "partition-majorities-ring",
-    "small-skew",
-    "medium-skew",
-    "large-skew",
-    "xlarge-skew",
+    "stop-tserver",
+    "kill-tserver",
+    "pause-tserver",
+    "stop-master",
+    "kill-master",
+    "pause-master",
+    "stop",
+    "kill",
+    "pause",
+    "partition-half",
+    "partition-one",
+    "partition-ring",
+    "partition",
+    # "clock-skew",
 ]
+
 SCRIPT_DIR = os.path.abspath(os.path.dirname(sys.argv[0]))
 STORE_DIR = os.path.join(SCRIPT_DIR, "store")
 SORT_RESULTS_SH = os.path.join(SCRIPT_DIR, "sort-results.sh")
@@ -70,6 +77,7 @@ def cleanup():
                 raise e
 
 def run_cmd(cmd, shell=True, timeout=None, exit_on_error=True):
+    print cmd
     p = subprocess.Popen(cmd, shell=True)
     child_processes.append(p)
 
@@ -94,11 +102,12 @@ atexit.register(cleanup)
 run_cmd(SORT_RESULTS_SH)
 
 while True:
-    for test in TESTS:
-        for nemesis in NEMESES:
+    for nemesis in NEMESES:
+        for test in TESTS:
             result = run_cmd(
-                "lein run test --nodes-file {NODES_FILE} --test {test} --nemesis {nemesis}".format(**locals()),
-                timeout=TIMEOUT, exit_on_error=False
+                "lein run test --os debian --url {URL} --workload {test} --nemesis {nemesis} --concurrency 5n "
+                "--time-limit {run_time}".format(**locals()),
+                timeout=TIMEOUT, run_time=SINGLE_TEST_RUN_TIME, exit_on_error=False
             )
             if result.timed_out:
                 for root, dirs, files in os.walk(STORE_DIR):
