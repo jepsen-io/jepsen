@@ -318,6 +318,24 @@
                 :rate-graph {:valid? true},
                 :valid? true}))))
 
+    (testing "unfinished starts"
+      (let [checker (perf)
+            test    {:name "nemeses unfinished start"
+                     :start-time 0}
+            nemesis-ops [{:type     :info,
+                          :process  :nemesis
+                          :f        :start
+                          :time     (* 1e9 20)}
+                         {:type     :info
+                          :process  :nemesis
+                          :f        :start
+                          :time     (* 1e9 25)}]
+            history (apply conj history nemesis-ops)]
+        (is (= (check checker test history {})
+               {:latency-graph {:valid? true},
+                :rate-graph {:valid? true},
+                :valid? true}))))
+
     (testing "can render nemeses with custom styling"
       (let [checker (perf {:nemeses #{{:name "cool nemesis 8)"
                                        :fill-color "#6DB6FE"
