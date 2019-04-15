@@ -49,10 +49,12 @@
                      :update-in-place   [true false]
                      :read-lock         [nil "FOR UPDATE"]}
    :long-fork       {:auto-retry        [true false]
-                     :auto-retry-limit  [10 0]}
+                     :auto-retry-limit  [10 0]
+                     :use-index         [true false]}
    :register        {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
-                     :read-lock         [nil "FOR UPDATE"]}
+                     :read-lock         [nil "FOR UPDATE"]
+                     :use-index         [true false]}
    :set             {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]}
    :sequential      {:auto-retry        [true false]
@@ -293,6 +295,9 @@
    [nil "--update-in-place"
     "If true, performs updates (on some workloads) in place, rather than
     separating read and write operations."
+    :default false]
+
+   ["-i" "--use-index" "Whether to use indices, or read by primary key"
     :default false]
 
    ["-w" "--workload NAME" "Test workload to run"

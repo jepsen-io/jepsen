@@ -21,7 +21,8 @@
 (defn read
   "Reads the current value of a key."
   [conn test k]
-  (:val (first (j/query conn [(str "select * from test where id = ? "
+  (:val (first (j/query conn [(str "select (val) from test where "
+                                   (if (:use-index test) "sk" "id") " = ? "
                                    (:read-lock test))
                               k]))))
 
@@ -34,7 +35,11 @@
   (setup! [this test]
     (c/with-conn-failure-retry conn
       (j/execute! conn ["create table if not exists test
-                        (id int primary key, val int)"])))
+                        (id   int primary key,
+                         sk   int,
+                         val  int)"])
+      (when (:use-index test)
+        (c/create-index! conn ["create index test_sk_val on test (sk, val)"]))))
 
   (invoke! [this test op]
     (c/with-error-handling op
@@ -46,10 +51,11 @@
                            :type  :ok
                            :value (independent/tuple id (read c test id)))
 
-              :write (do (j/execute! c [(str "insert into test (id, val) "
-                                             "values (?, ?) "
-                                             "on duplicate key update val = ?")
-                                        id val' val'])
+              :write (do (j/execute! c [(str "insert into test (id, sk, val) "
+                                             "values (?, ?, ?) "
+                                             "on duplicate key update "
+                                             "val = ?")
+                                        id id val' val'])
                          (assoc op :type :ok))
 
               :cas (let [[expected-val new-val] val'

@@ -203,3 +203,12 @@
        (throw (ex-info "Connection not yet ready."
                        {:type :conn-not-ready})))
      ~@body))
+
+(defn create-index!
+  "proxies to j/execute!, but catches \"index already exist\" errors
+  transparently."
+  [& args]
+  (try (apply j/execute! args)
+       (catch java.sql.SQLSyntaxErrorException e
+         (when-not (re-find #"index already exist" (.getMessage e))
+           (throw e)))))

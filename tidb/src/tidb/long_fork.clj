@@ -9,17 +9,18 @@
 (defn mop!
   "Executes a transactional micro-op on a connection. Returns the completed
   micro-op."
-  [conn table [f k v]]
+  [conn test table [f k v]]
   [f k (case f
          :r (-> conn
-                (j/query [(str "select (val) from " table " where id = ?")
+                (j/query [(str "select (val) from " table " where "
+                               (if (:use-index test) "sk" "id") " = ?")
                           k])
                 first
                 :val)
          :w (do (j/execute! conn [(str "insert into " table
-                                  " (id, val) values (?, ?)"
+                                  " (id, sk, val) values (?, ?, ?)"
                                   " on duplicate key update val = ?")
-                             k v v])
+                             k k v v])
                 v))])
 
 (defrecord TxnClient [conn]
@@ -31,13 +32,16 @@
     (c/with-conn-failure-retry conn
       (j/execute! conn ["create table if not exists lf
                         (id  int not null primary key,
-                         val int)"])))
+                         sk  int not null,
+                         val int)"])
+      (when (:use-index test)
+        (c/create-index! conn ["create index lf_sk_val on lf (sk, val)"]))))
 
   (invoke! [this test op]
     (c/with-txn op [c conn]
       (assoc op
              :type  :ok
-             :value (mapv (partial mop! conn "lf") (:value op)))))
+             :value (mapv (partial mop! conn test "lf") (:value op)))))
 
   (teardown! [this test])
 
