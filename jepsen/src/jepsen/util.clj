@@ -652,30 +652,33 @@
   ([history opts]
    ;; Default to :start and :stop if no region keys are provided
    (let [start (:start opts #{:start})
-         stop  (:stop  opts #{:stop})]
-     ; First, group nemesis ops into pairs (one for invoke, one for
-     ; complete)
-     (->> history
-          (filter #(= :nemesis (:process %)))
-          (partition 2)
-          ; Verify that every pair has identical :fs. It's possible
-          ; that nemeses might, some day, log more types of :info
-          ; ops, maybe not in a call-response pattern, but that'll
-          ; break us.
-          (filter (fn [[a b]] (= (:f a) (:f b))))
-          ; Now move through all nemesis ops, keeping track of all start pairs,
-          ; and closing those off when we see a stop pair.
-          (reduce (fn [[intervals starts :as state] [a b :as pair]]
-               (let [f (:f a)]
-                 (cond (start f)  [intervals (conj starts pair)]
-                       (stop f)   [(->> starts
-                                        (mapcat (fn [[s1 s2]]
-                                                  [[s1 a] [s2 b]]))
-                                        (into intervals))
-                                   []]
-                       true        state)))
-             [[] []])
-          first))))
+         stop  (:stop  opts #{:stop})
+         [intervals starts]
+         ; First, group nemesis ops into pairs (one for invoke, one for
+         ; complete)
+         (->> history
+              (filter #(= :nemesis (:process %)))
+              (partition 2)
+              ; Verify that every pair has identical :fs. It's possible
+              ; that nemeses might, some day, log more types of :info
+              ; ops, maybe not in a call-response pattern, but that'll
+              ; break us.
+              (filter (fn [[a b]] (= (:f a) (:f b))))
+              ; Now move through all nemesis ops, keeping track of all start
+              ; pairs, and closing those off when we see a stop pair.
+              (reduce (fn [[intervals starts :as state] [a b :as pair]]
+                        (let [f (:f a)]
+                          (cond (start f)  [intervals (conj starts pair)]
+                                (stop f)   [(->> starts
+                                                 (mapcat (fn [[s1 s2]]
+                                                           [[s1 a] [s2 b]]))
+                                                 (into intervals))
+                                            []]
+                                true        state)))
+                      [[] []]))]
+     ; Complete unfinished intervals
+     (into intervals (mapcat (fn [[s1 s2]] [[s1 nil] [s2 nil]]) starts)))))
+
 
 (defn longest-common-prefix
   "Given a collection of sequences, finds the longest sequence which is a
