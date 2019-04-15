@@ -20,11 +20,12 @@
 (def pd-stdout      (str tidb-dir "/pd.stdout"))
 (def pd-pid-file    (str tidb-dir "/pd.pid"))
 (def pd-data-dir    (str tidb-dir "/data/pd"))
-(def kv-config-file (str tidb-dir "/tikv.conf"))
+(def kv-config-file (str tidb-dir "/kv.conf"))
 (def kv-log-file    (str tidb-dir "/kv.log"))
 (def kv-stdout      (str tidb-dir "/kv.stdout"))
 (def kv-pid-file    (str tidb-dir "/kv.pid"))
 (def kv-data-dir    (str tidb-dir "/data/kv"))
+(def db-config-file (str tidb-dir "/db.conf"))
 (def db-log-file    (str tidb-dir "/db.log"))
 (def db-stdout      (str tidb-dir "/db.stdout"))
 (def db-pid-file    (str tidb-dir "/db.pid"))
@@ -73,20 +74,24 @@
 (defn configure-pd!
   "Writes configuration file for placement driver"
   []
-  (c/su
-    (c/exec :echo (slurp (io/resource "pd.conf")) :> pd-config-file)))
+  (c/su (c/exec :echo (slurp (io/resource "pd.conf")) :> pd-config-file)))
 
 (defn configure-kv!
   "Writes configuration file for tikv"
   []
-  (c/su
-    (c/exec :echo (slurp (io/resource "tikv.conf")) :> kv-config-file)))
+  (c/su (c/exec :echo (slurp (io/resource "tikv.conf")) :> kv-config-file)))
+
+(defn configure-db!
+  "Writes configuration file for tidb"
+  []
+  (c/su (c/exec :echo (slurp (io/resource "tidb.conf")) :> db-config-file)))
 
 (defn configure!
   "Write all config files."
   []
   (configure-pd!)
-  (configure-kv!))
+  (configure-kv!)
+  (configure-db!))
 
 (defn start-pd!
   "Starts the placement driver daemon"
@@ -137,6 +142,7 @@
       (str "./bin/" db-bin)
       :--store     (str "tikv")
       :--path      (pd-endpoints test)
+      :--config    db-config-file
       :--log-file  db-log-file)))
 
 (defn wait-page

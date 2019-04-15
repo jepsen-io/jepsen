@@ -89,10 +89,10 @@
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
-  #{:inter-replica-partition
-    :intra-replica-partition
-    :single-node-partition
-    :partition
+  #{:partition
+    :partition-one
+    :partition-half
+    :partition-ring
     :kill
     :pause
     :kill-pd
