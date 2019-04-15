@@ -461,9 +461,9 @@
           ; Datasets
           data        (map :data series)]
       ; Go!
-      (info (with-out-str
-              (pprint commands)
-              (pprint (map (partial take 2) data))))
+      ;(info (with-out-str
+      ;        (pprint commands)
+      ;        (pprint (map (partial take 2) data))))
       (try (g/raw-plot! commands data)
            (catch java.io.IOException _
              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))
