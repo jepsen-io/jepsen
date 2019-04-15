@@ -35,227 +35,191 @@
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [jepsen.generator :as gen]
-            [fipp.edn :refer [pprint]]))
+            [fipp.edn :refer [pprint]])
+  (:import (io.lacuna.bifurcan DirectedGraph
+                               Graphs
+                               ISet
+                               IGraph
+                               SortedMap)))
+
 
 (set! *warn-on-reflection* true)
 
-;; TODO Remove later, just keeping it around to compare results
-(defn recur-tarjan
-  "Returns the strongly connected components of a graph specified by its nodes
-   and a successor function succs from node to nodes.
-   The used algorithm is Tarjan's one."
-  [succs]
-  (let [nodes (keys succs)]
-    (letfn [(sc [env node]
-              ;; env is a map from nodes to stack length or nil,
-              ;; nil means the node is known to belong to another SCC
-              ;; there are two special keys: ::stack for the current stack
-              ;; and ::sccs for the current set of SCCs
-              (if (contains? env node)
-                env
-                (let [stack (::stack env)
-                      n (count stack)
-                      env (assoc env node n ::stack (conj stack node))
-                      env (reduce (fn [env succ]
-                                    (let [env (sc env succ)]
-                                      (assoc env node (min (or (env succ) n) (env node)))))
-                                  env (succs node))]
-                  (if (= n (env node)) ; no link below us in the stack, call it a SCC
-                    (let [nodes (::stack env)
-                          scc (set (take (- (count nodes) n) nodes))
-                          ;; clear all stack lengths for these nodes since this SCC is done
-                          env (reduce #(assoc %1 %2 nil) env scc)]
-                      (assoc env ::stack stack ::sccs (conj (::sccs env) scc)))
-                    env))))]
-      (::sccs (reduce sc {::stack () ::sccs #{}} nodes)))))
+; Convert stuff back to Clojure data structures
+(defprotocol ToClj
+  (->clj [x]))
+
+(extend-protocol ToClj
+  ISet
+  (->clj [s]
+  (let [iter (.iterator s)]
+    (loop [s (transient #{})]
+      (if (.hasNext iter)
+        (recur (conj! s (->clj (.next iter))))
+        (persistent! s)))))
+
+  IGraph
+  (->clj [g]
+    (->> (.vertices g)
+         ->clj
+         (map (fn [vertex] [vertex (->clj (.out g vertex))]))
+         (into {})))
+
+  clojure.lang.IPersistentMap
+  (->clj [m]
+    (into {} (map (fn [[k v]] [(->clj k) (->clj v)]) m)))
+
+  Object
+  (->clj [x] x))
+
+(defn forked
+  "Bifurcan's analogue to (persistent! g)"
+  [^DirectedGraph graph]
+  (.forked graph))
+
+(defn link
+  "Helper for linking Bifurcan graphs."
+  [^DirectedGraph graph node succ]
+  (.link graph node succ))
+
+(defn link-to-all
+  "Given a graph g, links x to all ys."
+  [g x ys]
+  (if (seq ys)
+    (recur (link g x (first ys)) x (next ys))
+    g))
+
+(defn link-all-to-all
+  "Given a graph g, links all xs to all ys."
+  [g xs ys]
+  (if (seq xs)
+    (recur (link-to-all g (first xs) ys) (next xs) ys)
+    g))
+
+(defn map->bdigraph
+  "Turns a sequence of [node, successors] pairs (e.g. a map) into a bifurcan
+  directed graph"
+  [m]
+  (reduce (fn [^DirectedGraph g [node succs]]
+            (reduce (fn [^DirectedGraph graph succ]
+                      (.link graph node succ))
+                    g
+                    succs))
+          (.linear (DirectedGraph.))
+          m))
+
+(defn ^DirectedGraph digraph-union
+  "Takes the union of n graphs."
+  ([] (DirectedGraph.))
+  ([a] a)
+  ([^DirectedGraph a ^DirectedGraph b]
+   (.merge a b))
+  ([a b & more]
+   (reduce digraph-union a (cons b more))))
+
+(defn strongly-connected-components
+  "Finds the strongly connected components of a graph, greater than 1 element."
+  [g]
+  (map ->clj (Graphs/stronglyConnectedComponents g false)))
 
 (defn tarjan
   "Returns the strongly connected components of a graph specified by its
   nodes (ints) and a successor function (succs node) from node to nodes.
   A iterative verison of Tarjan's Strongly Connected Components."
-  [succs]
-  (let [^clojure.lang.APersistentMap$KeySeq
-        nodes (keys succs)
-        ;; Ensure there's a table index for every value we could find
-        table-size (->> nodes (apply max) inc)
-        result (loop [index      0
-                      prev-node  nil
-                      low        (int-array table-size)
-                      visited    (boolean-array table-size)
-                      ^clojure.lang.PersistentHashMap$ArrayNode$Iter
-                      iterator   (.iterator nodes)
-                      iter-stack '()
-                      min-stack  '()
-                      stack      '()
-                      sccs       #{}]
-                 (pprint {:index index :iter-stack (count iter-stack)
-                          :min-stack min-stack :stack stack :sccs sccs})
-                 ;; Depth-first search
-                 (if-let [node (when (.hasNext iterator)
-                                 (.next iterator))]
-                   ;; Has the node been visited?
-                   (if-not (aget visited node)
-                     ;; New node! Go down a level
-                     (let [_          (aset low node index)
-                           _          (aset visited node true)
-                           stack      (conj stack node)
-                           m          (aget low node)
-                           min-stack  (conj min-stack m)
-                           iter-stack (conj iter-stack iterator)
-                           ^clojure.lang.PersistentHashSet
-                           edges      (succs node)
-                           iterator   (.iterator edges)
-                           index      (inc index)]
-                       (recur index node low visited iterator
-                              iter-stack min-stack stack sccs))
+  [graph]
+  (strongly-connected-components (map->bdigraph graph)))
 
-                     ;; We've seen this before, update the min stack
-                     (let [min-stack (if (< 0 (count min-stack)) ; Ensure we have a recent minimum
-                                       (let [;; We do, let's grab it
-                                             m         (peek min-stack)
-                                             min-stack (pop min-stack)
-                                             ;; Compare the recent lowest to node's current index
-                                             i' (aget low prev-node)
-                                             ;; Find the smaller of the node's index or last min
-                                             low   (min i' m)]
-                                         (conj min-stack low))
-                                       min-stack)]
-                       (recur index node low visited iterator
-                              iter-stack min-stack stack sccs)))
+(defn combine
+  "Helpful in composing an order function for a checker out of multiple order
+  fns. For example, you might want a checker that looks for per-key
+  monotonicity *and* real-time precedence---you could use:
 
-                   ;; Done checking this set of edges
-                   ;; Are we done?
-                   (if (zero? (count iter-stack))
-                     ;; No more large components, let's drain the non-components
-                     ;; nodes at the end
-                     sccs
-                     ;; More to search
-                     (let [iterator   (peek iter-stack)
-                           iter-stack (pop iter-stack)
+  (checker (combine monotonic-key-orders real-time))"
+  [& order-fns]
+  (fn [history]
+    (->> order-fns
+         (map (fn [order-fn] (order-fn history)))
+         (reduce merge))))
 
-                           ^Integer m (peek min-stack)
-                           min-stack  (pop min-stack)
+(defn monotonic-key-order
+  "Given a key, and a history where ops are maps of keys to values, constructs
+  a partial order graph over ops reading successive values of key k."
+  [k history]
+  ; Construct an index of values for k to all ops with that value.
+  (let [index (as-> history x
+                (group-by (fn [op] (get (:value op) k ::not-found)) x)
+                (dissoc x ::not-found))]
+    (->> index
+         ; Take successive pairs of keys
+         (sort-by key)
+         (partition 2 1)
+         ; And build a graph out of them
+         (reduce (fn [g [[v1 ops1] [v2 ops2]]]
+                   (link-all-to-all g ops1 ops2))
+                 (.linear (DirectedGraph.)))
+         forked)))
 
-                           ;; Should we start a component?
-                           [stack scc] (if (< m (aget low prev-node))
-                                         (do
-                                           (aset low prev-node m)
-                                           [stack #{}])
-
-                                         ;; SCC good to go sir
-                                         (loop [w     (or (peek stack) prev-node)
-                                                stack (try
-                                                        (pop stack)
-                                                        (catch java.lang.IllegalStateException _
-                                                          '()))
-                                                scc   #{}]
-                                           (pprint {:w w :prev-node prev-node :scc scc})
-                                           (if (not= prev-node w)
-                                             (let [scc (conj scc w)
-                                                   _   (aset low w (count nodes))
-                                                   w'  (or (peek stack) prev-node)
-                                                   stack (try
-                                                           (pop stack)
-                                                           (catch java.lang.IllegalStateException _
-                                                             '()))]
-                                               (recur w' stack scc))
-                                             [stack (conj scc w)])))
-
-                           ;; Add SCC to collection if we have one
-                           sccs (if (< 0 (count scc))
-                                  (conj sccs scc)
-                                  sccs)
-
-                           ;; Update head of min-stack
-                           min-stack (if (< 0 (count min-stack))
-                                       (let [m         (peek min-stack)
-                                             min-stack (pop min-stack)
-
-                                             i' (aget low prev-node)
-                                             ;; Find the smaller of the node's index or last min
-                                             low       (min i' m)
-                                             min-stack (conj min-stack low)]
-                                         min-stack)
-                                       min-stack)]
-                       (recur index prev-node low visited iterator
-                              iter-stack min-stack stack sccs)))))]
-    result))
-
-(defn merge-merge-union
-  "Return a partial function which merges and unions maps containing maps
-  of sets. Ex.
-  {:x {0 #{1 2 3}}}
-  {:x {0 #{4 5 6}}}
-  {:x {1 #{7 8 9}}}
-  =>
-  {:x {0 #{1 2 3 4 5 6}
-       1 #{7 8 9}}}"
-  []
-  (partial merge-with (partial merge-with clojure.set/union)))
-
-(defn key-index
-  "Takes an empty map or key-index map and an op, merging the op into the
-  key-index. A key-index is a per-key map of values to the transactions that
-  have observed that value.
-  Ex:
-  (key-index {:x {0 #{1}}}, {:index 4 :f :read :value {:x 3 :y 7}})
-  => {:x {0 #{1}
-          3 #{4}}
-      :y {7 #{4}}}"
-  ([values {:keys [index value]}]
-   (let [indices (map (fn [[k v]] {k (sorted-map v #{index})})
-                      value)]
-     (apply (merge-merge-union) values indices))))
-
-(defn key-orders
-  "Takes an key-index, an empty map or key-order map, and an op representing
-  a read transaction. Looks up the transactions that succeed this one, on the
-  key-index and merges the txn and its succs into the key-order.
-  Ex:
-  (key-orders {:x {0 #{1} 1 #{2}}}, {} {:index 3 :f :read :value {:x 3}})
-  => {:x {0 #{1}
-          1 #{2}
-          2 #{3}}}"
-  [key-index orders {:keys [index value]}]
-  (let [succs (map (fn [[k v]]
-                     (let [idx (key-index k)]
-                       (loop [v' (inc v)]
-                         (let [succs (idx v')]
-                           (cond
-                             ;; No more succs, we're done with the graph
-                             (< (count idx) (dec v')) {k {index #{}}}
-                             ;; Found succs
-                             (<= 1 (count succs)) {k {index succs}}
-                             ;; Missing vals, keep incrementing
-                             :else (recur (inc v')))))))
-                   value)]
-    (apply (merge-merge-union) orders succs)))
-
-(defn precedence-graph
-  "Takes a history of read txns and returns a single precedence graph of the
-  transactions across all keys."
+(defn monotonic-key-orders
+  "Constructs a map of value keys to orders on those keys, assuming each value
+  monotonically increases."
   [history]
-  (let [idx        (r/reduce key-index {} history)
-        key-orders (r/reduce (partial key-orders idx) {} history)]
+  (->> history
+       (mapcat (comp keys :value))
+       distinct
+       (map (fn [k] [[:key k] (monotonic-key-order k history)]))
+       (into (sorted-map))))
 
-    ;; Merge all of our key-orders together into a precedence graph
-    (->> key-orders
-         vals
-         (apply merge-with clojure.set/union))))
+(defn process-order
+  "Given a history and a process ID, constructs a partial order graph based on
+  all operations that process performed."
+  [history process]
+  (->> history
+       (filter (comp #{process} :process))
+       (partition 2 1)
+       (reduce (fn [g [op1 op2]] (link g op1 op2))
+               (.linear (DirectedGraph.)))
+       forked))
 
-(defn checker []
+(defn process-orders
+  "Constructs a map of processes to orders on those particular processes."
+  [history]
+  (let [oks (filter op/ok? history)]
+    (->> oks
+         (map :process)
+         distinct
+         (map (fn [p] [[:process p] (process-order oks p)]))
+         (into (sorted-map)))))
+
+(defn full-graph
+  "Takes a map of names to orders, and computes the union of those orders as a
+  Bifurcan DirectedGraph."
+  [orders]
+  (reduce digraph-union (vals orders)))
+
+(defn explain-cycle
+  "Takes a map of orders, and a cycle (a collection of ops) in that cycle.
+  Using those orders, constructs a chain of [op1 relationship op2 relationship
+  ... op1], illustrating how they form a cycle.
+
+      [{:process 0 :value {:x 5}}
+       [:process 0] {:process 0 :value {:x 3}}
+       [:key :x]    {:process 1 :value {:x 4}}
+       [:key :x]    {:process 0 :value {:x 5}}]"
+  [orders cycle]
+  ; TODO
+  cycle)
+
+(defn checker [orders-fn]
   (reify checker/Checker
     (check [this test history opts]
       (let [h          (->> history
                             (filter op/ok?)
                             (filter #(= :read (:f %))))
-            g          (precedence-graph h)
-            components (tarjan g)
-            errors     (filter #(< 1 (count %)) components)]
-
-        ;; Auto-validate single-key histories
-        {:valid? (empty? errors)
-         :errors errors}))))
+            orders    (orders-fn h)
+            graph     (full-graph orders)
+            cycles    (strongly-connected-components graph)]
+         {:valid? (empty? cycles)
+          :cycles cycles}))))
 
 (defn w-inc [ks]
   {:f :inc, :type :invoke, :value (vec ks)})
@@ -273,6 +237,6 @@
             monotonically increasing writes per key, and create reads for n keys.
     :read-n How many keys to read from at once. Default 2."
   [{:keys [keys read-n]}]
-  {:checker (checker)
+  {:checker (checker monotonic-key-orders)
    ;; FIXME
    :generator (gen/mix [w-inc r])})
