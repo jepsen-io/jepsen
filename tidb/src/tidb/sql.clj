@@ -1,11 +1,12 @@
 (ns tidb.sql
   (:require [clojure.string :as str]
             [dom-top.core :as dt]
-            [jepsen [util :as util :refer [timeout]]]
+            [jepsen [util :as util :refer [default timeout]]]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer [info warn]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
+(def txn-timeout     5000)
 (def connect-timeout 10000)
 (def socket-timeout  20000)
 (def open-timeout
@@ -73,6 +74,34 @@
   [conn]
   (close! conn)
   (open (::node conn) (::test conn)))
+
+(defn execute!
+  "Like j/execute!, but provides a default timeout."
+  ([db sql-params]
+   (execute! db sql-params {}))
+  ([db sql-params opts]
+   (j/execute! db sql-params (default opts :timeout (/ txn-timeout 1000)))))
+
+(defn query
+  "Like j/query, but provides a default timeout."
+  ([db sql-params]
+   (query db sql-params {}))
+  ([db sql-params opts]
+   (j/query db sql-params (default opts :timeout (/ txn-timeout 1000)))))
+
+(defn update!
+  "Like j/update, but provides a default timeout."
+  ([db table set-map where-clause]
+   (update! db table set-map where-clause {}))
+  ([db table set-map where-clause opts]
+   (j/update! db table set-map where-clause (default opts :timeout (/ txn-timeout 1000)))))
+
+(defn insert!
+  "Like j/insert!, but provides a default timeout."
+  ([db table row]
+   (insert! db table row {}))
+  ([db table row opts]
+   (j/insert! db table row (default opts :timeout (/ txn-timeout 1000)))))
 
 (def await-id
   "Used to generate unique identifiers for awaiting cluster stabilization"

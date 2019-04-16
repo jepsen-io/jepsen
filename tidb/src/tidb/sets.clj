@@ -5,8 +5,7 @@
                     [generator :as gen]]
     [knossos.op :as op]
     [tidb.sql :as c :refer :all]
-    [tidb.basic :as basic]
-    [clojure.java.jdbc :as j]))
+    [tidb.basic :as basic]))
 
 (defrecord SetClient [conn]
   client/Client
@@ -15,7 +14,7 @@
 
   (setup! [this test]
     (c/with-conn-failure-retry conn
-      (j/execute! conn ["create table if not exists sets
+      (c/execute! conn ["create table if not exists sets
                         (id     int not null primary key auto_increment,
                         value  bigint not null)"])))
 
@@ -23,10 +22,10 @@
     (c/with-error-handling op
       (c/with-txn-aborts op
         (case (:f op)
-          :add  (do (j/insert! conn :sets (select-keys op [:value]))
+          :add  (do (c/insert! conn :sets (select-keys op [:value]))
                     (assoc op :type :ok))
 
-          :read (->> (j/query conn ["select * from sets"])
+          :read (->> (c/query conn ["select * from sets"])
                      (mapv :value)
                      (assoc op :type :ok, :value))))))
 

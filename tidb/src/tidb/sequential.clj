@@ -21,7 +21,6 @@
              [generator :as gen]
              [independent :as independent]
              [util :as util :refer [meh]]]
-            [clojure.java.jdbc :as j]
             [clojure.set :as set]
             [clojure.tools.logging :refer :all]
             [tidb.sql :as c :refer :all]
@@ -59,8 +58,8 @@
           ; use first node to exec ddl
           (info "Creating tables" (pr-str (table-names table-count)))
           (doseq [t (table-names table-count)]
-            (j/execute! conn [(str "drop table if exists " t)])
-            (j/execute! conn [(str "create table if not exists " t
+            (c/execute! conn [(str "drop table if exists " t)])
+            (c/execute! conn [(str "create table if not exists " t
                                    " (tkey varchar(255) primary key)")])
             (info "Created table" t))))))
 
@@ -71,7 +70,7 @@
         (do (doseq [k ks]
               (let [table (key->table table-count k)]
                 (with-txn-retries
-                  (j/insert! conn table {:tkey k}))))
+                  (c/insert! conn table {:tkey k}))))
             (assoc op :type :ok))
         :read
         (->> ks
@@ -79,7 +78,7 @@
              (mapv (fn [k]
                      (first
                        (with-txn-retries
-                         (j/query conn [(str "select tkey from "
+                         (c/query conn [(str "select tkey from "
                                              (key->table table-count k)
                                              " where tkey = ?") k]
                                   {:row-fn :tkey})))))

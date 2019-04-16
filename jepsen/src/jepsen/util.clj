@@ -17,6 +17,13 @@
            (java.io File
                     RandomAccessFile)))
 
+(defn default
+  "Like assoc, but only fills in values which are NOT present in the map."
+  [m k v]
+  (if (contains? m k)
+    m
+    (assoc m k v)))
+
 (defn exception?
   "Is x an Exception?"
   [x]

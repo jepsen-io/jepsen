@@ -1,6 +1,5 @@
 (ns tidb.long-fork
-  (:require [clojure.java.jdbc :as j]
-            [clojure.tools.logging :refer [info]]
+  (:require [clojure.tools.logging :refer [info]]
             [jepsen [client :as client]
                     [generator :as gen]]
             [jepsen.tests.long-fork :as lf]
@@ -12,12 +11,12 @@
   [conn test table [f k v]]
   [f k (case f
          :r (-> conn
-                (j/query [(str "select (val) from " table " where "
+                (c/query [(str "select (val) from " table " where "
                                (if (:use-index test) "sk" "id") " = ?")
                           k])
                 first
                 :val)
-         :w (do (j/execute! conn [(str "insert into " table
+         :w (do (c/execute! conn [(str "insert into " table
                                   " (id, sk, val) values (?, ?, ?)"
                                   " on duplicate key update val = ?")
                              k k v v])
@@ -30,7 +29,7 @@
 
   (setup! [this test]
     (c/with-conn-failure-retry conn
-      (j/execute! conn ["create table if not exists lf
+      (c/execute! conn ["create table if not exists lf
                         (id  int not null primary key,
                          sk  int not null,
                          val int)"])
