@@ -17,6 +17,7 @@
             [tidb [bank :as bank]
                   [db :as db]
                   [long-fork :as long-fork]
+                  [monotonic :as monotonic]
                   [nemesis :as nemesis]
                   [register :as register]
                   [sequential :as sequential]
@@ -33,6 +34,7 @@
   {:bank            bank/workload
    :bank-multitable bank/multitable-workload
    :long-fork       long-fork/workload
+   :monotonic       monotonic/workload
    :register        register/workload
    :set             set/workload
    :sequential      sequential/workload})
@@ -49,6 +51,9 @@
                      :update-in-place   [true false]
                      :read-lock         [nil "FOR UPDATE"]}
    :long-fork       {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :use-index         [true false]}
+   :monotonic       {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :use-index         [true false]}
    :register        {:auto-retry        [true false]

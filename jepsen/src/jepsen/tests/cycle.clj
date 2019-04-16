@@ -1,4 +1,4 @@
-(ns jepsen.tests.monotonic-cycle
+(ns jepsen.tests.cycle
   "A checker which searches for incidents of read skew. Because each register
   is increment-only, we know that there should never exist a pair of reads r1
   and r2, such that for two registers x and y, where both registers are
@@ -216,6 +216,7 @@
                             (filter op/ok?)
                             (filter #(= :read (:f %))))
             orders    (orders-fn h)
+            ; _         (info :orders (with-out-str (pprint orders)))
             graph     (full-graph orders)
             cycles    (strongly-connected-components graph)]
          {:valid? (empty? cycles)

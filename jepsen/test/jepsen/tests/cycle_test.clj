@@ -1,5 +1,5 @@
-(ns jepsen.tests.monotonic-cycle-test
-  (:require [jepsen.tests.monotonic-cycle :refer :all]
+(ns jepsen.tests.cycle-test
+  (:require [jepsen.tests.cycle :refer :all]
             [jepsen.checker :as checker]
             [jepsen.util :refer [map-vals]]
             [knossos.op :as op]
