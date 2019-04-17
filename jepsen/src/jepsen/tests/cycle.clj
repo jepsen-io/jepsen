@@ -28,8 +28,10 @@
   This isn't suuuper ideal... the connected component could, I guess, be fairly
   large, and then it'd be hard to prove where the cycle lies. But this feels
   like an OK start."
-  (:require [jepsen.checker :as checker]
-            [jepsen.util :as util]
+  (:require [jepsen [checker :as checker]
+                    [txn :as txn]
+                    [util :as util]]
+            [jepsen.txn.micro-op :as mop]
             [knossos.op :as op]
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
@@ -163,11 +165,12 @@
   "Constructs a map of value keys to orders on those keys, assuming each value
   monotonically increases."
   [history]
-  (->> history
-       (mapcat (comp keys :value))
-       distinct
-       (map (fn [k] [[:key k] (monotonic-key-order k history)]))
-       (into (sorted-map))))
+  (let [history (filter op/ok? history)]
+    (->> history
+         (mapcat (comp keys :value))
+         distinct
+         (map (fn [k] [[:key k] (monotonic-key-order k history)]))
+         (into (sorted-map)))))
 
 (defn process-order
   "Given a history and a process ID, constructs a partial order graph based on
@@ -189,6 +192,62 @@
          distinct
          (map (fn [p] [[:process p] (process-order oks p)]))
          (into (sorted-map)))))
+
+(defn ext-index
+  "Given a function that takes a txn and returns a map of external keys to
+  written values for that txn, and a history, computes a map like {k {v [op1,
+  op2, ...]}}, where k is a key, v is a particular value for that key, and op1,
+  op2, ... are operations which externally wrote k=v.
+
+  Right now we index only :ok ops. Later we should do :infos too, but we need
+  to think carefully about how to interpret the meaning of their nil reads."
+  [ext-fn history]
+  (->> history
+       (r/filter op/ok?)
+       (reduce (fn [idx op]
+                 (reduce (fn [idx [k v]]
+                           (update-in idx [k v] conj op))
+                         idx
+                         (ext-fn (:value op))))
+               {})))
+
+(defn wr-orders
+  "Given a history where ops are txns (e.g. [[:r :x 2] [:w :y 3]]), constructs
+  an order over txns based on the external writes and reads of key k: any txn
+  that reads value v must come after the txn that wrote v."
+  [history]
+  (let [ext-writes (ext-index txn/ext-writes  history)
+        ext-reads  (ext-index txn/ext-reads   history)]
+    ; Take all reads and relate them to prior writes.
+    (reduce (fn [orders [k values->reads]]
+              ; OK, we've got a map of values to ops that read those values
+              (->> values->reads
+                   (reduce (fn [k-graph [v reads]]
+                             ; Find ops that set k=v
+                             (let [writes (-> ext-writes (get k) (get v))]
+                               ; There should be exactly one--if there's more
+                               ; than one, we can't do this sort of cycle
+                               ; analysis because there are multiple
+                               ; alternative orders.
+                               ;
+                               ; Technically, it'd be legal to ignore these,
+                               ; but I think it's likely the case that users
+                               ; will want a big flashing warning if they mess
+                               ; this up.
+                               (assert (= 1 (count writes))
+                                       (throw (IllegalArgumentException.
+                                                (str "Key " (pr-str k)
+                                                     " had value " (pr-str v)
+                                                     " written by more than one op: "
+                                                     (pr-str writes)))))
+                               ; OK, this write needs to precede all reads
+                               (link-to-all k-graph (first writes) reads)))
+                             (DirectedGraph.))
+                   ; Now we have a graph of ops related by K. Merge that into
+                   ; our orders map!
+                   (assoc orders [:key k])))
+            {}
+            ext-reads)))
 
 (defn full-graph
   "Takes a map of names to orders, and computes the union of those orders as a
@@ -212,10 +271,8 @@
 (defn checker [orders-fn]
   (reify checker/Checker
     (check [this test history opts]
-      (let [h          (->> history
-                            (filter op/ok?)
-                            (filter #(= :read (:f %))))
-            orders    (orders-fn h)
+      (let [history   (remove (comp #{:nemesis} :process) history)
+            orders    (orders-fn history)
             ; _         (info :orders (with-out-str (pprint orders)))
             graph     (full-graph orders)
             cycles    (strongly-connected-components graph)]

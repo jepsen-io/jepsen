@@ -9,7 +9,7 @@
                  [spootnik/unilog "0.7.13"]
                  [org.clojure/tools.cli "0.4.1"]
                  [clj-time "0.11.0"]
-                 [jepsen.txn "0.1.0"]
+                 [jepsen.txn "0.1.1-SNAPSHOT"]
                  [knossos "0.3.4" :exclusions [org.slf4j/slf4j-log4j12]]
                  [tea-time "1.0.1"]
                  [clj-ssh "0.5.14"]
@@ -29,9 +29,7 @@
             [lein-codox "0.10.3"]]
   :jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC" "-XX:+UseParNewGC"
              "-XX:+CMSParallelRemarkEnabled" "-XX:+AggressiveOpts"
-             "-XX:+UseFastAccessorMethods" "-server"
-             ; "-XX:-OmitStackTraceInFastThrow"
-             ]
+             "-XX:+UseFastAccessorMethods" "-server"]
   :test-selectors {:default (fn [m]
                               (not (or (:integration m)
                                        (:logging m))))
@@ -40,4 +38,10 @@
   :codox {:output-path "doc/"
           :source-uri "https://github.com/jepsen-io/jepsen/blob/{version}/jepsen/{filepath}#L{line}"
           :metadata {:doc/format :markdown}}
-  :profiles {:uberjar {:aot :all}})
+  :profiles {:uberjar {:aot :all}
+             :dev {:jvm-opts ["-Xmx32g" "-XX:+UseConcMarkSweepGC"
+                              "-XX:+UseParNewGC"
+                              "-XX:+CMSParallelRemarkEnabled"
+                              "-XX:+AggressiveOpts"
+                              "-XX:+UseFastAccessorMethods" "-server"
+                              "-XX:-OmitStackTraceInFastThrow"]}})

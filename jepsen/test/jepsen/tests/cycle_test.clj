@@ -2,6 +2,7 @@
   (:require [jepsen.tests.cycle :refer :all]
             [jepsen.checker :as checker]
             [jepsen.util :refer [map-vals]]
+            [jepsen.txn :as txn]
             [knossos.op :as op]
             [clojure.test :refer :all]
             [fipp.edn :refer [pprint]]))
@@ -155,7 +156,7 @@
           history [{:index 0 :type :invoke :process 0 :f :read :value nil}
                    {:index 1 :type :ok     :process 0 :f :read :value {:x 0 :y 0}}
                    {:index 2 :type :invoke :process 0 :f :inc :value [:x]}
-                   {:index 3 :type :ok     :process 0 :f :inc :value [:y]}
+                   {:index 3 :type :ok     :process 0 :f :inc :value {:x 1}}
                    {:index 4 :type :invoke :process 0 :f :read :value nil}
                    {:index 5 :type :ok     :process 0 :f :read :value {:x 1 :y 1}}]]
       (is (= {:valid? true
@@ -229,3 +230,34 @@
          (print "Run" n ":")
          (time (let [r (checker/check checker nil history nil)]
                  (is (:valid? r)))))))))
+
+(deftest ext-index-test
+  (testing "empty"
+    (is (= {} (ext-index txn/ext-writes []))))
+  (testing "writes"
+    (let [w1 {:type :ok, :value [[:w :x 1] [:w :y 3] [:w :x 2]]}
+          w2 {:type :ok, :value [[:w :y 3] [:w :x 4]]}]
+      (is (= {:x {2 [w1], 4 [w2]}
+              :y {3 [w2 w1]}}
+             (ext-index txn/ext-writes [w1 w2]))))))
+
+(deftest wr-orders-test
+  ; Helper fns for constructing histories
+  (let [op (fn [txn] [{:type :invoke, :f :txn, :value txn}
+                      {:type :ok,     :f :txn, :value txn}])
+        check (fn [& txns]
+                (let [h (mapcat op txns)]
+                  (checker/check (checker wr-orders) nil h nil)))]
+    (testing "empty history"
+      (is (= {:valid? true, :cycles []}
+             (check []))))
+    (testing "write and read"
+      (is (= {:valid? true, :cycles []}
+             (check [[:w :x 0]]
+                    [[:w :x 0]]))))
+    (testing "chain on one register"
+      (is (false? (:valid? (check [[:r :x 0] [:w :x 1]]
+                                  [[:r :x 1] [:w :x 0]])))))
+    (testing "chain across two registers"
+      (is (false? (:valid? (check [[:r :x 0] [:w :y 1]]
+                                  [[:r :y 1] [:w :x 0]])))))))
