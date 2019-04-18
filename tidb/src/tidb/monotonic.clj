@@ -11,7 +11,8 @@
                     [util :as util]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.tests.cycle :as cycle]
-            [tidb.sql :as c :refer :all]))
+            [tidb [sql :as c :refer :all]
+                  [long-fork :refer [->TxnClient]]]))
 
 (defn read-key
   "Read a specific key's value from the table. Missing values are represented
@@ -95,7 +96,7 @@
           :f :inc
           :value (rand-int key-count)}))
 
-(defn workload
+(defn inc-workload
   [opts]
   (let [key-count 8]
     {:client (IncrementClient. nil)
@@ -107,3 +108,46 @@
                  :timeline (timeline/html)})
      :generator (->> (gen/mix [(incs key-count)
                                (reads key-count)]))}))
+
+(defn txns
+  "A lazy sequence of transactions over a pool of n numeric keys; every write
+  is unique per key. Options:
+
+    :key-count        Number of distinct keys
+    :min-txn-length   Minimum number of operations per txn
+    :max-txn-length   Maximum number of operations per txn"
+  ([opts]
+   (txns opts {}))
+  ([opts state]
+   (lazy-seq
+     (let [min-length (:min-txn-length opts 0)
+           max-length (:max-txn-length opts 2)
+           key-count  (:key-count opts 2)
+           length (+ min-length (rand-int (- (inc max-length) min-length)))
+           [txn state] (loop [length  length
+                              txn     []
+                              state   state]
+                         (if (zero? length)
+                           ; All done!
+                           [txn state]
+                           ; Add an op
+                           (let [f (rand-nth [:r :w])
+                                 k (rand-int key-count)
+                                 v (when (= f :w) (get state k 1))
+                                 state (if (= f :w) (assoc state k (inc v))
+                                         state)]
+                             (recur (dec length)
+                                    (conj txn [f k v])
+                                    state))))]
+       (cons txn (txns opts state))))))
+
+(defn txn-workload
+  [opts]
+  (let [key-count 5]
+     {:client  (->TxnClient nil)
+      :checker (cycle/checker
+                 (cycle/combine cycle/wr-orders
+                                cycle/process-orders))
+      :generator (->> (txns {:min-txn-length 2, :max-txn-length 5})
+                      (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
+                      gen/seq)}))

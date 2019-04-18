@@ -34,7 +34,8 @@
   {:bank            bank/workload
    :bank-multitable bank/multitable-workload
    :long-fork       long-fork/workload
-   :monotonic       monotonic/workload
+   :monotonic       monotonic/inc-workload
+   :txn-cycle       monotonic/txn-workload
    :register        register/workload
    :set             set/workload
    :sequential      sequential/workload})
