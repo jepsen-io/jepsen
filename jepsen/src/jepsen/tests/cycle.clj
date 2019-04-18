@@ -43,8 +43,11 @@
             [fipp.edn :refer [pprint]])
   (:import (io.lacuna.bifurcan DirectedGraph
                                Graphs
+                               ICollection
+                               IList
                                ISet
                                IGraph
+                               Set
                                SortedMap)))
 
 (set! *warn-on-reflection* true)
@@ -54,6 +57,10 @@
   (->clj [x]))
 
 (extend-protocol ToClj
+  IList
+  (->clj [l]
+    (iterator-seq (.iterator l)))
+
   ISet
   (->clj [s]
   (let [iter (.iterator s)]
@@ -120,6 +127,15 @@
                     succs))
           (.linear (DirectedGraph.))
           m))
+
+(defn ^Set ->bset
+  "Turns any collection into a Bifurcan Set."
+  ([coll]
+   (->bset coll (.linear (Set.))))
+  ([coll ^Set s]
+   (if (seq coll)
+     (recur (next coll) (.add s (first coll)))
+     s)))
 
 (defn ^DirectedGraph digraph-union
   "Takes the union of n graphs."
@@ -254,7 +270,7 @@
           ; An operation has completed. Add it to the oks buffer, and remove
           ; oks that this ok implies must have completed.
           :ok     (let [implied (->clj (in g op))
-                        _ (info op :implied implied)
+                        ;_ (info op :implied implied)
                         oks     (-> oks
                                     (set/difference implied)
                                     (conj op))]
@@ -331,18 +347,62 @@
   [graphs]
   (reduce digraph-union (vals graphs)))
 
-(defn explain-cycle
-  "Takes a map of graphs, and a cycle (a collection of ops) in that cycle.
-  Using those orders, constructs a chain of [op1 relationship op2 relationship
-  ... op1], illustrating how they form a cycle.
+(defn find-cycle
+  "Given a full graph and a set of ops forming a strongly connected
+  component, finds a cycle in that component."
+  ([full-graph scc]
+   (let [target (first scc)]
+     (prn :scc)
+     (pprint scc)
+     (prn :target target)
+     (Graphs/shortestPath ^IGraph full-graph
+                          (first scc)
+                          (reify java.util.function.Predicate
+                            (test [_ x]
+                              (prn :checking x)
+                              (= x (second scc))))
+                          (reify java.util.function.ToDoubleFunction
+                            (applyAsDouble [_ x] 1.0))))))
+
+(defn find-cycle
+  ([^IGraph full-graph scc]
+   (-> full-graph
+       (.select (->bset scc)) ; Restrict the graph to this particular scc
+       (Graphs/cycles)
+       (->> (sort-by #(.size ^ICollection %)))
+       util/spy
+       first
+       ->clj)))
+
+(defn explain-pair
+  "Takes a pair of operations and returns an explanation as for why they're
+  related."
+  [graphs a b]
+  (key (first (filter (fn [[_ ^IGraph graph]]
+                        (try (.. graph (out a) (contains b))
+                             (catch IllegalArgumentException e)))
+                      graphs))))
+
+(defn explain-scc
+  "Takes a full graph, a map of graphs which were combined to produce the full
+  graph, and a strongly connected component (a collection of ops) in that
+  graph. Using those graphs, constructs a chain like:
+
+      [op1 relationship op2 relationship ... op1]
+
+  ... illustrating how they form a cycle. For instance:
 
       [{:process 0 :value {:x 5}}
        [:process 0] {:process 0 :value {:x 3}}
        [:key :x]    {:process 1 :value {:x 4}}
        [:key :x]    {:process 0 :value {:x 5}}]"
-  [graphs cycle]
-  ; TODO
-  cycle)
+  [full-graph graphs scc]
+  (let [cycle (find-cycle full-graph scc)]
+    (->> cycle
+         (partition 2 1)
+         (reduce (fn [explanation [a b]]
+                   (conj explanation (explain-pair graphs a b) b))
+                 [(first cycle)]))))
 
 (defn checker
   "Takes a function which takes a history and returns a map of names to graphs
@@ -351,10 +411,9 @@
   [graph-fn]
   (reify checker/Checker
     (check [this test history opts]
-      (let [history   (remove (comp #{:nemesis} :process) history)
-            orders    (graph-fn history)
-            ; _         (info :orders (with-out-str (pprint orders)))
-            graph     (full-graph orders)
-            cycles    (strongly-connected-components graph)]
-         {:valid? (empty? cycles)
-          :cycles cycles}))))
+      (let [history     (remove (comp #{:nemesis} :process) history)
+            graphs      (graph-fn history)
+            full-graph  (full-graph graphs)
+            sccs        (strongly-connected-components full-graph)]
+         {:valid?     (empty? sccs)
+          :cycles     (map (partial explain-scc full-graph graphs) sccs)}))))

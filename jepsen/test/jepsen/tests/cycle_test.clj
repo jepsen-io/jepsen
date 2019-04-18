@@ -176,7 +176,7 @@
           r01' {:index 7 :type :ok     :process 0 :f :read :value {:x 0 :y 1}}
           history [r00 r00' r10 r10' r11 r11' r01 r01']]
       (is (= {:valid? false
-              :cycles [#{r10' r01'}]}
+              :cycles [[r01' [:key :x] r10' [:key :y] r01']]}
              (checker/check checker nil history nil)))))
 
   (testing "large histories"
@@ -208,7 +208,7 @@
              (checker/check (checker process-graph) nil history nil))))
     (testing "combined invalid"
       (is (= {:valid? false
-              :cycles [#{r1 r2}]}
+              :cycles [[r1 [:process 0] r2 [:key :x] r1]]}
              (checker/check (checker (combine monotonic-key-graph
                                               process-graph))
                             nil history nil))))))
