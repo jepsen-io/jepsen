@@ -3,7 +3,8 @@
             [jepsen.checker :as checker]
             [jepsen.util :refer [map-vals]]
             [jepsen.txn :as txn]
-            [knossos.op :as op]
+            [knossos [history :as history]
+                     [op :as op]]
             [clojure.test :refer :all]
             [fipp.edn :refer [pprint]]))
 
@@ -242,7 +243,7 @@
              (ext-index txn/ext-writes [w1 w2]))))))
 
 (deftest wr-orders-test
-  ; Helper fns for constructing histories
+  ; helper fns for constructing histories
   (let [op (fn [txn] [{:type :invoke, :f :txn, :value txn}
                       {:type :ok,     :f :txn, :value txn}])
         check (fn [& txns]
@@ -262,8 +263,56 @@
       (is (false? (:valid? (check [[:r :x 0] [:w :y 1]]
                                   [[:r :y 1] [:w :x 0]])))))
     (testing "write skew"
-      ; This violates SR, but doesn't introduce a w-r conflict, so it's legal
+      ; this violates si, but doesn't introduce a w-r conflict, so it's legal
       ; as far as this order is concerned.
       (is (true? (:valid? (check [[:r :x 0] [:r :y 0] [:w :x 1]]
                                  [[:r :x 0] [:r :y 0] [:w :y 1]])))))))
 
+(deftest realtime-order-test
+  ; We're gonna try a bunch of permutations of diff orders, so we'll index,
+  ; analyze, then remove indices, to simplify comparison. This is safe because
+  ; all ops are unique without indices.
+  (let [o (fn [& ops] (->> (history/index ops)
+                           realtime-order
+                           :realtime
+                           ->clj
+                           (map (fn [[k vs]]
+                                  [(dissoc k :index)
+                                   (map #(dissoc % :index) vs)]))
+                           (into {})))
+        a  {:type :invoke, :process 1, :f :read, :value nil}
+        a' {:type :ok      :process 1, :f :read, :value 1}
+        b  {:type :invoke, :process 2, :f :read, :value nil}
+        b' {:type :ok      :process 2, :f :read, :value 2}
+        c  {:type :invoke, :process 3, :f :read, :value nil}
+        c' {:type :ok      :process 3, :f :read, :value 3}
+        d  {:type :invoke, :process 4, :f :read, :value nil}
+        d' {:type :ok      :process 4, :f :read, :value 4}
+        e  {:type :invoke, :process 5, :f :read, :value nil}
+        e' {:type :ok      :process 5, :f :read, :value 5}]
+    (testing "empty history"
+      (is (= {} (o))))
+    (testing "single op"
+      (is (= {} (o a a'))))
+    (testing "two sequential ops"
+      (is (= {a' [b'], b' []}
+             (o a a' b b'))))
+    (testing "three ops in a row"
+      (is (= {a' [b'], b' [c'], c' []}
+             (o a a' b b' c c'))))
+    (testing "one followed by two concurrent"
+      (is (= {a' [b' c'], b' [], c' []}
+             (o a a' b c c' b'))))
+    (testing "two concurrent followed by one"
+      (is (= {a' [c'], b' [c'], c' []}
+             (o a b a' b' c c'))))
+    (testing "two concurrent followed by two concurrent"
+      (is (= {a' [d' c'], b' [d' c'], c' [], d' []}
+             (o a b b' a' c d c' d'))))
+    (testing "complex"
+      ;   ==a==       ==c== ==e==
+      ;         ==b==
+      ;           ==d===
+      ;
+      (is (= {a' [b' d'], b' [c'], c' [e'], d' [e'], e' []}
+             (o a a' b d b' c d' c' e e'))))))
