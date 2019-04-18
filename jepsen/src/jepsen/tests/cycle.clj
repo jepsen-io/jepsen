@@ -270,7 +270,6 @@
           ; An operation has completed. Add it to the oks buffer, and remove
           ; oks that this ok implies must have completed.
           :ok     (let [implied (->clj (in g op))
-                        ;_ (info op :implied implied)
                         oks     (-> oks
                                     (set/difference implied)
                                     (conj op))]
@@ -348,29 +347,11 @@
   (reduce digraph-union (vals graphs)))
 
 (defn find-cycle
-  "Given a full graph and a set of ops forming a strongly connected
-  component, finds a cycle in that component."
-  ([full-graph scc]
-   (let [target (first scc)]
-     (prn :scc)
-     (pprint scc)
-     (prn :target target)
-     (Graphs/shortestPath ^IGraph full-graph
-                          (first scc)
-                          (reify java.util.function.Predicate
-                            (test [_ x]
-                              (prn :checking x)
-                              (= x (second scc))))
-                          (reify java.util.function.ToDoubleFunction
-                            (applyAsDouble [_ x] 1.0))))))
-
-(defn find-cycle
   ([^IGraph full-graph scc]
    (-> full-graph
        (.select (->bset scc)) ; Restrict the graph to this particular scc
        (Graphs/cycles)
        (->> (sort-by #(.size ^ICollection %)))
-       util/spy
        first
        ->clj)))
 
@@ -416,4 +397,6 @@
             full-graph  (full-graph graphs)
             sccs        (strongly-connected-components full-graph)]
          {:valid?     (empty? sccs)
-          :cycles     (map (partial explain-scc full-graph graphs) sccs)}))))
+          :cycles     (->> sccs
+                           (sort-by count)
+                           (map (partial explain-scc full-graph graphs)))}))))
