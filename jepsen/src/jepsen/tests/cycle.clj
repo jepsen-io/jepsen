@@ -98,6 +98,8 @@
 (defn link
   "Helper for linking Bifurcan graphs."
   [^DirectedGraph graph node succ]
+  (assert (not (nil? node)))
+  (assert (not (nil? succ)))
   (.link graph node succ))
 
 (defn link-to-all
@@ -119,8 +121,8 @@
   directed graph"
   [m]
   (reduce (fn [^DirectedGraph g [node succs]]
-            (reduce (fn [^DirectedGraph graph succ]
-                      (.link graph node succ))
+            (reduce (fn [graph succ]
+                      (link graph node succ))
                     g
                     succs))
           (.linear (DirectedGraph.))
@@ -302,6 +304,7 @@
   Explainer
   (explain-pair [_ a' b']
     (let [b (get pairs b')]
+      (info :a a' :b b :b' b')
       (when (< (:index a') (:index b))
         "which completed before"))))
 
@@ -399,7 +402,8 @@
                     (reduced
                       (str "which wrote " (pr-str k) " = " (pr-str w)
                            ", which was read by")))))
-              nil))))
+              nil
+              (keys reads)))))
 
 (defn wr-graph
   "Given a history where ops are txns (e.g. [[:r :x 2] [:w :y 3]]), constructs
@@ -415,23 +419,31 @@
                  (reduce (fn [graph [v reads]]
                            ; Find ops that set k=v
                            (let [writes (-> ext-writes (get k) (get v))]
-                             ; There should be exactly one--if there's more
-                             ; than one, we can't do this sort of cycle
-                             ; analysis because there are multiple
-                             ; alternative orders.
-                             ;
-                             ; Technically, it'd be legal to ignore these,
-                             ; but I think it's likely the case that users
-                             ; will want a big flashing warning if they mess
-                             ; this up.
-                             (assert (< (count writes) 2)
-                                     (throw (IllegalArgumentException.
-                                              (str "Key " (pr-str k)
-                                                   " had value " (pr-str v)
-                                                   " written by more than one op: "
-                                                   (pr-str writes)))))
-                             ; OK, this write needs to precede all reads
-                             (link-to-all graph (first writes) reads)))
+                             (case (count writes)
+                               ; Huh. We read a value that came out of nowhere.
+                               ; This is probably an initial state. Later on
+                               ; we could do something interesting here, like
+                               ; enforcing that there's only one of these
+                               ; values and they have to precede all writes.
+                               0 graph
+
+                               ; OK, in this case, we've got exactly one
+                               ; txn that wrote this value, which is good!
+                               ; We can generate dependency edges here!
+                               1 (link-to-all graph (first writes) reads)
+
+                               ; But if there's more than one, we can't do this
+                               ; sort of cycle analysis because there are
+                               ; multiple alternative orders. Technically, it'd
+                               ; be legal to ignore these, but I think it's
+                               ; likely the case that users will want a big
+                               ; flashing warning if they mess this up.
+                               (assert (< (count writes) 2)
+                                       (throw (IllegalArgumentException.
+                                                (str "Key " (pr-str k)
+                                                     " had value " (pr-str v)
+                                                     " written by more than one op: "
+                                                     (pr-str writes))))))))
                          graph
                          values->reads))
                (.linear (DirectedGraph.))
@@ -465,7 +477,13 @@
     (->> cycle
          (partition 2 1)
          (reduce (fn [explanation [a b]]
-                   (conj explanation (explain-pair explainer a b) b))
+                   (if-let [e (explain-pair explainer a b)]
+                     (conj explanation (explain-pair explainer a b) b)
+                     ; uhhhh
+                     (throw (IllegalStateException.
+                              (str "Explainer " (pr-str explainer)
+                                   " was unable to explain the relationship"
+                                   " between" (pr-str a) " and " (pr-str b))))))
                  [(first cycle)]))))
 
 (defn checker
