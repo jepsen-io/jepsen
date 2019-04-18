@@ -5,18 +5,18 @@
   history. Our graphs use completions (e.g. ok, info) for the canonical
   representation of an operation. For instance:
 
-  `realtime-order` relates a->b if operation b begins after operation a
+  `realtime-graph` relates a->b if operation b begins after operation a
   completes successfully.
 
-  `process-order` relates a->b if a and b are performed by the same process,
+  `process-graph` relates a->b if a and b are performed by the same process,
   and that process executes a before b.
 
-  `monotonic-key-order` assumes op :values are maps of keys to observed values,
+  `monotonic-key-graph` assumes op :values are maps of keys to observed values,
   like {:x 1 :y 2}. It relates a->b if b observed a higher value of some key
   than a did. For instance, {:x 1 :y 2} -> {:x 2 :y 2}, because :x is higher in
   the second op.
 
-  `wr-order` assumes op :values are transactions like [[f k v] ...], and
+  `wr-graph` assumes op :values are transactions like [[f k v] ...], and
   relates operations based on transactional reads and writes: a->b if b
   observes a value that a wrote. This order requires that keys only have a
   given value written once.
@@ -147,7 +147,7 @@
   fns. For example, you might want a checker that looks for per-key
   monotonicity *and* real-time precedence---you could use:
 
-  (checker (combine monotonic-key-orders real-time))"
+  (checker (combine monotonic-key-graph real-time))"
   [& order-fns]
   (fn [history]
     (->> order-fns
@@ -172,7 +172,7 @@
                  (.linear (DirectedGraph.)))
          forked)))
 
-(defn monotonic-key-orders
+(defn monotonic-key-graph
   "Constructs a map of value keys to orders on those keys, assuming each value
   monotonically increases."
   [history]
@@ -194,7 +194,7 @@
                (.linear (DirectedGraph.)))
        forked))
 
-(defn process-orders
+(defn process-graph
   "Constructs a map of processes to orders on those particular processes."
   [history]
   (let [oks (filter op/ok? history)]
@@ -204,7 +204,7 @@
          (map (fn [p] [[:process p] (process-order oks p)]))
          (into (sorted-map)))))
 
-(defn realtime-order
+(defn realtime-graph
   "Given a history, produces an singleton order graph `{:realtime graph}` which
   encodes the real-time dependencies of transactions: a < b if a ends before b
   begins.
@@ -287,7 +287,7 @@
                          (ext-fn (:value op))))
                {})))
 
-(defn wr-orders
+(defn wr-graph
   "Given a history where ops are txns (e.g. [[:r :x 2] [:w :y 3]]), constructs
   an order over txns based on the external writes and reads of key k: any txn
   that reads value v must come after the txn that wrote v."
@@ -326,13 +326,13 @@
             ext-reads)))
 
 (defn full-graph
-  "Takes a map of names to orders, and computes the union of those orders as a
+  "Takes a map of names to graphs, and computes the union of those graphs as a
   Bifurcan DirectedGraph."
-  [orders]
-  (reduce digraph-union (vals orders)))
+  [graphs]
+  (reduce digraph-union (vals graphs)))
 
 (defn explain-cycle
-  "Takes a map of orders, and a cycle (a collection of ops) in that cycle.
+  "Takes a map of graphs, and a cycle (a collection of ops) in that cycle.
   Using those orders, constructs a chain of [op1 relationship op2 relationship
   ... op1], illustrating how they form a cycle.
 
@@ -340,37 +340,21 @@
        [:process 0] {:process 0 :value {:x 3}}
        [:key :x]    {:process 1 :value {:x 4}}
        [:key :x]    {:process 0 :value {:x 5}}]"
-  [orders cycle]
+  [graphs cycle]
   ; TODO
   cycle)
 
-(defn checker [orders-fn]
+(defn checker
+  "Takes a function which takes a history and returns a map of names to graphs
+  over operations in the history, and returns a checker which uses that
+  function to identify cyclic dependencies."
+  [graph-fn]
   (reify checker/Checker
     (check [this test history opts]
       (let [history   (remove (comp #{:nemesis} :process) history)
-            orders    (orders-fn history)
+            orders    (graph-fn history)
             ; _         (info :orders (with-out-str (pprint orders)))
             graph     (full-graph orders)
             cycles    (strongly-connected-components graph)]
          {:valid? (empty? cycles)
           :cycles cycles}))))
-
-(defn w-inc [ks]
-  {:f :inc, :type :invoke, :value (vec ks)})
-
-(defn r [ks]
-  (let [v (->> ks
-               (map (fn [k] [k nil]))
-               (into {}))]
-    {:f :read, :type :invoke, :value v}))
-
-(defn workload
-  "A package of a generator and checker. Options:
-
-    :keys   A set of registers you're going to operate on. Allows us to generate
-            monotonically increasing writes per key, and create reads for n keys.
-    :read-n How many keys to read from at once. Default 2."
-  [{:keys [keys read-n]}]
-  {:checker (checker monotonic-key-orders)
-   ;; FIXME
-   :generator (gen/mix [w-inc r])})
