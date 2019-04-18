@@ -40,7 +40,7 @@
     (c/with-txn op [c conn]
       (assoc op
              :type  :ok
-             :value (mapv (partial mop! c test "lf") (:value op)))))
+             :value (mapv (partial mop! conn test "lf") (:value op)))))
 
   (teardown! [this test])
 

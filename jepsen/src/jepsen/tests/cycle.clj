@@ -50,8 +50,6 @@
                                Set
                                SortedMap)))
 
-(set! *warn-on-reflection* true)
-
 ; Convert stuff back to Clojure data structures
 (defprotocol ToClj
   (->clj [x]))
@@ -158,17 +156,81 @@
   [graph]
   (strongly-connected-components (map->bdigraph graph)))
 
-(defn combine
-  "Helpful in composing an order function for a checker out of multiple order
-  fns. For example, you might want a checker that looks for per-key
-  monotonicity *and* real-time precedence---you could use:
+; This is going to look a bit odd. Please bear with me.
+;
+; Our analysis generally goes like this:
+;
+;   1. Take a history, and analyze it to build a dependency graph.
+;   2. Find cycles in that graph
+;   3. Explain why those are cycles
+;
+; Computing the graphs is fairly straightforward, but explaining cycles is a
+; bit less so, because the explanation may require data that's expensive to
+; calculate. For instance, realtime orders would like to be able to tell you
+; when precisely a given ok operation was invoked, and that needs an expensive
+; index to be constructed over the full history. We want to be able to *re-use*
+; that expensive state.
+;
+; At the top level, we want to have a single object that defines how to analyze
+; a history *and* how to explain why the results of that analysis form cycles.
+; We also want to be able to *compose* those objects together. That means that
+; both graph construction and cycle explanation must compose.
+;
+; To do this, we decouple analysis into three objects:
+;
+; - An Analyzer, which which examines a history and produces a pair of:
+; - A Graph of dependencies over completion ops, and
+; - An Explainer, which can explain cycles between those ops.
+;
+; We write our Analyzers as a function (f history) => [graph explainer]. Graphs
+; are Bifurcan DirectedGraphs. Explainers have a protocol, because we're going
+; to pack some cached state into them.
+(defprotocol Explainer
+  (explain-pair
+    [_ a b]
+    "Given a pair of operations, explain why b depends on a. `nil` indicates
+    that b does not depend on a."))
 
-  (checker (combine monotonic-key-graph real-time))"
-  [& order-fns]
+(defrecord CombinedExplainer [explainers]
+  Explainer
+  (explain-pair [_ a b]
+    (first (keep (fn [e] (explain-pair e a b)) explainers))))
+
+(defn combine
+  "Helpful in composing an analysis function for a checker out of multiple
+  other analysis fns. For example, you might want a checker that looks for
+  per-key monotonicity *and* real-time precedence---you could use:
+
+  (checker (combine monotonic-keys real-time))"
+  [& analyzers]
   (fn [history]
-    (->> order-fns
-         (map (fn [order-fn] (order-fn history)))
-         (reduce merge))))
+    (let [[graph explainers]
+          (reduce (fn [[graph explainers] analyzer]
+                    (let [[g e] (analyzer history)]
+                      [(digraph-union graph g) (conj explainers e)]))
+                  [(.linear (DirectedGraph.)) []]
+                  analyzers)]
+      [(.forked graph) (CombinedExplainer. explainers)])))
+
+;; Monotonic keys!
+
+(defrecord MonotonicKeyExplainer []
+  Explainer
+  (explain-pair [_ a b]
+    (let [a (:value a)
+          b (:value b)]
+      ; Find keys in common
+      (->> (keys a)
+           (filter b)
+           (reduce (fn [_ k]
+                     (let [a (get a k)
+                           b (get b k)]
+                       (when (and a b (< a b))
+                         (reduced (str "which observed " (pr-str k) " = "
+                                       (pr-str a)
+                                       ", and a higher value " (pr-str b)
+                                       " was observed by")))))
+                   nil)))))
 
 (defn monotonic-key-order
   "Given a key, and a history where ops are maps of keys to values, constructs
@@ -189,15 +251,19 @@
          forked)))
 
 (defn monotonic-key-graph
-  "Constructs a map of value keys to orders on those keys, assuming each value
-  monotonically increases."
+  "Analyzes ops where the :value of each op is a map of keys to values. Assumes
+  keys are monotonically increasing, and derives relationships between ops
+  based on those values."
   [history]
-  (let [history (filter op/ok? history)]
-    (->> history
-         (mapcat (comp keys :value))
-         distinct
-         (map (fn [k] [[:key k] (monotonic-key-order k history)]))
-         (into (sorted-map)))))
+  (let [history (filter op/ok? history)
+        graph (->> history
+                   (mapcat (comp keys :value))
+                   distinct
+                   (map (fn [k] (monotonic-key-order k history)))
+                   (reduce digraph-union))]
+    [graph (MonotonicKeyExplainer.)]))
+
+;; Processes
 
 (defn process-order
   "Given a history and a process ID, constructs a partial order graph based on
@@ -210,15 +276,34 @@
                (.linear (DirectedGraph.)))
        forked))
 
+(defrecord ProcessExplainer []
+  Explainer
+  (explain-pair [_ a b]
+    (when (and (= (:process a) (:process b))
+               (< (:index a) (:index b)))
+      (str "which process " (:process a) " completed before"))))
+
 (defn process-graph
-  "Constructs a map of processes to orders on those particular processes."
+  "Analyses histories and relates operations performed sequentially by each
+  process, such that every operation a process performs is ordered (but
+  operations across different processes are not related)."
   [history]
-  (let [oks (filter op/ok? history)]
-    (->> oks
-         (map :process)
-         distinct
-         (map (fn [p] [[:process p] (process-order oks p)]))
-         (into (sorted-map)))))
+  (let [oks (filter op/ok? history)
+       graph (->> oks
+                  (map :process)
+                  distinct
+                  (map (fn [p] (process-order oks p)))
+                  (reduce digraph-union))]
+    [graph (ProcessExplainer.)]))
+
+; Realtime order
+
+(defrecord RealtimeExplainer [pairs]
+  Explainer
+  (explain-pair [_ a' b']
+    (let [b (get pairs b')]
+      (when (< (:index a') (:index b))
+        "which completed before"))))
 
 (defn realtime-graph
   "Given a history, produces an singleton order graph `{:realtime graph}` which
@@ -282,7 +367,7 @@
           ; we don't need to add them to the ok set.
           :info (recur (next history) oks g))
         ; All done!
-        {:realtime g}))))
+        [g (RealtimeExplainer. pairs)]))))
 
 (defn ext-index
   "Given a function that takes a txn and returns a map of external keys to
@@ -302,6 +387,20 @@
                          (ext-fn (:value op))))
                {})))
 
+(defrecord WRExplainer []
+  Explainer
+  (explain-pair [_ a b]
+    (let [writes (txn/ext-writes (:value a))
+          reads  (txn/ext-reads  (:value b))]
+      (reduce (fn [_ k]
+                (let [r (get reads k)
+                      w (get writes k)]
+                  (when (= r w)
+                    (reduced
+                      (str "which wrote " (pr-str k) " = " (pr-str w)
+                           ", which was read by")))))
+              nil))))
+
 (defn wr-graph
   "Given a history where ops are txns (e.g. [[:r :x 2] [:w :y 3]]), constructs
   an order over txns based on the external writes and reads of key k: any txn
@@ -310,64 +409,48 @@
   (let [ext-writes (ext-index txn/ext-writes  history)
         ext-reads  (ext-index txn/ext-reads   history)]
     ; Take all reads and relate them to prior writes.
-    (reduce (fn [orders [k values->reads]]
-              ; OK, we've got a map of values to ops that read those values
-              (->> values->reads
-                   (reduce (fn [k-graph [v reads]]
-                             ; Find ops that set k=v
-                             (let [writes (-> ext-writes (get k) (get v))]
-                               ; There should be exactly one--if there's more
-                               ; than one, we can't do this sort of cycle
-                               ; analysis because there are multiple
-                               ; alternative orders.
-                               ;
-                               ; Technically, it'd be legal to ignore these,
-                               ; but I think it's likely the case that users
-                               ; will want a big flashing warning if they mess
-                               ; this up.
-                               (assert (< (count writes) 2)
-                                       (throw (IllegalArgumentException.
-                                                (str "Key " (pr-str k)
-                                                     " had value " (pr-str v)
-                                                     " written by more than one op: "
-                                                     (pr-str writes)))))
-                               ; OK, this write needs to precede all reads
-                               (link-to-all k-graph (first writes) reads)))
-                             (DirectedGraph.))
-                   ; Now we have a graph of ops related by K. Merge that into
-                   ; our orders map!
-                   (assoc orders [:key k])))
-            {}
-            ext-reads)))
-
-(defn full-graph
-  "Takes a map of names to graphs, and computes the union of those graphs as a
-  Bifurcan DirectedGraph."
-  [graphs]
-  (reduce digraph-union (vals graphs)))
+    [(.forked
+       (reduce (fn [graph [k values->reads]]
+                 ; OK, we've got a map of values to ops that read those values
+                 (reduce (fn [graph [v reads]]
+                           ; Find ops that set k=v
+                           (let [writes (-> ext-writes (get k) (get v))]
+                             ; There should be exactly one--if there's more
+                             ; than one, we can't do this sort of cycle
+                             ; analysis because there are multiple
+                             ; alternative orders.
+                             ;
+                             ; Technically, it'd be legal to ignore these,
+                             ; but I think it's likely the case that users
+                             ; will want a big flashing warning if they mess
+                             ; this up.
+                             (assert (< (count writes) 2)
+                                     (throw (IllegalArgumentException.
+                                              (str "Key " (pr-str k)
+                                                   " had value " (pr-str v)
+                                                   " written by more than one op: "
+                                                   (pr-str writes)))))
+                             ; OK, this write needs to precede all reads
+                             (link-to-all graph (first writes) reads)))
+                         graph
+                         values->reads))
+               (.linear (DirectedGraph.))
+               ext-reads))
+     (WRExplainer.)]))
 
 (defn find-cycle
-  ([^IGraph full-graph scc]
-   (-> full-graph
+  ([^IGraph graph scc]
+   (-> graph
        (.select (->bset scc)) ; Restrict the graph to this particular scc
        (Graphs/cycles)
        (->> (sort-by #(.size ^ICollection %)))
        first
        ->clj)))
 
-(defn explain-pair
-  "Takes a pair of operations and returns an explanation as for why they're
-  related."
-  [graphs a b]
-  (key (first (filter (fn [[_ ^IGraph graph]]
-                        (try (.. graph (out a) (contains b))
-                             (catch IllegalArgumentException e)))
-                      graphs))))
-
 (defn explain-scc
-  "Takes a full graph, a map of graphs which were combined to produce the full
-  graph, and a strongly connected component (a collection of ops) in that
-  graph. Using those graphs, constructs a chain like:
+  "Takes a graph, an explainer, and a strongly connected component (a
+  collection of ops) in that graph. Using those graphs, constructs a chain
+  like:
 
       [op1 relationship op2 relationship ... op1]
 
@@ -377,26 +460,25 @@
        [:process 0] {:process 0 :value {:x 3}}
        [:key :x]    {:process 1 :value {:x 4}}
        [:key :x]    {:process 0 :value {:x 5}}]"
-  [full-graph graphs scc]
-  (let [cycle (find-cycle full-graph scc)]
+  [graph explainer scc]
+  (let [cycle (find-cycle graph scc)]
     (->> cycle
          (partition 2 1)
          (reduce (fn [explanation [a b]]
-                   (conj explanation (explain-pair graphs a b) b))
+                   (conj explanation (explain-pair explainer a b) b))
                  [(first cycle)]))))
 
 (defn checker
-  "Takes a function which takes a history and returns a map of names to graphs
-  over operations in the history, and returns a checker which uses that
-  function to identify cyclic dependencies."
-  [graph-fn]
+  "Takes a function which takes a history and returns a [graph, explainer]
+  pair, and returns a checker which uses those graphs to identify cyclic
+  dependencies."
+  [analyze-fn]
   (reify checker/Checker
     (check [this test history opts]
-      (let [history     (remove (comp #{:nemesis} :process) history)
-            graphs      (graph-fn history)
-            full-graph  (full-graph graphs)
-            sccs        (strongly-connected-components full-graph)]
+      (let [history           (remove (comp #{:nemesis} :process) history)
+            [graph explainer] (analyze-fn history)
+            sccs              (strongly-connected-components graph)]
          {:valid?     (empty? sccs)
           :cycles     (->> sccs
                            (sort-by count)
-                           (map (partial explain-scc full-graph graphs)))}))))
+                           (map (partial explain-scc graph explainer)))}))))

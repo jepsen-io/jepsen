@@ -102,9 +102,8 @@
     {:client (IncrementClient. nil)
      :checker (checker/compose
                 {:cycle (cycle/checker
-                          ;cycle/monotonic-key-orders)
-                          (cycle/combine cycle/monotonic-key-orders
-                                         cycle/process-orders))
+                          (cycle/combine cycle/monotonic-key-graph
+                                         cycle/realtime-graph))
                  :timeline (timeline/html)})
      :generator (->> (gen/mix [(incs key-count)
                                (reads key-count)]))}))
@@ -146,8 +145,8 @@
   (let [key-count 5]
      {:client  (->TxnClient nil)
       :checker (cycle/checker
-                 (cycle/combine cycle/wr-orders
-                                cycle/process-orders))
+                 (cycle/combine cycle/wr-graph
+                                cycle/realtime-graph))
       :generator (->> (txns {:min-txn-length 2, :max-txn-length 5})
                       (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
                       gen/seq)}))

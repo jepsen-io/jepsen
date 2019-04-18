@@ -103,9 +103,8 @@
         o3 {:index 2 :process 2 :type :ok}
         o4 {:index 3 :process 1 :type :ok}
         history [o1 o2 o3 o4]]
-    (is (= {[:process 1] {o1 #{o4}, o4 #{}}
-            [:process 2] {o2 #{o3}, o3 #{}}}
-           (->clj (process-graph history))))))
+    (is (= {o1 #{o4}, o2 #{o3}, o3 #{}, o4 #{}}
+           (->clj (first (process-graph history)))))))
 
 (deftest monotonic-key-graph-test
   (testing "basics"
@@ -114,9 +113,11 @@
           r3 {:index 4 :type :ok, :f :read, :value {:x 1, :y 1}}
           r4 {:index 5 :type :ok, :f :read, :value {:x 0, :y 1}}
           history [r1 r2 r3 r4]]
-      (is (= {[:key :x] {r1 #{r2 r3}, r2 #{},      r3 #{}, r4 #{r2 r3}}
-              [:key :y] {r1 #{r3 r4}, r2 #{r3 r4}, r3 #{}, r4 #{}}}
-             (->clj (monotonic-key-graph history))))))
+      (is (= {r1 #{r2 r3 r4}
+              r2 #{r3 r4}
+              r3 #{}
+              r4 #{r2 r3}}
+             (->clj (first (monotonic-key-graph history)))))))
 
   (testing "Can bridge missing values"
     (let [r1 {:index 0 :type :ok, :f :read, :value {:x 0, :y 0}}
@@ -124,22 +125,11 @@
           r3 {:index 4 :type :ok, :f :read, :value {:x 4, :y 1}}
           r4 {:index 5 :type :ok, :f :read, :value {:x 0, :y 1}}
           history [r1 r2 r3 r4]]
-      (is (= {[:key :x] {r1 #{r2},       r2 #{r3}, r3 #{}, r4 #{r2}}
-              [:key :y] {r1 #{r2 r3 r4}, r2 #{}, r3 #{}, r4 #{}}}
-             (->clj (monotonic-key-graph history)))))))
-
-(deftest full-graph-test
-  (let [r1 {:index 0 :type :ok, :f :read, :value {:x 0, :y 0}}
-        r2 {:index 2 :type :ok, :f :read, :value {:x 1, :y 0}}
-        r3 {:index 4 :type :ok, :f :read, :value {:x 1, :y 1}}
-        r4 {:index 5 :type :ok, :f :read, :value {:x 0, :y 1}}
-        history [r1 r2 r3 r4]
-        orders (monotonic-key-graph history)]
-    (is (= {r1 #{r2 r3 r4}
-            r2 #{r3 r4}
-            r3 #{}
-            r4 #{r2 r3}}
-           (->clj (full-graph orders))))))
+      (is (= {r1 #{r2 r3 r4}
+              r2 #{r3}
+              r3 #{}
+              r4 #{r2}}
+             (->clj (first (monotonic-key-graph history))))))))
 
 (defn big-history-gen
   [v]
@@ -176,7 +166,9 @@
           r01' {:index 7 :type :ok     :process 0 :f :read :value {:x 0 :y 1}}
           history [r00 r00' r10 r10' r11 r11' r01 r01']]
       (is (= {:valid? false
-              :cycles [[r01' [:key :x] r10' [:key :y] r01']]}
+              :cycles [[r01' "which observed :x = 0, and a higher value 1 was observed by"
+                        r10' "which observed :y = 0, and a higher value 1 was observed by"
+                        r01']]}
              (checker/check checker nil history nil)))))
 
   (testing "large histories"
@@ -192,13 +184,14 @@
 (deftest monotonic+process-test
   ; Here, we construct an order which is legal on keys AND is sequentially
   ; consistent, but the key order is incompatible with process order.
-  (let [r1 {:type :ok, :process 0, :f :read, :value {:x 1}}
-        r2 {:type :ok, :process 0, :f :read, :value {:x 0}}
-        history [r1 r2]]
+  (let [[r1 r2 :as history]
+        (history/index [{:type :ok, :process 0, :f :read, :value {:x 1}}
+                        {:type :ok, :process 0, :f :read, :value {:x 0}}])]
     (testing "combined order"
-      (is (= {[:key :x]     {r2 #{r1}, r1 #{}}
-              [:process 0]  {r1 #{r2}, r2 #{}}}
-             (->clj ((combine monotonic-key-graph process-graph) history)))))
+      (let [[graph explainer] ((combine monotonic-key-graph process-graph)
+                               history)]
+        (is (= {r1 #{r2} r2 #{r1}}
+               (->clj graph)))))
     (testing "independently valid"
       (is (= {:valid? true
               :cycles []}
@@ -208,7 +201,9 @@
              (checker/check (checker process-graph) nil history nil))))
     (testing "combined invalid"
       (is (= {:valid? false
-              :cycles [[r1 [:process 0] r2 [:key :x] r1]]}
+              :cycles [[r2 "which observed :x = 0, and a higher value 1 was observed by"
+                        r1 "which process 0 completed before"
+                        r2]]}
              (checker/check (checker (combine monotonic-key-graph
                                               process-graph))
                             nil history nil))))))
@@ -274,7 +269,7 @@
   ; all ops are unique without indices.
   (let [o (fn [& ops] (->> (history/index ops)
                            realtime-graph
-                           :realtime
+                           first
                            ->clj
                            (map (fn [[k vs]]
                                   [(dissoc k :index)
