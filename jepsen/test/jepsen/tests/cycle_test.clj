@@ -260,4 +260,10 @@
                                   [[:r :x 1] [:w :x 0]])))))
     (testing "chain across two registers"
       (is (false? (:valid? (check [[:r :x 0] [:w :y 1]]
-                                  [[:r :y 1] [:w :x 0]])))))))
+                                  [[:r :y 1] [:w :x 0]])))))
+    (testing "write skew"
+      ; This violates SR, but doesn't introduce a w-r conflict, so it's legal
+      ; as far as this order is concerned.
+      (is (true? (:valid? (check [[:r :x 0] [:r :y 0] [:w :x 1]]
+                                 [[:r :x 0] [:r :y 0] [:w :y 1]])))))))
+

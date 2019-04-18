@@ -234,7 +234,7 @@
                                ; but I think it's likely the case that users
                                ; will want a big flashing warning if they mess
                                ; this up.
-                               (assert (= 1 (count writes))
+                               (assert (< (count writes) 2)
                                        (throw (IllegalArgumentException.
                                                 (str "Key " (pr-str k)
                                                      " had value " (pr-str v)
