@@ -256,7 +256,7 @@ automatically convert it to an `:info` crash.
                (case (:f op)
                  :read (assoc op :type :ok, :value (v/get conn "foo"))
                  :write (do (v/reset! conn "foo" (:value op))
-                            (assoc op :type, :ok))))
+                            (assoc op :type :ok))))
 ```
 
 We'll confirm writes work by watching the test:

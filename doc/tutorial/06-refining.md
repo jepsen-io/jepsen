@@ -193,12 +193,13 @@ Finally, our checker thinks in terms of a single value--but we can turn that
 into a checker that reasons about *independent* values, identified by keys.
 
 ```clj
-          :checker  (checker/compose 
-                      {:perf  (checker/perf)
-                       :indep (independent/checker 
-                                (checker/compose 
-                                {:timeline (timeline/html)
-                                 :linear (checker/linearizable)}))})
+          :checker   (checker/compose
+                       {:perf  (checker/perf)
+                        :indep (independent/checker
+                                 (checker/compose
+                                   {:linear   (checker/linearizable {:model (model/cas-register)
+                                                                     :algorithm :linear})
+                                    :timeline (timeline/html)}))})
 ```
 
 Write one checker, get a family of n checkers for free! Maaaaagic!

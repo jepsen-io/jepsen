@@ -181,9 +181,12 @@ as a rate per second, and change our hardcoded limit on each key's generator to 
             :nemesis    (nemesis/partition-random-halves)
             :model      (model/cas-register)
             :checker    (checker/compose
-                          {:perf      (checker/perf)
-                           :linear    (independent/checker (checker/linearizable))
-                           :timeline  (independent/checker (timeline/html))})
+                          {:perf  (checker/perf)
+                           :indep (independent/checker
+                                    (checker/compose
+                                      {:linear   (checker/linearizable {:model     (model/cas-register)
+                                                                        :algorithm :linear})
+                                       :timeline (timeline/html)}))})
             :generator  (->> (independent/concurrent-generator
                                10
                                (range)
