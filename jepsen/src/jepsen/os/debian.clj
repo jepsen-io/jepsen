@@ -136,6 +136,11 @@
     (install [:oracle-java8-installer])
     (install [:oracle-java8-set-default])))
 
+(defn install-openjdk-8-jre!
+  "Installs OpenJDK Java runtime, using Hotspot JIT"
+  []
+  (c/su (install [:openjdk-8-jre])))
+
 (deftype Debian []
   os/OS
   (setup! [_ test node]
