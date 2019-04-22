@@ -117,6 +117,9 @@
     :pause-pd
     :pause-kv
     :pause-db
+    :shuffle-leader
+    :shuffle-region
+    :random-merge
     :clock-skew
     ; Special-case generators
     :restart-kv-without-pd})
@@ -160,6 +163,18 @@
                :color       "#A6A0E9"
                :start       #{:pause-db}
                :stop        #{:resume-db}}
+              {:name        "shuffle-leader"
+               :color       "#A6D0E9"
+               :start       #{:shuffle-leader}
+               :stop        #{:del-shuffle-leader}}
+              {:name        "shuffle-region"
+               :color       "#A6D0C9"
+               :start       #{:shuffle-region}
+               :stop        #{:del-shuffle-region}}
+              {:name        "random-merge"
+               :color       "#A6D0A9"
+               :start       #{:random-merge}
+               :stop        #{:del-random-merge}}
               {:name        "partition"
                :color       "#A0C8E9"
                :start       #{:start-partition}

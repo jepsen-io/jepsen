@@ -50,6 +50,40 @@
 
     (teardown! [this test])))
 
+(defn schedule-nemesis
+  "A nemesis that can add stress test schedulers, shuffle-leader, shuffle-region
+  and random-merge."
+  []
+  (reify nemesis/Nemesis
+    (setup! [this test] this)
+
+    (invoke! [this test op]
+      ; We only need a node that has the pd-ctl utility.
+      (let [node   (take 1 (util/random-nonempty-subset (:nodes test)))
+            pd-ctl (fn [node cmd]
+                      ; Execute a pd-ctl command.
+                      (c/exec :/opt/tidb/bin/pd-ctl
+                        :-u (str "http://" node ":" db/client-port)
+                        cmd))]
+        (assoc op :value
+               (c/on-nodes test node
+                           (fn [test node]
+                             (case (:f op)
+                               :shuffle-leader
+                                 (pd-ctl node "sched add shuffle-leader")
+                               :shuffle-region
+                                 (pd-ctl node "sched add shuffle-region")
+                               :random-merge
+                                 (pd-ctl node "sched add random-merge")
+                               :del-shuffle-leader
+                                 (pd-ctl node "sched remove shuffle-leader")
+                               :del-shuffle-region
+                                 (pd-ctl node "sched remove shuffle-region")
+                               :del-random-merge
+                                 (pd-ctl node "sched remove random-merge")))))))
+
+    (teardown! [this test])))
+
 (defn full-nemesis
   "Merges together all nemeses"
   []
@@ -58,6 +92,9 @@
        :kill-pd   :kill-kv   :kill-db
        :pause-pd  :pause-kv  :pause-db
        :resume-pd :resume-kv :resume-db}    (process-nemesis)
+     {:shuffle-leader     :shuffle-region     :random-merge
+      :del-shuffle-leader :del-shuffle-region :del-random-merge}
+                                            (schedule-nemesis)
      {:start-partition :start
       :stop-partition  :stop}               (nemesis/partitioner nil)
      {:reset-clock          :reset
@@ -151,6 +188,12 @@
              (op :resume-kv))
           (o {:pause-db (op :pause-db)}
              (op :resume-db))
+          (o {:shuffle-leader (op :shuffle-leader)}
+             (op :del-shuffle-leader))
+          (o {:shuffle-region (op :shuffle-region)}
+             (op :del-shuffle-region))
+          (o {:random-merge (op :random-merge)}
+             (op :del-random-merge))
           (o {:partition-one  partition-one-gen
               :partition-half partition-half-gen
               :partition-ring partition-ring-gen}
@@ -171,13 +214,16 @@
   operations."
   [n]
   (->> (cond-> []
-         (:clock-skew n)  (conj :reset-clock)
-         (:pause-pd n)    (conj :resume-pd)
-         (:pause-kv n)    (conj :resume-kv)
-         (:pause-db n)    (conj :resume-db)
-         (:kill-pd n)			(conj :start-pd)
-         (:kill-kv n)   	(conj :start-kv)
-         (:kill-db n)   	(conj :start-db)
+         (:clock-skew n)      (conj :reset-clock)
+         (:pause-pd n)        (conj :resume-pd)
+         (:pause-kv n)        (conj :resume-kv)
+         (:pause-db n)        (conj :resume-db)
+         (:kill-pd n)         (conj :start-pd)
+         (:kill-kv n)         (conj :start-kv)
+         (:kill-db n)         (conj :start-db)
+         (:shuffle-leader n)  (conj :del-shuffle-leader)
+         (:shuffle-region n)  (conj :del-shuffle-region)
+         (:random-merge n)    (conj :del-random-merge)
 
          (some n [:partition-one :partition-half :partition-ring])
          (conj :stop-partition))
@@ -229,6 +275,9 @@
     (:pause n) (assoc :pause-pd true
                       :pause-kv true
                       :pause-db true)
+    (:bad-sched n) (assoc :shuffle-leader true
+                          :shuffle-region true
+                          :random-merge true)
     (:partitions n) (assoc :partition-one true
                            :partition-half true
                            :partition-ring true)))
