@@ -1,7 +1,7 @@
 (ns jepsen.tests.cycle-test
   (:require [jepsen.tests.cycle :refer :all]
             [jepsen.checker :as checker]
-            [jepsen.util :refer [map-vals]]
+            [jepsen.util :refer [map-vals spy]]
             [jepsen.txn :as txn]
             [knossos [history :as history]
                      [op :as op]]
@@ -263,18 +263,26 @@
       (is (true? (:valid? (check [[:r :x 0] [:r :y 0] [:w :x 1]]
                                  [[:r :x 0] [:r :y 0] [:w :y 1]])))))))
 
+(defn graph
+  "Takes a history, indexes it, uses the given analyzer function to construct a
+  graph+explainer, extracts just the graph, converts it to Clojure, and removes
+  indices from the ops."
+  [analyzer history]
+  (->> history
+       history/index
+       analyzer
+       first
+       ->clj
+       (map (fn [[k vs]]
+              [(dissoc k :index)
+               (map #(dissoc % :index) vs)]))
+       (into {})))
+
 (deftest realtime-graph-test
   ; We're gonna try a bunch of permutations of diff orders, so we'll index,
   ; analyze, then remove indices, to simplify comparison. This is safe because
   ; all ops are unique without indices.
-  (let [o (fn [& ops] (->> (history/index ops)
-                           realtime-graph
-                           first
-                           ->clj
-                           (map (fn [[k vs]]
-                                  [(dissoc k :index)
-                                   (map #(dissoc % :index) vs)]))
-                           (into {})))
+  (let [o (comp (partial graph realtime-graph) vector)
         a  {:type :invoke, :process 1, :f :read, :value nil}
         a' {:type :ok      :process 1, :f :read, :value 1}
         b  {:type :invoke, :process 2, :f :read, :value nil}
@@ -311,3 +319,89 @@
       ;
       (is (= {a' [b' d'], b' [c'], c' [e'], d' [e'], e' []}
              (o a a' b d b' c d' c' e e'))))))
+
+(deftest append-and-read-graph-test
+  (let [g (comp (partial graph appends-and-reads-graph) vector)
+        ax1       {:type :ok, :value [[:append :x 1]]}
+        ax2       {:type :ok, :value [[:append :x 2]]}
+        ax1ay1    {:type :ok, :value [[:append :x 1] [:append :y 1]]}
+        ax1ry1    {:type :ok, :value [[:append :x 1] [:r :y [1]]]}
+        ax2ay1    {:type :ok, :value [[:append :x 2] [:append :y 1]]}
+        ax2ay2    {:type :ok, :value [[:append :x 2] [:append :y 2]]}
+        az1ax1ay1 {:type :ok, :value [[:append :z 1]
+                                      [:append :x 1]
+                                      [:append :y 1]]}
+        rxay1     {:type :ok, :value [[:r :x nil] [:append :y 1]]}
+        ryax1     {:type :ok, :value [[:r :y nil] [:append :x 1]]}
+        rx1ry1    {:type :ok, :value [[:r :x [1]] [:r :y [1]]]}
+        rx1ay2    {:type :ok, :value [[:r :x [1]] [:append :y 2]]}
+        ry12az3   {:type :ok, :value [[:r :y [1 2]] [:append :z 3]]}
+        rz13      {:type :ok, :value [[:r :z [1 3]]]}
+        rx        {:type :ok, :value [[:r :x nil]]}
+        rx1       {:type :ok, :value [[:r :x [1]]]}
+        rx12      {:type :ok, :value [[:r :x [1 2]]]}
+        rx12ry1   {:type :ok, :value [[:r :x [1 2]] [:r :y [1]]]}
+        rx12ry21  {:type :ok, :value [[:r :x [1 2]] [:r :y [2 1]]]}
+        ]
+    (testing "empty history"
+      (is (= {} (g))))
+
+    (testing "one append"
+      (is (= {} (g ax1))))
+
+    (testing "empty read"
+      (is (= {} (g rx))))
+
+    (testing "one append one read"
+      (is (= {ax1 [rx1], rx1 []}
+             (g ax1 rx1))))
+
+    (testing "read empty, append, read"
+      ; This verifies anti-dependencies.
+      ; We need the third read in order to establish ax1's ordering
+      (is (= {rx [ax1] ax1 [rx1] rx1 []}
+             (g rx ax1 rx1))))
+
+    (testing "append, append, read"
+      ; This verifies write dependencies
+      (is (= {ax1 [ax2], ax2 [rx12], rx12 []}
+             (g ax2 ax1 rx12))))
+
+    (testing "serializable figure 3 from Adya, Liskov, O'Neil"
+      (is (= {az1ax1ay1 [rx1ay2 ry12az3]
+              rx1ay2    [ry12az3]
+              ry12az3   [rz13]
+              rz13      []}
+             (g az1ax1ay1 rx1ay2 ry12az3 rz13))))
+
+    (testing "G0: write cycle"
+      (let [t1 ax1ay1
+            t2 ax2ay2
+            ; Establishes that the updates from t1 and t2 were applied in
+            ; different orders
+            t3 rx12ry21]
+        (is (= {t1 [t2 t3], t2 [t1 t3], t3 []}
+               (g t1 t2 t3)))))
+
+    ; TODO: we should do internal consistency checks here as well--see G1a and
+    ; G1b.
+
+    (testing "G1c: circular information flow"
+      ; G0 is a special case of G1c, so for G1c we'll construct a cycle with a
+      ; ww dependency on x and a wr dependency on y. The second transaction
+      ; overwrites the first on x, but the second's write of y is visible to
+      ; the first's read.
+      (let [t1 ax1ry1
+            t2 ax2ay1
+            t3 rx12]
+        (is (= {t1 [t2], t2 [t3 t1], t3 []}
+               (g t1 t2 t3)))))
+
+    (print "\n\n\n")
+    (testing "G2: anti-dependency cycle"
+      ; Here, two transactions observe the empty state of a key that the other
+      ; transaction will append to.
+      (is (= {rxay1 [ryax1 rx1ry1], ryax1 [rxay1 rx1ry1], rx1ry1 []}
+             (g rxay1 ryax1 rx1ry1))))
+  ))
+

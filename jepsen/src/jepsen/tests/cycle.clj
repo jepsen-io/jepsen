@@ -31,6 +31,7 @@
   resulting graph, and decides whether the history is valid based on whether
   the graph has any strongly connected components--e.g. cycles."
   (:require [jepsen [checker :as checker]
+                    [generator :as gen]
                     [txn :as txn]
                     [util :as util]]
             [jepsen.txn.micro-op :as mop]
@@ -39,8 +40,8 @@
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
-            [jepsen.generator :as gen]
-            [fipp.edn :refer [pprint]])
+            [fipp.edn :refer [pprint]]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan DirectedGraph
                                Graphs
                                ICollection
@@ -304,9 +305,12 @@
   Explainer
   (explain-pair [_ a' b']
     (let [b (get pairs b')]
-      (info :a a' :b b :b' b')
       (when (< (:index a') (:index b))
-        "which completed before"))))
+        (str "which completed"
+             (when (and (:time a') (:time b))
+               (str (format "%.3f" (util/nanos->secs (- (:time b) (:time a'))))
+                    " seconds "))
+             " before the invocation of")))))
 
 (defn realtime-graph
   "Given a history, produces an singleton order graph `{:realtime graph}` which
@@ -371,6 +375,272 @@
           :info (recur (next history) oks g))
         ; All done!
         [g (RealtimeExplainer. pairs)]))))
+
+; Adya-style dependency graphs over transactions
+
+(defn appends-and-reads-verify-mop-types
+  "Takes a history where operation values are transactions. Verifies that the
+  history contains only reads [:r k v] and appends [:append k v]. Returns nil if the history conforms, or throws an error object otherwise."
+  [history]
+  (let [bad (remove (fn [op] (every? #{:r :append} (map mop/f (:value op))))
+                    history)]
+    (when (seq bad)
+      (throw+ {:type      :unexpected-txn-micro-op-types
+               :message   "history contained operations other than appends or reads"
+               :examples  (take 8 bad)}))))
+
+(defn prefix?
+  "Given two sequences, returns true iff A is a prefix of B."
+  [a b]
+  (and (<= (count a) (count b))
+       (loop [a a
+              b b]
+         (cond (nil? (seq a))           true
+               (= (first a) (first b))  (recur (next a) (next b))
+               true                     false))))
+
+(defn appends-and-reads-sorted-values
+  "Takes a history where operation values are transactions, and every micro-op
+  in a transaction is an append or a read. Computes a map of keys to all
+  distinct observed values for that key, ordered by length."
+  [history]
+  (->> history
+       ; Build up a map of keys to sets of observed values for those keys
+       (reduce (fn [states op]
+                 (reduce (fn [states [f k v]]
+                           (if (= :r f)
+                             ; Good, this is a read
+                             (-> states
+                                 (get k #{})
+                                 (conj v)
+                                 (->> (assoc states k)))
+                             ; Something else!
+                             states))
+                         states
+                         (:value op)))
+               {})
+       ; If a total order exists, we should be able
+       ; to sort their values by size and each one
+       ; will be a prefix of the next.
+       (util/map-vals (partial sort-by count))))
+
+(defn appends-and-reads-verify-total-order
+  "Takes a map of keys to observed values (e.g. from
+  `appends-and-reads-sorted-values`, and verifies that for each key, the values
+  read are consistent with a total order of appends. For instance, these values
+  are consistent:
+
+     {:x [[1] [1 2 3]]}
+
+  But these two are not:
+
+     {:x [[1 2] [1 3 2]]}
+
+  ... because the first is not a prefix of the second.
+
+  Returns nil if the history is OK, or throws otherwise."
+  [sorted-values]
+  (let [; For each key, verify the total order.
+        errors (keep (fn ok? [[k values]]
+                       (->> values
+                            ; If a total order exists, we should be able
+                            ; to sort their values by size and each one
+                            ; will be a prefix of the next.
+                            (partition 2 1)
+                            (reduce (fn mop [error [a b]]
+                                      (when-not (prefix? a b)
+                                        (reduced
+                                          {:key    k
+                                           :values [a b]})))
+                                    nil)))
+                     sorted-values)]
+    (when (seq errors)
+      (throw+ {:type    :no-total-state-order
+               :message "observed mutually incompatible orders of appends"
+               :errors  errors}))))
+
+(defn appends-and-reads-append-index
+  "Takes a map of keys to observed values (e.g. from
+  appends-and-reads-sorted-values), and builds a map of keys to indexes on
+  those keys, where each index is a map relating appended values on that key to
+  the order in which they were effectively appended by the database.
+
+    {:x {:indices {v0 0, v1 1, v2 2}
+         :values  [v0 v1 v2]}}
+
+  This allows us to map bidirectionally."
+  [sorted-values]
+  (util/map-vals (fn [values]
+                   ; The last value will be the longest, and since every other
+                   ; is a prefix, it includes all the information we need.
+                   (let [vs (util/fast-last values)]
+                     {:values  vs
+                      :indices (into {} (map vector vs (range)))}))
+                 sorted-values))
+
+(defn appends-and-reads-write-index
+  "Takes a history restricted to oks and infos, and constructs a map of keys to
+  append values to the operations that appended those values."
+  [history]
+  (reduce (fn [index op]
+            (reduce (fn [index [f k v]]
+                      (if (= :append f)
+                        (assoc-in index [k v] op)
+                        index))
+                    index
+                    (:value op)))
+          {}
+          history))
+
+(defn appends-and-reads-read-index
+  "Takes a history restricted to oks and infos, and constructs a map of keys to
+  append values to the operations which observed the state generated by the
+  append of k. The special append value ::init generates the initial (nil)
+  state."
+  [history]
+  (reduce (fn [index op]
+            (reduce (fn [index [f k v]]
+                      (if (= :r f)
+                        (update-in index [k (or (peek v) ::init)] conj op)
+                        index))
+                    index
+                    (:value op)))
+          {}
+          history))
+
+(defrecord AppendsAndReadsExplainer []
+  Explainer
+  (explain-pair [_ a b]
+    "something something"))
+
+(defn appends-and-reads-graph
+  "Some parts of a transaction's dependency graph--for instance,
+  anti-dependency cycles--involve the *version order* of states for a key.
+  Given two transactions: [[:w :x 1]] and [[:w :x 2]], we can't tell whether T1
+  or T2 happened first. This makes it hard to identify read-write and
+  write-write edges, because we can't tell what particular transaction should
+  have overwritten the state observed by a previous transaction.
+
+  However, if we constrain ourselves to transactions whose only mutation is to
+  *append* a value to a key's current state...
+
+    {:f :txn, :value [[:r :x [1 2]] [:append :x 3] [:r :x [1 2 3]]]} ...
+
+  ... we can derive the version order for (almost) any pair of operations on
+  the same key because the order of appends is encoded in every read: if we
+  observe [:r :x [3 1 2]], we know the previous states must have been [3] [3 1]
+  [3 1 2].
+
+  That is, assuming appends actually work correctly. If the database loses
+  appends or reorders them, it's *likely* (but not necessarily the case), that
+  we'll observe states like:
+
+    [1 2 3]
+    [1 3 4]  ; 2 has been lost!
+
+  We can verify these in a single O(appends^2) pass by sorting all observed
+  states for a key by size, and verifying that each is a prefix of the next.
+  Assuming we *do* observe a total order, we can use the longest read value for
+  each key as an order over appends for that key. This order is *almost*
+  complete in that appends which are never read can't be related, but so long
+  as the DB lets us see most of our appends at least once, this should work.
+
+  So then, our strategy here is to compute those orders for each key, then use
+  them to relate successive [w w], [r w], and [w r] pair on that key. [w,w]
+  pairs are a direct write dependency, [w,r] pairs are a direct
+  read-dependency, and [r,w] pairs are direct anti-dependencies.
+
+  For more context, see Adya, Liskov, and O'Neil's 'Generalized Isolation Level
+  Definitions', page 8."
+  ([history]
+   ; Make sure there are only appends and reads
+   (appends-and-reads-verify-mop-types history)
+   ; We only care about ok and info ops; invocations don't matter, and failed
+   ; ops can't contribute to the state.
+   (let [history       (filter (comp #{:ok :info} :type) history)
+         sorted-values (appends-and-reads-sorted-values history)]
+     (prn :sorted-values sorted-values)
+     ; Make sure we can actually compute a version order for each key
+     (appends-and-reads-verify-total-order sorted-values)
+     ; Compute indices
+     (let [append-index (appends-and-reads-append-index sorted-values)
+           write-index  (appends-and-reads-write-index history)
+           read-index   (appends-and-reads-read-index history)
+           ; And build our graph
+           _     (prn :append-index append-index)
+           _     (prn :write-index  write-index)
+           _     (prn :read-index   read-index)
+           graph (appends-and-reads-graph
+                   history append-index write-index read-index)]
+       [graph (AppendsAndReadsExplainer.)])))
+  ; Actually build the DirectedGraph
+  ([history append-index write-index read-index]
+   (reduce
+     (fn op [g op]
+       (prn :op (:value op))
+       (reduce
+         (fn mop [g [f k v]]
+           (prn :mop f k v)
+           (case f
+             ; OK, we've got a read. What op appended the last thing we saw?
+             :r (if (seq v)
+                  (let [_ (prn :last-v (peek v))
+                        append-op (-> write-index (get k) (get (peek v)))]
+                    (prn :appender append-op)
+                    (assert append-op)
+                    (prn :link append-op '-> op)
+                    (if (= op append-op)
+                      ; We appended this particular value, and that append will
+                      ; encode the w-w dependency we need for this read.
+                      g
+                      ; We depend on the other op that appended this.
+                      (link g append-op op)))
+                  ; The read value was empty; we don't depend on anything.
+                  g)
+
+             ; OK, we have an append. We need two classes of edge here: one ww
+             ; edge, for the append we're overwriting, and n rw edges, for
+             ; anyone who read the version immediately prior to us.
+             :append
+             ; So what version did we append?
+             (if-let [index (get-in append-index [k :indices v])]
+               (let [; And what value was appended immediately before us in
+                     ; version order?
+                     prev-v (if (pos? index)
+                              (get-in append-index [k :values (dec index)])
+                              ::init)
+                     _ (prn :prev-v prev-v)
+
+                     ; What op wrote that value?
+                     prev-append (when (pos? index)
+                                   (get-in write-index [k prev-v]))
+
+                     ; Link that writer to us
+                     g (if (and (pos? index)             ; (if we weren't first)
+                                (not= prev-append op)) ; (and it wasn't us)
+                         (link g prev-append op)
+                         g)
+
+                     ; And what ops read that previous value?
+                     prev-reads (get-in read-index [k prev-v])
+
+                     ; Link them all to us
+                     g (reduce (fn link-read [g r]
+                                 (if (not= r op)
+                                   (link g r op)
+                                   g))
+                               g
+                               prev-reads)]
+                 g)
+               ; Huh, we actually don't know what index this was--because we
+               ; never read this appended value. Nothing we can infer!
+               g)))
+         g
+         (:value op)))
+     (.linear (DirectedGraph.))
+     history)))
+
+; Basic kv reads and writes
 
 (defn ext-index
   "Given a function that takes a txn and returns a map of external keys to
