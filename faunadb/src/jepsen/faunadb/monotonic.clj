@@ -271,7 +271,7 @@
     (try
       (g/raw-plot!
         (concat (perf/preamble path)
-                (perf/nemesis-regions* history)
+                (perf/nemesis-ops history)
                 (perf/nemesis-lines history)
                 [['set 'title (str (:name test) " sequential by process")]
                  '[set ylabel "register value"]
