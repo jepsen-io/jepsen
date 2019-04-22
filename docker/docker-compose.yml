@@ -4,6 +4,8 @@ x-node:
   build: ./node
   env_file: ./secret/node.env
   privileged: true
+  networks:
+    - jepsen
 
 services:
   control:
@@ -14,12 +16,8 @@ services:
     privileged: true
     ports:
       - "8080"
-    links:
-      - n1
-      - n2
-      - n3
-      - n4
-      - n5
+    networks:
+      - jepsen
   n1:
     << : *default-node
     container_name: jepsen-n1
@@ -40,3 +38,6 @@ services:
     << : *default-node
     container_name: jepsen-n5
     hostname: n5
+
+networks:
+  jepsen:
