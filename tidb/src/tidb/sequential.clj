@@ -9,8 +9,8 @@
   B: read y
   B: read x
 
-  A's process order enforces that x must be visible before y, so we should
-  always read both or neither.
+  A's process order enforces that x must be visible before y; we should never
+  observe y alone.
 
   Splits keys up onto different tables to make sure they fall in different
   shard ranges"
