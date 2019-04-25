@@ -380,7 +380,7 @@
   (info "Installing faunadb")
   (c/su
     (info "Installing JDK")
-    (debian/install-jdk8!)
+    (debian/install-jdk11!)
     (info "Adding apt key")
     (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
             :apt-key :add :-)
