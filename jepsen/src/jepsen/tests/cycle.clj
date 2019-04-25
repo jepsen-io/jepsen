@@ -930,6 +930,5 @@
         ; needed to hold in order to infer dependencies), or it might discover
         ; violations that *can't* be encoded as a part of the dependency graph.
         ; If that happens, the analyzer can throw an exception with a :valid?
-        ; key, and we'll simply return its ex-info map.
-        (catch (contains? % :valid?) e
-          (ex-data e))))))
+        ; key, and we'll simply return the ex-info map.
+        (catch (contains? % :valid?) e e)))))

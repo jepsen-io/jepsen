@@ -437,7 +437,14 @@
                     (catch [:type :no-total-state-order] e e))]
         (is (= [{:key :x
                  :values [[1 2] [1 3 4]]}]
-               (:errors e)))))))
+               (:errors e)))
+        (is (= {:valid?   false
+                :type     :no-total-state-order
+                :message  "observed mutually incompatible orders of appends"
+                :errors   [{:key :x, :values [[1 2] [1 3 4]]}]}
+               (checker/check (checker appends-and-reads-graph)
+                              nil [rx12 rx134] nil)))))))
+
 
 (deftest path-shells-test
   (let [g     (map->bdigraph {0 [1 2] 1 [3] 2 [3] 3 [0]})
