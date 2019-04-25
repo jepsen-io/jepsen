@@ -16,31 +16,46 @@
                           k])
                 first
                 :val)
+
          :w (do (c/execute! conn [(str "insert into " table
                                   " (id, sk, val) values (?, ?, ?)"
                                   " on duplicate key update val = ?")
                              k k v v])
-                v))])
+                v)
 
-(defrecord TxnClient [conn]
+         :append
+         (let [r (c/execute!
+                   conn
+                   [(str "insert into " table " (id, sk, val) values (?, ?, ?)"
+                         " on duplicate key update val = CONCAT(val, ',', ?)")
+                    k k (str v) (str v)])]
+           v))])
+
+(defrecord TxnClient [conn val-type]
   client/Client
   (open! [this test node]
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
     (c/with-conn-failure-retry conn
-      (c/execute! conn ["create table if not exists lf
-                        (id  int not null primary key,
-                         sk  int not null,
-                         val int)"])
+      (c/execute! conn [(str "create table if not exists lf
+                             (id  int not null primary key,
+                              sk  int not null,
+                              val " val-type ")")])
       (when (:use-index test)
         (c/create-index! conn ["create index lf_sk_val on lf (sk, val)"]))))
 
   (invoke! [this test op]
-    (c/with-txn op [c conn]
-      (assoc op
-             :type  :ok
-             :value (mapv (partial mop! conn test "lf") (:value op)))))
+    (let [txn       (:value op)
+          use-txn?  (< 1 (count txn))
+          ;use-txn?  false
+          txn'  (if use-txn?
+                  (c/with-txn op [c conn]
+                    (mapv (partial mop! c test "lf") txn))
+                  ; If there's 1 or 0 elements in the txn, we don't need a
+                  ; transactional scope to execute it.
+                  (mapv (partial mop! conn test "lf") txn))]
+      (assoc op :type :ok, :value txn', :txn? use-txn?)))
 
   (teardown! [this test])
 
@@ -50,4 +65,4 @@
 (defn workload
   [opts]
   (assoc (lf/workload 10)
-         :client (TxnClient. nil)))
+         :client (TxnClient. nil "int")))

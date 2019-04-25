@@ -4,7 +4,8 @@
   small groups. We verify that the order of transactions implied by each key
   are mutually consistent; e.g. no transaction can observe key x increase, but
   key y decrease."
-  (:require [clojure.tools.logging :refer [info]]
+  (:require [clojure.string :as str]
+            [clojure.tools.logging :refer [info]]
             [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]
@@ -108,15 +109,15 @@
      :generator (->> (gen/mix [(incs key-count)
                                (reads key-count)]))}))
 
-(defn txns
-  "A lazy sequence of transactions over a pool of n numeric keys; every write
-  is unique per key. Options:
+(defn wr-txns
+  "A lazy sequence of write and read transactions over a pool of n numeric
+  keys; every write is unique per key. Options:
 
     :key-count        Number of distinct keys
     :min-txn-length   Minimum number of operations per txn
     :max-txn-length   Maximum number of operations per txn"
   ([opts]
-   (txns opts {}))
+   (wr-txns opts {}))
   ([opts state]
    (lazy-seq
      (let [min-length (:min-txn-length opts 0)
@@ -138,15 +139,60 @@
                              (recur (dec length)
                                     (conj txn [f k v])
                                     state))))]
-       (cons txn (txns opts state))))))
+       (cons txn (wr-txns opts state))))))
 
 (defn txn-workload
   [opts]
-  (let [key-count 5]
-     {:client  (->TxnClient nil)
-      :checker (cycle/checker
-                 (cycle/combine cycle/wr-graph
-                                cycle/realtime-graph))
-      :generator (->> (txns {:min-txn-length 2, :max-txn-length 5})
-                      (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
-                      gen/seq)}))
+  {:client  (->TxnClient nil "int")
+   :checker (cycle/checker
+              (cycle/combine cycle/wr-graph
+                             cycle/realtime-graph))
+   :generator (->> (wr-txns {:min-txn-length 2, :max-txn-length 5})
+                   (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
+                   gen/seq)})
+
+(defn append-client
+  "Wraps a TxnClient, translating string lists back into integers."
+  [client]
+  (reify client/Client
+    (open! [this test node]
+      (append-client (client/open! client test node)))
+
+    (setup! [this test]
+      (append-client (client/setup! client test)))
+
+    (invoke! [this test op]
+      (let [op' (client/invoke! client test op)
+            txn' (mapv (fn [[f k v :as mop]]
+                         (info :got f k v)
+                         (if (= f :r)
+                           ; Rewrite reads to convert "1,2,3" to [1 2 3].
+                           (do (info :raw-read v)
+                               [f k (when v (mapv #(Long/parseLong %)
+                                                  (str/split v #",")))])
+                           mop))
+                       (:value op'))]
+        (assoc op' :value txn')))
+
+    (teardown! [this test]
+      (client/teardown! client test))
+
+    (close! [this test]
+      (client/close! client test))))
+
+(defn append-txns
+  "Like wr-txns, we just rewrite writes to be appends."
+  [opts]
+  (->> (wr-txns opts)
+       (map (partial mapv (fn [[f k v]] [(case f :w :append f) k v])))))
+
+(defn append-workload
+  [opts]
+  {:client (append-client (->TxnClient nil "text"))
+   :generator (->> (append-txns {:min-txn-length 1
+                                 :max-txn-length 3
+                                 :key-count 2})
+                   (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
+                   gen/seq)
+   :checker (cycle/checker
+              cycle/appends-and-reads-graph)})

@@ -36,6 +36,7 @@
    :long-fork       long-fork/workload
    :monotonic       monotonic/inc-workload
    :txn-cycle       monotonic/txn-workload
+   :append          monotonic/append-workload
    :register        register/workload
    :set             set/workload
    :sequential      sequential/workload})
