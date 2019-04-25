@@ -385,9 +385,45 @@
   (let [bad (remove (fn [op] (every? #{:r :append} (map mop/f (:value op))))
                     history)]
     (when (seq bad)
-      (throw+ {:type      :unexpected-txn-micro-op-types
+      (throw+ {:valid?    :unknown
+               :type      :unexpected-txn-micro-op-types
                :message   "history contained operations other than appends or reads"
                :examples  (take 8 bad)}))))
+
+(defn reduce-mops
+  "Takes a history of operations, where each operation op has a :value which is
+  a transaction made up of [f k v] micro-ops. Runs a reduction over every
+  micro-op, where the reduction function is of the form (f state op [f k v]).
+  Saves you having to do endless nested reduces."
+  [f init-state history]
+  (reduce (fn op [state op]
+            (reduce (fn mop [state mop]
+                      (f state op mop))
+                    state
+                    (:value op)))
+          init-state
+          history))
+
+(defn appends-and-reads-verify-unique-appends
+  "Takes a history of txns made up of appends and reads, and checks to make
+  sure that every invoke appending a value to a key chose a unique value."
+  [history]
+  (reduce-mops (fn [written op [f k v]]
+                 (if (and (op/invoke? op) (= :append f))
+                   (let [writes-of-k (written k #{})]
+                     (if (contains? writes-of-k v)
+                       (throw+ {:valid?   :unknown
+                                :type     :duplicate-appends
+                                :op       op
+                                :key      k
+                                :value    v
+                                :message  (str "value " v " appended to key " k
+                                               " multiple times!")})
+                       (assoc written k (conj writes-of-k v))))
+                   ; Something other than an invoke append, whatever
+                   written))
+               {}
+               history))
 
 (defn prefix?
   "Given two sequences, returns true iff A is a prefix of B."
@@ -455,9 +491,32 @@
                                     nil)))
                      sorted-values)]
     (when (seq errors)
-      (throw+ {:type    :no-total-state-order
+      (throw+ {:valid?  false
+               :type    :no-total-state-order
                :message "observed mutually incompatible orders of appends"
                :errors  errors}))))
+
+(defn appends-and-reads-verify-no-dups
+  "Given a history, checks to make sure that no read contains *duplicate*
+  copies of the same appended element. Since we only append values once, we
+  should never see them more than that--and if we do, it's really gonna mess up
+  our whole \"total order\" thing!"
+  [history]
+  (reduce-mops (fn [_ op [f k v]]
+                 (when (= f :r)
+                   (let [dups (->> (frequencies v)
+                                   (filter (comp (partial < 1) val))
+                                   (into (sorted-map)))]
+                     (when (seq dups)
+                       (throw+ {:valid?   false
+                                :type     :duplicate-elements
+                                :message  "Observed multiple copies of a value which was only inserted once"
+                                :op         op
+                                :key        k
+                                :value      v
+                                :duplicates dups})))))
+               nil
+               history))
 
 (defn appends-and-reads-append-index
   "Takes a map of keys to observed values (e.g. from
@@ -555,11 +614,16 @@
   ([history]
    ; Make sure there are only appends and reads
    (appends-and-reads-verify-mop-types history)
+   ; And that every append is unique
+   (appends-and-reads-verify-unique-appends history)
+   ; And that reads never observe duplicates
+   (appends-and-reads-verify-no-dups history)
+
    ; We only care about ok and info ops; invocations don't matter, and failed
    ; ops can't contribute to the state.
    (let [history       (filter (comp #{:ok :info} :type) history)
          sorted-values (appends-and-reads-sorted-values history)]
-     (prn :sorted-values sorted-values)
+     ;(prn :sorted-values sorted-values)
      ; Make sure we can actually compute a version order for each key
      (appends-and-reads-verify-total-order sorted-values)
      ; Compute indices
@@ -567,9 +631,9 @@
            write-index  (appends-and-reads-write-index history)
            read-index   (appends-and-reads-read-index history)
            ; And build our graph
-           _     (prn :append-index append-index)
-           _     (prn :write-index  write-index)
-           _     (prn :read-index   read-index)
+           ;_     (prn :append-index append-index)
+           ;_     (prn :write-index  write-index)
+           ;_     (prn :read-index   read-index)
            graph (appends-and-reads-graph
                    history append-index write-index read-index)]
        [graph (AppendsAndReadsExplainer.)])))
@@ -577,18 +641,13 @@
   ([history append-index write-index read-index]
    (reduce
      (fn op [g op]
-       (prn :op (:value op))
        (reduce
          (fn mop [g [f k v]]
-           (prn :mop f k v)
            (case f
              ; OK, we've got a read. What op appended the last thing we saw?
              :r (if (seq v)
-                  (let [_ (prn :last-v (peek v))
-                        append-op (-> write-index (get k) (get (peek v)))]
-                    (prn :appender append-op)
+                  (let [append-op (-> write-index (get k) (get (peek v)))]
                     (assert append-op)
-                    (prn :link append-op '-> op)
                     (if (= op append-op)
                       ; We appended this particular value, and that append will
                       ; encode the w-w dependency we need for this read.
@@ -609,7 +668,6 @@
                      prev-v (if (pos? index)
                               (get-in append-index [k :values (dec index)])
                               ::init)
-                     _ (prn :prev-v prev-v)
 
                      ; What op wrote that value?
                      prev-append (when (pos? index)
@@ -720,14 +778,108 @@
                ext-reads))
      (WRExplainer.)]))
 
+; Hooo boy, this blows up BADLY on real-world inputs, so we're gonna hack
+; together a little BFS
+;(defn find-cycle
+;  ([^IGraph graph scc]
+;   (-> graph
+;       (.select (->bset scc)) ; Restrict the graph to this particular scc
+;       (Graphs/cycles)
+;       (->> (sort-by #(.size ^ICollection %)))
+;       first
+;       ->clj)))
+
+(defn prune-alternate-paths
+  "If we have two paths [a b d] and [a c d], we don't need both of them,
+  because both get us from a to d. We collapse a set of paths by filtering out
+  duplicates. Since all paths *start* at the same place, we can do this
+  efficiently by selecting one from the set of all paths that end in the same
+  place."
+  [paths]
+  (->> paths
+       (group-by peek)
+       vals
+       (map first)))
+
+(defn prune-longer-paths
+  "We can also completely remove paths whose tips are in a prefix of any other
+  path, because these paths are simply longer versions of paths we've already
+  explored."
+  [paths]
+  (let [old (->> paths
+                 (mapcat butlast)
+                 (into #{}))]
+    (remove (comp old peek) paths)))
+
+(defn grow-paths
+  "Given a graph g, and a set of paths (each a sequence like [a b c]),
+  constructs a new set of paths by taking the tip c of each path p, and
+  expanding p to all vertices c can reach: [a b c] => #{[a b c d] [a b c e]}."
+  [^DirectedGraph g, paths]
+  (->> paths
+       (mapcat (fn [path]
+                 (let [tip (peek path)]
+                   ; Expand the tip to all nodes it can reach
+                   (map (partial conj path) (.out g tip)))))))
+
+(defn path-shells
+  "Given a graph, and a starting node, constructs shells outwards from that
+  node: collections of longer and longer paths."
+  [g start]
+  (iterate (comp prune-alternate-paths
+                 (partial grow-paths g)
+                 prune-longer-paths)
+           [[start]]))
+
+(defn loop?
+  "Does the given vector begin and end with identical elements, and is longer
+  than 1?"
+  [v]
+  (and (< 1 (count v))
+       (= (first v) (peek v))))
+
+(defn renumber-graph
+  "Takes a Graph and rewrites each vertex to a unique integer, returning the
+  rewritten Graph, and a vector of the original vertexes for reconstruction."
+  [g]
+  (let [mapping (persistent!
+                  (reduce (fn [mapping v]
+                            (assoc! mapping v (count mapping)))
+                          (transient {})
+                          (.vertices g)))
+        g' (reduce (fn [g' v]
+                     ; Find the index of this vertex
+                     (let [vi (get mapping v)]
+                       (reduce (fn [g' n]
+                                 ; And the index of this neighbor
+                                 (let [ni (get mapping n)]
+                                   (link g' vi ni)))
+                               g'
+                               (.out g v))))
+                (.linear (DirectedGraph.))
+                (.vertices g))]
+    [(.forked g')
+     (persistent!
+       (reduce (fn [vertices [vertex index]]
+                 (assoc! vertices index vertex))
+               (transient (vec (repeat (count mapping) nil)))
+               mapping))]))
+
 (defn find-cycle
-  ([^IGraph graph scc]
-   (-> graph
-       (.select (->bset scc)) ; Restrict the graph to this particular scc
-       (Graphs/cycles)
-       (->> (sort-by #(.size ^ICollection %)))
-       first
-       ->clj)))
+  "Given a graph and a strongly connected component within it, finds a short
+  cycle in that component."
+  [^IGraph graph scc]
+  (let [g             (.select graph (->bset scc))
+        ; Just to speed up equality checks here, we'll construct an isomorphic
+        ; graph with integers standing for our ops, find a cycle in THAT, then
+        ; map back to our own space.
+        [gn mapping]  (renumber-graph g)
+        candidate     (first (.vertices gn))
+        paths         (mapcat identity (path-shells gn candidate))]
+    (->> paths
+         (filter loop?)
+         first
+         (mapv mapping))))
 
 (defn explain-scc
   "Takes a graph, an explainer, and a strongly connected component (a
@@ -763,10 +915,21 @@
   [analyze-fn]
   (reify checker/Checker
     (check [this test history opts]
-      (let [history           (remove (comp #{:nemesis} :process) history)
-            [graph explainer] (analyze-fn history)
-            sccs              (strongly-connected-components graph)]
-         {:valid?     (empty? sccs)
-          :cycles     (->> sccs
-                           (sort-by count)
-                           (map (partial explain-scc graph explainer)))}))))
+      (try+
+        (let [history           (remove (comp #{:nemesis} :process) history)
+              [graph explainer] (analyze-fn history)
+              sccs              (strongly-connected-components graph)]
+          {:valid?     (empty? sccs)
+           :scc-count  (count sccs)
+           :cycles     (->> sccs
+                            (sort-by count)
+                            (take 8)
+                            (mapv (partial explain-scc graph explainer)))})
+        ; The graph analysis might decide that a certain history isn't
+        ; analyzable (perhaps because it violates expectations the analyzer
+        ; needed to hold in order to infer dependencies), or it might discover
+        ; violations that *can't* be encoded as a part of the dependency graph.
+        ; If that happens, the analyzer can throw an exception with a :valid?
+        ; key, and we'll simply return its ex-info map.
+        (catch (contains? % :valid?) e
+          (ex-data e))))))

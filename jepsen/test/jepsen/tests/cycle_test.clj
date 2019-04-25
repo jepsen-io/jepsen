@@ -6,7 +6,8 @@
             [knossos [history :as history]
                      [op :as op]]
             [clojure.test :refer :all]
-            [fipp.edn :refer [pprint]]))
+            [fipp.edn :refer [pprint]]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (deftest tarjan-test
   (let [tarjan (comp set tarjan)]
@@ -150,8 +151,9 @@
                    {:index 3 :type :ok     :process 0 :f :inc :value {:x 1}}
                    {:index 4 :type :invoke :process 0 :f :read :value nil}
                    {:index 5 :type :ok     :process 0 :f :read :value {:x 1 :y 1}}]]
-      (is (= {:valid? true
-              :cycles []}
+      (is (= {:valid?     true
+              :scc-count  0
+              :cycles     []}
              (checker/check checker nil history nil)))))
 
   (testing "invalid"
@@ -166,6 +168,7 @@
           r01' {:index 7 :type :ok     :process 0 :f :read :value {:x 0 :y 1}}
           history [r00 r00' r10 r10' r11 r11' r01 r01']]
       (is (= {:valid? false
+              :scc-count 1
               :cycles [[r01' "which observed :x = 0, and a higher value 1 was observed by"
                         r10' "which observed :y = 0, and a higher value 1 was observed by"
                         r01']]}
@@ -194,13 +197,16 @@
                (->clj graph)))))
     (testing "independently valid"
       (is (= {:valid? true
+              :scc-count 0
               :cycles []}
              (checker/check (checker monotonic-key-graph) nil history nil)))
       (is (= {:valid? true
+              :scc-count 0
               :cycles []}
              (checker/check (checker process-graph) nil history nil))))
     (testing "combined invalid"
       (is (= {:valid? false
+              :scc-count 1
               :cycles [[r2 "which observed :x = 0, and a higher value 1 was observed by"
                         r1 "which process 0 completed before"
                         r2]]}
@@ -245,10 +251,10 @@
                 (let [h (mapcat op txns)]
                   (checker/check (checker wr-graph) nil h nil)))]
     (testing "empty history"
-      (is (= {:valid? true, :cycles []}
+      (is (= {:valid? true, :scc-count 0, :cycles []}
              (check []))))
     (testing "write and read"
-      (is (= {:valid? true, :cycles []}
+      (is (= {:valid? true, :scc-count 0, :cycles []}
              (check [[:w :x 0]]
                     [[:w :x 0]]))))
     (testing "chain on one register"
@@ -333,6 +339,7 @@
                                       [:append :y 1]]}
         rxay1     {:type :ok, :value [[:r :x nil] [:append :y 1]]}
         ryax1     {:type :ok, :value [[:r :y nil] [:append :x 1]]}
+        rx121     {:type :ok, :value [[:r :x [1 2 1]]]}
         rx1ry1    {:type :ok, :value [[:r :x [1]] [:r :y [1]]]}
         rx1ay2    {:type :ok, :value [[:r :x [1]] [:append :y 2]]}
         ry12az3   {:type :ok, :value [[:r :y [1 2]] [:append :z 3]]}
@@ -397,11 +404,69 @@
         (is (= {t1 [t2], t2 [t3 t1], t3 []}
                (g t1 t2 t3)))))
 
-    (print "\n\n\n")
     (testing "G2: anti-dependency cycle"
       ; Here, two transactions observe the empty state of a key that the other
       ; transaction will append to.
       (is (= {rxay1 [ryax1 rx1ry1], ryax1 [rxay1 rx1ry1], rx1ry1 []}
              (g rxay1 ryax1 rx1ry1))))
-  ))
 
+    (testing "reads with duplicates"
+      (let [e (try+ (g rx121)
+                    false
+                    (catch [:type :duplicate-elements] e e))]
+        (is (= (assoc rx121 :index 0) (:op e)))
+        (is (= :x (:key e)))
+        (is (= [1 2 1] (:value e)))
+        (is (= {1 2} (:duplicates e)))))
+
+    (testing "duplicate inserts attempts"
+      (let [ax1ry  {:index 0, :type :invoke, :value [[:append :x 1] [:r :y nil]]}
+            ay2ax1 {:index 1, :type :invoke, :value [[:append :y 2] [:append :x 1]]}
+            e (try+ (g ax1ry ay2ax1)
+                    false
+                    (catch [:type :duplicate-appends] e e))]
+        (is (= ay2ax1 (:op e)))
+        (is (= :x (:key e)))
+        (is (= 1 (:value e)))))
+
+    (testing "incompatible orders"
+      (let [rx12  {:index 0, :type :ok, :value [[:r :x [1 2]]]}
+            rx134 {:index 0, :type :ok, :value [[:r :x [1 3 4]]]}
+            e (try+ (g rx12 rx134)
+                    false
+                    (catch [:type :no-total-state-order] e e))]
+        (is (= [{:key :x
+                 :values [[1 2] [1 3 4]]}]
+               (:errors e)))))))
+
+(deftest path-shells-test
+  (let [g     (map->bdigraph {0 [1 2] 1 [3] 2 [3] 3 [0]})
+        paths (path-shells g 0)]
+    (is (= [[[0]]
+            [[0 1] [0 2]]
+            [[0 1 3]]
+            [[0 1 3 0]]]
+           (take 4 paths)))))
+
+(deftest find-cycle-test
+  (let [g (map->bdigraph {0 [1 2]
+                          1 [4]
+                          2 [3]
+                          3 [4]
+                          4 [0 2]})]
+    (is (= [0 1 4 0]
+           (find-cycle g (->clj (.vertices g)))))))
+
+(deftest renumber-graph-test
+  (is (= [{} []]
+         (update (renumber-graph (map->bdigraph {})) 0 ->clj)))
+  (is (= [{0 #{1 3}
+           1 #{0}
+           2 #{0}
+           3 #{}}
+          [:y :t :x :z]]
+         (update (renumber-graph (map->bdigraph {:x #{:y}
+                                                 :y #{:z :t}
+                                                 :z #{}
+                                                 :t #{:y}}))
+                 0 ->clj))))
