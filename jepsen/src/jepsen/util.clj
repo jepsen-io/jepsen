@@ -17,6 +17,13 @@
            (java.io File
                     RandomAccessFile)))
 
+(defn default
+  "Like assoc, but only fills in values which are NOT present in the map."
+  [m k v]
+  (if (contains? m k)
+    m
+    (assoc m k v)))
+
 (defn exception?
   "Is x an Exception?"
   [x]
@@ -280,6 +287,7 @@
   "Binds *relative-time-origin* at the start of body."
   [& body]
   `(binding [*relative-time-origin* (linear-time-nanos)]
+     (info "Relative time begins now")
      ~@body))
 
 (defn relative-time-nanos
@@ -632,29 +640,52 @@
          persistent!)))
 
 (defn nemesis-intervals
-  "Given a history where a nemesis goes through :f :start and :f :stop
-  type transitions, constructs a sequence of pairs of start and stop ops. Since a
+  "Given a history where a nemesis goes through :f :start and :f :stop type
+  transitions, constructs a sequence of pairs of start and stop ops. Since a
   nemesis usually goes :start :start :stop :stop, we construct pairs of the
   first and third, then second and fourth events. Where no :stop op is present,
   we emit a pair like [start nil]. Optionally, a map of start and stop sets may
-  be provided to match on user-defined :start and :stop keys."
+  be provided to match on user-defined :start and :stop keys.
+
+  Multiple starts are ended by the same pair of stops, so :start1 :start2
+  :start3 :start4 :stop1 :stop2 yields:
+
+    [start1 stop1]
+    [start2 stop2]
+    [start3 stop1]
+    [start4 stop2]"
   ([history]
    (nemesis-intervals history {}))
   ([history opts]
    ;; Default to :start and :stop if no region keys are provided
-   (let [start (or (:start opts) #{:start})
-         stop  (or (:stop  opts) #{:stop})
-         [pairs starts] (->> history
-                             (filter #(= :nemesis (:process %)))
-                             (reduce (fn [[pairs starts] op]
-                                       (cond
-                                         (start (:f op)) [pairs (conj starts op)]
-                                         (stop  (:f op)) [(conj pairs [(peek starts)
-                                                                       op])
-                                                          (pop starts)]
-                                         :else [pairs starts]))
-                                     [[] (clojure.lang.PersistentQueue/EMPTY)]))]
-     (concat pairs (map vector starts (repeat nil))))))
+   (let [start (:start opts #{:start})
+         stop  (:stop  opts #{:stop})
+         [intervals starts]
+         ; First, group nemesis ops into pairs (one for invoke, one for
+         ; complete)
+         (->> history
+              (filter #(= :nemesis (:process %)))
+              (partition 2)
+              ; Verify that every pair has identical :fs. It's possible
+              ; that nemeses might, some day, log more types of :info
+              ; ops, maybe not in a call-response pattern, but that'll
+              ; break us.
+              (filter (fn [[a b]] (= (:f a) (:f b))))
+              ; Now move through all nemesis ops, keeping track of all start
+              ; pairs, and closing those off when we see a stop pair.
+              (reduce (fn [[intervals starts :as state] [a b :as pair]]
+                        (let [f (:f a)]
+                          (cond (start f)  [intervals (conj starts pair)]
+                                (stop f)   [(->> starts
+                                                 (mapcat (fn [[s1 s2]]
+                                                           [[s1 a] [s2 b]]))
+                                                 (into intervals))
+                                            []]
+                                true        state)))
+                      [[] []]))]
+     ; Complete unfinished intervals
+     (into intervals (mapcat (fn [[s1 s2]] [[s1 nil] [s2 nil]]) starts)))))
+
 
 (defn longest-common-prefix
   "Given a collection of sequences, finds the longest sequence which is a

@@ -7,7 +7,8 @@
             [jepsen.control :as c :refer [|]]
             [jepsen.control.util :as cu]
             [jepsen.net :as net]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn setup-hostfile!
   "Makes sure the hostfile has a loopback entry for the local hostname"
@@ -135,6 +136,15 @@
     (install [:oracle-java8-installer])
     (install [:oracle-java8-set-default])))
 
+(defn install-jdk11!
+  "Installs an openjdk jdk11 via stretch-backports."
+  []
+  (c/su
+    (add-repo!
+      "stretch-backports"
+      "deb http://deb.debian.org/debian stretch-backports main")
+    (install [:openjdk-11-jdk])))
+
 (deftype Debian []
   os/OS
   (setup! [_ test node]
@@ -158,11 +168,15 @@
                 :psmisc
                 :tar
                 :bzip2
-                :libzip2
                 :iputils-ping
                 :iproute
                 :rsyslog
-                :logrotate]))
+                :logrotate
+                :dirmngr])
+      (try+ (install [:libzip4])
+            (catch [:exit 100] _
+              ; Wrong package name; let's use the old one for jessie
+              (install [:libzip2]))))
 
     (meh (net/heal! (:net test) test)))
 

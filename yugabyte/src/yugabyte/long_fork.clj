@@ -33,7 +33,7 @@
     (let [txn (:value op)]
       (c/with-errors op #{}
         (case (:f op)
-          :read (let [ks (lf/op-read-keys op)
+          :read (let [ks (seq (lf/op-read-keys op))
                       ; Look up values by the value index
                       vs (->> (cql/select conn table
                                           (q/columns :key2 :val)

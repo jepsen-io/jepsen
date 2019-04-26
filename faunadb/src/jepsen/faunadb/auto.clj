@@ -380,7 +380,7 @@
   (info "Installing faunadb")
   (c/su
     (info "Installing JDK")
-    (debian/install-jdk8!)
+    (debian/install-jdk11!)
     (info "Adding apt key")
     (c/exec :wget :-qO :- "https://repo.fauna.com/faunadb-gpg-public.key" |
             :apt-key :add :-)
@@ -395,7 +395,8 @@
       (assert v)
       (if (re-find #"\.deb$" v)
         ; Install deb file
-        (do (c/exec :mkdir :-p "/tmp/jepsen")
+        (do (debian/install ["bash-completion"])
+            (c/exec :mkdir :-p "/tmp/jepsen")
             (c/exec :chmod "a+rwx" "/tmp/jepsen")
             (info "Uploading" v)
             (c/upload v "/tmp/jepsen/faunadb.deb")
@@ -430,7 +431,7 @@
                   {:auth_root_key                  f/root-key
                    :network_coordinator_http_address ip
                    :network_broadcast_address      node
-                   :network_datacenter_name        (topo/replica topo node)
+                   :replica_name                   (topo/replica topo node)
                    :network_host_id                node
                    :network_listen_address         ip}
                   (when (topo/manual-log-config? test)

@@ -1,15 +1,16 @@
 (ns tidb.register
   "Single atomic register test"
-  (:refer-clojure :exclude [test])
+  (:refer-clojure :exclude [test read])
   (:require [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]
                     [independent :as independent]
                     [util :refer [meh]]]
             [jepsen.checker.timeline :as timeline]
+            [jepsen.tests.linearizable-register :as lr]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer :all]
-            [tidb.sql :refer :all]
+            [tidb.sql :as c :refer :all]
             [tidb.basic :as basic]
             [knossos.model :as model]))
 
@@ -17,59 +18,61 @@
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
-(defrecord AtomicClient [node]
+(defn read
+  "Reads the current value of a key."
+  [conn test k]
+  (:val (first (c/query conn [(str "select (val) from test where "
+                                   (if (:use-index test) "sk" "id") " = ? "
+                                   (:read-lock test))
+                              k]))))
+
+(defrecord AtomicClient [conn]
   client/Client
 
-  (setup! [this test node]
-    (j/with-db-connection [c (conn-spec (first (:nodes test)))]
-      (j/execute! c ["drop table if exists test"])
-      (j/execute! c ["create table if not exists test
-                     (id int primary key, val int)"]))
+  (open! [this test node]
+    (assoc this :conn (c/open node test)))
 
-    (assoc this :node node))
+  (setup! [this test]
+    (c/with-conn-failure-retry conn
+      (c/execute! conn ["create table if not exists test
+                        (id   int primary key,
+                         sk   int,
+                         val  int)"])
+      (when (:use-index test)
+        (c/create-index! conn ["create index test_sk_val on test (sk, val)"]))))
 
   (invoke! [this test op]
-    (with-txn op [c node]
-      (try
-        (let [id   (key (:value op))
-              val' (val (:value op))
-              val  (-> c (j/query [(str "select * from test where id = ? FOR UPDATE") id] :row-fn :val) first)]
-          (case (:f op)
-            :read (assoc op :type :ok, :value (independent/tuple id val))
+    (c/with-error-handling op
+      (c/with-txn-aborts op
+        (j/with-db-transaction [c conn]
+          (let [[id val'] (:value op)]
+            (case (:f op)
+              :read (assoc op
+                           :type  :ok
+                           :value (independent/tuple id (read c test id)))
 
-            :write (do
-                     (if (nil? val)
-                       (j/insert! c :test {:id id :val val'})
-                       (j/update! c :test {:val val'} ["id = ?" id]))
-                     (assoc op :type :ok))
+              :write (do (c/execute! c [(str "insert into test (id, sk, val) "
+                                             "values (?, ?, ?) "
+                                             "on duplicate key update "
+                                             "val = ?")
+                                        id id val' val'])
+                         (assoc op :type :ok))
 
-            :cas (let [[expected-val new-val] val'
-                       cnt (j/update! c :test {:val new-val} ["id = ? and val = ?" id expected-val])]
-                   (assoc op :type (if (zero? (first cnt))
-                                     :fail
-                                     :ok))))))))
+              :cas (let [[expected-val new-val] val'
+                         v   (read c test id)]
+                     (if (= v expected-val)
+                       (do (c/update! c :test {:val new-val} ["id = ?" id])
+                           (assoc op :type :ok))
+                       (assoc op :type :fail, :error :precondition-failed)))))))))
 
-  (teardown! [this test]))
+  (teardown! [this test])
 
-(defn test
+  (close! [this test]
+    (c/close! conn)))
+
+(defn workload
   [opts]
-  (basic/basic-test
-    (merge
-      {:name        "register"
-       :client      {:client (AtomicClient. nil)
-                     :during (independent/concurrent-generator
-                               10
-                               (range)
-                               (fn [k]
-                                 (->> (gen/reserve 5 (gen/mix [w cas cas]) r)
-                                      (gen/delay-til 1/2)
-                                      (gen/stagger 0.1)
-                                      (gen/limit 100))))}
-       :model       (model/cas-register 0)
-       :checker     (checker/compose
-                      {:perf   (checker/perf)
-                       :indep (independent/checker
-                                  (checker/compose
-                                    {:timeline (timeline/html)
-                                     :linear   checker/linearizable}))})}
-      opts)))
+  (let [w (lr/test (assoc opts :model (model/cas-register 0)))]
+    (-> w
+        (assoc :client (AtomicClient. nil))
+        (update :generator (partial gen/stagger 1/10)))))

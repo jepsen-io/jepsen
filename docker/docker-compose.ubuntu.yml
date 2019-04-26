@@ -1,6 +1,12 @@
-version: '2'
+version: '3.7'
+x-ubuntu:
+  &ubuntu
+  build:
+    dockerfile: Dockerfile-ubuntu
+
 services:
-  node:
-    build:
-      context: ./node
-      dockerfile: Dockerfile-ubuntu
+  n1: *ubuntu
+  n2: *ubuntu
+  n3: *ubuntu
+  n4: *ubuntu
+  n5: *ubuntu

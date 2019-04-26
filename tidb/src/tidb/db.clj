@@ -1,31 +1,34 @@
 (ns tidb.db
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
+            [clojure.java.io :as io]
+            [dom-top.core :refer [with-retry]]
             [jepsen
               [core :as jepsen]
               [control :as c]
-              [db :as db]
-            ]
+              [db :as db]]
             [jepsen.control.util :as cu]
-  )
-)
+            [slingshot.slingshot :refer [try+ throw+]]
+            [tidb.sql :as sql]))
 
-(def tidb-dir "/opt/tidb")
-(def pd "./bin/pd-server")
-(def tikv "./bin/tikv-server")
-(def tidb "./bin/tidb-server")
-(def pdbin "pd-server")
-(def tikvbin "tikv-server")
-(def tidbbin "tidb-server")
-(def pdlogfile (str tidb-dir "/jepsen-pd.log"))
-(def pdpidfile (str tidb-dir "/jepsen-pd.pid"))
-(def kvlogfile (str tidb-dir "/jepsen-kv.log"))
-(def kvpidfile (str tidb-dir "/jepsen-kv.pid"))
-(def dblogfile (str tidb-dir "/jepsen-db.log"))
-(def dbpidfile (str tidb-dir "/jepsen-db.pid"))
-(def pdconfigfile (str tidb-dir "/pd.conf"))
-(def tikvconfigfile (str tidb-dir "/tikv.conf"))
-(def log-file "test.log")
+(def tidb-dir       "/opt/tidb")
+(def pd-bin         "pd-server")
+(def kv-bin         "tikv-server")
+(def db-bin         "tidb-server")
+(def pd-config-file (str tidb-dir "/pd.conf"))
+(def pd-log-file    (str tidb-dir "/pd.log"))
+(def pd-stdout      (str tidb-dir "/pd.stdout"))
+(def pd-pid-file    (str tidb-dir "/pd.pid"))
+(def pd-data-dir    (str tidb-dir "/data/pd"))
+(def kv-config-file (str tidb-dir "/kv.conf"))
+(def kv-log-file    (str tidb-dir "/kv.log"))
+(def kv-stdout      (str tidb-dir "/kv.stdout"))
+(def kv-pid-file    (str tidb-dir "/kv.pid"))
+(def kv-data-dir    (str tidb-dir "/data/kv"))
+(def db-config-file (str tidb-dir "/db.conf"))
+(def db-log-file    (str tidb-dir "/db.log"))
+(def db-stdout      (str tidb-dir "/db.stdout"))
+(def db-pid-file    (str tidb-dir "/db.pid"))
 
 (def client-port 2379)
 (def peer-port   2380)
@@ -35,189 +38,197 @@
    "n2" {:pd "pd2" :kv "tikv2"}
    "n3" {:pd "pd3" :kv "tikv3"}
    "n4" {:pd "pd4" :kv "tikv4"}
-   "n5" {:pd "pd5" :kv "tikv5"}
-  }
-)
+   "n5" {:pd "pd5" :kv "tikv5"} })
 
 (defn node-url
   "An HTTP url for connecting to a node on a particular port."
   [node port]
-  (str "http://" (name node) ":" port)
-)
+  (str "http://" (name node) ":" port))
 
 (defn client-url
   "The HTTP url clients use to talk to a node."
   [node]
-  (node-url node client-port)
-)
+  (node-url node client-port))
 
 (defn peer-url
   "The HTTP url for other peers to talk to a node."
   [node]
-  (node-url node peer-port)
-)
+  (node-url node peer-port))
 
 (defn initial-cluster
-  "Constructs an initial cluster string for a test, like \"foo=foo:2380,bar=bar:2380,...\""
+  "Constructs an initial cluster string for a test, like
+  \"foo=foo:2380,bar=bar:2380,...\""
   [test]
   (->> (:nodes test)
        (map (fn [node] (str (get-in tidb-map [node :pd]) "=" (peer-url node))))
-       (str/join ",")
-  )
-)
+       (str/join ",")))
 
 (defn pd-endpoints
-  "Constructs an initial pd cluster string for a test, like \"foo:2379,bar:2379,...\""
+  "Constructs an initial pd cluster string for a test, like
+  \"foo:2379,bar:2379,...\""
   [test]
   (->> (:nodes test)
        (map (fn [node] (str (name node) ":" client-port)))
-       (str/join ",")
-  )
-)
+       (str/join ",")))
 
-(defn quickstart!
+(defn configure-pd!
+  "Writes configuration file for placement driver"
+  []
+  (c/su (c/exec :echo (slurp (io/resource "pd.conf")) :> pd-config-file)))
+
+(defn configure-kv!
+  "Writes configuration file for tikv"
+  []
+  (c/su (c/exec :echo (slurp (io/resource "tikv.conf")) :> kv-config-file)))
+
+(defn configure-db!
+  "Writes configuration file for tidb"
+  []
+  (c/su (c/exec :echo (slurp (io/resource "tidb.conf")) :> db-config-file)))
+
+(defn configure!
+  "Write all config files."
+  []
+  (configure-pd!)
+  (configure-kv!)
+  (configure-db!))
+
+(defn start-pd!
+  "Starts the placement driver daemon"
   [test node]
-  (cu/start-daemon!
-    {:logfile pdlogfile
-     :pidfile pdpidfile
-     :chdir   tidb-dir
-    }
-    pd
-    :--name                  (get-in tidb-map [node :pd])
-    :--data-dir              (get-in tidb-map [node :pd])
-    :--client-urls           (str "http://0.0.0.0:" client-port)
-    :--peer-urls             (str "http://0.0.0.0:" peer-port)
-    :--advertise-client-urls (client-url node)
-    :--advertise-peer-urls   (peer-url node)
-    :--initial-cluster       (initial-cluster test)
-    :--log-file              (str "pd.log")
-    :--config                pdconfigfile
-  )
+  (c/su
+    (cu/start-daemon!
+      {:logfile pd-stdout
+       :pidfile pd-pid-file
+       :chdir   tidb-dir
+       }
+      (str "./bin/" pd-bin)
+      :--name                  (get-in tidb-map [node :pd])
+      :--data-dir              pd-data-dir
+      :--client-urls           (str "http://0.0.0.0:" client-port)
+      :--peer-urls             (str "http://0.0.0.0:" peer-port)
+      :--advertise-client-urls (client-url node)
+      :--advertise-peer-urls   (peer-url node)
+      :--initial-cluster       (initial-cluster test)
+      :--log-file              pd-log-file
+      :--config                pd-config-file)))
 
-  (cu/start-daemon!
-    {:logfile kvlogfile
-     :pidfile kvpidfile
-     :chdir   tidb-dir
-    }
-    tikv
-    :--pd             (pd-endpoints test)
-    :--addr           (str "0.0.0.0:20160")
-    :--advertise-addr (str (name node) ":" "20160")
-    :--data-dir       (get-in tidb-map [node :kv])
-    :--log-file       (str "tikv.log")
-    :--config         tikvconfigfile
-  )
+(defn start-kv!
+  "Starts the TiKV daemon"
+  [test node]
+  (c/su
+    (cu/start-daemon!
+      {:logfile kv-stdout
+       :pidfile kv-pid-file
+       :chdir   tidb-dir
+       }
+      (str "./bin/" kv-bin)
+      :--pd             (pd-endpoints test)
+      :--addr           (str "0.0.0.0:20160")
+      :--advertise-addr (str (name node) ":" "20160")
+      :--data-dir       kv-data-dir
+      :--log-file       kv-log-file
+      :--config         kv-config-file)))
 
-  (cu/start-daemon!
-    {:logfile dblogfile
-     :pidfile dbpidfile
-     :chdir   tidb-dir
-    }
-    tidb
-    :--store     (str "tikv")
-    :--path      (pd-endpoints test)
-    :--log-file  (str "tidb.log")
-  )
-)
+(defn start-db!
+  "Starts the TiDB daemon"
+  [test node]
+  (c/su
+    (cu/start-daemon!
+      {:logfile db-stdout
+       :pidfile db-pid-file
+       :chdir   tidb-dir
+       }
+      (str "./bin/" db-bin)
+      :--store     (str "tikv")
+      :--path      (pd-endpoints test)
+      :--config    db-config-file
+      :--log-file  db-log-file)))
+
+(defn wait-page
+  "Waits for a status page to become available"
+  [url]
+  (with-retry [tries 20]
+    (c/exec :curl :--fail url)
+    (catch Throwable e
+      (info "Waiting for page" url)
+      (if (pos? tries)
+          (do (Thread/sleep 1000)
+              (retry (dec tries)))
+          (throw+ {:type  :wait-page
+                   :url   url})))))
+
+(defn start!
+  "Starts all daemons, waiting for each one's health page in turn."
+  [test node]
+  (start-pd! test node)
+  (wait-page (str "http://127.0.0.1:" client-port "/health"))
+  (start-kv! test node)
+  (wait-page "http://127.0.0.1:20180/status")
+  (start-db! test node)
+  (wait-page "http://127.0.0.1:10080/status"))
+
+(defn stop-pd! [test node] (cu/stop-daemon! pd-bin pd-pid-file))
+(defn stop-kv! [test node] (cu/stop-daemon! kv-bin kv-pid-file))
+(defn stop-db! [test node] (cu/stop-daemon! db-bin db-pid-file))
 
 (defn stop!
+  "Stops all daemons"
   [test node]
-  (cu/stop-daemon! tidbbin dbpidfile)
-  (cu/stop-daemon! tikvbin kvpidfile)
-  (cu/stop-daemon! pdbin   pdpidfile)
-)
+  (stop-db! test node)
+  (stop-kv! test node)
+  (stop-pd! test node))
+
+(defn tarball-url
+  [url version]
+  (if (nil? url)
+    (str "http://download.pingcap.org/tidb-" version "-linux-amd64.tar.gz")
+    url))
+
+(defn install!
+  "Downloads archive and extracts it to our local tidb-dir, if it doesn't exist
+  already. If test contains a :force-reinstall key, we always install a fresh
+  copy.
+
+  Calls `sync`; this tarball is *massive* (1.1G), and when we start tidb, it'll
+  try to fsync, and cause, like, 60s stalls on single nodes, wrecking the
+  cluster."
+  [test node]
+  (c/su
+    (when (or (:force-reinstall test) (not (cu/exists? tidb-dir)))
+      (info node "installing TiDB")
+      (cu/install-archive! (tarball-url (:tarball-url test) (:version test)) tidb-dir)
+      (info "Syncing disks to avoid slow fsync on db start")
+      (c/exec :sync))))
 
 (defn db
   "TiDB"
-  [opts]
+  []
   (reify db/DB
     (setup! [_ test node]
       (c/su
-        (info node "installing TiDB")
-        (cu/install-tarball! node (:tarball test) tidb-dir)
+        (install! test node)
+        (configure!)
 
-        (c/exec :echo "[replication]\nmax-replicas=5" :> pdconfigfile)
-        (c/exec :echo "[raftstore]\npd-heartbeat-tick-interval=\"5s\"" :> tikvconfigfile)
+        (start! test node)
 
-        ; ./bin/pd-server --name=pd1
-        ;                 --data-dir=pd1
-        ;                 --client-urls="http://0.0.0.0:2379"
-        ;                 --peer-urls="http://0.0.0.0:2380"
-        ;                 --advertise-client-urls="http://n1:2379"
-        ;                 --advertise-peer-urls="http://n1:2380"
-        ;                 --initial-cluster="pd1=http://n1:2380, \
-        ;                                    pd2=http://n2:2380, \
-        ;                                    pd3=http://n3:2380, \
-        ;                                    pd4=http://n4:2380, \
-        ;                                    pd5=http://n5:2380" \
-        ;                 --log-file=pd.log
-        (cu/start-daemon!
-          {:logfile pdlogfile
-           :pidfile pdpidfile
-           :chdir   tidb-dir
-          }
-          pd
-          :--name                  (get-in tidb-map [node :pd])
-          :--data-dir              (get-in tidb-map [node :pd])
-          :--client-urls           (str "http://0.0.0.0:" client-port)
-          :--peer-urls             (str "http://0.0.0.0:" peer-port)
-          :--advertise-client-urls (client-url node)
-          :--advertise-peer-urls   (peer-url node)
-          :--initial-cluster       (initial-cluster test)
-          :--log-file              (str "pd.log")
-          :--config                pdconfigfile
-        )
+        (sql/await-node node)))
 
-        (jepsen/synchronize test)
-        (Thread/sleep 10000)
-
-        ; ./bin/tikv-server --pd="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379"
-        ;                   --addr="0.0.0.0:20160"
-        ;                   --advertise-addr="n1:20160"
-        ;                   --data-dir=tikv1
-        ;                   --log-file=tikv.log
-        (cu/start-daemon!
-          {:logfile kvlogfile
-           :pidfile kvpidfile
-           :chdir   tidb-dir
-          }
-          tikv
-          :--pd             (pd-endpoints test)
-          :--addr           (str "0.0.0.0:20160")
-          :--advertise-addr (str (name node) ":" "20160")
-          :--data-dir       (get-in tidb-map [node :kv])
-          :--log-file       (str "tikv.log")
-          :--config         tikvconfigfile
-        )
-
-        (jepsen/synchronize test)
-        (Thread/sleep 60000)
-
-        ; ./bin/tidb-server --store=tikv
-        ;                   --path="n1:2379,n2:2379,n3:2379,n4:2379,n5:2379"
-        ;                   --log-file=tidb.log
-        (cu/start-daemon!
-          {:logfile dblogfile
-           :pidfile dbpidfile
-           :chdir   tidb-dir
-          }
-          tidb
-          :--store     (str "tikv")
-          :--path      (pd-endpoints test)
-          :--log-file  (str "tidb.log")
-        )
-
-        (jepsen/synchronize test)
-        (Thread/sleep 30000)
-      )
-    )
     (teardown! [_ test node]
-      (info node "tearing down TiDB")
-      (stop! test node)
-      ; (c/exec :rm :-rf tidb-dir)
-    )
+      (c/su
+        (info node "tearing down TiDB")
+        (stop! test node)
+        ; Delete everything but bin/
+        (->> (cu/ls tidb-dir)
+             (remove #{"bin"})
+             (map (partial str tidb-dir "/"))
+             (c/exec :rm :-rf))))
 
     db/LogFiles
-    (log-files [_ test node] [log-file])
-  )
-)
+    (log-files [_ test node]
+      [db-log-file
+       db-stdout
+       kv-log-file
+       kv-stdout
+       pd-log-file
+       pd-stdout])))

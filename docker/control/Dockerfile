@@ -11,6 +11,7 @@ RUN apt-get -y -q update && \
     add-apt-repository ppa:openjdk-r/ppa && \
     apt-get -y -q update && \
     apt-get install -qqy \
+        dos2unix \
         openjdk-8-jdk \
         libjna-java \
         git \
@@ -23,12 +24,15 @@ RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein
     chmod +x /usr/bin/lein && \
     lein self-install
 
-# You need to locate jepsen in this directory (up.sh does that automatically)
-ADD jepsen /jepsen
-RUN cd /jepsen/jepsen && lein install
+# without --dev flag up.sh copies jepsen to these subfolders
+# with --dev flag they are empty until mounted
+COPY jepsen/jepsen /jepsen/jepsen/
+RUN if [ -f /jepsen/jepsen/project.clj ]; then cd /jepsen/jepsen && lein install; fi
+COPY jepsen /jepsen/
 
 ADD ./bashrc /root/.bashrc
 ADD ./init.sh /init.sh
-RUN chmod +x /init.sh
+RUN dos2unix /init.sh /root/.bashrc \
+    && chmod +x /init.sh
 
 CMD /init.sh
