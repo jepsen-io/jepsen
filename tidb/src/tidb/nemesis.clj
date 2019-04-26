@@ -59,28 +59,28 @@
 
     (invoke! [this test op]
       ; We only need a node that has the pd-ctl utility.
-      (let [node   (take 1 (util/random-nonempty-subset (:nodes test)))
-            pd-ctl (fn [node cmd]
+      (let [nodes  (take 1 (util/random-nonempty-subset (:nodes test)))
+            pd-ctl (fn [& cmds]
                       ; Execute a pd-ctl command.
-                      (c/exec :/opt/tidb/bin/pd-ctl
-                        :-u (str "http://" node ":" db/client-port)
-                        cmd))]
+                      (try (c/exec :echo cmds :| :pd-ctl :-d)
+                        (catch RuntimeException e
+                          (info "fail to " cmds))))]
         (assoc op :value
-               (c/on-nodes test node
-                           (fn [test node]
-                             (case (:f op)
-                               :shuffle-leader
-                                 (pd-ctl node "sched add shuffle-leader")
-                               :shuffle-region
-                                 (pd-ctl node "sched add shuffle-region")
-                               :random-merge
-                                 (pd-ctl node "sched add random-merge")
-                               :del-shuffle-leader
-                                 (pd-ctl node "sched remove shuffle-leader")
-                               :del-shuffle-region
-                                 (pd-ctl node "sched remove shuffle-region")
-                               :del-random-merge
-                                 (pd-ctl node "sched remove random-merge")))))))
+          (c/on-nodes test nodes
+             (fn [test node]
+               (case (:f op)
+                 :shuffle-leader
+                   (pd-ctl :sched :add :shuffle-leader-scheduler)
+                 :shuffle-region
+                   (pd-ctl :sched :add :shuffle-region-scheduler)
+                 :random-merge
+                   (pd-ctl :sched :add :random-merge-scheduler)
+                 :del-shuffle-leader
+                   (pd-ctl :sched :remove :shuffle-leader-scheduler)
+                 :del-shuffle-region
+                   (pd-ctl :sched :remove :shuffle-region-scheduler)
+                 :del-random-merge
+                   (pd-ctl :sched :remove :random-merge-scheduler)))))))
 
     (teardown! [this test])))
 
@@ -92,9 +92,9 @@
        :kill-pd   :kill-kv   :kill-db
        :pause-pd  :pause-kv  :pause-db
        :resume-pd :resume-kv :resume-db}    (process-nemesis)
-     {:shuffle-leader     :shuffle-region     :random-merge
-      :del-shuffle-leader :del-shuffle-region :del-random-merge}
-                                            (schedule-nemesis)
+     #{:shuffle-leader  :del-shuffle-leader
+       :shuffle-region  :del-shuffle-region
+       :random-merge    :del-random-merge}  (schedule-nemesis)
      {:start-partition :start
       :stop-partition  :stop}               (nemesis/partitioner nil)
      {:reset-clock          :reset
