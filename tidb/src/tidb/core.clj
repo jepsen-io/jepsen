@@ -58,6 +58,9 @@
    :monotonic       {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :use-index         [true false]}
+   :append          {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :read-lock         [nil "FOR UPDATE"]}
    :register        {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :read-lock         [nil "FOR UPDATE"]
@@ -72,7 +75,10 @@
   (-> (util/map-vals #(assoc %
                              :auto-retry        [false]
                              :auto-retry-limit  [0])
-                     workload-options)))
+                     workload-options)
+      ; Read lock is required in the append workload in order to
+      ; avoid write skew.
+      (#(assoc % :append (assoc (:append %) :read-lock ["FOR UPDATE"])))))
 
 (defn all-combos
   "Takes a map of options to collections of values for that option. Computes a
