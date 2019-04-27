@@ -275,7 +275,7 @@
     (:pause n) (assoc :pause-pd true
                       :pause-kv true
                       :pause-db true)
-    (:bad-sched n) (assoc :shuffle-leader true
+    (:schedules n) (assoc :shuffle-leader true
                           :shuffle-region true
                           :random-merge true)
     (:partitions n) (assoc :partition-one true
