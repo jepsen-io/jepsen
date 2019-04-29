@@ -200,7 +200,7 @@
 
 (defrecord Explainer [append-index write-index read-index]
   cycle/Explainer
-  (explain-pair [_ a b]
+  (explain-pair [_ a-name a b-name b]
     (->> (:value b)
          (keep (fn [[f k v]]
                  (case f
@@ -209,9 +209,9 @@
                         (let [last-e (peek v)
                               append-op (-> write-index (get k) (get last-e))]
                           (when (= a append-op)
-                            (str "appended " (pr-str last-e)
-                                 " to key " (pr-str k)
-                                 " which was observed by"))))
+                            (str b-name " observed " a-name
+                                 "'s append of " (pr-str last-e)
+                                 " to key " (pr-str k)))))
                    :append
                    (when-let [index (get-in append-index [k :indices v])]
                      (let [; And what value was appended immediately before us
@@ -227,19 +227,19 @@
                            ; What ops read that value?
                            prev-reads (get-in read-index [k prev-v])]
                          (cond (= a prev-append)
-                               (str " appended " (pr-str prev-v)
-                                    " to key " (pr-str k)
-                                    ", which was overwritten by appending "
-                                    (pr-str v) " in")
+                               (str b-name "appended " (pr-str v) " after "
+                                    a-name "appended " (pr-str prev-v)
+                                    " to " (pr-str k))
 
                                (some #{a} prev-reads)
-                               (str " observed "
-                                    (if (= ::init prev-v)
-                                      (str "the initial value of " (pr-str k))
-                                      (str (pr-str k)
-                                           " ending in " (pr-str prev-v)))
-                                    ", which was overwritten by appending "
-                                    (pr-str v) " in")))))))
+                               (if (= ::init prev-v)
+                                 (str a-name
+                                      " observed the initial (nil) state of "
+                                      (pr-str k) ", which " b-name
+                                      " created by appending " (pr-str v))
+                                 (str b-name " did not observe "
+                                      a-name "'s append of " (pr-str v)
+                                      " to " (pr-str k)))))))))
          first)))
 
 (defn graph

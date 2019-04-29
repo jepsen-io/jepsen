@@ -40,6 +40,7 @@
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
+            [clojure.string :as str]
             [fipp.edn :refer [pprint]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan DirectedGraph
@@ -190,14 +191,14 @@
 ; to pack some cached state into them.
 (defprotocol Explainer
   (explain-pair
-    [_ a b]
-    "Given a pair of operations, explain why b depends on a. `nil` indicates
-    that b does not depend on a."))
+    [_ a-name a b-name b]
+    "Given a pair of operations, and short names for them, explain why b
+    depends on a. `nil` indicates that b does not depend on a."))
 
 (defrecord CombinedExplainer [explainers]
   Explainer
-  (explain-pair [_ a b]
-    (first (keep (fn [e] (explain-pair e a b)) explainers))))
+  (explain-pair [_ a-name a b-name b]
+    (first (keep (fn [e] (explain-pair e a-name a b-name b)) explainers))))
 
 (defn combine
   "Helpful in composing an analysis function for a checker out of multiple
@@ -219,7 +220,7 @@
 
 (defrecord MonotonicKeyExplainer []
   Explainer
-  (explain-pair [_ a b]
+  (explain-pair [_ a-name a b-name b]
     (let [a (:value a)
           b (:value b)]
       ; Find keys in common
@@ -229,10 +230,10 @@
                      (let [a (get a k)
                            b (get b k)]
                        (when (and a b (< a b))
-                         (reduced (str "which observed " (pr-str k) " = "
-                                       (pr-str a)
-                                       ", and a higher value " (pr-str b)
-                                       " was observed by")))))
+                         (reduced (str a-name " observed " (pr-str k) " = "
+                                       (pr-str a) ", and " b-name
+                                       " observed a higher value "
+                                       (pr-str b))))))
                    nil)))))
 
 (defn monotonic-key-order
@@ -281,10 +282,10 @@
 
 (defrecord ProcessExplainer []
   Explainer
-  (explain-pair [_ a b]
+  (explain-pair [_ a-name a b-name b]
     (when (and (= (:process a) (:process b))
                (< (:index a) (:index b)))
-      (str "which process " (:process a) " completed before"))))
+      (str "process " (:process a) " executed " a-name " before " b-name))))
 
 (defn process-graph
   "Analyses histories and relates operations performed sequentially by each
@@ -303,14 +304,14 @@
 
 (defrecord RealtimeExplainer [pairs]
   Explainer
-  (explain-pair [_ a' b']
+  (explain-pair [_ a'-name a' b'-name b']
     (let [b (get pairs b')]
       (when (< (:index a') (:index b))
-        (str "which completed"
+        (str a'-name " completed "
              (when (and (:time a') (:time b))
                (str (format "%.3f" (util/nanos->secs (- (:time b) (:time a'))))
                     " seconds "))
-             " before the invocation of")))))
+             " before the invocation of " b'-name)))))
 
 (defn realtime-graph
   "Given a history, produces an singleton order graph `{:realtime graph}` which
@@ -398,7 +399,7 @@
 
 (defrecord WRExplainer []
   Explainer
-  (explain-pair [_ a b]
+  (explain-pair [_ a-name a b-name b]
     (let [writes (txn/ext-writes (:value a))
           reads  (txn/ext-reads  (:value b))]
       (reduce (fn [_ k]
@@ -406,8 +407,8 @@
                       w (get writes k)]
                   (when (= r w)
                     (reduced
-                      (str "which wrote " (pr-str k) " = " (pr-str w)
-                           ", which was read by")))))
+                      (str a-name " wrote " (pr-str k) " = " (pr-str w)
+                           ", which was read by " b-name)))))
               nil
               (keys reads)))))
 
@@ -559,6 +560,42 @@
          first
          (mapv mapping))))
 
+(defn explain-binding
+  "Takes a seq of [name op] pairs, and constructs a string naming each op."
+  [bindings]
+  (str "Let...\n"
+       (->> bindings
+            (map (fn [[name txn]]
+                   (str "  " name " = " (pr-str txn))))
+            (str/join "\n"))))
+
+(defn explain-cycle-pair
+  "Takes an explainer and a pair of [[a-name a] [b-name b] transactions, and
+  for each one, constructs a string explaining why a precedes b."
+  [explainer [[a-name a] [b-name b]]]
+  (or (when-let [ex (explain-pair explainer a-name a b-name b)]
+        (str a-name " < " b-name ", because " ex))
+      ; uhhhh
+      (throw (IllegalStateException.
+               (str "Explainer " (pr-str explainer)
+                    " was unable to explain the relationship"
+                    " between " (pr-str a)
+                    " and " (pr-str b))))))
+
+(defn explain-cycle
+  "Takes an explainer and a sequence of [op-name op] operations, and produces a
+  string explaining why they follow in that order."
+  [explainer ops]
+  (let [explanations (->> (partition 2 1 ops)
+                          (map (partial explain-cycle-pair explainer)))
+        prefix       "  - "]
+    (->> explanations
+         (map-indexed (fn [i ex]
+                        (if (= i (dec (count explanations)))
+                          (str prefix " However, " ex ": a contradiction!")
+                          (str prefix ex ".\n"))))
+         str/join)))
+
 (defn explain-scc
   "Takes a graph, an explainer, and a strongly connected component (a
   collection of ops) in that graph. Using those graphs, constructs a chain
@@ -573,19 +610,12 @@
        [:key :x]    {:process 1 :value {:x 4}}
        [:key :x]    {:process 0 :value {:x 5}}]"
   [graph explainer scc]
-  (let [cycle (find-cycle graph scc)]
-    (->> cycle
-         (partition 2 1)
-         (reduce (fn [explanation [a b]]
-                   (if-let [e (explain-pair explainer a b)]
-                     (conj explanation (explain-pair explainer a b) b)
-                     ; uhhhh
-                     (throw (IllegalStateException.
-                              (str "Explainer " (pr-str explainer)
-                                   " was unable to explain the relationship"
-                                   " between " (pr-str a)
-                                   " and " (pr-str b))))))
-                 [(first cycle)]))))
+  (let [cycle   (find-cycle graph scc)
+        binding (->> (butlast cycle)
+                     (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
+    (str (explain-binding binding)
+         "\n\nThen:\n"
+         (explain-cycle explainer (concat binding [(first binding)])))))
 
 (defn checker
   "Takes a function which takes a history and returns a [graph, explainer]
