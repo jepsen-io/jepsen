@@ -12,8 +12,9 @@
                     [util :as util]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.tests.cycle :as cycle]
+            [jepsen.tests.cycle.append :as append]
             [tidb [sql :as c :refer :all]
-                  [long-fork :refer [->TxnClient]]]))
+                  [txn :as txn]]))
 
 (defn read-key
   "Read a specific key's value from the table. Missing values are represented
@@ -113,37 +114,51 @@
   "A lazy sequence of write and read transactions over a pool of n numeric
   keys; every write is unique per key. Options:
 
-    :key-count        Number of distinct keys
-    :min-txn-length   Minimum number of operations per txn
-    :max-txn-length   Maximum number of operations per txn"
+    :key-count            Number of distinct keys
+    :min-txn-length       Minimum number of operations per txn
+    :max-txn-length       Maximum number of operations per txn
+    :max-writes-per-key   Maximum number of operations per key"
   ([opts]
-   (wr-txns opts {}))
+   (wr-txns opts {:active-keys (vec (range (:key-count opts)))}))
   ([opts state]
    (lazy-seq
-     (let [min-length (:min-txn-length opts 0)
-           max-length (:max-txn-length opts 2)
-           key-count  (:key-count opts 2)
-           length (+ min-length (rand-int (- (inc max-length) min-length)))
+     (let [min-length           (:min-txn-length opts 0)
+           max-length           (:max-txn-length opts 2)
+           max-writes-per-key   (:max-writes-per-key opts 32)
+           key-count            (:key-count opts 2)
+           length               (+ min-length (rand-int (- (inc max-length)
+                                                           min-length)))
            [txn state] (loop [length  length
                               txn     []
                               state   state]
-                         (if (zero? length)
-                           ; All done!
-                           [txn state]
-                           ; Add an op
-                           (let [f (rand-nth [:r :w])
-                                 k (rand-int key-count)
-                                 v (when (= f :w) (get state k 1))
-                                 state (if (= f :w) (assoc state k (inc v))
-                                         state)]
-                             (recur (dec length)
-                                    (conj txn [f k v])
-                                    state))))]
+                         (let [active-keys (:active-keys state)]
+                           (if (zero? length)
+                             ; All done!
+                             [txn state]
+                             ; Add an op
+                             (let [f (rand-nth [:r :w])
+                                   k (rand-nth active-keys)
+                                   v (when (= f :w) (get state k 1))]
+                               (if (and (= :w f)
+                                        (<= max-writes-per-key v))
+                                 ; We've updated this key too many times!
+                                 (let [i  (.indexOf active-keys k)
+                                       k' (inc (reduce max active-keys))
+                                       state' (update state :active-keys
+                                                      assoc i k')]
+                                   (recur length txn state'))
+                                 ; Key is valid, OK
+                                 (let [state' (if (= f :w)
+                                                (assoc state k (inc v))
+                                                state)]
+                                   (recur (dec length)
+                                          (conj txn [f k v])
+                                          state')))))))]
        (cons txn (wr-txns opts state))))))
 
 (defn txn-workload
   [opts]
-  {:client  (->TxnClient nil "int")
+  {:client  (txn/client {:val-type "int"})
    :checker (cycle/checker
               (cycle/combine cycle/wr-graph
                              cycle/realtime-graph))
@@ -164,12 +179,10 @@
     (invoke! [this test op]
       (let [op' (client/invoke! client test op)
             txn' (mapv (fn [[f k v :as mop]]
-                         (info :got f k v)
                          (if (= f :r)
                            ; Rewrite reads to convert "1,2,3" to [1 2 3].
-                           (do (info :raw-read v)
-                               [f k (when v (mapv #(Long/parseLong %)
-                                                  (str/split v #",")))])
+                           [f k (when v (mapv #(Long/parseLong %)
+                                              (str/split v #",")))]
                            mop))
                        (:value op'))]
         (assoc op' :value txn')))
@@ -188,11 +201,11 @@
 
 (defn append-workload
   [opts]
-  {:client (append-client (->TxnClient nil "text"))
+  {:client (append-client (txn/client {:val-type "text"}))
    :generator (->> (append-txns {:min-txn-length 1
                                  :max-txn-length 3
                                  :key-count 2})
                    (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
                    gen/seq)
-   :checker (cycle/checker
-              cycle/appends-and-reads-graph)})
+   :checker (cycle/checker (cycle/combine cycle/realtime-graph
+                                          append/graph))})
