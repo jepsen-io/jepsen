@@ -307,11 +307,18 @@
   (explain-pair [_ a'-name a' b'-name b']
     (let [b (get pairs b')]
       (when (< (:index a') (:index b))
-        (str a'-name " completed "
+        (str a'-name " completed at index " (:index a') ","
              (when (and (:time a') (:time b))
-               (str (format "%.3f" (util/nanos->secs (- (:time b) (:time a'))))
-                    " seconds "))
-             " before the invocation of " b'-name)))))
+               (let [dt (- (:time b) (:time a'))]
+                 ; Times are approximate--what matters is the serialization
+                 ; order. If we observe a zero or negative delta, just fudge it.
+                 (if (pos? dt)
+                   (str (format " %.3f" (util/nanos->secs (- (:time b) (:time a'))))
+                        " seconds")
+                   ; Times are inaccurate
+                   " just")))
+             " before the invocation of " b'-name
+             ", at index " (:index b))))))
 
 (defn realtime-graph
   "Given a history, produces an singleton order graph `{:realtime graph}` which
@@ -350,8 +357,6 @@
     (loop [history history
            oks     #{}               ; Our buffer of completed ops
            g       (DirectedGraph.)] ; Our order graph
-      (when-let [op (first history)]
-        (info :op op :pair (get pairs op)))
       (if-let [op (first history)]
         (case (:type op)
           ; A new operation begins! Link every completed op to this one's
@@ -594,7 +599,7 @@
     (->> explanations
          (map-indexed (fn [i ex]
                         (if (= i (dec (count explanations)))
-                          (str prefix " However, " ex ": a contradiction!")
+                          (str prefix "However, " ex ": a contradiction!")
                           (str prefix ex ".\n"))))
          str/join)))
 

@@ -169,7 +169,7 @@
           history [r00 r00' r10 r10' r11 r11' r01 r01']]
       (is (= {:valid? false
               :scc-count 1
-              :cycles ["Let...\n  T1 = {:index 7, :type :ok, :process 0, :f :read, :value {:x 0, :y 1}}\n  T2 = {:index 3, :type :ok, :process 0, :f :read, :value {:x 1, :y 0}}\n\nThen:\n  - T1 < T2, because T1 observed :x = 0, and T2 observed a higher value 1.\n  -  However, T2 < T1, because T2 observed :y = 0, and T1 observed a higher value 1: a contradiction!"]}
+              :cycles ["Let...\n  T1 = {:index 7, :type :ok, :process 0, :f :read, :value {:x 0, :y 1}}\n  T2 = {:index 3, :type :ok, :process 0, :f :read, :value {:x 1, :y 0}}\n\nThen:\n  - T1 < T2, because T1 observed :x = 0, and T2 observed a higher value 1.\n  - However, T2 < T1, because T2 observed :y = 0, and T1 observed a higher value 1: a contradiction!"]}
              (checker/check checker nil history nil)))))
 
   (testing "large histories"
@@ -205,7 +205,7 @@
     (testing "combined invalid"
       (is (= {:valid? false
               :scc-count 1
-              :cycles ["Let...\n  T1 = {:type :ok, :process 0, :f :read, :value {:x 0}, :index 1}\n  T2 = {:type :ok, :process 0, :f :read, :value {:x 1}, :index 0}\n\nThen:\n  - T1 < T2, because T1 observed :x = 0, and T2 observed a higher value 1.\n  -  However, T2 < T1, because process 0 executed T2 before T1: a contradiction!"]}
+              :cycles ["Let...\n  T1 = {:type :ok, :process 0, :f :read, :value {:x 0}, :index 1}\n  T2 = {:type :ok, :process 0, :f :read, :value {:x 1}, :index 0}\n\nThen:\n  - T1 < T2, because T1 observed :x = 0, and T2 observed a higher value 1.\n  - However, T2 < T1, because process 0 executed T2 before T1: a contradiction!"]}
              (checker/check (checker (combine monotonic-key-graph
                                               process-graph))
                             nil history nil))))))
