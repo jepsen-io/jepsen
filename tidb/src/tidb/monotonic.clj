@@ -140,7 +140,7 @@
                                    k (rand-nth active-keys)
                                    v (when (= f :w) (get state k 1))]
                                (if (and (= :w f)
-                                        (<= max-writes-per-key v))
+                                        (< max-writes-per-key v))
                                  ; We've updated this key too many times!
                                  (let [i  (.indexOf active-keys k)
                                        k' (inc (reduce max active-keys))

@@ -319,21 +319,89 @@
 
                            ; What ops read that value?
                            prev-reads (get-in read-index [k prev-v])]
-                         (cond (= a prev-append)
-                               (str b-name " appended " (pr-str v) " after "
-                                    a-name " appended " (pr-str prev-v)
-                                    " to " (pr-str k))
+                       (cond (= a prev-append)
+                             (str b-name " appended " (pr-str v) " after "
+                                  a-name " appended " (pr-str prev-v)
+                                  " to " (pr-str k))
 
-                               (some #{a} prev-reads)
-                               (if (= ::init prev-v)
-                                 (str a-name
-                                      " observed the initial (nil) state of "
-                                      (pr-str k) ", which " b-name
-                                      " created by appending " (pr-str v))
-                                 (str a-name " did not observe "
-                                      b-name "'s append of " (pr-str v)
-                                      " to " (pr-str k)))))))))
+                             (some #{a} prev-reads)
+                             (if (= ::init prev-v)
+                               (str a-name
+                                    " observed the initial (nil) state of "
+                                    (pr-str k) ", which " b-name
+                                    " created by appending " (pr-str v))
+                               (str a-name " did not observe "
+                                    b-name "'s append of " (pr-str v)
+                                    " to " (pr-str k)))))))))
          first)))
+
+(defrecord G0Explainer [append-index write-index read-index]
+  cycle/Explainer
+  (explain-pair [_ a-name a b-name b]
+    (->> (:value b)
+         (keep (fn [[f k v :as mop]]
+                 (when (= f :append)
+                   ; G0 only does write-write cycles
+                   (when-let [prev-v (previously-appended-element
+                                       append-index write-index b mop)]
+                     ; What op wrote that value?
+                     (when-let [dep (ww-mop-dep append-index write-index b mop)]
+                       (when (= a dep)
+                         (str b-name " appended " (pr-str v) " after "
+                              a-name " appended " (pr-str prev-v)
+                              " to " (pr-str k))))))))
+         first)))
+
+(defn preprocess
+  "Before we do any graph computation, we need to preprocess the history,
+  making sure it's well-formed. We return a map of:
+
+  {:history       The history restricted to :ok and :info ops
+   :append-index  An append index
+   :write-index   A write index
+   :read-index    A read index}"
+  [history]
+   ; Make sure there are only appends and reads
+   (verify-mop-types history)
+   ; And that every append is unique
+   (verify-unique-appends history)
+   ; And that reads never observe duplicates
+   (verify-no-dups history)
+
+   ; We only care about ok and info ops; invocations don't matter, and failed
+   ; ops can't contribute to the state.
+   (let [history       (filter (comp #{:ok :info} :type) history)
+         sorted-values (sorted-values history)]
+     ;(prn :sorted-values sorted-values)
+     ; Make sure we can actually compute a version order for each key
+     (verify-total-order sorted-values)
+     ; Compute indices
+     (let [append-index (append-index sorted-values)
+           write-index  (write-index history)
+           read-index   (read-index history)]
+       {:history      history
+        :append-index append-index
+        :write-index  write-index
+        :read-index   read-index})))
+
+(defn g0
+  "Analyzes write-write dependencies."
+  [history]
+  (let [{:keys [history append-index write-index read-index]} (preprocess
+                                                                history)]
+    [(cycle/forked
+       (reduce-mops (fn [g op [f :as mop]]
+                      ; Only appends have dependencies, cuz we're interested in
+                      ; ww cycles.
+                      (if (not= f :append)
+                        g
+                        (if-let [dep (ww-mop-dep
+                                       append-index write-index op mop)]
+                          (cycle/link g dep op)
+                          g)))
+                    (.linear (DirectedGraph.))
+                    history))
+     (G0Explainer. append-index write-index read-index)]))
 
 (defn graph
   "Some parts of a transaction's dependency graph--for instance,
@@ -374,39 +442,16 @@
 
   For more context, see Adya, Liskov, and O'Neil's 'Generalized Isolation Level
   Definitions', page 8."
-  ([history]
-   ; Make sure there are only appends and reads
-   (verify-mop-types history)
-   ; And that every append is unique
-   (verify-unique-appends history)
-   ; And that reads never observe duplicates
-   (verify-no-dups history)
-
-   ; We only care about ok and info ops; invocations don't matter, and failed
-   ; ops can't contribute to the state.
-   (let [history       (filter (comp #{:ok :info} :type) history)
-         sorted-values (sorted-values history)]
-     ;(prn :sorted-values sorted-values)
-     ; Make sure we can actually compute a version order for each key
-     (verify-total-order sorted-values)
-     ; Compute indices
-     (let [append-index (append-index sorted-values)
-           write-index  (write-index history)
-           read-index   (read-index history)
-           ; And build our graph
-           ;_     (prn :append-index append-index)
-           ;_     (prn :write-index  write-index)
-           ;_     (prn :read-index   read-index)
-           graph (graph history append-index write-index read-index)]
-       [graph
-        (Explainer. append-index write-index read-index)])))
-  ; Actually build the DirectedGraph
-  ([history append-index write-index read-index]
-   (cycle/forked
-     (reduce (fn op [g op]
-               (reduce (fn [g dep]
-                         (cycle/link g dep op))
-                       g
-                       (op-deps append-index write-index read-index op)))
-             (.linear (DirectedGraph.))
-             history))))
+  [history]
+  (let [{:keys [history append-index write-index read-index]} (preprocess
+                                                                history)
+        graph (cycle/forked
+                (reduce (fn op [g op]
+                          (reduce (fn [g dep]
+                                    (cycle/link g dep op))
+                                  g
+                                  (op-deps
+                                    append-index write-index read-index op)))
+                        (.linear (DirectedGraph.))
+                        history))]
+    [graph (Explainer. append-index write-index read-index)]))

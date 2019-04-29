@@ -25,6 +25,39 @@
                (map #(dissoc % :index) vs)]))
        (into {})))
 
+(defn op
+  "Generates an operation from a string language like so:
+
+  ax1       append 1 to x
+  ry12      read y = [1 2]
+  ax1ax2    append 1 to x, append 2 to x"
+  [string]
+  (let [[[_ & txn] mop] (reduce (fn [[txn [f k v :as mop]] c]
+                            (case c
+                              \a [(conj txn mop) [:append]]
+                              \r [(conj txn mop) [:r]]
+                              \x [txn (conj mop :x)]
+                              \y [txn (conj mop :y)]
+                              \z [txn (conj mop :z)]
+                              (let [e (Long/parseLong (str c))]
+                                [txn [f k (case f
+                                            :append e
+                                            :r      (conj (or v []) e))]])))
+                          [[] nil]
+                          string)
+        txn (conj txn mop)]
+    {:type :ok, :value txn}))
+
+(deftest g0-test
+  (let [g   (comp (partial just-graph g0) vector)
+        t1  (op "ax1")
+        t2  (op "ax2")
+        t3  (op "rx12")]
+    (testing "write-write"
+      ; Notice that T3 doesn't depend on T2, because we don't detect wr edges!
+      (is (= {t1 [t2] t2 []}
+             (g t1 t2 t3))))))
+
 (deftest graph-test
   (let [g (comp (partial just-graph graph) vector)
         ax1       {:type :ok, :value [[:append :x 1]]}

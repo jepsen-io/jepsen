@@ -112,6 +112,13 @@
     (recur (link g x (first ys)) x (next ys))
     g))
 
+(defn link-all-to
+  "Given a graph g, links all xs to y."
+  [g xs y]
+  (if (seq xs)
+    (recur (link (first xs) y) (next xs) y)
+    g))
+
 (defn link-all-to-all
   "Given a graph g, links all xs to all ys."
   [g xs ys]
