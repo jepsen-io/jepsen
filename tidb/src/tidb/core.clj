@@ -44,7 +44,10 @@
 (def workload-options
   "For each workload, a map of workload options to all values that option
   supports."
-  {:bank            {:auto-retry        [true false]
+  {:append          {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :read-lock         [nil "FOR UPDATE"]}
+   :bank            {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :update-in-place   [true false]
                      :read-lock         [nil "FOR UPDATE"]}

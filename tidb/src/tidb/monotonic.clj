@@ -202,9 +202,10 @@
 (defn append-workload
   [opts]
   {:client (append-client (txn/client {:val-type "text"}))
-   :generator (->> (append-txns {:min-txn-length 1
-                                 :max-txn-length 3
-                                 :key-count 2})
+   :generator (->> (append-txns {:min-txn-length      1
+                                 :max-txn-length      4
+                                 :key-count           5
+                                 :max-writes-per-key  2})
                    (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
                    gen/seq)
    :checker (cycle/checker (cycle/combine cycle/realtime-graph

@@ -12,7 +12,8 @@
   [f k (case f
          :r (-> conn
                 (c/query [(str "select (val) from " table " where "
-                               (if (:use-index test) "sk" "id") " = ?")
+                               (if (:use-index test) "sk" "id") " = ? "
+                               (:read-lock test))
                           k])
                 first
                 :val)
@@ -47,14 +48,14 @@
 
   (invoke! [this test op]
     (let [txn      (:value op)
-          use-txn? (< 1 (count txn))
-          txn'     (if use-txn?
-                     (c/with-txn op [c conn]
-                       (mapv (partial mop! c test "lf") txn))
-                     (mapv (partial mop! conn test "lf") txn))]
-      (assoc op
-             :type  :ok
-             :value txn')))
+          use-txn? (< 1 (count txn))]
+          (if use-txn?
+            (c/with-txn op [c conn]
+              (assoc op :type :ok, :value
+                     (mapv (partial mop! c test "lf") txn)))
+            (c/with-txn-aborts op
+              (assoc op :type :ok, :value
+                     (mapv (partial mop! conn test "lf") txn))))))
 
   (teardown! [this test])
 
