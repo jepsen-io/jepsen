@@ -227,8 +227,8 @@
                            ; What ops read that value?
                            prev-reads (get-in read-index [k prev-v])]
                          (cond (= a prev-append)
-                               (str b-name "appended " (pr-str v) " after "
-                                    a-name "appended " (pr-str prev-v)
+                               (str b-name " appended " (pr-str v) " after "
+                                    a-name " appended " (pr-str prev-v)
                                     " to " (pr-str k))
 
                                (some #{a} prev-reads)
@@ -237,8 +237,8 @@
                                       " observed the initial (nil) state of "
                                       (pr-str k) ", which " b-name
                                       " created by appending " (pr-str v))
-                                 (str b-name " did not observe "
-                                      a-name "'s append of " (pr-str v)
+                                 (str a-name " did not observe "
+                                      b-name "'s append of " (pr-str v)
                                       " to " (pr-str k)))))))))
          first)))
 
