@@ -567,10 +567,49 @@
           {}
           history))
 
-(defrecord AppendsAndReadsExplainer []
+(defrecord AppendsAndReadsExplainer [append-index write-index read-index]
   Explainer
   (explain-pair [_ a b]
-    "something something"))
+    (->> (:value b)
+         (keep (fn [[f k v]]
+                 (case f
+                   :r (when (seq v)
+                        ; What wrote the last thing we saw?
+                        (let [last-e (peek v)
+                              append-op (-> write-index (get k) (get last-e))]
+                          (when (= a append-op)
+                            (str "appended " (pr-str last-e)
+                                 " to key " (pr-str k)
+                                 " which was observed by"))))
+                   :append
+                   (when-let [index (get-in append-index [k :indices v])]
+                     (let [; And what value was appended immediately before us
+                           ; in version order?
+                           prev-v (if (pos? index)
+                                    (get-in append-index [k :values (dec index)])
+                                    ::init)
+
+                           ; What op wrote that value?
+                           prev-append (when (pos? index)
+                                         (get-in write-index [k prev-v]))
+
+                           ; What ops read that value?
+                           prev-reads (get-in read-index [k prev-v])]
+                         (cond (= a prev-append)
+                               (str " appended " (pr-str prev-v)
+                                    " to key " (pr-str k)
+                                    ", which was overwritten by appending "
+                                    (pr-str v) " in")
+
+                               (some #{a} prev-reads)
+                               (str " observed "
+                                    (if (= ::init prev-v)
+                                      (str "the initial value of " (pr-str k))
+                                      (str (pr-str k)
+                                           " ending in " (pr-str prev-v)))
+                                    ", which was overwritten by appending "
+                                    (pr-str v) " in")))))))
+         first)))
 
 (defn appends-and-reads-graph
   "Some parts of a transaction's dependency graph--for instance,
@@ -636,7 +675,8 @@
            ;_     (prn :read-index   read-index)
            graph (appends-and-reads-graph
                    history append-index write-index read-index)]
-       [graph (AppendsAndReadsExplainer.)])))
+       [graph
+        (AppendsAndReadsExplainer. append-index write-index read-index)])))
   ; Actually build the DirectedGraph
   ([history append-index write-index read-index]
    (reduce
@@ -905,7 +945,8 @@
                      (throw (IllegalStateException.
                               (str "Explainer " (pr-str explainer)
                                    " was unable to explain the relationship"
-                                   " between" (pr-str a) " and " (pr-str b))))))
+                                   " between " (pr-str a)
+                                   " and " (pr-str b))))))
                  [(first cycle)]))))
 
 (defn checker
@@ -922,7 +963,7 @@
           {:valid?     (empty? sccs)
            :scc-count  (count sccs)
            :cycles     (->> sccs
-                            (sort-by count)
+                            (sort-by (comp :index first))
                             (take 8)
                             (mapv (partial explain-scc graph explainer)))})
         ; The graph analysis might decide that a certain history isn't
@@ -931,4 +972,5 @@
         ; violations that *can't* be encoded as a part of the dependency graph.
         ; If that happens, the analyzer can throw an exception with a :valid?
         ; key, and we'll simply return the ex-info map.
-        (catch (contains? % :valid?) e e)))))
+        (catch [:valid? false] e e)
+        (catch [:valid? :unknown] e e)))))

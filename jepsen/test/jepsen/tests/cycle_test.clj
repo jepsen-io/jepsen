@@ -408,7 +408,16 @@
       ; Here, two transactions observe the empty state of a key that the other
       ; transaction will append to.
       (is (= {rxay1 [ryax1 rx1ry1], ryax1 [rxay1 rx1ry1], rx1ry1 []}
-             (g rxay1 ryax1 rx1ry1))))
+             (g rxay1 ryax1 rx1ry1)))
+      (is (= {:valid? false
+              :scc-count 1
+              :cycles [[{:type :ok, :value [[:r :x nil] [:append :y 1]]}
+                        " observed the initial value of :x, which was overwritten by appending 1 in"
+                        {:type :ok, :value [[:r :y nil] [:append :x 1]]}
+                        " observed the initial value of :y, which was overwritten by appending 1 in"
+                        {:type :ok, :value [[:r :x nil] [:append :y 1]]}]]}
+             (checker/check (checker appends-and-reads-graph)
+                            nil [rxay1 ryax1 rx1ry1] nil))))
 
     (testing "reads with duplicates"
       (let [e (try+ (g rx121)
