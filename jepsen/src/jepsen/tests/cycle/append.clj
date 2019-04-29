@@ -66,10 +66,37 @@
                (= (first a) (first b))  (recur (next a) (next b))
                true                     false))))
 
+(defn values-from-single-appends
+  "As a special case of sorted-values, if we have a key which only has a single
+  append, we don't need a read: we can infer the sorted values it took on were
+  simply [], [x]."
+  [history]
+  ; Build a map of keys to appended elements.
+  (->> history
+       (reduce-mops (fn [appends op [f k v]]
+                      (cond ; If it's not an append, we don't care
+                            (not= :append f) appends
+
+                            ; There's already an append!
+                            (contains? appends k)
+                            (assoc appends k ::too-many)
+
+                            ; No known appends; record
+                            true
+                            (assoc appends k v)))
+                    {})
+       (keep (fn [[k v]]
+               (when (not= ::too-many v)
+                 [k #{[v]}])))
+       (into {})))
+
 (defn sorted-values
   "Takes a history where operation values are transactions, and every micro-op
   in a transaction is an append or a read. Computes a map of keys to all
-  distinct observed values for that key, ordered by length."
+  distinct observed values for that key, ordered by length.
+
+  As a special case, if we have a key which only has a single append, we don't
+  need a read: we can infer the sorted values it took on were simply [], [x]."
   [history]
   (->> history
        ; Build up a map of keys to sets of observed values for those keys
@@ -85,10 +112,8 @@
                              states))
                          states
                          (:value op)))
-               {})
-       ; If a total order exists, we should be able
-       ; to sort their values by size and each one
-       ; will be a prefix of the next.
+               (values-from-single-appends history))
+       ; And sort
        (util/map-vals (partial sort-by count))))
 
 (defn verify-total-order

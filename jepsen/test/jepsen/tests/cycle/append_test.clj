@@ -117,7 +117,6 @@
     ; We can't infer anything about an info's nil reads: an :ok read of nil
     ; means we saw the initial state, but an :info read of nil means we don't
     ; know what was observed.
-    (prn) (prn)
     (testing "info reads"
       ; T1 appends 2 to x after T2, so we can infer T2 < T1.
       ; However, T1's crashed read of y = nil does NOT mean T1 < T2.
@@ -126,6 +125,15 @@
             t3 {:type :ok,   :value [[:r :x [1 2]] [:r :y [1]]]}]
         (is (= {t1 [t3], t2 [t3 t1], t3 []}
                (g t1 t2 t3)))))
+
+    ; Special case: when there's only one append for a key, we can trivially
+    ; infer the version order for that key, even if we never observe it in a
+    ; read: it has to go from nil -> [x].
+    (prn) (prn)
+    (testing "single appends without reads"
+      (is (= {rx [ax1] ax1 []} (g rx ax1)))
+      ; But with two appends, we can't infer any more
+      (is (= {} (g rx ax1 ax2))))
 
     (testing "reads with duplicates"
       (let [e (try+ (g rx121)
