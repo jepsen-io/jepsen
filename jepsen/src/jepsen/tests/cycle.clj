@@ -36,7 +36,7 @@
                     [util :as util]]
             [jepsen.txn.micro-op :as mop]
             [knossos [op :as op]
-                     [history :refer [pair-index]]]
+                     [history :refer [pair-index+]]]
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
@@ -346,10 +346,12 @@
   ; completions point to d, and remove those from the buffer.
   ;
   ; OK, first up: we need this index to look forward from invokes to completes.
-  (let [pairs (pair-index history)]
+  (let [pairs (pair-index+ history)]
     (loop [history history
            oks     #{}               ; Our buffer of completed ops
            g       (DirectedGraph.)] ; Our order graph
+      (when-let [op (first history)]
+        (info :op op :pair (get pairs op)))
       (if-let [op (first history)]
         (case (:type op)
           ; A new operation begins! Link every completed op to this one's
