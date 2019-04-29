@@ -32,6 +32,7 @@
   the graph has any strongly connected components--e.g. cycles."
   (:require [jepsen [checker :as checker]
                     [generator :as gen]
+                    [store :as store]
                     [txn :as txn]
                     [util :as util]]
             [jepsen.txn.micro-op :as mop]
@@ -570,7 +571,7 @@
 (defn explain-binding
   "Takes a seq of [name op] pairs, and constructs a string naming each op."
   [bindings]
-  (str "Let...\n"
+  (str "Let:\n"
        (->> bindings
             (map (fn [[name txn]]
                    (str "  " name " = " (pr-str txn))))
@@ -634,13 +635,23 @@
       (try+
         (let [history           (remove (comp #{:nemesis} :process) history)
               [graph explainer] (analyze-fn history)
-              sccs              (strongly-connected-components graph)]
+              sccs              (strongly-connected-components graph)
+              cycles            (->> sccs
+                                     (sort-by (comp :index first))
+                                     (take 8)
+                                     (mapv (partial explain-scc graph explainer)))]
+          ; Write out files
+          (when (and (seq cycles)
+                     ; These are purely here so we don't have to fill in test
+                     ; maps with names and times in our internal tests.
+                     (:name test)
+                     (:start-time test))
+            (->> cycles
+                 (str/join "\n\n\n")
+                 (spit (store/path! test (:subdirectory opts) "cycles.txt"))))
           {:valid?     (empty? sccs)
            :scc-count  (count sccs)
-           :cycles     (->> sccs
-                            (sort-by (comp :index first))
-                            (take 8)
-                            (mapv (partial explain-scc graph explainer)))})
+           :cycles     cycles})
         ; The graph analysis might decide that a certain history isn't
         ; analyzable (perhaps because it violates expectations the analyzer
         ; needed to hold in order to infer dependencies), or it might discover
