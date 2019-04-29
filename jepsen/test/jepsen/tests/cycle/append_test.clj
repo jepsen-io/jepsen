@@ -114,6 +114,19 @@
              (checker/check (checker graph)
                             nil [rxay1 ryax1 rx1ry1] nil))))
 
+    ; We can't infer anything about an info's nil reads: an :ok read of nil
+    ; means we saw the initial state, but an :info read of nil means we don't
+    ; know what was observed.
+    (prn) (prn)
+    (testing "info reads"
+      ; T1 appends 2 to x after T2, so we can infer T2 < T1.
+      ; However, T1's crashed read of y = nil does NOT mean T1 < T2.
+      (let [t1 {:type :info, :value [[:append :x 2] [:r :y nil]]}
+            t2 {:type :ok,   :value [[:append :x 1] [:append :y 1]]}
+            t3 {:type :ok,   :value [[:r :x [1 2]] [:r :y [1]]]}]
+        (is (= {t1 [t3], t2 [t3 t1], t3 []}
+               (g t1 t2 t3)))))
+
     (testing "reads with duplicates"
       (let [e (try+ (g rx121)
                     false
@@ -135,7 +148,7 @@
 
     (testing "incompatible orders"
       (let [rx12  {:index 0, :type :ok, :value [[:r :x [1 2]]]}
-            rx134 {:index 0, :type :ok, :value [[:r :x [1 3 4]]]}
+            rx134 {:index 1, :type :ok, :value [[:r :x [1 3 4]]]}
             e (try+ (g rx12 rx134)
                     false
                     (catch [:type :no-total-state-order] e e))]

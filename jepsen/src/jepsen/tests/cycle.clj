@@ -638,7 +638,6 @@
               sccs              (strongly-connected-components graph)
               cycles            (->> sccs
                                      (sort-by (comp :index first))
-                                     (take 8)
                                      (mapv (partial explain-scc graph explainer)))]
           ; Write out files
           (when (and (seq cycles)
