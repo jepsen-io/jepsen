@@ -227,20 +227,84 @@
                {}
                history))
 
+(defn wr-mop-dep
+  "What (other) operation wrote the value just before this read mop?"
+  [write-index op [f k v]]
+  (when (seq v)
+    (let [append-op (-> write-index (get k) (get (peek v)))]
+      (assert append-op)
+      ; If we wrote this value, there's no external dep here.
+      (when-not (= op append-op)
+        append-op))))
+
+(defn previously-appended-element
+  "Given an append mop, finds the element that was appended immediately prior
+  to this append. Returns ::init if this was the first append."
+  [append-index write-index op [f k v]]
+  ; We may not know what version this append was--for instance, if we never
+  ; read a state reflecting this append.
+  (when-let [index (get-in append-index [k :indices v])]
+    ; What value was appended immediately before us in version order?
+    (if (pos? index)
+      (get-in append-index [k :values (dec index)])
+      ::init)))
+
+(defn ww-mop-dep
+  "What (other) operation wrote the value just before this write mop?"
+  [append-index write-index op [f k v :as mop]]
+  (when-let [prev-e (previously-appended-element
+                      append-index write-index op mop)]
+      ; If we read the initial state, no writer precedes us
+      (when (not= ::init prev-e)
+        ; What op wrote that value?
+        (let [writer (get-in write-index [k prev-e])]
+          ; If we wrote it, there's no dependency here
+          (when (not= op writer)
+            writer)))))
+
+(defn rw-mop-deps
+  "The set of (other) operations which read the value just before this write
+  mop."
+  [append-index write-index read-index op [f k v :as mop]]
+  (if-let [prev-e (previously-appended-element
+                      append-index write-index op mop)]
+    ; Find all ops that read the previous value, except us
+    (-> (get-in read-index [k prev-e])
+        set
+        (disj op))
+    ; Dunno what was appended before us
+    #{}))
+
+(defn mop-deps
+  "A set of dependencies for a mop in an op."
+  [append-index write-index read-index op [f :as mop]]
+  (case f
+    :append (let [deps (rw-mop-deps append-index write-index read-index op mop)
+                  deps (if-let [d (ww-mop-dep append-index write-index op mop)]
+                         (conj deps d)
+                         deps)]
+              deps)
+    :r      (when-let [d (wr-mop-dep write-index op mop)]
+              #{d})))
+
+(defn op-deps
+  "All dependencies for an op."
+  [append-index write-index read-index op]
+  (->> (:value op)
+       (map (partial mop-deps append-index write-index read-index op))
+       (reduce set/union #{})))
+
 (defrecord Explainer [append-index write-index read-index]
   cycle/Explainer
   (explain-pair [_ a-name a b-name b]
     (->> (:value b)
-         (keep (fn [[f k v]]
+         (keep (fn [[f k v :as mop]]
                  (case f
-                   :r (when (seq v)
-                        ; What wrote the last thing we saw?
-                        (let [last-e (peek v)
-                              append-op (-> write-index (get k) (get last-e))]
-                          (when (= a append-op)
-                            (str b-name " observed " a-name
-                                 "'s append of " (pr-str last-e)
-                                 " to key " (pr-str k)))))
+                   :r (when-let [writer (wr-mop-dep write-index b mop)]
+                        (when (= writer a)
+                          (str b-name " observed " a-name
+                               "'s append of " (pr-str (peek v))
+                               " to key " (pr-str k))))
                    :append
                    (when-let [index (get-in append-index [k :indices v])]
                      (let [; And what value was appended immediately before us
@@ -338,61 +402,11 @@
         (Explainer. append-index write-index read-index)])))
   ; Actually build the DirectedGraph
   ([history append-index write-index read-index]
-   (reduce
-     (fn op [g op]
-       (reduce
-         (fn mop [g [f k v]]
-           (case f
-             ; OK, we've got a read. What op appended the last thing we saw?
-             :r (if (seq v)
-                  (let [append-op (-> write-index (get k) (get (peek v)))]
-                    (assert append-op)
-                    (if (= op append-op)
-                      ; We appended this particular value, and that append will
-                      ; encode the w-w dependency we need for this read.
-                      g
-                      ; We depend on the other op that appended this.
-                      (cycle/link g append-op op)))
-                  ; The read value was empty; we don't depend on anything.
-                  g)
-
-             ; OK, we have an append. We need two classes of edge here: one ww
-             ; edge, for the append we're overwriting, and n rw edges, for
-             ; anyone who read the version immediately prior to us.
-             :append
-             ; So what version did we append?
-             (if-let [index (get-in append-index [k :indices v])]
-               (let [; And what value was appended immediately before us in
-                     ; version order?
-                     prev-v (if (pos? index)
-                              (get-in append-index [k :values (dec index)])
-                              ::init)
-
-                     ; What op wrote that value?
-                     prev-append (when (pos? index)
-                                   (get-in write-index [k prev-v]))
-
-                     ; Link that writer to us
-                     g (if (and (pos? index)           ; (if we weren't first)
-                                (not= prev-append op)) ; (and it wasn't us)
-                         (cycle/link g prev-append op)
-                         g)
-
-                     ; And what ops read that previous value?
-                     prev-reads (get-in read-index [k prev-v])
-
-                     ; Link them all to us
-                     g (reduce (fn link-read [g r]
-                                 (if (not= r op)
-                                   (cycle/link g r op)
-                                   g))
-                               g
-                               prev-reads)]
-                 g)
-               ; Huh, we actually don't know what index this was--because we
-               ; never read this appended value. Nothing we can infer!
-               g)))
-         g
-         (:value op)))
-     (.linear (DirectedGraph.))
-     history)))
+   (cycle/forked
+     (reduce (fn op [g op]
+               (reduce (fn [g dep]
+                         (cycle/link g dep op))
+                       g
+                       (op-deps append-index write-index read-index op)))
+             (.linear (DirectedGraph.))
+             history))))
