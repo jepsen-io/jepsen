@@ -283,6 +283,9 @@
   computes a total order which is consistent with both of them: where there are
   conflicts, we drop those elements.
 
+  First, we remove duplicates; an order shouldn't have them at all. Yes, this
+  means we fail to compute some dependencies.
+
   In general, the differences between orders fall into some cases:
 
   1. One empty
@@ -308,9 +311,12 @@
   symmetric; we prefer longer and higher elements for tail-end conflicts, but I
   think that's still a justifiable choice. After all, we DID read both values,
   and it's sensible to compute a dependency based on any read. Might as well
-  pick longer ones."
+  pick longer ones.
+
+  Later, we should change the whole structure of append indexes to admit
+  multiple prior txns rather than just one, and get rid of this."
   ([as bs]
-   (merge-orders [] as bs))
+   (merge-orders [] (distinct as) (distinct bs)))
   ([merged as bs]
    (cond (empty? as) (into merged bs)
          (empty? bs) (into merged as)
@@ -330,15 +336,7 @@
     {:x {:indices {v0 0, v1 1, v2 2}
          :values  [v0 v1 v2]}}
 
-  In the presence of incompatible orders, we take a conservative approach (this
-  is more implementation laziness than anything else), and smooth over records
-  which would conflict, like so:
-
-    [1 3 4]
-    [1 2 4]
-
-  Aggressively, we could infer both 3 < 4 and 2 < 4, but this would break our
-  idea of having a totally ordered index. Instead, we only infer [1 < 4]."
+  We merge all observed orders on a key using merge-orders."
   [sorted-values]
   (util/map-vals (fn [values]
                    ; The last value will be the longest, and since every other

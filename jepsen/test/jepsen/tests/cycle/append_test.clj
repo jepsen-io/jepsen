@@ -382,4 +382,8 @@
   (is (= [1 4 9] (merge-orders [1 4] [1 4 9])))
   (is (= [1 4 5] (merge-orders [1 4 5] [1])))
   (is (= [1 5 6] (merge-orders [1 2 5 6] [1 3 5 6])))
-  (is (= [1 3]   (merge-orders [1 2] [1 3]))))
+  (is (= [1 3]   (merge-orders [1 2] [1 3])))
+  (testing "dups"
+    (is (= [1 2 3] (merge-orders [1 2 2 3] [])))
+    (is (= [1 2 3 5] (merge-orders [1 2 3 2]
+                                   [1 2 3 2 5])))))
