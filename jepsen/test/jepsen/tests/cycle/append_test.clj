@@ -203,23 +203,7 @@
                     (catch [:type :duplicate-appends] e e))]
         (is (= ay2ax1 (:op e)))
         (is (= :x (:key e)))
-        (is (= 1 (:value e)))))
-
-    (testing "incompatible orders"
-      (let [rx12  {:index 0, :type :ok, :value [[:r :x [1 2]]]}
-            rx134 {:index 1, :type :ok, :value [[:r :x [1 3 4]]]}
-            e (try+ (g rx12 rx134)
-                    false
-                    (catch [:type :no-total-state-order] e e))]
-        (is (= [{:key :x
-                 :values [[1 2] [1 3 4]]}]
-               (:errors e)))
-        (is (= {:valid?   false
-                :type     :no-total-state-order
-                :message  "observed mutually incompatible orders of appends"
-                :errors   [{:key :x, :values [[1 2] [1 3 4]]}]}
-               (checker/check (cycle/checker graph)
-                              nil [rx12 rx134] nil)))))))
+        (is (= 1 (:value e)))))))
 
 (deftest g1a-cases-test
   (testing "empty"
@@ -376,7 +360,26 @@
                    :additional-graphs [cycle/realtime-graph]}
                   h)))))
 
-    (testing "")
+    (testing "contradictory read orders"
+      (let [t1 (op "ax1ry1")  ; read t3's ay1
+            t2 (op "ax2")
+            t3 (op "ax3ay1")  ; append of x happens later
+            t4 (op "rx13")
+            t5 (op "rx123")
+            h [t1 t2 t3 t4 t5]]
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c :incompatible-order]
+                :anomalies
+                {:incompatible-order [{:key :x, :values [[1 3] [1 2 3]]}]
+                 :G0+G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 3] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 3 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]}}
+                (c {:anomalies [:G1]} h)))))))
 
-
-        ))
+(deftest merge-order-test
+  (is (= [] (merge-orders [] [])))
+  (is (= [1 2 3] (merge-orders [1 2 3] [])))
+  (is (= [2 3 4] (merge-orders [] [2 3 4])))
+  (is (= [1 2 3] (merge-orders [1 2 3] [1 2 3])))
+  (is (= [1 4 9] (merge-orders [1 4] [1 4 9])))
+  (is (= [1 4 5] (merge-orders [1 4 5] [1])))
+  (is (= [1 5 6] (merge-orders [1 2 5 6] [1 3 5 6])))
+  (is (= [1 3]   (merge-orders [1 2] [1 3]))))

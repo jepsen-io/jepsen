@@ -204,6 +204,36 @@
        ; And sort
        (util/map-vals (partial sort-by count))))
 
+(defn incompatible-orders
+  "Takes a map of keys to sorted observed values and verifies that for each key
+  the values read are consistent with a total order of appends. For instance,
+  these values are consistent:
+
+     {:x [[1] [1 2 3]]}
+
+  But these two are not:
+
+     {:x [[1 2] [1 3 2]]}
+
+  ... because the first is not a prefix of the second. Returns a sequence of
+  anomaly maps, nil if none are present."
+  [sorted-values]
+  (let [; For each key, verify the total order.
+        errors (keep (fn ok? [[k values]]
+                       (->> values
+                            ; If a total order exists, we should be able
+                            ; to sort their values by size and each one
+                            ; will be a prefix of the next.
+                            (partition 2 1)
+                            (reduce (fn mop [error [a b]]
+                                      (when-not (prefix? a b)
+                                        (reduced
+                                          {:key    k
+                                           :values [a b]})))
+                                    nil)))
+                     sorted-values)]
+    (seq errors)))
+
 (defn verify-total-order
   "Takes a map of keys to observed values (e.g. from
   `sorted-values`, and verifies that for each key, the values
@@ -220,25 +250,11 @@
 
   Returns nil if the history is OK, or throws otherwise."
   [sorted-values]
-  (let [; For each key, verify the total order.
-        errors (keep (fn ok? [[k values]]
-                       (->> values
-                            ; If a total order exists, we should be able
-                            ; to sort their values by size and each one
-                            ; will be a prefix of the next.
-                            (partition 2 1)
-                            (reduce (fn mop [error [a b]]
-                                      (when-not (prefix? a b)
-                                        (reduced
-                                          {:key    k
-                                           :values [a b]})))
-                                    nil)))
-                     sorted-values)]
-    (when (seq errors)
-      (throw+ {:valid?  false
-               :type    :no-total-state-order
-               :message "observed mutually incompatible orders of appends"
-               :errors  errors}))))
+  (when-let [errors (incompatible-orders sorted-values)]
+    (throw+ {:valid?  false
+             :type    :no-total-state-order
+             :message "observed mutually incompatible orders of appends"
+             :errors  errors})))
 
 (defn verify-no-dups
   "Given a history, checks to make sure that no read contains *duplicate*
@@ -262,21 +278,72 @@
                nil
                history))
 
+(defn merge-orders
+  "Takes two potentially incompatible read orders (sequences of elements), and
+  computes a total order which is consistent with both of them: where there are
+  conflicts, we drop those elements.
+
+  In general, the differences between orders fall into some cases:
+
+  1. One empty
+
+      _
+      1 2 3 4 5
+
+     We simply pick the non-empty order.
+
+  2. Same first element
+
+     2 x y
+     2 z
+
+     Our order is [2] followed by the merged result of [x y] and [z].
+
+  3. Different first elements followed by a common element
+
+     3 y
+     2 3
+
+    We drop the smaller element and recur with [3 y] [3]. This isn't... exactly
+  symmetric; we prefer longer and higher elements for tail-end conflicts, but I
+  think that's still a justifiable choice. After all, we DID read both values,
+  and it's sensible to compute a dependency based on any read. Might as well
+  pick longer ones."
+  ([as bs]
+   (merge-orders [] as bs))
+  ([merged as bs]
+   (cond (empty? as) (into merged bs)
+         (empty? bs) (into merged as)
+
+         (= (first as) (first bs))
+         (recur (conj merged (first as)) (next as) (next bs))
+
+         (< (first as) (first bs)) (recur merged (next as) bs)
+         true                      (recur merged as (next bs)))))
+
 (defn append-index
-  "Takes a map of keys to observed values (e.g. from
-  sorted-values), and builds a map of keys to indexes on
-  those keys, where each index is a map relating appended values on that key to
-  the order in which they were effectively appended by the database.
+  "Takes a map of keys to observed values (e.g. from sorted-values), and builds
+  a bidirectional index: a map of keys to indexes on those keys, where each
+  index is a map relating appended values on that key to the order in which
+  they were effectively appended by the database.
 
     {:x {:indices {v0 0, v1 1, v2 2}
          :values  [v0 v1 v2]}}
 
-  This allows us to map bidirectionally."
+  In the presence of incompatible orders, we take a conservative approach (this
+  is more implementation laziness than anything else), and smooth over records
+  which would conflict, like so:
+
+    [1 3 4]
+    [1 2 4]
+
+  Aggressively, we could infer both 3 < 4 and 2 < 4, but this would break our
+  idea of having a totally ordered index. Instead, we only infer [1 < 4]."
   [sorted-values]
   (util/map-vals (fn [values]
                    ; The last value will be the longest, and since every other
                    ; is a prefix, it includes all the information we need.
-                   (let [vs (util/fast-last values)]
+                   (let [vs (reduce merge-orders [] values)]
                      {:values  vs
                       :indices (into {} (map vector vs (range)))}))
                  sorted-values))
@@ -445,9 +512,6 @@
    ; ops can't contribute to the state.
    (let [history       (filter (comp #{:ok :info} :type) history)
          sorted-values (sorted-values history)]
-     ;(prn :sorted-values sorted-values)
-     ; Make sure we can actually compute a version order for each key
-     (verify-total-order sorted-values)
      ; Compute indices
      (let [append-index (append-index sorted-values)
            write-index  (write-index history)
@@ -658,6 +722,8 @@
        (check [this test history checker-opts]
          (let [g1a           (when (:G1a anomalies) (g1a-cases history))
                g1b           (when (:G1b anomalies) (g1b-cases history))
+               sorted-values (sorted-values history)
+               incmp-order   (incompatible-orders sorted-values)
                cycles        (cycles opts test history checker-opts)
                ; Right now we can't tell what anomalies are on a case-by-case
                ; basis. Looking for G2 will actually find G1 and G0 as well,
@@ -667,6 +733,7 @@
                                         (:G0  anomalies) :G0)
                ; Categorize anomalies and build up a map of types to examples
                anomalies (cond-> {}
+                           incmp-order  (assoc :incompatible-order incmp-order)
                            (seq g1a)    (assoc :G1a g1a)
                            (seq g1b)    (assoc :G1b g1b)
                            (seq cycles) (assoc graph-anomaly-type cycles))]
