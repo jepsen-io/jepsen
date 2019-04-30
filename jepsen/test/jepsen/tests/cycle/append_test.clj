@@ -186,15 +186,6 @@
       ; But with two appends, we can't infer any more
       (is (= {} (g rx ax1 ax2))))
 
-    (testing "reads with duplicates"
-      (let [e (try+ (g rx121)
-                    false
-                    (catch [:type :duplicate-elements] e e))]
-        (is (= (assoc rx121 :index 0) (:op e)))
-        (is (= :x (:key e)))
-        (is (= [1 2 1] (:value e)))
-        (is (= {1 2} (:duplicates e)))))
-
     (testing "duplicate inserts attempts"
       (let [ax1ry  {:index 0, :type :invoke, :value [[:append :x 1] [:r :y nil]]}
             ay2ax1 {:index 1, :type :invoke, :value [[:append :y 2] [:append :x 1]]}
@@ -372,7 +363,20 @@
                 :anomalies
                 {:incompatible-order [{:key :x, :values [[1 3] [1 2 3]]}]
                  :G0+G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 3] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 3 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]}}
-                (c {:anomalies [:G1]} h)))))))
+                (c {:anomalies [:G1]} h)))))
+
+    (testing "duplicated elements"
+      (let [t1 (op "ax1ry1") ; read t2's write of y
+            t2 (op "ax2ay1")
+            t3 (op "rx121")
+            h  [t1 t2 t3]]
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c :duplicate-elements]
+                :anomalies {:duplicate-elements [{:op t3
+                                                  :mop [:r :x [1 2 1]]
+                                                  :duplicates {1 2}}]
+                            :G0+G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 2] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 2 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]}}
+               (c {:anomalies [:G1]} h)))))))
 
 (deftest merge-order-test
   (is (= [] (merge-orders [] [])))

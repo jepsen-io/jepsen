@@ -256,27 +256,24 @@
              :message "observed mutually incompatible orders of appends"
              :errors  errors})))
 
-(defn verify-no-dups
-  "Given a history, checks to make sure that no read contains *duplicate*
-  copies of the same appended element. Since we only append values once, we
-  should never see them more than that--and if we do, it's really gonna mess up
-  our whole \"total order\" thing!"
+(defn duplicates
+  "Given a history, finds operations which have duplicate copies of the same
+  appended element. Since we only append values once, we should never see them
+  more than that--and if we do, it could mess up our whole \"total order\"
+  thing!"
   [history]
-  (reduce-mops (fn [_ op [f k v]]
+  (->> history
+       op-mops
+       (keep (fn [[op [f k v :as mop]]]
                  (when (= f :r)
                    (let [dups (->> (frequencies v)
                                    (filter (comp (partial < 1) val))
                                    (into (sorted-map)))]
                      (when (seq dups)
-                       (throw+ {:valid?   false
-                                :type     :duplicate-elements
-                                :message  "Observed multiple copies of a value which was only inserted once"
-                                :op         op
-                                :key        k
-                                :value      v
-                                :duplicates dups})))))
-               nil
-               history))
+                       {:op         op
+                        :mop        mop
+                        :duplicates dups})))))
+       seq))
 
 (defn merge-orders
   "Takes two potentially incompatible read orders (sequences of elements), and
@@ -503,8 +500,6 @@
    (verify-mop-types history)
    ; And that every append is unique
    (verify-unique-appends history)
-   ; And that reads never observe duplicates
-   (verify-no-dups history)
 
    ; We only care about ok and info ops; invocations don't matter, and failed
    ; ops can't contribute to the state.
@@ -720,6 +715,7 @@
        (check [this test history checker-opts]
          (let [g1a           (when (:G1a anomalies) (g1a-cases history))
                g1b           (when (:G1b anomalies) (g1b-cases history))
+               dups          (duplicates history)
                sorted-values (sorted-values history)
                incmp-order   (incompatible-orders sorted-values)
                cycles        (cycles opts test history checker-opts)
@@ -731,6 +727,7 @@
                                         (:G0  anomalies) :G0)
                ; Categorize anomalies and build up a map of types to examples
                anomalies (cond-> {}
+                           dups         (assoc :duplicate-elements dups)
                            incmp-order  (assoc :incompatible-order incmp-order)
                            (seq g1a)    (assoc :G1a g1a)
                            (seq g1b)    (assoc :G1b g1b)
