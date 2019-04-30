@@ -216,8 +216,10 @@
   (checker (combine monotonic-keys real-time))"
   [& analyzers]
   (fn [history]
+    (prn :analyzers analyzers)
     (let [[graph explainers]
           (reduce (fn [[graph explainers] analyzer]
+                    (prn :checking-with analyzer)
                     (let [[g e] (analyzer history)]
                       [(digraph-union graph g) (conj explainers e)]))
                   [(.linear (DirectedGraph.)) []]

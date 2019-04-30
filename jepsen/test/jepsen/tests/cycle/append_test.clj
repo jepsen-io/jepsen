@@ -356,4 +356,27 @@
         (is (= {:valid? false
                 :anomaly-types [:G0+G1c+G2]
                 :anomalies {:G0+G1c+G2 ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y]]}\n  T2 = {:type :ok, :value [[:append :y 1] [:r :x]]}\n\nThen:\n  - T1 < T2, because T1 observed the initial (nil) state of :y, which T2 created by appending 1.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :x, which T1 created by appending 1: a contradiction!"]}}
-               (c {:anomalies [:G2]} h)))))))
+               (c {:anomalies [:G2]} h)))))
+
+    (testing "Strict-1SR violation"
+      (let [; T1 anti-depends on T2, but T1 happens first
+            t1  {:index 0, :type :invoke, :value [[:append :x 1]]}
+            t1' {:index 1, :type :ok,     :value [[:append :x 1]]}
+            t2  {:index 2, :type :invoke, :value [[:r :x nil]]}
+            t2'  {:index 3, :type :ok,    :value [[:r :x nil]]}
+            h [t1 t1' t2 t2']]
+        ; G2 won't catch this by itself
+        (is (= {:valid? true}
+               (c {:anomalies [:G2]} h)))
+        ; But it will if we introduce a realtime graph component
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c+G2]
+                :anomalies {:G0+G1c+G2 ["Let:\n  T1 = {:index 1, :type :ok, :value [[:append :x 1]]}\n  T2 = {:index 3, :type :ok, :value [[:r :x nil]]}\n\nThen:\n  - T1 < T2, because T1 completed at index 1, before the invocation of T2, at index 2.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :x, which T1 created by appending 1: a contradiction!"]}}
+               (c {:anomalies [:G2]
+                   :additional-graphs [cycle/realtime-graph]}
+                  h)))))
+
+    (testing "")
+
+
+        ))

@@ -209,4 +209,4 @@
                    (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
                    gen/seq)
    :checker (append/checker {:anomalies         [:G1]
-                             :additional-graphs cycle/realtime-graph})})
+                             :additional-graphs [cycle/realtime-graph]})})

@@ -592,8 +592,8 @@
         as (if (:G1c as) (conj as :G0) as)]
     as))
 
-(defn graph-checker
-  "Performs dependency graph analysis.
+(defn cycles
+  "Performs dependency graph analysis and returns a sequence of anomalies.
 
   Options:
 
@@ -604,9 +604,7 @@
 
   Supported anomalies are :G0, :G1c, and :G2. G1c implies G0. We don't know how
   to check g2-single yet."
-  ([]
-   (graph-checker {:anomalies [:G2]}))
-  ([opts]
+  ([opts test history checker-opts]
    (let [as       (expand-anomalies (:anomalies opts))
          analyzer (cond (:G2  as)  graph     ; graph includes g1c and g0
                         (:G1c as)  g1c-graph ; g1c includes g0
@@ -614,17 +612,18 @@
                         true       (throw (IllegalArgumentException.
                                             "Expected at least one anomaly to check for!")))
          ; Any other graphs to merge in?
-         analyzer (if-let [ag (:additional-graphs opts)]
-                    (cycle/combine analyzer ag)
+         analyzer (if-let [ags (:additional-graphs opts)]
+                    (apply cycle/combine analyzer ags)
                     analyzer)
-         cycle-checker (cycle/checker analyzer)]
-     ; Wrap the underlying cycle checker in our new, expanded checker
-     (reify checker/Checker
-       (check [this test history opts]
-         (let [results (checker/check cycle-checker test history opts)]
-           ; Later, we'll categorize the cycles this spits out. For now, just
-           ; return em as-is.
-           results))))))
+         ; Good, analyze the history
+         {:keys [graph explainer sccs cycles]} (cycle/check analyzer history)]
+
+     ; Write out cycles as a side effect
+     (cycle/write-cycles! test checker-opts cycles)
+
+     ; Later, we'll categorize the cycles this spits out. For now, just
+     ; return em as-is.
+     cycles)))
 
 (defn checker
   "Full checker for append and read histories. Options are:
@@ -653,21 +652,20 @@
   ([]
    (checker {:anomalies [:G1 :G2]}))
   ([opts]
-   (let [anomalies      (expand-anomalies (:anomalies opts))
-         graph-checker  (graph-checker opts)]
+   (let [opts       (update opts :anomalies expand-anomalies)
+         anomalies  (:anomalies opts)]
      (reify checker/Checker
-       (check [this test history opts]
+       (check [this test history checker-opts]
          (let [g1a           (when (:G1a anomalies) (g1a-cases history))
                g1b           (when (:G1b anomalies) (g1b-cases history))
-               graph-results (checker/check graph-checker test history opts)
+               cycles        (cycles opts test history checker-opts)
                ; Right now we can't tell what anomalies are on a case-by-case
                ; basis. Looking for G2 will actually find G1 and G0 as well,
                ; and G1 finds G0.
                graph-anomaly-type (cond (:G2  anomalies) :G0+G1c+G2
                                         (:G1c anomalies) :G0+G1c
                                         (:G0  anomalies) :G0)
-               cycles (:cycles graph-results)
-               ; Categorize anomalies
+               ; Categorize anomalies and build up a map of types to examples
                anomalies (cond-> {}
                            (seq g1a)    (assoc :G1a g1a)
                            (seq g1b)    (assoc :G1b g1b)
