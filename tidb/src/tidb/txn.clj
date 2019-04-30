@@ -49,6 +49,7 @@
   (invoke! [this test op]
     (let [txn      (:value op)
           use-txn? (< 1 (count txn))]
+          ;use-txn? false]
           (if use-txn?
             (c/with-txn op [c conn]
               (assoc op :type :ok, :value

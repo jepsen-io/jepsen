@@ -1,5 +1,5 @@
 (ns jepsen.tests.cycle.append-test
-  (:require [jepsen.tests.cycle :refer :all]
+  (:require [jepsen.tests.cycle :as cycle]
             [jepsen.tests.cycle.append :refer :all]
             [jepsen.checker :as checker]
             [jepsen.util :refer [map-vals spy]]
@@ -19,7 +19,7 @@
        history/index
        analyzer
        first
-       ->clj
+       cycle/->clj
        (map (fn [[k vs]]
               [(dissoc k :index)
                (map #(dissoc % :index) vs)]))
@@ -48,8 +48,8 @@
         txn (conj txn mop)]
     {:type :ok, :value txn}))
 
-(deftest g0-test
-  (let [g   (comp (partial just-graph g0) vector)
+(deftest ww-graph-test
+  (let [g   (comp (partial just-graph ww-graph) vector)
         t1  (op "ax1")
         t2  (op "ax2")
         t3  (op "rx12")]
@@ -57,6 +57,19 @@
       ; Notice that T3 doesn't depend on T2, because we don't detect wr edges!
       (is (= {t1 [t2] t2 []}
              (g t1 t2 t3))))))
+
+(deftest wr-graph-test
+  (let [g (comp (partial just-graph wr-graph) vector)]
+    (testing "basic read"
+      (let [t1 (op "ax1")
+            t2 (op "rx1")
+            t3 (op "ax2")
+            t4 (op "rx12")]
+        ; Note that t2 doesn't precede t3, because the wr graph doesn't encode
+        ; anti-dependency edges, and t1 doesn't precede t3, because there are
+        ; no ww edges here.
+        (is (= {t1 [t2], t2 [], t3 [t4], t4 []}
+               (g t1 t2 t3 t4)))))))
 
 (deftest graph-test
   (let [g (comp (partial just-graph graph) vector)
@@ -144,7 +157,7 @@
       (is (= {:valid? false
               :scc-count 1
               :cycles ["Let:\n  T1 = {:type :ok, :value [[:r :x nil] [:append :y 1]]}\n  T2 = {:type :ok, :value [[:r :y nil] [:append :x 1]]}\n\nThen:\n  - T1 < T2, because T1 observed the initial (nil) state of :x, which T2 created by appending 1.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :y, which T1 created by appending 1: a contradiction!"]}
-             (checker/check (checker graph)
+             (checker/check (cycle/checker graph)
                             nil [rxay1 ryax1 rx1ry1] nil))))
 
     ; We can't infer anything about an info's nil reads: an :ok read of nil
@@ -200,5 +213,5 @@
                 :type     :no-total-state-order
                 :message  "observed mutually incompatible orders of appends"
                 :errors   [{:key :x, :values [[1 2] [1 3 4]]}]}
-               (checker/check (checker graph)
+               (checker/check (cycle/checker graph)
                               nil [rx12 rx134] nil)))))))

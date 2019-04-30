@@ -209,4 +209,4 @@
                    (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
                    gen/seq)
    :checker (cycle/checker (cycle/combine cycle/realtime-graph
-                                          append/graph))})
+                                          append/g1c-graph))})

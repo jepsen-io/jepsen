@@ -335,22 +335,6 @@
                                     " to " (pr-str k)))))))))
          first)))
 
-(defrecord G0Explainer [append-index write-index read-index]
-  cycle/Explainer
-  (explain-pair [_ a-name a b-name b]
-    (->> (:value b)
-         (keep (fn [[f k v :as mop]]
-                 (when (= f :append)
-                   ; G0 only does write-write cycles
-                   (when-let [prev-v (previously-appended-element
-                                       append-index write-index b mop)]
-                     ; What op wrote that value?
-                     (when-let [dep (ww-mop-dep append-index write-index b mop)]
-                       (when (= a dep)
-                         (str b-name " appended " (pr-str v) " after "
-                              a-name " appended " (pr-str prev-v)
-                              " to " (pr-str k))))))))
-         first)))
 
 (defn preprocess
   "Before we do any graph computation, we need to preprocess the history,
@@ -384,7 +368,24 @@
         :write-index  write-index
         :read-index   read-index})))
 
-(defn g0
+(defrecord WWExplainer [append-index write-index read-index]
+  cycle/Explainer
+  (explain-pair [_ a-name a b-name b]
+    (->> (:value b)
+         (keep (fn [[f k v :as mop]]
+                 (when (= f :append)
+                   ; We only care about write-write cycles
+                   (when-let [prev-v (previously-appended-element
+                                       append-index write-index b mop)]
+                     ; What op wrote that value?
+                     (when-let [dep (ww-mop-dep append-index write-index b mop)]
+                       (when (= a dep)
+                         (str b-name " appended " (pr-str v) " after "
+                              a-name " appended " (pr-str prev-v)
+                              " to " (pr-str k))))))))
+         first)))
+
+(defn ww-graph
   "Analyzes write-write dependencies."
   [history]
   (let [{:keys [history append-index write-index read-index]} (preprocess
@@ -401,7 +402,44 @@
                           g)))
                     (.linear (DirectedGraph.))
                     history))
-     (G0Explainer. append-index write-index read-index)]))
+     (WWExplainer. append-index write-index read-index)]))
+
+(defrecord WRExplainer [append-index write-index read-index]
+  cycle/Explainer
+  (explain-pair [_ a-name a b-name b]
+    (->> (:value b)
+         (keep (fn [[f k v :as mop]]
+                 (when (= f :r)
+                   (when-let [writer (wr-mop-dep write-index b mop)]
+                     (when (= writer a)
+                       (str b-name " observed " a-name
+                            "'s append of " (pr-str (peek v))
+                            " to key " (pr-str k)))))))
+         first)))
+
+(defn wr-graph
+  "Analyzes write-read dependencies."
+  [history]
+  (let [{:keys [history append-index write-index read-index]} (preprocess
+                                                                history)]
+    [(cycle/forked
+       (reduce-mops (fn [g op [f :as mop]]
+                      (if (not= f :r)
+                        g
+                        ; Figure out what write we overwrote
+                        (if-let [dep (wr-mop-dep write-index op mop)]
+                          (cycle/link g dep op)
+                          ; No dep
+                          g)))
+                    (.linear (DirectedGraph.))
+                    history))
+     (WRExplainer. append-index write-index read-index)]))
+
+(defn g1c-graph
+  "Per Adya, Liskov, & O'Neil, phenomenon G1C encompasses any cycle made up of
+  direct dependency edges (but does not include anti-dependencies)."
+  [history]
+  ((cycle/combine ww-graph wr-graph) history))
 
 (defn graph
   "Some parts of a transaction's dependency graph--for instance,
