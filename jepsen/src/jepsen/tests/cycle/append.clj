@@ -137,10 +137,12 @@
                    ; We've got an illegal read if our last element came from an
                    ; intermediate append.
                    (when-let [writer (get-in im [k (peek v)])]
-                     {:op       op
-                      :mop      mop
-                      :writer   writer
-                      :element  (peek v)})))))))
+                     ; Internal reads are OK!
+                     (when (not= op writer)
+                       {:op       op
+                        :mop      mop
+                        :writer   writer
+                        :element  (peek v)}))))))))
 
 (defn prefix?
   "Given two sequences, returns true iff A is a prefix of B."

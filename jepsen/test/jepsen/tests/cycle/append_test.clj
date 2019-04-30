@@ -252,7 +252,11 @@
                :mop       [:r :x [1]]
                :writer    t1
                :element   1}]
-             (g1b-cases [t2 t3 t1 t4]))))))
+             (g1b-cases [t2 t3 t1 t4])))))
+
+  (testing "internal reads"
+    (let [t1 (op "ax1rx1ax2")]
+      (is (= [] (g1b-cases [t1]))))))
 
 (deftest checker-test
   (let [c (fn [checker-opts history]

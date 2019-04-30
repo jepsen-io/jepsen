@@ -208,5 +208,5 @@
                                  :max-writes-per-key  10})
                    (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
                    gen/seq)
-   :checker (cycle/checker (cycle/combine cycle/realtime-graph
-                                          append/g1c-graph))})
+   :checker (append/checker {:anomalies         [:G1]
+                             :additional-graphs cycle/realtime-graph})})
