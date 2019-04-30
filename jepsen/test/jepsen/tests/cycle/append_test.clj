@@ -32,7 +32,7 @@
   ry12      read y = [1 2]
   ax1ax2    append 1 to x, append 2 to x"
   [string]
-  (let [[[_ & txn] mop] (reduce (fn [[txn [f k v :as mop]] c]
+  (let [[txn mop] (reduce (fn [[txn [f k v :as mop]] c]
                             (case c
                               \a [(conj txn mop) [:append]]
                               \r [(conj txn mop) [:r]]
@@ -45,8 +45,14 @@
                                             :r      (conj (or v []) e))]])))
                           [[] nil]
                           string)
-        txn (conj txn mop)]
+        txn (-> txn
+                (subvec 1)
+                (conj mop))]
     {:type :ok, :value txn}))
+
+(deftest op-test
+  (is (= {:type :ok, :value [[:append :x 1] [:append :x 2]]}
+         (op "ax1ax2"))))
 
 (deftest ww-graph-test
   (let [g   (comp (partial just-graph ww-graph) vector)
@@ -175,7 +181,6 @@
     ; Special case: when there's only one append for a key, we can trivially
     ; infer the version order for that key, even if we never observe it in a
     ; read: it has to go from nil -> [x].
-    (prn) (prn)
     (testing "single appends without reads"
       (is (= {rx [ax1] ax1 []} (g rx ax1)))
       ; But with two appends, we can't infer any more
@@ -215,3 +220,136 @@
                 :errors   [{:key :x, :values [[1 2] [1 3 4]]}]}
                (checker/check (cycle/checker graph)
                               nil [rx12 rx134] nil)))))))
+
+(deftest g1a-cases-test
+  (testing "empty"
+    (is (= [] (g1a-cases []))))
+  (testing "valid and invalid reads"
+    (let [t1 {:type :fail, :value [[:append :x 1]]}
+          t2 (op "rx1ax2")
+          t3 (op "rx12ry3")]
+      (is (= [{:op        t2
+               :mop       [:r :x [1]]
+               :writer    t1
+               :element   1}
+              {:op        t3
+               :mop       [:r :x [1 2]]
+               :writer    t1
+               :element   1}]
+             (g1a-cases [t2 t3 t1]))))))
+
+(deftest g1b-cases-test
+  (testing "empty"
+    (is (= [] (g1b-cases []))))
+
+  (testing "valid and invalid reads"
+    ; t1 has an intermediate append of 1 which should never be visible alone.
+    (let [t1 (op "ax1ax2")
+          t2 (op "rx1")
+          t3 (op "rx12ry3")
+          t4 (op "rx123")]
+      (is (= [{:op        t2
+               :mop       [:r :x [1]]
+               :writer    t1
+               :element   1}]
+             (g1b-cases [t2 t3 t1 t4]))))))
+
+(deftest checker-test
+  (let [c (fn [checker-opts history]
+            (checker/check (checker checker-opts) nil history nil))]
+
+    (testing "G0"
+      (let [; A pure write cycle: x => t1, t2; but y => t2, t1
+            t1 (op "ax1ay1")
+            t2 (op "ax2ay2")
+            t3 (op "rx12ry21")
+            h [t1 t2 t3]
+            msg "Let:\n  T1 = {:type :ok, :value [[:append :x 2] [:append :y 2]]}\n  T2 = {:type :ok, :value [[:append :x 1] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 1 after T1 appended 2 to :y.\n  - However, T2 < T1, because T1 appended 2 after T2 appended 1 to :x: a contradiction!"]
+        ; All checkers catch this.
+        (is (= {:valid? false
+                :anomaly-types [:G0]
+                :anomalies {:G0 [msg]}}
+               (c {:anomalies [:G0]} h)))
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c]
+                :anomalies {:G0+G1c [msg]}}
+               (c {:anomalies [:G1]} h)))
+        ; G2 doesn't actually include G0, but catches it anyway
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c+G2]
+                :anomalies {:G0+G1c+G2 [msg]}}
+               (c {:anomalies [:G2]} h)))))
+
+    (testing "G1a"
+      (let [; T2 sees T1's failed write
+            t1 {:type :fail, :value [[:append :x 1]]}
+            t2 (op "rx1")
+            h  [t1 t2]]
+        ; G0 checker won't catch this
+        (is (= {:valid? true} (c {:anomalies [:G0]} h)))
+        ; G1 will
+        (is (= {:valid? false
+                :anomaly-types [:G1a]
+                :anomalies {:G1a [{:op      t2
+                                   :writer  t1
+                                   :mop     [:r :x [1]]
+                                   :element 1}]}}
+               (c {:anomalies [:G1]} h)))
+        ; G2 won't: even though the graph covers G1c, we don't do the specific
+        ; G1a/b checks unless asked.
+        (is (= {:valid? true}
+               (c {:anomalies [:G2]} h)))))
+
+    (testing "G1b"
+      (let [; T2 sees T1's intermediate write
+            t1 (op "ax1ax2")
+            t2 (op "rx1")
+            h  [t1 t2]]
+        ; G0 checker won't catch this
+        (is (= {:valid? true} (c {:anomalies [:G0]} h)))
+        ; G1 will
+        (is (= {:valid? false
+                :anomaly-types [:G1b]
+                :anomalies {:G1b [{:op      t2
+                                   :writer  t1
+                                   :mop     [:r :x [1]]
+                                   :element 1}]}}
+               (c {:anomalies [:G1]} h)))
+        ; G2 won't: even though the graph covers G1c, we don't do the specific
+        ; G1a/b checks unless asked.
+        (is (= {:valid? true}
+               (c {:anomalies [:G2]} h)))))
+
+    (testing "G1c"
+      (let [; T2 writes x after T1, but T1 observes T2's write on y.
+            t1 (op "ax1ry1")
+            t2 (op "ax2ay1")
+            t3 (op "rx12ry1")
+            h  [t1 t2 t3]
+            msg "Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 2] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 2 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]
+        ; G0 won't see this
+        (is (= {:valid? true} (c {:anomalies [:G0]} h)))
+        ; But G1 will!
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c]
+                :anomalies {:G0+G1c [msg]}}
+               (c {:anomalies [:G1]} h)))
+        ; As will G2
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c+G2]
+                :anomalies {:G0+G1c+G2 [msg]}}
+               (c {:anomalies [:G2]} h)))))
+
+    (testing "G2"
+      (let [; A pure anti-dependency cycle
+            t1 (op "ax1ry")
+            t2 (op "ay1rx")
+            h  [t1 t2]]
+        ; G0 and G1 won't catch this
+        (is (= {:valid? true} (c {:anomalies [:G0]} h)))
+        (is (= {:valid? true} (c {:anomalies [:G1]} h)))
+        ; But G2 will
+        (is (= {:valid? false
+                :anomaly-types [:G0+G1c+G2]
+                :anomalies {:G0+G1c+G2 ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y]]}\n  T2 = {:type :ok, :value [[:append :y 1] [:r :x]]}\n\nThen:\n  - T1 < T2, because T1 observed the initial (nil) state of :y, which T2 created by appending 1.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :x, which T1 created by appending 1: a contradiction!"]}}
+               (c {:anomalies [:G2]} h)))))))

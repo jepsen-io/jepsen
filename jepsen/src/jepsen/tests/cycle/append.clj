@@ -13,6 +13,7 @@
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
+            [clojure.string :as str]
             [fipp.edn :refer [pprint]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan DirectedGraph
@@ -23,10 +24,16 @@
                                IGraph
                                Set
                                SortedMap)))
+
+(defn op-mops
+  "A lazy sequence of all [op mop] pairs from a history."
+  [history]
+  (mapcat (fn [op] (map (fn [mop] [op mop]) (:value op))) history))
+
 (defn verify-mop-types
   "Takes a history where operation values are transactions. Verifies that the
-  history contains only reads [:r k v] and appends [:append k v]. Returns nil if the history conforms, or throws an error object otherwise."
-  [history]
+  history contains only reads [:r k v] and appends [:append k v]. Returns nil
+  if the history conforms, or throws an error object otherwise." [history]
   (let [bad (remove (fn [op] (every? #{:r :append} (map mop/f (:value op))))
                     history)]
     (when (seq bad)
@@ -55,6 +62,85 @@
                    written))
                {}
                history))
+
+(defn g1a-cases
+  "G1a, or aborted read, is an anomaly where a transaction reads data from an
+  aborted transaction. For us, an aborted transaction is one that we know
+  failed. Info transactions may abort, but if they do, the only way for us to
+  TELL they aborted is by observing their writes, and if we observe their
+  writes, we can't conclude they aborted, sooooo...
+
+  This function takes a history (which should include :fail events!), and
+  produces a sequence of error objects, each representing an operation which
+  read state written by a failed transaction."
+  [history]
+  ; Build a map of keys to maps of failed elements to the ops that appended
+  ; them.
+  (let [failed (reduce-mops (fn index [failed op [f k v :as mop]]
+                              (if (and (op/fail? op)
+                                       (= :append f))
+                                (assoc-in failed [k v] op)
+                                failed))
+                            {}
+                            history)]
+    ; Look for ok ops with a read mop of a failed append
+    (->> history
+         (filter op/ok?)
+         op-mops
+         (mapcat (fn [[op [f k v :as mop]]]
+                   (when (= :r f)
+                     (keep (fn [e]
+                             (when-let [writer (get-in failed [k e])]
+                               {:op        op
+                                :mop       mop
+                                :writer    writer
+                                :element   e}))
+                           v)))))))
+
+(defn g1b-cases
+  "G1b, or intermediate read, is an anomaly where a transaction T2 reads a
+  state for key k that was written by another transaction, T1, that was not
+  T1's final update to k.
+
+  This function takes a history (which should include :fail events!), and
+  produces a sequence of error objects, each representing a read of an
+  intermediate state."
+  [history]
+  ; Build a map of keys to maps of intermediate elements to the ops that wrote
+  ; them
+  (let [im (reduce (fn [im op]
+                     ; Find intermediate appends for this particular txn by
+                     ; producing two maps: intermediate keys to elements, and
+                     ; final keys to elements in this txn. We shift elements
+                     ; from final to intermediate when they're overwritten.
+                     (first
+                       (reduce (fn [[im final :as state] [f k v]]
+                                 (if (= :append f)
+                                   (if-let [e (final k)]
+                                     ; We have a previous write of k
+                                     [(assoc-in im [k e] op)
+                                      (assoc final k v)]
+                                     ; No previous write
+                                     [im (assoc final k v)])
+                                   ; Something other than an append
+                                   state))
+                               [im {}]
+                               (:value op))))
+                   {}
+                   history)]
+    ; Look for ok ops with a read mop of an intermediate append
+    (->> history
+         (filter op/ok?)
+         op-mops
+         (keep (fn [[op [f k v :as mop]]]
+                 (when (= :r f)
+                   ; We've got an illegal read if our last element came from an
+                   ; intermediate append.
+                   (when-let [writer (get-in im [k (peek v)])]
+                     {:op       op
+                      :mop      mop
+                      :writer   writer
+                      :element  (peek v)})))))))
 
 (defn prefix?
   "Given two sequences, returns true iff A is a prefix of B."
@@ -231,8 +317,9 @@
   "What (other) operation wrote the value just before this read mop?"
   [write-index op [f k v]]
   (when (seq v)
-    (let [append-op (-> write-index (get k) (get (peek v)))]
-      (assert append-op)
+    ; It may be the case that a failed operation appended this--that'd be
+    ; picked up by the G1a checker.
+    (when-let [append-op (-> write-index (get k) (get (peek v)))]
       ; If we wrote this value, there's no external dep here.
       (when-not (= op append-op)
         append-op))))
@@ -493,3 +580,98 @@
                         (.linear (DirectedGraph.))
                         history))]
     [graph (Explainer. append-index write-index read-index)]))
+
+(defn expand-anomalies
+  "Takes a collection of anomalies, and returns the fully expanded version of
+  those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
+  [as]
+  (let [as (set as)
+        as (if (:G1 as) (conj as :G1a :G1b :G1c) as)
+        as (if (:G1c as) (conj as :G0) as)]
+    as))
+
+(defn graph-checker
+  "Performs dependency graph analysis.
+
+  Options:
+
+    :additional-graphs      A collection of graph analyzers (e.g. realtime)
+                            which should be merged with our own dependencies.
+    :anomalies              A collection of anomalies which should be reported,
+                            if found.
+
+  Supported anomalies are :G0, :G1c, and :G2. G1c implies G0. We don't know how
+  to check g2-single yet."
+  ([]
+   (graph-checker {:anomalies [:G2]}))
+  ([opts]
+   (let [as       (expand-anomalies (:anomalies opts))
+         analyzer (cond (:G2  as)  graph     ; graph includes g1c and g0
+                        (:G1c as)  g1c-graph ; g1c includes g0
+                        (:G0  as)  ww-graph  ; g0 is just write conflicts
+                        true       (throw (IllegalArgumentException.
+                                            "Expected at least one anomaly to check for!")))
+         ; Any other graphs to merge in?
+         analyzer (if-let [ag (:additional-graphs opts)]
+                    (cycle/combine analyzer ag)
+                    analyzer)
+         cycle-checker (cycle/checker analyzer)]
+     ; Wrap the underlying cycle checker in our new, expanded checker
+     (reify checker/Checker
+       (check [this test history opts]
+         (let [results (checker/check cycle-checker test history opts)]
+           ; Later, we'll categorize the cycles this spits out. For now, just
+           ; return em as-is.
+           results))))))
+
+(defn checker
+  "Full checker for append and read histories. Options are:
+
+    :additional-graphs      A collection of graph analyzers (e.g. realtime)
+                            which should be merged with our own dependencies.
+    :anomalies              A collection of anomalies which should be reported,
+                            if found.
+
+  Supported anomalies are:
+
+    :G0   Write Cycle. A cycle comprised purely of write-write deps.
+    :G1a  Aborted Read. A transaction observes data from a failed txn.
+    :G1b  Intermediate Read. A transaction observes a value from the middle of
+          another transaction.
+    :G1c  Circular Information Flow. A cycle comprised of write-write and
+          write-read edges.
+    :G1   G1a, G1b, and G1c.
+    :G2   A dependency cycle with at least one anti-dependency edge.
+
+  :G1c implies G0. See http://pmg.csail.mit.edu/papers/icde00.pdf for context.
+
+  Note that while we can *find* instances of G0, G1c and G2, we can't (yet)
+  categorize them automatically. These anomalies are grouped under :G0+G1c+G2
+  in checker results."
+  ([]
+   (checker {:anomalies [:G1 :G2]}))
+  ([opts]
+   (let [anomalies      (expand-anomalies (:anomalies opts))
+         graph-checker  (graph-checker opts)]
+     (reify checker/Checker
+       (check [this test history opts]
+         (let [g1a           (when (:G1a anomalies) (g1a-cases history))
+               g1b           (when (:G1b anomalies) (g1b-cases history))
+               graph-results (checker/check graph-checker test history opts)
+               ; Right now we can't tell what anomalies are on a case-by-case
+               ; basis. Looking for G2 will actually find G1 and G0 as well,
+               ; and G1 finds G0.
+               graph-anomaly-type (cond (:G2  anomalies) :G0+G1c+G2
+                                        (:G1c anomalies) :G0+G1c
+                                        (:G0  anomalies) :G0)
+               cycles (:cycles graph-results)
+               ; Categorize anomalies
+               anomalies (cond-> {}
+                           (seq g1a)    (assoc :G1a g1a)
+                           (seq g1b)    (assoc :G1b g1b)
+                           (seq cycles) (assoc graph-anomaly-type cycles))]
+           (if (empty? anomalies)
+             {:valid?         true}
+             {:valid?         false
+              :anomaly-types  (sort (keys anomalies))
+              :anomalies      anomalies})))))))

@@ -632,6 +632,39 @@
          "\n\nThen:\n"
          (explain-cycle explainer (concat binding [(first binding)])))))
 
+(defn check
+  "Meat of the checker. Takes an analysis function and a history; returns a map
+  of:
+
+      {:graph     The computed graph
+       :explainer The explainer for that graph
+       :cycles    A list of cycles we found
+       :sccs      A set of strongly connected components}"
+  [analyze-fn history]
+  (let [history           (remove (comp #{:nemesis} :process) history)
+        [graph explainer] (analyze-fn history)
+        sccs              (strongly-connected-components graph)
+        cycles            (->> sccs
+                               (sort-by (comp :index first))
+                               (mapv (partial explain-scc graph explainer)))]
+    {:graph     graph
+     :explainer explainer
+     :sccs      sccs
+     :cycles    cycles}))
+
+(defn write-cycles!
+  "Writes cycles to a file. Opts should be checker options, e,g, {:subdirectory
+  ...}"
+  [test opts cycles]
+  (when (and (seq cycles)
+             ; These are purely here so we don't have to fill in test
+             ; maps with names and times in our internal tests.
+             (:name test)
+             (:start-time test))
+    (->> cycles
+         (str/join "\n\n\n")
+         (spit (store/path! test (:subdirectory opts) "cycles.txt")))))
+
 (defn checker
   "Takes a function which takes a history and returns a [graph, explainer]
   pair, and returns a checker which uses those graphs to identify cyclic
@@ -640,21 +673,8 @@
   (reify checker/Checker
     (check [this test history opts]
       (try+
-        (let [history           (remove (comp #{:nemesis} :process) history)
-              [graph explainer] (analyze-fn history)
-              sccs              (strongly-connected-components graph)
-              cycles            (->> sccs
-                                     (sort-by (comp :index first))
-                                     (mapv (partial explain-scc graph explainer)))]
-          ; Write out files
-          (when (and (seq cycles)
-                     ; These are purely here so we don't have to fill in test
-                     ; maps with names and times in our internal tests.
-                     (:name test)
-                     (:start-time test))
-            (->> cycles
-                 (str/join "\n\n\n")
-                 (spit (store/path! test (:subdirectory opts) "cycles.txt"))))
+        (let [{:keys [graph explainer sccs cycles]} (check analyze-fn history)]
+          (write-cycles! test opts cycles)
           {:valid?     (empty? sccs)
            :scc-count  (count sccs)
            :cycles     cycles})
