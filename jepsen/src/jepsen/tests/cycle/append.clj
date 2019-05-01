@@ -486,7 +486,6 @@
                                     " to " (pr-str k)))))))))
          first)))
 
-
 (defn preprocess
   "Before we do any graph computation, we need to preprocess the history,
   making sure it's well-formed. We return a map of:
@@ -544,7 +543,7 @@
                         g
                         (if-let [dep (ww-mop-dep
                                        append-index write-index op mop)]
-                          (cycle/link g dep op)
+                          (cycle/link g dep op :ww)
                           g)))
                     (.linear (DirectedGraph.))
                     history))
@@ -574,7 +573,7 @@
                         g
                         ; Figure out what write we overwrote
                         (if-let [dep (wr-mop-dep write-index op mop)]
-                          (cycle/link g dep op)
+                          (cycle/link g dep op :wr)
                           ; No dep
                           g)))
                     (.linear (DirectedGraph.))
@@ -649,6 +648,18 @@
         as (if (:G1c as) (conj as :G0) as)]
     as))
 
+(defn g0-cases
+  "Given a graph, an explainer, and a collection of of strongly connected
+  components, searches for instances of G0 anomalies within it. Returns nil if
+  none are present."
+  [graph explainer sccs]
+  ; For g0, we want to restrict the graph purely to write-write edges.
+  (let [g0-graph (cycle/project-relationship graph :ww)]
+    (seq (keep (fn [scc]
+                 (when-let [cycle (cycle/find-cycle g0-graph scc)]
+                   (cycle/explain-cycle explainer cycle)))
+               sccs))))
+
 (defn cycles
   "Performs dependency graph analysis and returns a sequence of anomalies.
 
@@ -673,14 +684,24 @@
                     (apply cycle/combine analyzer ags)
                     analyzer)
          ; Good, analyze the history
-         {:keys [graph explainer sccs cycles]} (cycle/check analyzer history)]
+         {:keys [graph explainer sccs cycles]} (cycle/check analyzer history)
+         g0 (g0-cases graph explainer sccs)
+
+         ; Right now we can't tell what anomalies are on a case-by-case
+         ; basis. Looking for G2 will actually find G1 and G0 as well,
+         ; and G1 finds G0.
+         anomaly-type (cond (:G2  as) :G0+G1c+G2
+                            (:G1c as) :G0+G1c
+                            (:G0  as) :G0)]
 
      ; Write out cycles as a side effect
      (cycle/write-cycles! test checker-opts cycles)
 
      ; Later, we'll categorize the cycles this spits out. For now, just
      ; return em as-is.
-     cycles)))
+     (cond-> {}
+       g0           (assoc :G0 g0)
+       (seq cycles) (assoc anomaly-type cycles)))))
 
 (defn checker
   "Full checker for append and read histories. Options are:
@@ -719,19 +740,12 @@
                sorted-values (sorted-values history)
                incmp-order   (incompatible-orders sorted-values)
                cycles        (cycles opts test history checker-opts)
-               ; Right now we can't tell what anomalies are on a case-by-case
-               ; basis. Looking for G2 will actually find G1 and G0 as well,
-               ; and G1 finds G0.
-               graph-anomaly-type (cond (:G2  anomalies) :G0+G1c+G2
-                                        (:G1c anomalies) :G0+G1c
-                                        (:G0  anomalies) :G0)
                ; Categorize anomalies and build up a map of types to examples
-               anomalies (cond-> {}
+               anomalies (cond-> cycles
                            dups         (assoc :duplicate-elements dups)
                            incmp-order  (assoc :incompatible-order incmp-order)
                            (seq g1a)    (assoc :G1a g1a)
-                           (seq g1b)    (assoc :G1b g1b)
-                           (seq cycles) (assoc graph-anomaly-type cycles))]
+                           (seq g1b)    (assoc :G1b g1b))]
            (if (empty? anomalies)
              {:valid?         true}
              {:valid?         false

@@ -154,22 +154,40 @@
   [^IGraph g a b]
   (.unlink g a b))
 
-(defn remove-relationship
-  "Filters a graph, removing the given relationship from it."
-  [^DirectedGraph g rel]
+(defn keep-edge-values
+  "Transforms a graph by applying a function (f edge-value) to each edge in the
+  graph. Where the function returns `nil`, removes that edge altogether."
+  [f ^DirectedGraph g]
   (forked
     (reduce (fn [^IGraph g, ^IEdge edge]
-              (let [v' (disj (.value edge) rel)]
-                (if (seq v')
-                  ; Still relationships left
-                  (.link g (.from edge) (.to edge) v')
-                  ; All gone
-                  (.unlink g (.from edge) (.to edge)))))
+              (let [v' (f (.value edge))]
+                (if (nil? v')
+                  ; Remove edge
+                  (.unlink g (.from edge) (.to edge))
+                  ; Update existing edge
+                  (.link g (.from edge) (.to edge) v'))))
             (linear g)
             ; Note that we iterate over an immutable copy of g, and mutate a
             ; linear version in-place, to avoid seeing our own mutations during
             ; iteration.
             (edges (forked g)))))
+
+(defn remove-relationship
+  "Filters a graph, removing the given relationship from it."
+  [g rel]
+  (keep-edge-values (fn [rs]
+                      (let [rs' (disj rs rel)]
+                        (when (seq rs')
+                          rs')))
+                    g))
+
+(defn project-relationship
+  "Filters a graph to just those edges with the given relationship."
+  [g rel]
+  ; Might as well re-use this, we're gonna build it a lot.
+  (let [rs' #{rel}]
+    (keep-edge-values (fn [rs] (when (contains? rs rel) rs'))
+                      g)))
 
 (defn link-to-all
   "Given a graph g, links x to all ys."
@@ -214,11 +232,11 @@
      s)))
 
 (defn ^DirectedGraph digraph-union
-  "Takes the union of n graphs."
+  "Takes the union of n graphs, merging edges with union."
   ([] (DirectedGraph.))
   ([a] a)
   ([^DirectedGraph a ^DirectedGraph b]
-   (.merge a b))
+   (.merge a b union-edge))
   ([a b & more]
    (reduce digraph-union a (cons b more))))
 
@@ -538,17 +556,6 @@
                ext-reads))
      (WRExplainer.)]))
 
-; Hooo boy, this blows up BADLY on real-world inputs, so we're gonna hack
-; together a little BFS
-;(defn find-cycle
-;  ([^IGraph graph scc]
-;   (-> graph
-;       (.select (->bset scc)) ; Restrict the graph to this particular scc
-;       (Graphs/cycles)
-;       (->> (sort-by #(.size ^ICollection %)))
-;       first
-;       ->clj)))
-
 (defn prune-alternate-paths
   "If we have two paths [a b d] and [a c d], we don't need both of them,
   because both get us from a to d. We collapse a set of paths by filtering out
@@ -585,11 +592,13 @@
 (defn path-shells
   "Given a graph, and a starting node, constructs shells outwards from that
   node: collections of longer and longer paths."
-  [g start]
-  (iterate (comp prune-alternate-paths
-                 (partial grow-paths g)
-                 prune-longer-paths)
-           [[start]]))
+  [^DirectedGraph g start]
+  ; The longest possible cycle is the entire graph, plus one.
+  (take (inc (.size g))
+        (iterate (comp prune-alternate-paths
+                       (partial grow-paths g)
+                       prune-longer-paths)
+                 [[start]])))
 
 (defn loop?
   "Does the given vector begin and end with identical elements, and is longer
@@ -633,13 +642,15 @@
         ; Just to speed up equality checks here, we'll construct an isomorphic
         ; graph with integers standing for our ops, find a cycle in THAT, then
         ; map back to our own space.
-        [gn mapping]  (renumber-graph g)
-        candidate     (first (.vertices gn))
-        paths         (mapcat identity (path-shells gn candidate))]
-    (->> paths
-         (filter loop?)
-         first
-         (mapv mapping))))
+        [gn mapping]  (renumber-graph g)]
+    (->> (.vertices gn)
+         (keep (fn [start]
+                 (when-let [cycle (->> (path-shells gn start)
+                                       (mapcat identity)
+                                       (filter loop?)
+                                       first)]
+                     (mapv mapping cycle))))
+         first)))
 
 (defn explain-binding
   "Takes a seq of [name op] pairs, and constructs a string naming each op."
@@ -663,7 +674,7 @@
                     " between " (pr-str a)
                     " and " (pr-str b))))))
 
-(defn explain-cycle
+(defn explain-cycle-ops
   "Takes an explainer and a sequence of [op-name op] operations, and produces a
   string explaining why they follow in that order."
   [explainer ops]
@@ -676,6 +687,16 @@
                           (str prefix "However, " ex ": a contradiction!")
                           (str prefix ex ".\n"))))
          str/join)))
+
+(defn explain-cycle
+  "Takes an explainer and a cycle of ops [a b c a], and returns an explanation
+  of that cycle."
+  [explainer cycle]
+  (let [binding (->> (butlast cycle)
+                     (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
+    (str (explain-binding binding)
+         "\n\nThen:\n"
+         (explain-cycle-ops explainer (concat binding [(first binding)])))))
 
 (defn explain-scc
   "Takes a graph, an explainer, and a strongly connected component (a
@@ -691,12 +712,7 @@
        [:key :x]    {:process 1 :value {:x 4}}
        [:key :x]    {:process 0 :value {:x 5}}]"
   [graph explainer scc]
-  (let [cycle   (find-cycle graph scc)
-        binding (->> (butlast cycle)
-                     (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
-    (str (explain-binding binding)
-         "\n\nThen:\n"
-         (explain-cycle explainer (concat binding [(first binding)])))))
+  (explain-cycle explainer (find-cycle graph scc)))
 
 (defn check
   "Meat of the checker. Takes an analysis function and a history; returns a map

@@ -337,8 +337,19 @@
                           2 [3]
                           3 [4]
                           4 [0 2]})]
-    (is (= [0 1 4 0]
-           (find-cycle g (->clj (.vertices g)))))))
+    (testing "basic cycle"
+      (is (= [0 1 4 0]
+             (find-cycle g (->clj (.vertices g))))))
+
+    ; We may restrict a graph to a particular relationship and look for cycles
+    ; in an SCC found in a larger graph; this should still work.
+    (testing "scc without cycle in graph"
+      (is (= nil
+             (find-cycle g #{0 2 4}))))
+
+    (testing "cycle in restricted scc"
+      (is (= [0 1 4 0]
+             (find-cycle g #{0 1 4}))))))
 
 (deftest renumber-graph-test
   (is (= [{} []]
@@ -360,13 +371,17 @@
               (link 1 2 :bar))]
     (is (= #{:foo :bar} (edge g 1 2)))))
 
-(deftest remove-relationship-test
+(deftest project+remove-relationship-test
   (let [g (-> (directed-graph)
               (link 1 2 :foo)
               (link 1 3 :foo)
               (link 2 3 :bar)
-              (link 1 2 :bar)
-              (remove-relationship :foo))]
-    (is (= #{{:from 1, :to 2, :value #{:bar}}
-             {:from 2, :to 3, :value #{:bar}}}
-           (set (map ->clj (edges g)))))))
+              (link 1 2 :bar))]
+    (testing "remove"
+      (is (= #{{:from 1, :to 2, :value #{:bar}}
+               {:from 2, :to 3, :value #{:bar}}}
+             (set (map ->clj (edges (remove-relationship g :foo)))))))
+    (testing "project"
+      (is (= #{{:from 1, :to 2, :value #{:foo}}
+               {:from 1, :to 3, :value #{:foo}}}
+             (set (map ->clj (edges (project-relationship g :foo)))))))))

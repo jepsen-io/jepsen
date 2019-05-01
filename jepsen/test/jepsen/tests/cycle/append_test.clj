@@ -250,8 +250,9 @@
                 :anomalies {:G0 [msg]}}
                (c {:anomalies [:G0]} h)))
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c]
-                :anomalies {:G0+G1c [msg]}}
+                :anomaly-types [:G0 :G0+G1c]
+                :anomalies {:G0     [msg]
+                            :G0+G1c [msg]}}
                (c {:anomalies [:G1]} h)))
         ; G2 doesn't actually include G0, but catches it anyway
         (is (= {:valid? false
