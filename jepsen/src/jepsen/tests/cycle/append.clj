@@ -654,15 +654,19 @@
   none are present."
   [graph explainer sccs]
   ; For g1c, we want to restrict the graph to write-write edges or write-read
-  ; edges.
-  (let [g1c-graph (cycle/keep-edge-values
-                    (fn [rs]
-                      (let [rs' (set/intersection #{:ww :wr} rs)]
-                        (when (seq rs')
-                          rs')))
-                    graph)]
+  ; edges. We also need *just* the write-read graph, so that we can
+  ; differentiate from G0--this differs from Adya, but we'd like to say
+  ; specifically that an anomaly is G1c and NOT G0.
+  (let [wr-graph  (cycle/project-relationship graph :wr)
+        ww+wr-graph (cycle/keep-edge-values
+                      (fn [rs]
+                        (let [rs' (set/intersection #{:ww :wr} rs)]
+                          (when (seq rs')
+                            rs')))
+                      graph)]
     (seq (keep (fn [scc]
-                 (when-let [cycle (cycle/find-cycle g1c-graph scc)]
+                 (when-let [cycle (cycle/find-cycle-starting-with
+                                    wr-graph ww+wr-graph scc)]
                    (cycle/explain-cycle explainer cycle)))
                sccs))))
 

@@ -324,7 +324,7 @@
 
 (deftest path-shells-test
   (let [g     (map->bdigraph {0 [1 2] 1 [3] 2 [3] 3 [0]})
-        paths (path-shells g 0)]
+        paths (path-shells g [[0]])]
     (is (= [[[0]]
             [[0 1] [0 2]]
             [[0 1 3]]
@@ -350,6 +350,17 @@
     (testing "cycle in restricted scc"
       (is (= [0 1 4 0]
              (find-cycle g #{0 1 4}))))))
+
+(deftest find-cycle-starting-with-test
+  (let [initial   (map->bdigraph {0 [1 2]})
+        ; Remaining HAS a cycle, but we don't want to find it.
+        remaining (map->bdigraph {1 [3]
+                                  3 [1 0]})]
+    (testing "without 0"
+      (is (= nil (find-cycle-starting-with initial remaining #{1 2 3}))))
+    (testing "with 0"
+      (is (= [0 1 3 0]
+             (find-cycle-starting-with initial remaining #{0 1 2 3}))))))
 
 (deftest renumber-graph-test
   (is (= [{} []]

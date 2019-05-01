@@ -595,15 +595,15 @@
                    (map (partial conj path) (.out g tip)))))))
 
 (defn path-shells
-  "Given a graph, and a starting node, constructs shells outwards from that
-  node: collections of longer and longer paths."
-  [^DirectedGraph g start]
+  "Given a graph, and a starting collection of paths, constructs shells
+  outwards from those paths: collections of longer and longer paths."
+  [^DirectedGraph g starting-paths]
   ; The longest possible cycle is the entire graph, plus one.
   (take (inc (.size g))
         (iterate (comp prune-alternate-paths
                        (partial grow-paths g)
                        prune-longer-paths)
-                 [[start]])))
+                 starting-paths)))
 
 (defn loop?
   "Does the given vector begin and end with identical elements, and is longer
@@ -639,6 +639,53 @@
                (transient (vec (repeat (count mapping) nil)))
                mapping))]))
 
+(defn find-cycle-starting-with
+  "Some anomalies consist of a cycle with exactly, or at least, one edge of a
+  particular type. This fuction works like find-cycle, but allows you to pass
+  *two* graphs: an initial graph, which is used for the first step, and a
+  remaining graph, which is used for later steps."
+  [^IGraph initial-graph ^IGraph remaining-graph scc]
+  (let [scc   (->bset scc)
+        ig    (.select initial-graph scc)
+        rg    (.select remaining-graph scc)
+        ; Think about the structure of these two graphs
+        ;
+        ;  I        R
+        ; ┌── d ┆
+        ; ↓   ↑ ┆
+        ; a ──┤ ┆
+        ;     ↓ ┆
+        ; b → c ┆ c → a
+        ;
+        ; In this graph, a cycle starting with I and completing with R can't
+        ; include d, since there is no way for d to continue in R--it's not
+        ; present in that set. Note that this is true even though [a d a] is a
+        ; cycle--it's just a cycle purely in I, rather than a cycle starting in
+        ; I and continuing in R, which is what we're looking for.
+        ;
+        ; Similarly, b can't be in a cycle, because there's no way to *return*
+        ; to b from R, and we know that the final step in our cycle must be a
+        ; transition from R -> I.
+        ;
+        ; In general, a cycle which has one edge from I must cross the boundary
+        ; from I to R, and from R back to I again--otherwise it would not be a
+        ; cycle. We therefore know that the first two vertices must be elements
+        ; of both I *and* R. To encode this, we restrict I to only vertices
+        ; present in R.
+        ig (.select initial-graph (.vertices rg))]
+    ; Start with a vertex in the initial graph
+    (->> (.vertices ig)
+         (keep (fn [start]
+                 ; Expand this vertex out one step using the initial graph
+                 (->> (grow-paths ig [[start]])
+                      ; Then expand those paths into surrounding shells
+                      (path-shells rg)
+                      ; Flatten those into a list of paths
+                      (mapcat identity)
+                      (filter loop?)
+                      first)))
+         first)))
+
 (defn find-cycle
   "Given a graph and a strongly connected component within it, finds a short
   cycle in that component."
@@ -650,7 +697,7 @@
         [gn mapping]  (renumber-graph g)]
     (->> (.vertices gn)
          (keep (fn [start]
-                 (when-let [cycle (->> (path-shells gn start)
+                 (when-let [cycle (->> (path-shells gn [[start]])
                                        (mapcat identity)
                                        (filter loop?)
                                        first)]

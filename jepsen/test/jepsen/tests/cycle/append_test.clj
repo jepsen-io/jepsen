@@ -250,20 +250,16 @@
                 :anomalies {:G0 [msg]}}
                (c {:anomalies [:G0]} h)))
         (is (= {:valid? false
-                ; Technically this is both G1c and G0.
-                :anomaly-types [:G0 :G0+G1c :G1c]
-                :anomalies {:G0 [msg]
-                            :G1c [msg]
-                            :G0+G1c [msg]}}
+                :anomaly-types [:G0]
+                :anomalies {:G0 [msg]}}
                (c {:anomalies [:G1]} h)))
         ; G2 doesn't actually include G0, but catches it anyway. We're not
-        ; smart enough to figure out that this isn't a super useful G1c error,
-        ; and it might be G2 too, so we conservatively report all 3.
+        ; smart enough to figure out that this isn't G2 as well, so we
+        ; conservatively tag it as both.
         (is (= {:valid? false
-                :anomaly-types [:G0 :G0+G1c+G2 :G1c]
-                :anomalies {:G0         [msg]
-                            :G0+G1c+G2  [msg]
-                            :G1c        [msg]}}
+                :anomaly-types [:G0 :G0+G2]
+                :anomalies {:G0     [msg]
+                            :G0+G2  [msg]}}
                (c {:anomalies [:G2]} h)))))
 
     (testing "G1a"
@@ -321,12 +317,14 @@
                 :anomalies {:G1c [msg]}}
                (c {:anomalies [:G1]} h)))
         ; As will G2, but it's going to assume conservatively that it could be
-        ; G2 as well.
-        (is (= {:valid? false
-                :anomaly-types [:G1c :G1c+G2]
-                :anomalies {:G1c    [msg]
-                            :G1c+G2 [msg]}}
-               (c {:anomalies [:G2]} h)))))
+        ; G2 as well. Note that the anomaly message is a little different
+        ; because the graph structure is different here.
+        (let [msg2 "Let:\n  T1 = {:type :ok, :value [[:append :x 2] [:append :y 1]]}\n  T2 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n\nThen:\n  - T1 < T2, because T2 observed T1's append of 1 to key :y.\n  - However, T2 < T1, because T1 appended 2 after T2 appended 1 to :x: a contradiction!"]
+          (is (= {:valid? false
+                  :anomaly-types [:G1c :G1c+G2]
+                  :anomalies {:G1c    [msg2]
+                              :G1c+G2 [msg]}}
+                 (c {:anomalies [:G2]} h))))))
 
     (testing "G2"
       (let [; A pure anti-dependency cycle
