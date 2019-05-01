@@ -151,10 +151,12 @@
 
 (defn link-to-all
   "Given a graph g, links x to all ys."
-  [g x ys]
-  (if (seq ys)
-    (recur (link g x (first ys)) x (next ys))
-    g))
+  ([g x ys]
+   (link-to-all g x ys nil))
+  ([g x ys rel]
+   (if (seq ys)
+     (recur (link g x (first ys) rel) x (next ys) rel)
+     g)))
 
 (defn link-all-to
   "Given a graph g, links all xs to y."
@@ -169,10 +171,12 @@
 
 (defn link-all-to-all
   "Given a graph g, links all xs to all ys."
-  [g xs ys]
-  (if (seq xs)
-    (recur (link-to-all g (first xs) ys) (next xs) ys)
-    g))
+  ([g xs ys]
+   (link-all-to-all g xs ys nil))
+  ([g xs ys rel]
+   (if (seq xs)
+     (recur (link-to-all g (first xs) ys rel) (next xs) ys rel)
+     g)))
 
 (defn unlink
   "Heper for unlinking Bifurcan graphs."
@@ -389,7 +393,7 @@
          (partition 2 1)
          ; And build a graph out of them
          (reduce (fn [g [[v1 ops1] [v2 ops2]]]
-                   (link-all-to-all g ops1 ops2))
+                   (link-all-to-all g ops1 ops2 :monotonic-key))
                  (.linear (DirectedGraph.)))
          forked)))
 
@@ -415,7 +419,7 @@
   (->> history
        (filter (comp #{process} :process))
        (partition 2 1)
-       (reduce (fn [g [op1 op2]] (link g op1 op2))
+       (reduce (fn [g [op1 op2]] (link g op1 op2 :process))
                (.linear (DirectedGraph.)))
        forked))
 
@@ -513,7 +517,9 @@
           ; failures, but I don't think they'll hurt. We *do* need edges to
           ; crashed ops, because they may complete later on.
           :invoke (let [op' (get pairs op)
-                        g   (reduce (fn [g ok] (link g ok op')) g oks)]
+                        g   (reduce (fn [g ok] (link g ok op' :realtime))
+                                    g
+                                    oks)]
                     (recur (next history) oks g))
           ; An operation has completed. Add it to the oks buffer, and remove
           ; oks that this ok implies must have completed.
@@ -597,7 +603,8 @@
                                ; OK, in this case, we've got exactly one
                                ; txn that wrote this value, which is good!
                                ; We can generate dependency edges here!
-                               1 (link-to-all graph (first writes) reads)
+                               1 (link-to-all graph (first writes) reads
+                                              :realtime)
 
                                ; But if there's more than one, we can't do this
                                ; sort of cycle analysis because there are
@@ -812,25 +819,25 @@
     [_ pair-explainer explanation]
     "Takes an explanation of a cycle and renders it to a string."))
 
-; This explainer just provides the step-by-step explanation of the
-; relationships between pairs of operations.
-(defrecord DefaultCycleExplainer []
-  CycleExplainer
-  (explain-cycle [_ pair-explainer cycle]
-    ; Take pairs of ops from the cycle, and construct an explanation for each.
-    {:cycle cycle
-     :steps (->> cycle
-                 (partition 2 1)
-                 (map (partial explain-cycle-pair-data pair-explainer)))})
+(def cycle-explainer
+  "This explainer just provides the step-by-step explanation of the
+  relationships between pairs of operations."
+  (reify CycleExplainer
+    (explain-cycle [_ pair-explainer cycle]
+      ; Take pairs of ops from the cycle, and construct an explanation for each.
+      {:cycle cycle
+       :steps (->> cycle
+                   (partition 2 1)
+                   (map (partial explain-cycle-pair-data pair-explainer)))})
 
-  (render-cycle-explanation [_ pair-explainer {:keys [cycle steps]}]
-    ; Number the transactions in the cycle
-    (let [binding (->> (butlast cycle)
-                       (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
-      ; Explain the binding, then each step.
-      (str (explain-binding binding)
-           "\n\nThen:\n"
-           (explain-cycle-ops pair-explainer binding steps)))))
+    (render-cycle-explanation [_ pair-explainer {:keys [cycle steps]}]
+      ; Number the transactions in the cycle
+      (let [binding (->> (butlast cycle)
+                         (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
+        ; Explain the binding, then each step.
+        (str (explain-binding binding)
+             "\n\nThen:\n"
+             (explain-cycle-ops pair-explainer binding steps))))))
 
 (defn explain-scc
   "Takes a graph, a cycle explainer, a pair explainer, and a strongly connected
@@ -856,7 +863,7 @@
         cycles            (->> sccs
                                (sort-by (comp :index first))
                                (mapv (partial explain-scc graph
-                                              (->DefaultCycleExplainer)
+                                              cycle-explainer
                                               explainer)))]
     {:graph     graph
      :explainer explainer

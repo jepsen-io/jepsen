@@ -643,7 +643,32 @@
   [history]
   ((cycle/combine ww-graph wr-graph rw-graph) history))
 
-(def cycle-explainer (cycle/->DefaultCycleExplainer))
+(def cycle-explainer
+  ; We categorize cycles based on their dependency edges
+  (reify cycle/CycleExplainer
+    (explain-cycle [_ pair-explainer cycle]
+      (let [ex (cycle/explain-cycle cycle/cycle-explainer pair-explainer cycle)
+
+            ; What types of relationships are involved here?
+            type-freqs (frequencies (map :type (:steps ex)))
+            ww (:ww type-freqs 0)
+            wr (:wr type-freqs 0)
+            rw (:rw type-freqs 0)]
+        ; Tag the cycle with a type based on the edges involved. Note that we
+        ; might have edges from, say, real-time or process orders, so we try to
+        ; be permissive.
+        (assoc ex :type (cond (< 1 rw) :G2
+                              (= 1 rw) :G2-single
+                              (< 0 wr) :G1c
+                              (< 0 ww) :G0
+                              true (throw (IllegalStateException.
+                                            (str "Don't know how to classify"
+                                                 (pr-str ex))))))))
+
+    (render-cycle-explanation [_ pair-explainer
+                               {:keys [type cycle steps] :as ex}]
+      (cycle/render-cycle-explanation
+        cycle/cycle-explainer pair-explainer ex))))
 
 (defn cycle-explanations
   "Takes a pair explainer, a function taking an scc and possible yielding a
@@ -714,9 +739,25 @@
   (let [rw-graph (-> graph
                      (cycle/remove-relationship :ww)
                      (cycle/remove-relationship :wr))]
-    (cycle-explanations pair-explainer
-                        (partial cycle/find-cycle-starting-with rw-graph graph)
-                        sccs)))
+    ; Sort of a hack; we reject cycles that don't have at least two rw edges,
+    ; because single rw edges fall under g2-single.
+    (seq (keep (fn [scc]
+                 (when-let [cycle (cycle/find-cycle-starting-with
+                                    rw-graph graph scc)]
+                   ; Good, we've got a cycle. We're going to reject any cycles
+                   ; that are actually G2-single, because the G2-single checker
+                   ; will pick up on those. This could mean we might miss some
+                   ; G2 cycles that we COULD find by modifying find-cycle to
+                   ; return more candidates, but I don't think it's the end of
+                   ; the world; G2-single is worse, and if we see it, G2 is
+                   ; just icing on the cake
+                   (let [cx (cycle/explain-cycle cycle-explainer
+                                                 pair-explainer
+                                                 cycle)]
+                     (when (= :G2 (:type cx))
+                       (cycle/render-cycle-explanation cycle-explainer
+                                                       pair-explainer cx)))))
+               sccs))))
 
 (defn expand-anomalies
   "Takes a collection of anomalies, and returns the fully expanded version of
@@ -739,7 +780,7 @@
                             if found.
 
   Supported anomalies are :G0, :G1c, :G2-single, and :G2. G2 implies G2-single
-  and G1c, and G1c implies G0. We don't know how to check g2-single yet."
+  and G1c, and G1c implies G0."
   ([opts test history checker-opts]
    (let [as       (expand-anomalies (:anomalies opts))
          ; What graph do we need to detect these anomalies?
