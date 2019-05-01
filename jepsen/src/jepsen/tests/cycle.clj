@@ -46,12 +46,16 @@
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan DirectedGraph
                                Graphs
+                               Graphs$Edge
                                ICollection
+                               IEdge
                                IList
                                ISet
                                IGraph
                                Set
-                               SortedMap)))
+                               SortedMap)
+           (java.util.function BinaryOperator
+                               Function)))
 
 ; Convert stuff back to Clojure data structures
 (defprotocol ToClj
@@ -61,6 +65,12 @@
   IList
   (->clj [l]
     (iterator-seq (.iterator l)))
+
+  IEdge
+  (->clj [e]
+    {:from  (.from e)
+     :to    (.to e)
+     :value (.value e)})
 
   ISet
   (->clj [s]
@@ -87,6 +97,16 @@
   nil
   (->clj [x] x))
 
+(defn directed-graph
+  "Constructs a fresh directed graph."
+  []
+  (DirectedGraph.))
+
+(defn linear
+  "Bifurcan's analogue to (transient g)"
+  [^DirectedGraph graph]
+  (.linear graph))
+
 (defn forked
   "Bifurcan's analogue to (persistent! g)"
   [^DirectedGraph graph]
@@ -98,12 +118,58 @@
   (try (.in g v)
        (catch IllegalArgumentException e)))
 
+(def union-edge
+  "A binary operator performing set union on the values of edges."
+  (reify BinaryOperator
+    (apply [_ a b]
+      (set/union a b))))
+
+(defn edge
+  "Returns the edge between two vertices."
+  [^IGraph g a b]
+  (.edge g a b))
+
+(defn edges
+  "A lazy seq of all edges."
+  [^IGraph g]
+  ; We work around a bug in bifurcan which returns edges backwards!
+  (map (fn [^IEdge e]
+         (Graphs$Edge. (.value e) (.to e) (.from e)))
+       (.edges g)))
+
 (defn link
-  "Helper for linking Bifurcan graphs."
-  [^DirectedGraph graph node succ]
-  (assert (not (nil? node)))
-  (assert (not (nil? succ)))
-  (.link graph node succ))
+  "Helper for linking Bifurcan graphs. Optionally takes a relationship,
+  which is added to the value set of the edge."
+  ([graph node succ]
+   (assert (not (nil? node)))
+   (assert (not (nil? succ)))
+   (.link graph node succ))
+  ([^DirectedGraph graph node succ relationship]
+   (assert (not (nil? node)))
+   (assert (not (nil? succ)))
+   (.link graph node succ #{relationship} union-edge)))
+
+(defn unlink
+  "Heper for unlinking Bifurcan graphs."
+  [^IGraph g a b]
+  (.unlink g a b))
+
+(defn remove-relationship
+  "Filters a graph, removing the given relationship from it."
+  [^DirectedGraph g rel]
+  (forked
+    (reduce (fn [^IGraph g, ^IEdge edge]
+              (let [v' (disj (.value edge) rel)]
+                (if (seq v')
+                  ; Still relationships left
+                  (.link g (.from edge) (.to edge) v')
+                  ; All gone
+                  (.unlink g (.from edge) (.to edge)))))
+            (linear g)
+            ; Note that we iterate over an immutable copy of g, and mutate a
+            ; linear version in-place, to avoid seeing our own mutations during
+            ; iteration.
+            (edges (forked g)))))
 
 (defn link-to-all
   "Given a graph g, links x to all ys."

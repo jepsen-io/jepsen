@@ -353,3 +353,20 @@
                                                  :z #{}
                                                  :t #{:y}}))
                  0 ->clj))))
+
+(deftest link-test
+  (let [g (-> (directed-graph)
+              (link 1 2 :foo)
+              (link 1 2 :bar))]
+    (is (= #{:foo :bar} (edge g 1 2)))))
+
+(deftest remove-relationship-test
+  (let [g (-> (directed-graph)
+              (link 1 2 :foo)
+              (link 1 3 :foo)
+              (link 2 3 :bar)
+              (link 1 2 :bar)
+              (remove-relationship :foo))]
+    (is (= #{{:from 1, :to 2, :value #{:bar}}
+             {:from 2, :to 3, :value #{:bar}}}
+           (set (map ->clj (edges g)))))))
