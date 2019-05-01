@@ -711,8 +711,8 @@
     :anomalies              A collection of anomalies which should be reported,
                             if found.
 
-  Supported anomalies are :G0, :G1c, :G2-single, and :G2. G1c implies G0. We
-  don't know how to check g2-single yet."
+  Supported anomalies are :G0, :G1c, :G2-single, and :G2. G2 implies G2-single
+  and G1c, and G1c implies G0. We don't know how to check g2-single yet."
   ([opts test history checker-opts]
    (let [as       (expand-anomalies (:anomalies opts))
          ; What graph do we need to detect these anomalies?
