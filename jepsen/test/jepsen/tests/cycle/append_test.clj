@@ -250,14 +250,20 @@
                 :anomalies {:G0 [msg]}}
                (c {:anomalies [:G0]} h)))
         (is (= {:valid? false
-                :anomaly-types [:G0 :G0+G1c]
-                :anomalies {:G0     [msg]
+                ; Technically this is both G1c and G0.
+                :anomaly-types [:G0 :G0+G1c :G1c]
+                :anomalies {:G0 [msg]
+                            :G1c [msg]
                             :G0+G1c [msg]}}
                (c {:anomalies [:G1]} h)))
-        ; G2 doesn't actually include G0, but catches it anyway
+        ; G2 doesn't actually include G0, but catches it anyway. We're not
+        ; smart enough to figure out that this isn't a super useful G1c error,
+        ; and it might be G2 too, so we conservatively report all 3.
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c+G2]
-                :anomalies {:G0+G1c+G2 [msg]}}
+                :anomaly-types [:G0 :G0+G1c+G2 :G1c]
+                :anomalies {:G0         [msg]
+                            :G0+G1c+G2  [msg]
+                            :G1c        [msg]}}
                (c {:anomalies [:G2]} h)))))
 
     (testing "G1a"
@@ -311,13 +317,15 @@
         (is (= {:valid? true} (c {:anomalies [:G0]} h)))
         ; But G1 will!
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c]
-                :anomalies {:G0+G1c [msg]}}
+                :anomaly-types [:G1c]
+                :anomalies {:G1c [msg]}}
                (c {:anomalies [:G1]} h)))
-        ; As will G2
+        ; As will G2, but it's going to assume conservatively that it could be
+        ; G2 as well.
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c+G2]
-                :anomalies {:G0+G1c+G2 [msg]}}
+                :anomaly-types [:G1c :G1c+G2]
+                :anomalies {:G1c    [msg]
+                            :G1c+G2 [msg]}}
                (c {:anomalies [:G2]} h)))))
 
     (testing "G2"
@@ -330,8 +338,8 @@
         (is (= {:valid? true} (c {:anomalies [:G1]} h)))
         ; But G2 will
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c+G2]
-                :anomalies {:G0+G1c+G2 ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y]]}\n  T2 = {:type :ok, :value [[:append :y 1] [:r :x]]}\n\nThen:\n  - T1 < T2, because T1 observed the initial (nil) state of :y, which T2 created by appending 1.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :x, which T1 created by appending 1: a contradiction!"]}}
+                :anomaly-types [:G2]
+                :anomalies {:G2 ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y]]}\n  T2 = {:type :ok, :value [[:append :y 1] [:r :x]]}\n\nThen:\n  - T1 < T2, because T1 observed the initial (nil) state of :y, which T2 created by appending 1.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :x, which T1 created by appending 1: a contradiction!"]}}
                (c {:anomalies [:G2]} h)))))
 
     (testing "Strict-1SR violation"
@@ -346,8 +354,8 @@
                (c {:anomalies [:G2]} h)))
         ; But it will if we introduce a realtime graph component
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c+G2]
-                :anomalies {:G0+G1c+G2 ["Let:\n  T1 = {:index 1, :type :ok, :value [[:append :x 1]]}\n  T2 = {:index 3, :type :ok, :value [[:r :x nil]]}\n\nThen:\n  - T1 < T2, because T1 completed at index 1, before the invocation of T2, at index 2.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :x, which T1 created by appending 1: a contradiction!"]}}
+                :anomaly-types [:G2]
+                :anomalies {:G2 ["Let:\n  T1 = {:index 1, :type :ok, :value [[:append :x 1]]}\n  T2 = {:index 3, :type :ok, :value [[:r :x nil]]}\n\nThen:\n  - T1 < T2, because T1 completed at index 1, before the invocation of T2, at index 2.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :x, which T1 created by appending 1: a contradiction!"]}}
                (c {:anomalies [:G2]
                    :additional-graphs [cycle/realtime-graph]}
                   h)))))
@@ -360,23 +368,24 @@
             t5 (op "rx123")
             h [t1 t2 t3 t4 t5]]
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c :incompatible-order]
+                :anomaly-types [:G1c :incompatible-order]
                 :anomalies
                 {:incompatible-order [{:key :x, :values [[1 3] [1 2 3]]}]
-                 :G0+G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 3] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 3 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]}}
+                 :G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 3] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 3 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]}}
                 (c {:anomalies [:G1]} h)))))
 
     (testing "duplicated elements"
+      ; This is an instance of G1c
       (let [t1 (op "ax1ry1") ; read t2's write of y
             t2 (op "ax2ay1")
             t3 (op "rx121")
             h  [t1 t2 t3]]
         (is (= {:valid? false
-                :anomaly-types [:G0+G1c :duplicate-elements]
+                :anomaly-types [:G1c :duplicate-elements]
                 :anomalies {:duplicate-elements [{:op t3
                                                   :mop [:r :x [1 2 1]]
                                                   :duplicates {1 2}}]
-                            :G0+G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 2] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 2 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]}}
+                            :G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n  T2 = {:type :ok, :value [[:append :x 2] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T2 appended 2 after T1 appended 1 to :x.\n  - However, T2 < T1, because T1 observed T2's append of 1 to key :y: a contradiction!"]}}
                (c {:anomalies [:G1]} h)))))))
 
 (deftest merge-order-test

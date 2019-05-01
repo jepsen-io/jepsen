@@ -445,47 +445,6 @@
        (map (partial mop-deps append-index write-index read-index op))
        (reduce set/union #{})))
 
-(defrecord Explainer [append-index write-index read-index]
-  cycle/Explainer
-  (explain-pair [_ a-name a b-name b]
-    (->> (:value b)
-         (keep (fn [[f k v :as mop]]
-                 (case f
-                   :r (when-let [writer (wr-mop-dep write-index b mop)]
-                        (when (= writer a)
-                          (str b-name " observed " a-name
-                               "'s append of " (pr-str (peek v))
-                               " to key " (pr-str k))))
-                   :append
-                   (when-let [index (get-in append-index [k :indices v])]
-                     (let [; And what value was appended immediately before us
-                           ; in version order?
-                           prev-v (if (pos? index)
-                                    (get-in append-index [k :values (dec index)])
-                                    ::init)
-
-                           ; What op wrote that value?
-                           prev-append (when (pos? index)
-                                         (get-in write-index [k prev-v]))
-
-                           ; What ops read that value?
-                           prev-reads (get-in read-index [k prev-v])]
-                       (cond (= a prev-append)
-                             (str b-name " appended " (pr-str v) " after "
-                                  a-name " appended " (pr-str prev-v)
-                                  " to " (pr-str k))
-
-                             (some #{a} prev-reads)
-                             (if (= ::init prev-v)
-                               (str a-name
-                                    " observed the initial (nil) state of "
-                                    (pr-str k) ", which " b-name
-                                    " created by appending " (pr-str v))
-                               (str a-name " did not observe "
-                                    b-name "'s append of " (pr-str v)
-                                    " to " (pr-str k)))))))))
-         first)))
-
 (defn preprocess
   "Before we do any graph computation, we need to preprocess the history,
   making sure it's well-formed. We return a map of:
@@ -580,6 +539,45 @@
                     history))
      (WRExplainer. append-index write-index read-index)]))
 
+(defrecord RWExplainer [append-index write-index read-index]
+  cycle/Explainer
+  (explain-pair [_ a-name a b-name b]
+    (->> (:value b)
+         (keep (fn [[f k v :as mop]]
+                 (when (= f :append)
+                   (when-let [readers (rw-mop-deps append-index write-index
+                                                   read-index b mop)]
+                     (when (some #{a} readers)
+                       (let [prev-v (previously-appended-element
+                                      append-index write-index b mop)]
+                         (if (= ::init prev-v)
+                           (str a-name
+                                " observed the initial (nil) state of "
+                                (pr-str k) ", which " b-name
+                                " created by appending " (pr-str v))
+                           (str a-name " did not observe "
+                                b-name "'s append of " (pr-str v)
+                                " to " (pr-str k)))))))))
+         first)))
+
+(defn rw-graph
+  "Analyzes read-write anti-dependencies."
+  [history]
+  (let [{:keys [history append-index write-index read-index]} (preprocess
+                                                                history)]
+    [(cycle/forked
+       (reduce-mops (fn [g op [f :as mop]]
+                      (if (= f :append)
+                        ; Who read the state just before we wrote?
+                        (if-let [deps (rw-mop-deps append-index write-index
+                                                   read-index op mop)]
+                          (cycle/link-all-to g deps op :rw)
+                          g)
+                        g))
+                    (cycle/linear (cycle/directed-graph))
+                    history))
+     (RWExplainer. append-index write-index read-index)]))
+
 (defn g1c-graph
   "Per Adya, Liskov, & O'Neil, phenomenon G1C encompasses any cycle made up of
   direct dependency edges (but does not include anti-dependencies)."
@@ -626,24 +624,14 @@
   For more context, see Adya, Liskov, and O'Neil's 'Generalized Isolation Level
   Definitions', page 8."
   [history]
-  (let [{:keys [history append-index write-index read-index]} (preprocess
-                                                                history)
-        graph (cycle/forked
-                (reduce (fn op [g op]
-                          (reduce (fn [g dep]
-                                    (cycle/link g dep op))
-                                  g
-                                  (op-deps
-                                    append-index write-index read-index op)))
-                        (.linear (DirectedGraph.))
-                        history))]
-    [graph (Explainer. append-index write-index read-index)]))
+  ((cycle/combine ww-graph wr-graph rw-graph) history))
 
 (defn expand-anomalies
   "Takes a collection of anomalies, and returns the fully expanded version of
   those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
   [as]
   (let [as (set as)
+        as (if (:G2 as) (conj as :G1c) as)
         as (if (:G1 as) (conj as :G1a :G1b :G1c) as)
         as (if (:G1c as) (conj as :G0) as)]
     as))
@@ -657,6 +645,24 @@
   (let [g0-graph (cycle/project-relationship graph :ww)]
     (seq (keep (fn [scc]
                  (when-let [cycle (cycle/find-cycle g0-graph scc)]
+                   (cycle/explain-cycle explainer cycle)))
+               sccs))))
+
+(defn g1c-cases
+  "Given a graph, an explainer, and a collection of of strongly connected
+  components, searches for instances of G1c anomalies within it. Returns nil if
+  none are present."
+  [graph explainer sccs]
+  ; For g1c, we want to restrict the graph to write-write edges or write-read
+  ; edges.
+  (let [g1c-graph (cycle/keep-edge-values
+                    (fn [rs]
+                      (let [rs' (set/intersection #{:ww :wr} rs)]
+                        (when (seq rs')
+                          rs')))
+                    graph)]
+    (seq (keep (fn [scc]
+                 (when-let [cycle (cycle/find-cycle g1c-graph scc)]
                    (cycle/explain-cycle explainer cycle)))
                sccs))))
 
@@ -685,14 +691,30 @@
                     analyzer)
          ; Good, analyze the history
          {:keys [graph explainer sccs cycles]} (cycle/check analyzer history)
-         g0 (g0-cases graph explainer sccs)
 
-         ; Right now we can't tell what anomalies are on a case-by-case
-         ; basis. Looking for G2 will actually find G1 and G0 as well,
-         ; and G1 finds G0.
-         anomaly-type (cond (:G2  as) :G0+G1c+G2
-                            (:G1c as) :G0+G1c
-                            (:G0  as) :G0)]
+         ; Find specific anomaly cases
+         g0   (when (:G0 as)  (g0-cases graph explainer sccs))
+         g1c  (when (:G1c as) (g1c-cases graph explainer sccs))
+
+         ; What anomalies do we *definitely* have?
+         known-anomaly-types (cond-> #{}
+                               g0  (conj :G0)
+                               g1c (conj :G1c))
+
+         ; We might have G2 if we checked for it and found some anomalies; we
+         ; just don't know. If there are no cycles, there are clearly no
+         ; anomalies.
+         possible-anomaly-types (-> (when (seq cycles)
+                                      (conj known-anomaly-types :G2))
+                                    (set/intersection as))
+
+         unknown-anomaly-type
+         (when (seq possible-anomaly-types)
+           (->> possible-anomaly-types
+                sort
+                (map name)
+                (str/join "+")
+                keyword))]
 
      ; Write out cycles as a side effect
      (cycle/write-cycles! test checker-opts cycles)
@@ -700,8 +722,9 @@
      ; Later, we'll categorize the cycles this spits out. For now, just
      ; return em as-is.
      (cond-> {}
-       g0           (assoc :G0 g0)
-       (seq cycles) (assoc anomaly-type cycles)))))
+       g0                    (assoc :G0 g0)
+       g1c                   (assoc :G1c g1c)
+       unknown-anomaly-type  (assoc unknown-anomaly-type cycles)))))
 
 (defn checker
   "Full checker for append and read histories. Options are:
@@ -722,7 +745,9 @@
     :G1   G1a, G1b, and G1c.
     :G2   A dependency cycle with at least one anti-dependency edge.
 
-  :G1c implies G0. See http://pmg.csail.mit.edu/papers/icde00.pdf for context.
+  :G2 implies :G1c, and :G1c implies :G0, because if we construct the graph for
+  G2, it'll include all the edges for G1c, and so on. See
+  http://pmg.csail.mit.edu/papers/icde00.pdf for context.
 
   Note that while we can *find* instances of G0, G1c and G2, we can't (yet)
   categorize them automatically. These anomalies are grouped under :G0+G1c+G2

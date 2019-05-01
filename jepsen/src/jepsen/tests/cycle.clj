@@ -149,6 +149,31 @@
    (assert (not (nil? succ)))
    (.link graph node succ #{relationship} union-edge)))
 
+(defn link-to-all
+  "Given a graph g, links x to all ys."
+  [g x ys]
+  (if (seq ys)
+    (recur (link g x (first ys)) x (next ys))
+    g))
+
+(defn link-all-to
+  "Given a graph g, links all xs to y."
+  ([g xs y]
+   (if (seq xs)
+     (recur (link (first xs) y) (next xs) y)
+     g))
+  ([g xs y relationship]
+   (if (seq xs)
+     (recur (link g (first xs) y relationship) (next xs) y relationship)
+     g)))
+
+(defn link-all-to-all
+  "Given a graph g, links all xs to all ys."
+  [g xs ys]
+  (if (seq xs)
+    (recur (link-to-all g (first xs) ys) (next xs) ys)
+    g))
+
 (defn unlink
   "Heper for unlinking Bifurcan graphs."
   [^IGraph g a b]
@@ -189,26 +214,6 @@
     (keep-edge-values (fn [rs] (when (contains? rs rel) rs'))
                       g)))
 
-(defn link-to-all
-  "Given a graph g, links x to all ys."
-  [g x ys]
-  (if (seq ys)
-    (recur (link g x (first ys)) x (next ys))
-    g))
-
-(defn link-all-to
-  "Given a graph g, links all xs to y."
-  [g xs y]
-  (if (seq xs)
-    (recur (link (first xs) y) (next xs) y)
-    g))
-
-(defn link-all-to-all
-  "Given a graph g, links all xs to all ys."
-  [g xs ys]
-  (if (seq xs)
-    (recur (link-to-all g (first xs) ys) (next xs) ys)
-    g))
 
 (defn map->bdigraph
   "Turns a sequence of [node, successors] pairs (e.g. a map) into a bifurcan
