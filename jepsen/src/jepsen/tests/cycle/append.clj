@@ -643,42 +643,55 @@
   [history]
   ((cycle/combine ww-graph wr-graph rw-graph) history))
 
+(def cycle-explainer (cycle/->DefaultCycleExplainer))
+
+(defn cycle-explanations
+  "Takes a pair explainer, a function taking an scc and possible yielding a
+  cycle, and a series of strongly connected components. Produces a seq (nil if
+  empty) of explanations of cycles."
+  [pair-explainer cycle-fn sccs]
+  (seq (keep (fn [scc]
+               (when-let [cycle (cycle-fn scc)]
+                 (->> cycle
+                      (cycle/explain-cycle cycle-explainer pair-explainer)
+                      (cycle/render-cycle-explanation cycle-explainer
+                                                      pair-explainer))))
+             sccs)))
+
 (defn g0-cases
-  "Given a graph, an explainer, and a collection of strongly connected
+  "Given a graph, a pair explainer, and a collection of strongly connected
   components, searches for instances of G0 anomalies within it. Returns nil if
   none are present."
-  [graph explainer sccs]
+  [graph pair-explainer sccs]
   ; For g0, we want to restrict the graph purely to write-write edges.
   (let [g0-graph (-> graph
                      (cycle/remove-relationship :rw)
                      (cycle/remove-relationship :wr))]
-    (seq (keep (fn [scc]
-                 (when-let [cycle (cycle/find-cycle g0-graph scc)]
-                   (cycle/explain-cycle explainer cycle)))
-               sccs))))
+    (cycle-explanations pair-explainer
+                        (partial cycle/find-cycle g0-graph)
+                        sccs)))
 
 (defn g1c-cases
   "Given a graph, an explainer, and a collection of strongly connected
   components, searches for instances of G1c anomalies within them. Returns nil
   if none are present."
-  [graph explainer sccs]
+  [graph pair-explainer sccs]
   ; For g1c, we want to restrict the graph to write-write edges or write-read
   ; edges. We also need *just* the write-read graph, so that we can
   ; differentiate from G0--this differs from Adya, but we'd like to say
   ; specifically that an anomaly is G1c and NOT G0.
   (let [ww+wr-graph (cycle/remove-relationship graph        :rw)
         wr-graph    (cycle/remove-relationship ww+wr-graph  :ww)]
-    (seq (keep (fn [scc]
-                 (when-let [cycle (cycle/find-cycle-starting-with
-                                    wr-graph ww+wr-graph scc)]
-                   (cycle/explain-cycle explainer cycle)))
-               sccs))))
+    (cycle-explanations pair-explainer
+                        (partial cycle/find-cycle-starting-with
+                                 wr-graph ww+wr-graph)
+                        sccs)))
 
 (defn g2-single-cases
   "Given a graph, an explainer, and a collection of strongly connected
   components, searches for instances of G2-single anomalies within them.
   Returns nil if none are present."
-  [graph explainer sccs]
+  [graph pair-explainer sccs]
   ; For G2-single, we want exactly one rw edge in a cycle, and the remaining
   ; edges from ww or wr.
   (let [rw-graph      (-> graph
@@ -686,27 +699,24 @@
                           (cycle/remove-relationship :wr))
         ww+wr-graph   (-> graph
                           (cycle/remove-relationship :rw))]
-    (seq (keep (fn [scc]
-                 (when-let [cycle (cycle/find-cycle-starting-with
-                                    rw-graph ww+wr-graph scc)]
-                   (cycle/explain-cycle explainer cycle)))
-               sccs))))
+    (cycle-explanations pair-explainer
+                        (partial cycle/find-cycle-starting-with
+                                 rw-graph ww+wr-graph)
+                        sccs)))
 
 (defn g2-cases
   "Given a graph, an explainer, and a collection of strongly connected
   components, searches for instances of G2 anomalies within them. Returns nil
   if none are present."
-  [graph explainer sccs]
+  [graph pair-explainer sccs]
   ; For G2, we want at least one rw edge in a cycle; the other edges can be
   ; anything.
   (let [rw-graph (-> graph
                      (cycle/remove-relationship :ww)
                      (cycle/remove-relationship :wr))]
-    (seq (keep (fn [scc]
-                 (when-let [cycle (cycle/find-cycle-starting-with
-                                    rw-graph graph scc)]
-                   (cycle/explain-cycle explainer cycle)))
-               sccs))))
+    (cycle-explanations pair-explainer
+                        (partial cycle/find-cycle-starting-with rw-graph graph)
+                        sccs)))
 
 (defn expand-anomalies
   "Takes a collection of anomalies, and returns the fully expanded version of

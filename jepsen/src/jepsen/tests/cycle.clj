@@ -282,7 +282,7 @@
 ; - An Analyzer, which which examines a history and produces a pair of:
 ; - A Graph of dependencies over completion ops, and
 ; - An Explainer, which can explain cycles between those ops.
-;
+
 ; We write our Analyzers as a function (f history) => [graph explainer]. Graphs
 ; are Bifurcan DirectedGraphs. Explainers have a protocol, because we're going
 ; to pack some cached state into them.
@@ -769,25 +769,29 @@
                    (str "  " name " = " (pr-str txn))))
             (str/join "\n"))))
 
-(defn explain-cycle-pair
-  "Takes an explainer and a pair of [[a-name a] [b-name b] transactions, and
-  for each one, constructs a string explaining why a precedes b."
-  [explainer [[a-name a] [b-name b]]]
-  (or (when-let [ex (explain-pair explainer a-name a b-name b)]
-        (str a-name " < " b-name ", because " ex))
-      ; uhhhh
+(defn explain-cycle-pair-data
+  "Takes a pair explainer and a pair of ops, and constructs a data structure
+  explaining why a precedes b."
+  [pair-explainer [a b]]
+  (or (explain-pair-data pair-explainer a b)
       (throw (IllegalStateException.
-               (str "Explainer " (pr-str explainer)
+               (str "Explainer " (pr-str pair-explainer)
                     " was unable to explain the relationship"
                     " between " (pr-str a)
                     " and " (pr-str b))))))
 
 (defn explain-cycle-ops
-  "Takes an explainer and a sequence of [op-name op] operations, and produces a
-  string explaining why they follow in that order."
-  [explainer ops]
-  (let [explanations (->> (partition 2 1 ops)
-                          (map (partial explain-cycle-pair explainer)))
+  "Takes an pair explainer, a binding, and a sequence of steps: each an
+  explanation data structure of one pair. Produces a string explaining why they
+  follow in that order."
+  [pair-explainer binding steps]
+  (let [explanations (map (fn [[a-name b-name] step]
+                            (str a-name " < " b-name ", because "
+                                 (render-explanation
+                                   pair-explainer step a-name b-name)))
+                          ; Take pairs of names from the binding
+                          (partition 2 1 (cycle (map first binding)))
+                          steps)
         prefix       "  - "]
     (->> explanations
          (map-indexed (fn [i ex]
@@ -796,31 +800,46 @@
                           (str prefix ex ".\n"))))
          str/join)))
 
-(defn explain-cycle
-  "Takes an explainer and a cycle of ops [a b c a], and returns an explanation
-  of that cycle."
-  [explainer cycle]
-  (let [binding (->> (butlast cycle)
-                     (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
-    (str (explain-binding binding)
-         "\n\nThen:\n"
-         (explain-cycle-ops explainer (concat binding [(first binding)])))))
+; This protocol gives us the ability to take a cycle of operations and produce
+; a data structure describing that cycle, and to render that cycle explanation
+; as a string.
+(defprotocol CycleExplainer
+  (explain-cycle
+    [_ pair-explainer cycle]
+    "Takes a cycle and constructs a data structure describing it.")
+
+  (render-cycle-explanation
+    [_ pair-explainer explanation]
+    "Takes an explanation of a cycle and renders it to a string."))
+
+; This explainer just provides the step-by-step explanation of the
+; relationships between pairs of operations.
+(defrecord DefaultCycleExplainer []
+  CycleExplainer
+  (explain-cycle [_ pair-explainer cycle]
+    ; Take pairs of ops from the cycle, and construct an explanation for each.
+    {:cycle cycle
+     :steps (->> cycle
+                 (partition 2 1)
+                 (map (partial explain-cycle-pair-data pair-explainer)))})
+
+  (render-cycle-explanation [_ pair-explainer {:keys [cycle steps]}]
+    ; Number the transactions in the cycle
+    (let [binding (->> (butlast cycle)
+                       (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
+      ; Explain the binding, then each step.
+      (str (explain-binding binding)
+           "\n\nThen:\n"
+           (explain-cycle-ops pair-explainer binding steps)))))
 
 (defn explain-scc
-  "Takes a graph, an explainer, and a strongly connected component (a
-  collection of ops) in that graph. Using those graphs, constructs a chain
-  like:
-
-      [op1 relationship op2 relationship ... op1]
-
-  ... illustrating how they form a cycle. For instance:
-
-      [{:process 0 :value {:x 5}}
-       [:process 0] {:process 0 :value {:x 3}}
-       [:key :x]    {:process 1 :value {:x 4}}
-       [:key :x]    {:process 0 :value {:x 5}}]"
-  [graph explainer scc]
-  (explain-cycle explainer (find-cycle graph scc)))
+  "Takes a graph, a cycle explainer, a pair explainer, and a strongly connected
+  component (a collection of ops) in that graph. Using those graphs, constructs
+  a string explaining the cycle."
+  [graph cycle-explainer pair-explainer scc]
+  (->> (find-cycle graph scc)
+       (explain-cycle cycle-explainer pair-explainer)
+       (render-cycle-explanation cycle-explainer pair-explainer)))
 
 (defn check
   "Meat of the checker. Takes an analysis function and a history; returns a map
@@ -836,7 +855,9 @@
         sccs              (strongly-connected-components graph)
         cycles            (->> sccs
                                (sort-by (comp :index first))
-                               (mapv (partial explain-scc graph explainer)))]
+                               (mapv (partial explain-scc graph
+                                              (->DefaultCycleExplainer)
+                                              explainer)))]
     {:graph     graph
      :explainer explainer
      :sccs      sccs
