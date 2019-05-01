@@ -326,6 +326,27 @@
                               :G1c+G2 [msg]}}
                  (c {:anomalies [:G2]} h))))))
 
+    (testing "G2-single"
+      (let [t1  (op "ax1ay1")  ; T1 writes y after T1's read
+            t2  (op "ax2ry")   ; T2 writes x after T1
+            t3  (op "rx12")
+            h   [t1 t2 t3]
+            msg "Let:\n  T1 = {:type :ok, :value [[:append :x 1] [:append :y 1]]}\n  T2 = {:type :ok, :value [[:append :x 2] [:r :y]]}\n\nThen:\n  - T1 < T2, because T2 appended 2 after T1 appended 1 to :x.\n  - However, T2 < T1, because T2 observed the initial (nil) state of :y, which T1 created by appending 1: a contradiction!"
+            msg2 "Let:\n  T1 = {:type :ok, :value [[:append :x 2] [:r :y]]}\n  T2 = {:type :ok, :value [[:append :x 1] [:append :y 1]]}\n\nThen:\n  - T1 < T2, because T1 observed the initial (nil) state of :y, which T2 created by appending 1.\n  - However, T2 < T1, because T1 appended 2 after T2 appended 1 to :x: a contradiction!"]
+        ; G0 and G1 won't catch this
+        (is (= {:valid? true} (c {:anomalies [:G0]} h)))
+        (is (= {:valid? true} (c {:anomalies [:G1]} h)))
+        ; But G2-single and G2 will!
+        (is (= {:valid? false
+                :anomaly-types [:G2-single]
+                :anomalies {:G2-single [msg]}}
+               (c {:anomalies [:G2-single]} h)))
+        (is (= {:valid? false
+                :anomaly-types [:G2+G2-single :G2-single]
+                :anomalies {:G2+G2-single [msg]
+                            :G2-single    [msg2]}}
+               (c {:anomalies [:G2]} h)))))
+
     (testing "G2"
       (let [; A pure anti-dependency cycle
             t1 (op "ax1ry")

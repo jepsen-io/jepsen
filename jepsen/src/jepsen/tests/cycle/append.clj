@@ -626,18 +626,8 @@
   [history]
   ((cycle/combine ww-graph wr-graph rw-graph) history))
 
-(defn expand-anomalies
-  "Takes a collection of anomalies, and returns the fully expanded version of
-  those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
-  [as]
-  (let [as (set as)
-        as (if (:G2 as) (conj as :G1c) as)
-        as (if (:G1 as) (conj as :G1a :G1b :G1c) as)
-        as (if (:G1c as) (conj as :G0) as)]
-    as))
-
 (defn g0-cases
-  "Given a graph, an explainer, and a collection of of strongly connected
+  "Given a graph, an explainer, and a collection of strongly connected
   components, searches for instances of G0 anomalies within it. Returns nil if
   none are present."
   [graph explainer sccs]
@@ -649,26 +639,49 @@
                sccs))))
 
 (defn g1c-cases
-  "Given a graph, an explainer, and a collection of of strongly connected
-  components, searches for instances of G1c anomalies within it. Returns nil if
-  none are present."
+  "Given a graph, an explainer, and a collection of strongly connected
+  components, searches for instances of G1c anomalies within them. Returns nil
+  if none are present."
   [graph explainer sccs]
   ; For g1c, we want to restrict the graph to write-write edges or write-read
   ; edges. We also need *just* the write-read graph, so that we can
   ; differentiate from G0--this differs from Adya, but we'd like to say
   ; specifically that an anomaly is G1c and NOT G0.
-  (let [wr-graph  (cycle/project-relationship graph :wr)
-        ww+wr-graph (cycle/keep-edge-values
-                      (fn [rs]
-                        (let [rs' (set/intersection #{:ww :wr} rs)]
-                          (when (seq rs')
-                            rs')))
-                      graph)]
+  (let [ww+wr-graph (cycle/remove-relationship graph        :rw)
+        wr-graph    (cycle/remove-relationship ww+wr-graph  :ww)]
     (seq (keep (fn [scc]
                  (when-let [cycle (cycle/find-cycle-starting-with
                                     wr-graph ww+wr-graph scc)]
                    (cycle/explain-cycle explainer cycle)))
                sccs))))
+
+(defn g2-single-cases
+  "Given a graph, an explainer, and a collection of strongly connected
+  components, searches for instances of G2-single anomalies within them.
+  Returns nil if none are present."
+  [graph explainer sccs]
+  ; For G2-single, we want exactly one rw edge in a cycle, and the remaining
+  ; edges from ww or wr.
+  (let [rw-graph      (-> graph
+                          (cycle/remove-relationship :ww)
+                          (cycle/remove-relationship :wr))
+        ww+wr-graph   (-> graph
+                          (cycle/remove-relationship :rw))]
+    (seq (keep (fn [scc]
+                 (when-let [cycle (cycle/find-cycle-starting-with
+                                    rw-graph ww+wr-graph scc)]
+                   (cycle/explain-cycle explainer cycle)))
+               sccs))))
+
+(defn expand-anomalies
+  "Takes a collection of anomalies, and returns the fully expanded version of
+  those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
+  [as]
+  (let [as (set as)
+        as (if (:G2 as)  (conj as :G2-single :G1c) as)
+        as (if (:G1 as)  (conj as :G1a :G1b :G1c) as)
+        as (if (:G1c as) (conj as :G0) as)]
+    as))
 
 (defn cycles
   "Performs dependency graph analysis and returns a sequence of anomalies.
@@ -680,13 +693,15 @@
     :anomalies              A collection of anomalies which should be reported,
                             if found.
 
-  Supported anomalies are :G0, :G1c, and :G2. G1c implies G0. We don't know how
-  to check g2-single yet."
+  Supported anomalies are :G0, :G1c, :G2-single, and :G2. G1c implies G0. We
+  don't know how to check g2-single yet."
   ([opts test history checker-opts]
    (let [as       (expand-anomalies (:anomalies opts))
-         analyzer (cond (:G2  as)  graph     ; graph includes g1c and g0
-                        (:G1c as)  g1c-graph ; g1c includes g0
-                        (:G0  as)  ww-graph  ; g0 is just write conflicts
+         ; What graph do we need to detect these anomalies?
+         analyzer (cond (:G2  as)       graph     ; Need full deps
+                        (:G2-single as) graph     ; Need full deps
+                        (:G1c as)       g1c-graph ; g1c includes g0
+                        (:G0  as)       ww-graph  ; g0 is just write conflicts
                         true       (throw (IllegalArgumentException.
                                             "Expected at least one anomaly to check for!")))
          ; Any other graphs to merge in?
@@ -697,13 +712,16 @@
          {:keys [graph explainer sccs cycles]} (cycle/check analyzer history)
 
          ; Find specific anomaly cases
-         g0   (when (:G0 as)  (g0-cases graph explainer sccs))
-         g1c  (when (:G1c as) (g1c-cases graph explainer sccs))
+         g0         (when (:G0 as)        (g0-cases graph explainer sccs))
+         g1c        (when (:G1c as)       (g1c-cases graph explainer sccs))
+         g2-single  (when (:G2-single as) (g2-single-cases
+                                            graph explainer sccs))
 
          ; What anomalies do we *definitely* have?
          known-anomaly-types (cond-> #{}
-                               g0  (conj :G0)
-                               g1c (conj :G1c))
+                               g0         (conj :G0)
+                               g1c        (conj :G1c)
+                               g2-single  (conj :G2-single))
 
          ; We might have G2 if we checked for it and found some anomalies; we
          ; just don't know. If there are no cycles, there are clearly no
@@ -726,8 +744,9 @@
      ; Later, we'll categorize the cycles this spits out. For now, just
      ; return em as-is.
      (cond-> {}
-       g0                    (assoc :G0 g0)
-       g1c                   (assoc :G1c g1c)
+       g0                    (assoc :G0         g0)
+       g1c                   (assoc :G1c        g1c)
+       g2-single             (assoc :G2-single  g2-single)
        unknown-anomaly-type  (assoc unknown-anomaly-type cycles)))))
 
 (defn checker
