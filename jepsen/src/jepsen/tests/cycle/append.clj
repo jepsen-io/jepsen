@@ -632,7 +632,9 @@
   none are present."
   [graph explainer sccs]
   ; For g0, we want to restrict the graph purely to write-write edges.
-  (let [g0-graph (cycle/project-relationship graph :ww)]
+  (let [g0-graph (-> graph
+                     (cycle/remove-relationship :rw)
+                     (cycle/remove-relationship :wr))]
     (seq (keep (fn [scc]
                  (when-let [cycle (cycle/find-cycle g0-graph scc)]
                    (cycle/explain-cycle explainer cycle)))
@@ -673,6 +675,22 @@
                    (cycle/explain-cycle explainer cycle)))
                sccs))))
 
+(defn g2-cases
+  "Given a graph, an explainer, and a collection of strongly connected
+  components, searches for instances of G2 anomalies within them. Returns nil
+  if none are present."
+  [graph explainer sccs]
+  ; For G2, we want at least one rw edge in a cycle; the other edges can be
+  ; anything.
+  (let [rw-graph (-> graph
+                     (cycle/remove-relationship :ww)
+                     (cycle/remove-relationship :wr))]
+    (seq (keep (fn [scc]
+                 (when-let [cycle (cycle/find-cycle-starting-with
+                                    rw-graph graph scc)]
+                   (cycle/explain-cycle explainer cycle)))
+               sccs))))
+
 (defn expand-anomalies
   "Takes a collection of anomalies, and returns the fully expanded version of
   those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
@@ -700,7 +718,7 @@
          ; What graph do we need to detect these anomalies?
          analyzer (cond (:G2  as)       graph     ; Need full deps
                         (:G2-single as) graph     ; Need full deps
-                        (:G1c as)       g1c-graph ; g1c includes g0
+                        (:G1c as)       g1c-graph ; g1c graph includes g0
                         (:G0  as)       ww-graph  ; g0 is just write conflicts
                         true       (throw (IllegalArgumentException.
                                             "Expected at least one anomaly to check for!")))
@@ -709,45 +727,28 @@
                     (apply cycle/combine analyzer ags)
                     analyzer)
          ; Good, analyze the history
-         {:keys [graph explainer sccs cycles]} (cycle/check analyzer history)
+         {:keys [graph explainer sccs]} (cycle/check analyzer history)
 
          ; Find specific anomaly cases
          g0         (when (:G0 as)        (g0-cases graph explainer sccs))
          g1c        (when (:G1c as)       (g1c-cases graph explainer sccs))
          g2-single  (when (:G2-single as) (g2-single-cases
                                             graph explainer sccs))
+         g2         (when (:G2 as)        (g2-cases graph explainer sccs))
 
-         ; What anomalies do we *definitely* have?
-         known-anomaly-types (cond-> #{}
-                               g0         (conj :G0)
-                               g1c        (conj :G1c)
-                               g2-single  (conj :G2-single))
-
-         ; We might have G2 if we checked for it and found some anomalies; we
-         ; just don't know. If there are no cycles, there are clearly no
-         ; anomalies.
-         possible-anomaly-types (-> (when (seq cycles)
-                                      (conj known-anomaly-types :G2))
-                                    (set/intersection as))
-
-         unknown-anomaly-type
-         (when (seq possible-anomaly-types)
-           (->> possible-anomaly-types
-                sort
-                (map name)
-                (str/join "+")
-                keyword))]
-
+         ; Results
+         anomalies (cond-> {}
+                     g0                    (assoc :G0         g0)
+                     g1c                   (assoc :G1c        g1c)
+                     g2-single             (assoc :G2-single  g2-single)
+                     g2                    (assoc :G2         g2))]
      ; Write out cycles as a side effect
-     (cycle/write-cycles! test checker-opts cycles)
-
-     ; Later, we'll categorize the cycles this spits out. For now, just
-     ; return em as-is.
-     (cond-> {}
-       g0                    (assoc :G0         g0)
-       g1c                   (assoc :G1c        g1c)
-       g2-single             (assoc :G2-single  g2-single)
-       unknown-anomaly-type  (assoc unknown-anomaly-type cycles)))))
+     (doseq [[type cycles] anomalies]
+       (cycle/write-cycles! test
+                            (assoc checker-opts
+                                   :filename (str (name type) ".txt"))
+                            cycles))
+     anomalies)))
 
 (defn checker
   "Full checker for append and read histories. Options are:

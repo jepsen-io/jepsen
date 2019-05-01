@@ -787,8 +787,10 @@
      :cycles    cycles}))
 
 (defn write-cycles!
-  "Writes cycles to a file. Opts should be checker options, e,g, {:subdirectory
-  ...}"
+  "Writes cycles to a file. Opts:
+
+  :subdirectory   What subdirectory to write to
+  :filename       What to call the file"
   [test opts cycles]
   (when (and (seq cycles)
              ; These are purely here so we don't have to fill in test
@@ -797,7 +799,8 @@
              (:start-time test))
     (->> cycles
          (str/join "\n\n\n")
-         (spit (store/path! test (:subdirectory opts) "cycles.txt")))))
+         (spit (store/path! test (:subdirectory opts)
+                            (:filename opts "cycles.txt"))))))
 
 (defn checker
   "Takes a function which takes a history and returns a [graph, explainer]
