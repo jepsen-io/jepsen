@@ -190,8 +190,9 @@
        ; Build up a map of keys to sets of observed values for those keys
        (reduce (fn [states op]
                  (reduce (fn [states [f k v]]
-                           (if (= :r f)
-                             ; Good, this is a read
+                           (if (and (= :r f) (seq v))
+                             ; Good, this is a read of something other than the
+                             ; initial state
                              (-> states
                                  (get k #{})
                                  (conj v)
@@ -200,7 +201,10 @@
                              states))
                          states
                          (:value op)))
-               (values-from-single-appends history))
+               {})
+       ; If we can't infer anything from reads, see if we can use a single
+       ; append operation to infer a value.
+       (merge (values-from-single-appends history))
        ; And sort
        (util/map-vals (partial sort-by count))))
 
@@ -574,7 +578,7 @@
            (pr-str key) ", which " b-name
            " created by appending " (pr-str value'))
       (str a-name " did not observe "
-           b-name "'s append of " (pr-str value)
+           b-name "'s append of " (pr-str value')
            " to " (pr-str key)))))
 
 (defn rw-graph
@@ -794,6 +798,7 @@
          analyzer (if-let [ags (:additional-graphs opts)]
                     (apply cycle/combine analyzer ags)
                     analyzer)
+
          ; Good, analyze the history
          {:keys [graph explainer sccs]} (cycle/check analyzer history)
 
