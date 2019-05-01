@@ -286,16 +286,52 @@
 ; We write our Analyzers as a function (f history) => [graph explainer]. Graphs
 ; are Bifurcan DirectedGraphs. Explainers have a protocol, because we're going
 ; to pack some cached state into them.
-(defprotocol Explainer
-  (explain-pair
-    [_ a-name a b-name b]
-    "Given a pair of operations, and short names for them, explain why b
-    depends on a. `nil` indicates that b does not depend on a."))
+(defprotocol DataExplainer
+  (explain-pair-data
+    [_ a b]
+    "Given a pair of operations a and b, explains why b depends on a, in the
+    form of a data structure. Returns `nil` if b does not depend on a.")
+
+  (render-explanation
+    [_ explanation a-name b-name]
+    "Given an explanation from explain-pair-data, and short names for a and b,
+    renders a string explaining why a depends on b."))
+
+(defn explain-pair
+  "Given a pair of operations, and short names for them, explain why b
+  depends on a, as a string. `nil` indicates that b does not depend on a."
+  [explainer a-name a b-name b]
+  (when-let [ex (explain-pair-data explainer a b)]
+    (render-explanation explainer ex a-name b-name)))
 
 (defrecord CombinedExplainer [explainers]
-  Explainer
-  (explain-pair [_ a-name a b-name b]
-    (first (keep (fn [e] (explain-pair e a-name a b-name b)) explainers))))
+  DataExplainer
+  (explain-pair-data [this a b]
+    ; This is SUCH an evil hack, but, uh, bear with me.
+    ; When we render an explanation, we have no way to tell what explainer
+    ; knows how to render it, and we don't want to make every explainer have to
+    ; double-check whether they're rendering their own explanations, or if
+    ; they're being passed someone else's. We could have a *wrapper type* here,
+    ; but then we're introducing non-semantic data into the explanation which
+    ; isn't necessary for users, makes it harder to read output, and makes it
+    ; more difficult to test. Routing explanations to the explainers that
+    ; generated them is just *plumbing*, and has no semantic place in our
+    ; data model.
+    ;
+    ; Lord help me, I think this is the first time I've actually wanted to
+    ; think about metadata outside of a macro or compiler context.
+    (when-let [[i ex] (->> explainers
+                           (map-indexed (fn [i e] [i (explain-pair-data e a b)]))
+                           ; Find the first [i explanation] pair where ex is
+                           ; present
+                           (filter second)
+                           first)]
+      (vary-meta ex assoc this i)))
+
+  (render-explanation [this ex a-name b-name]
+    (let [i (get (meta ex) this)]
+      (assert i (str "Not sure where explanation " (pr-str ex) " with meta " (pr-str (meta ex)) " came from!"))
+      (render-explanation (nth explainers i) ex a-name b-name))))
 
 (defn combine
   "Helpful in composing an analysis function for a checker out of multiple
@@ -316,8 +352,8 @@
 ;; Monotonic keys!
 
 (defrecord MonotonicKeyExplainer []
-  Explainer
-  (explain-pair [_ a-name a b-name b]
+  DataExplainer
+  (explain-pair-data [_ a b]
     (let [a (:value a)
           b (:value b)]
       ; Find keys in common
@@ -327,11 +363,17 @@
                      (let [a (get a k)
                            b (get b k)]
                        (when (and a b (< a b))
-                         (reduced (str a-name " observed " (pr-str k) " = "
-                                       (pr-str a) ", and " b-name
-                                       " observed a higher value "
-                                       (pr-str b))))))
-                   nil)))))
+                         (reduced {:type   :monotonic
+                                   :key    k
+                                   :value  a
+                                   :value' b}))))
+                   nil))))
+
+  (render-explanation [_ {:keys [key value value']} a-name b-name]
+    (str a-name " observed " (pr-str key) " = "
+         (pr-str value) ", and " b-name
+         " observed a higher value "
+         (pr-str value'))))
 
 (defn monotonic-key-order
   "Given a key, and a history where ops are maps of keys to values, constructs
@@ -378,11 +420,15 @@
        forked))
 
 (defrecord ProcessExplainer []
-  Explainer
-  (explain-pair [_ a-name a b-name b]
+  DataExplainer
+  (explain-pair-data [_ a b]
     (when (and (= (:process a) (:process b))
                (< (:index a) (:index b)))
-      (str "process " (:process a) " executed " a-name " before " b-name))))
+      {:type      :process
+       :process   (:process a)}))
+
+  (render-explanation [_ {:keys [process]} a-name b-name]
+    (str "process " process " executed " a-name " before " b-name)))
 
 (defn process-graph
   "Analyses histories and relates operations performed sequentially by each
@@ -400,22 +446,27 @@
 ; Realtime order
 
 (defrecord RealtimeExplainer [pairs]
-  Explainer
-  (explain-pair [_ a'-name a' b'-name b']
+  DataExplainer
+  (explain-pair-data [_ a' b']
     (let [b (get pairs b')]
       (when (< (:index a') (:index b))
-        (str a'-name " completed at index " (:index a') ","
-             (when (and (:time a') (:time b))
-               (let [dt (- (:time b) (:time a'))]
-                 ; Times are approximate--what matters is the serialization
-                 ; order. If we observe a zero or negative delta, just fudge it.
-                 (if (pos? dt)
-                   (str (format " %.3f" (util/nanos->secs (- (:time b) (:time a'))))
-                        " seconds")
-                   ; Times are inaccurate
-                   " just")))
-             " before the invocation of " b'-name
-             ", at index " (:index b))))))
+        {:type :realtime
+         :a'   a'
+         :b    b})))
+
+  (render-explanation [_ {:keys [a' b]} a'-name b'-name]
+    (str a'-name " completed at index " (:index a') ","
+         (when (and (:time a') (:time b))
+           (let [dt (- (:time b) (:time a'))]
+             ; Times are approximate--what matters is the serialization
+             ; order. If we observe a zero or negative delta, just fudge it.
+             (if (pos? dt)
+               (str (format " %.3f" (util/nanos->secs (- (:time b) (:time a'))))
+                    " seconds")
+               ; Times are inaccurate
+               " just")))
+         " before the invocation of " b'-name
+         ", at index " (:index b))))
 
 (defn realtime-graph
   "Given a history, produces an singleton order graph `{:realtime graph}` which
@@ -502,8 +553,8 @@
                {})))
 
 (defrecord WRExplainer []
-  Explainer
-  (explain-pair [_ a-name a b-name b]
+  DataExplainer
+  (explain-pair-data [_ a b]
     (let [writes (txn/ext-writes (:value a))
           reads  (txn/ext-reads  (:value b))]
       (reduce (fn [_ k]
@@ -511,10 +562,15 @@
                       w (get writes k)]
                   (when (= r w)
                     (reduced
-                      (str a-name " wrote " (pr-str k) " = " (pr-str w)
-                           ", which was read by " b-name)))))
+                      {:type  :wr
+                       :key   k
+                       :value w}))))
               nil
-              (keys reads)))))
+              (keys reads))))
+
+  (render-explanation [_ {:keys [key value]} a-name b-name]
+    (str a-name " wrote " (pr-str key) " = " (pr-str value)
+         ", which was read by " b-name)))
 
 (defn wr-graph
   "Given a history where ops are txns (e.g. [[:r :x 2] [:w :y 3]]), constructs

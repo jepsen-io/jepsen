@@ -473,8 +473,8 @@
         :read-index   read-index})))
 
 (defrecord WWExplainer [append-index write-index read-index]
-  cycle/Explainer
-  (explain-pair [_ a-name a b-name b]
+  cycle/DataExplainer
+  (explain-pair-data [_ a b]
     (->> (:value b)
          (keep (fn [[f k v :as mop]]
                  (when (= f :append)
@@ -484,10 +484,16 @@
                      ; What op wrote that value?
                      (when-let [dep (ww-mop-dep append-index write-index b mop)]
                        (when (= a dep)
-                         (str b-name " appended " (pr-str v) " after "
-                              a-name " appended " (pr-str prev-v)
-                              " to " (pr-str k))))))))
-         first)))
+                         {:type     :ww
+                          :key      k
+                          :value    prev-v
+                          :value'   v}))))))
+         first))
+
+  (render-explanation [_ {:keys [key value value'] :as m} a-name b-name]
+    (str b-name " appended " (pr-str value') " after "
+         a-name " appended " (pr-str value)
+         " to " (pr-str key))))
 
 (defn ww-graph
   "Analyzes write-write dependencies."
@@ -509,17 +515,22 @@
      (WWExplainer. append-index write-index read-index)]))
 
 (defrecord WRExplainer [append-index write-index read-index]
-  cycle/Explainer
-  (explain-pair [_ a-name a b-name b]
+  cycle/DataExplainer
+  (explain-pair-data [_ a b]
     (->> (:value b)
          (keep (fn [[f k v :as mop]]
                  (when (= f :r)
                    (when-let [writer (wr-mop-dep write-index b mop)]
                      (when (= writer a)
-                       (str b-name " observed " a-name
-                            "'s append of " (pr-str (peek v))
-                            " to key " (pr-str k)))))))
-         first)))
+                       {:type  :wr
+                        :key   k
+                        :value (peek v)})))))
+         first))
+
+  (render-explanation [_ {:keys [key value]} a-name b-name]
+    (str b-name " observed " a-name
+         "'s append of " (pr-str value)
+         " to key " (pr-str key))))
 
 (defn wr-graph
   "Analyzes write-read dependencies."
@@ -540,8 +551,8 @@
      (WRExplainer. append-index write-index read-index)]))
 
 (defrecord RWExplainer [append-index write-index read-index]
-  cycle/Explainer
-  (explain-pair [_ a-name a b-name b]
+  cycle/DataExplainer
+  (explain-pair-data [_ a b]
     (->> (:value b)
          (keep (fn [[f k v :as mop]]
                  (when (= f :append)
@@ -550,15 +561,21 @@
                      (when (some #{a} readers)
                        (let [prev-v (previously-appended-element
                                       append-index write-index b mop)]
-                         (if (= ::init prev-v)
-                           (str a-name
-                                " observed the initial (nil) state of "
-                                (pr-str k) ", which " b-name
-                                " created by appending " (pr-str v))
-                           (str a-name " did not observe "
-                                b-name "'s append of " (pr-str v)
-                                " to " (pr-str k)))))))))
-         first)))
+                         {:type   :rw
+                          :key    k
+                          :value  prev-v
+                          :value' v}))))))
+         first))
+
+  (render-explanation [_ {:keys [key value value']} a-name b-name]
+    (if (= ::init value)
+      (str a-name
+           " observed the initial (nil) state of "
+           (pr-str key) ", which " b-name
+           " created by appending " (pr-str value'))
+      (str a-name " did not observe "
+           b-name "'s append of " (pr-str value)
+           " to " (pr-str key)))))
 
 (defn rw-graph
   "Analyzes read-write anti-dependencies."
