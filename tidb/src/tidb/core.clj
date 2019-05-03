@@ -39,6 +39,7 @@
    :append          monotonic/append-workload
    :register        register/workload
    :set             set/workload
+   :set-cas         set/cas-workload
    :sequential      sequential/workload})
 
 (def workload-options
