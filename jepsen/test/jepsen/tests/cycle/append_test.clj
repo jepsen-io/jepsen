@@ -319,7 +319,7 @@
                 :anomalies {:G1c [msg]}}
                (c {:anomalies [:G2]} h)))))
 
-    (testing "G2-single"
+    (testing "G-single"
       (let [t1  (op "ax1ay1")  ; T1 writes y after T1's read
             t2  (op "ax2ry")   ; T2 writes x after T1
             t3  (op "rx12")
@@ -328,14 +328,14 @@
         ; G0 and G1 won't catch this
         (is (= {:valid? true} (c {:anomalies [:G0]} h)))
         (is (= {:valid? true} (c {:anomalies [:G1]} h)))
-        ; But G2-single and G2 will!
+        ; But G-single and G2 will!
         (is (= {:valid? false
-                :anomaly-types [:G2-single]
-                :anomalies {:G2-single [msg]}}
-               (c {:anomalies [:G2-single]} h)))
+                :anomaly-types [:G-single]
+                :anomalies {:G-single [msg]}}
+               (c {:anomalies [:G-single]} h)))
         (is (= {:valid? false
-                :anomaly-types [:G2-single]
-                :anomalies {:G2-single [msg]}}
+                :anomaly-types [:G-single]
+                :anomalies {:G-single [msg]}}
                (c {:anomalies [:G2]} h)))))
 
     (testing "G2"
@@ -366,8 +366,8 @@
                (c {:anomalies [:G2]} h)))
         ; But it will if we introduce a realtime graph component
         (is (= {:valid? false
-                :anomaly-types [:G2-single]
-                :anomalies {:G2-single ["Let:\n  T1 = {:index 3, :type :ok, :value [[:r :x [1]]]}\n  T2 = {:index 1, :type :ok, :value [[:append :x 2]]}\n\nThen:\n  - T1 < T2, because T1 did not observe T2's append of 2 to :x.\n  - However, T2 < T1, because T2 completed at index 1, before the invocation of T1, at index 2: a contradiction!"]}}
+                :anomaly-types [:G-single]
+                :anomalies {:G-single ["Let:\n  T1 = {:index 3, :type :ok, :value [[:r :x [1]]]}\n  T2 = {:index 1, :type :ok, :value [[:append :x 2]]}\n\nThen:\n  - T1 < T2, because T1 did not observe T2's append of 2 to :x.\n  - However, T2 < T1, because T2 completed at index 1, before the invocation of T1, at index 2: a contradiction!"]}}
                (c {:anomalies [:G2]
                    :additional-graphs [cycle/realtime-graph]}
                   h)))))

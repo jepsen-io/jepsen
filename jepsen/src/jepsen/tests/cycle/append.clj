@@ -662,7 +662,7 @@
         ; might have edges from, say, real-time or process orders, so we try to
         ; be permissive.
         (assoc ex :type (cond (< 1 rw) :G2
-                              (= 1 rw) :G2-single
+                              (= 1 rw) :G-single
                               (< 0 wr) :G1c
                               (< 0 ww) :G0
                               true (throw (IllegalStateException.
@@ -716,12 +716,12 @@
                                  wr-graph ww+wr-graph)
                         sccs)))
 
-(defn g2-single-cases
+(defn g-single-cases
   "Given a graph, an explainer, and a collection of strongly connected
-  components, searches for instances of G2-single anomalies within them.
+  components, searches for instances of G-single anomalies within them.
   Returns nil if none are present."
   [graph pair-explainer sccs]
-  ; For G2-single, we want exactly one rw edge in a cycle, and the remaining
+  ; For G-single, we want exactly one rw edge in a cycle, and the remaining
   ; edges from ww or wr.
   (let [rw-graph      (-> graph
                           (cycle/remove-relationship :ww)
@@ -744,16 +744,16 @@
                      (cycle/remove-relationship :ww)
                      (cycle/remove-relationship :wr))]
     ; Sort of a hack; we reject cycles that don't have at least two rw edges,
-    ; because single rw edges fall under g2-single.
+    ; because single rw edges fall under g-single.
     (seq (keep (fn [scc]
                  (when-let [cycle (cycle/find-cycle-starting-with
                                     rw-graph graph scc)]
                    ; Good, we've got a cycle. We're going to reject any cycles
-                   ; that are actually G2-single, because the G2-single checker
+                   ; that are actually G-single, because the G-single checker
                    ; will pick up on those. This could mean we might miss some
                    ; G2 cycles that we COULD find by modifying find-cycle to
                    ; return more candidates, but I don't think it's the end of
-                   ; the world; G2-single is worse, and if we see it, G2 is
+                   ; the world; G-single is worse, and if we see it, G2 is
                    ; just icing on the cake
                    (let [cx (cycle/explain-cycle cycle-explainer
                                                  pair-explainer
@@ -768,7 +768,7 @@
   those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
   [as]
   (let [as (set as)
-        as (if (:G2 as)  (conj as :G2-single :G1c) as)
+        as (if (:G2 as)  (conj as :G-single :G1c) as)
         as (if (:G1 as)  (conj as :G1a :G1b :G1c) as)
         as (if (:G1c as) (conj as :G0) as)]
     as))
@@ -783,13 +783,13 @@
     :anomalies              A collection of anomalies which should be reported,
                             if found.
 
-  Supported anomalies are :G0, :G1c, :G2-single, and :G2. G2 implies G2-single
+  Supported anomalies are :G0, :G1c, :G-single, and :G2. G2 implies G-single
   and G1c, and G1c implies G0."
   ([opts test history checker-opts]
    (let [as       (expand-anomalies (:anomalies opts))
          ; What graph do we need to detect these anomalies?
          analyzer (cond (:G2  as)       graph     ; Need full deps
-                        (:G2-single as) graph     ; Need full deps
+                        (:G-single as) graph     ; Need full deps
                         (:G1c as)       g1c-graph ; g1c graph includes g0
                         (:G0  as)       ww-graph  ; g0 is just write conflicts
                         true       (throw (IllegalArgumentException.
@@ -805,7 +805,7 @@
          ; Find specific anomaly cases
          g0         (when (:G0 as)        (g0-cases graph explainer sccs))
          g1c        (when (:G1c as)       (g1c-cases graph explainer sccs))
-         g2-single  (when (:G2-single as) (g2-single-cases
+         g-single  (when (:G-single as) (g-single-cases
                                             graph explainer sccs))
          g2         (when (:G2 as)        (g2-cases graph explainer sccs))
 
@@ -813,7 +813,7 @@
          anomalies (cond-> {}
                      g0                    (assoc :G0         g0)
                      g1c                   (assoc :G1c        g1c)
-                     g2-single             (assoc :G2-single  g2-single)
+                     g-single              (assoc :G-single  g-single)
                      g2                    (assoc :G2         g2))]
      ; Write out cycles as a side effect
      (doseq [[type cycles] anomalies]
