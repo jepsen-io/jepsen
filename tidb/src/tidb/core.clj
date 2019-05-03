@@ -68,6 +68,9 @@
                      :use-index         [true false]}
    :set             {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]}
+   :set-cas         {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :read-lock         [nil "FOR UPDATE"]}
    :sequential      {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]}})
 
