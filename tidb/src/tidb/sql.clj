@@ -194,7 +194,7 @@
   "Executes body in a transaction, with a timeout, automatically retrying
   conflicts and handling common errors."
   [op [c conn] & body]
-  `(timeout (+ 1000 socket-timeout) (assoc ~op :type :info, :value :timed-out)
+  `(timeout (+ 1000 socket-timeout) (assoc ~op :type :info, :error :timed-out)
             (with-error-handling ~op
               (with-txn-retries
                 ; PingCAP says that the default isolation level for
