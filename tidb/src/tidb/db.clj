@@ -200,7 +200,7 @@
     (when (or (:force-reinstall test) (not (cu/exists? tidb-dir)))
       (info node "installing TiDB")
       (info (tarball-url test))
-      (cu/install-archive! (tarball-url test))
+      (cu/install-archive! (tarball-url test) tidb-dir)
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))))
 
@@ -222,10 +222,13 @@
         (info node "tearing down TiDB")
         (stop! test node)
         ; Delete everything but bin/
-        (->> (cu/ls tidb-dir)
-             (remove #{"bin"})
-             (map (partial str tidb-dir "/"))
-             (c/exec :rm :-rf))))
+        (try+ (->> (cu/ls tidb-dir)
+                   (remove #{"bin"})
+                   (map (partial str tidb-dir "/"))
+                   (c/exec :rm :-rf))
+              (catch [:type :jepsen.control/nonzero-exit, :exit 2] e
+                ; No such dir
+                nil))))
 
     db/LogFiles
     (log-files [_ test node]
