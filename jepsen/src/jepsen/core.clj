@@ -153,7 +153,7 @@
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
        ~@body
-       (snarf-logs! test)
+       (snarf-logs! ~test)
        (finally
          (maybe-snarf-logs! ~test)
          (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
