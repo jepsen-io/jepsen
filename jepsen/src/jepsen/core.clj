@@ -152,8 +152,9 @@
                              (store/update-symlinks! ~test))))]
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
-       ~@body
-       (snarf-logs! ~test)
+       (let [res# (do ~@body)]
+         (snarf-logs! ~test)
+         res#)
        (finally
          (maybe-snarf-logs! ~test)
          (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
