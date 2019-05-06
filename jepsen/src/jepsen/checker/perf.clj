@@ -340,7 +340,7 @@
     ; If it's a zero-width interval, give it exactly 1 on either side.
     [(dec a) (inc a)]
     (let [; How big is the range?
-          size (Math/abs (- b a))
+          size (Math/abs (- (double b) (double a)))
           ; Divide the range into tenths
           grid (/ size 10)
           ; What's the nearest power of 10?
