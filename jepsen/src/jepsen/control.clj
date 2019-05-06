@@ -4,9 +4,8 @@
   scripts to open connections to various nodes."
   (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
-            [jepsen.util    :as util :refer [real-pmap
-                                             with-thread-name]]
-            [dom-top.core :refer [with-retry]]
+            [jepsen.util    :as util :refer [with-thread-name]]
+            [dom-top.core :refer [real-pmap with-retry]]
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
             [clojure.tools.logging :refer [warn info debug error]]
