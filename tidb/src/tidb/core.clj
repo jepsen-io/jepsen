@@ -234,7 +234,9 @@
 
 (def cli-opts
   "Command line options for tools.cli"
-  [[nil "--nemesis-interval SECONDS"
+  [[nil "--force-reinstall" "Don't re-use an existing TiDB directory"]
+
+    [nil "--nemesis-interval SECONDS"
     "Roughly how long to wait between nemesis operations. Default: 10s."
     :parse-fn parse-long
     :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))

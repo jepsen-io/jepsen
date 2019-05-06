@@ -148,13 +148,14 @@
 (defn wait-page
   "Waits for a status page to become available"
   [url]
-  (with-retry [tries 20]
+  (with-retry [delay 1000
+               tries 10] ; 1024 seconds
     (c/exec :curl :--fail url)
     (catch Throwable e
       (info "Waiting for page" url)
       (if (pos? tries)
-          (do (Thread/sleep 1000)
-              (retry (dec tries)))
+          (do (Thread/sleep delay)
+              (retry (* 2 delay) (dec tries)))
           (throw+ {:type  :wait-page
                    :url   url})))))
 
@@ -201,6 +202,8 @@
       (info node "installing TiDB")
       (info (tarball-url test))
       (cu/install-archive! (tarball-url test) tidb-dir)
+      (info :mkdir pd-data-dir)
+      (c/exec :mkdir :-p pd-data-dir kv-data-dir)
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))))
 
