@@ -229,9 +229,9 @@
     (:pause n) (assoc :pause-pd true
                       :pause-kv true
                       :pause-db true)
-    (:partition n) (assoc :partition-one true
-                          :partition-half true
-                          :partition-ring true)))
+    (:partitions n) (assoc :partition-one true
+                           :partition-half true
+                           :partition-ring true)))
 
 (defn nemesis
   "Composite nemesis and generator, given test options."
