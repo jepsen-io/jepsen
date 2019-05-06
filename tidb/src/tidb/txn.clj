@@ -12,7 +12,11 @@
   [f k (case f
          :r (-> conn
                 (c/query [(str "select (val) from " table " where "
-                               (if (:use-index test) "sk" "id") " = ? "
+                               (if (or (:use-index test)
+                                       (:predicate-read test))
+                                 "sk"
+                                 "id")
+                               " = ? "
                                (:read-lock test))
                           k])
                 first

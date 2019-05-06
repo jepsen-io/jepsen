@@ -180,10 +180,12 @@
   (stop-pd! test node))
 
 (defn tarball-url
-  [url version]
-  (if (nil? url)
-    (str "http://download.pingcap.org/tidb-" version "-linux-amd64.tar.gz")
-    url))
+  "Constructs the URL for a tarball; either passing through the test's URL, or
+  constructing one from the version."
+  [test]
+  (or (:tarball-url test)
+      (str "http://download.pingcap.org/tidb-" (:version test)
+           "-linux-amd64.tar.gz")))
 
 (defn install!
   "Downloads archive and extracts it to our local tidb-dir, if it doesn't exist
@@ -197,7 +199,8 @@
   (c/su
     (when (or (:force-reinstall test) (not (cu/exists? tidb-dir)))
       (info node "installing TiDB")
-      (cu/install-archive! (tarball-url (:tarball-url test) (:version test)) tidb-dir)
+      (info (tarball-url test))
+      (cu/install-archive! (tarball-url test))
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))))
 
