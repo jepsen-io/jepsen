@@ -33,12 +33,14 @@
 (def client-port 2379)
 (def peer-port   2380)
 
-(def tidb-map
-  {"n1" {:pd "pd1" :kv "tikv1"}
-   "n2" {:pd "pd2" :kv "tikv2"}
-   "n3" {:pd "pd3" :kv "tikv3"}
-   "n4" {:pd "pd4" :kv "tikv4"}
-   "n5" {:pd "pd5" :kv "tikv5"} })
+(defn tidb-map
+  "Computes node IDs for a test."
+  [test]
+  (->> (:nodes test)
+       (map-indexed (fn [i node]
+                      [node {:pd (str "pd" (inc i))
+                             :kv (str "kv" (inc i))}]))
+       (into {})))
 
 (defn node-url
   "An HTTP url for connecting to a node on a particular port."
@@ -60,7 +62,8 @@
   \"foo=foo:2380,bar=bar:2380,...\""
   [test]
   (->> (:nodes test)
-       (map (fn [node] (str (get-in tidb-map [node :pd]) "=" (peer-url node))))
+       (map (fn [node] (str (get-in (tidb-map test) [node :pd])
+                            "=" (peer-url node))))
        (str/join ",")))
 
 (defn pd-endpoints
@@ -103,7 +106,7 @@
        :chdir   tidb-dir
        }
       (str "./bin/" pd-bin)
-      :--name                  (get-in tidb-map [node :pd])
+      :--name                  (get-in (tidb-map test) [node :pd])
       :--data-dir              pd-data-dir
       :--client-urls           (str "http://0.0.0.0:" client-port)
       :--peer-urls             (str "http://0.0.0.0:" peer-port)
@@ -202,8 +205,6 @@
       (info node "installing TiDB")
       (info (tarball-url test))
       (cu/install-archive! (tarball-url test) tidb-dir)
-      (info :mkdir pd-data-dir)
-      (c/exec :mkdir :-p pd-data-dir kv-data-dir)
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))))
 
