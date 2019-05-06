@@ -470,9 +470,10 @@
           (when (:error (:results test))
             (str "\n\n" (:error (:results test))))
           "\n\n"
-          (if (:valid? (:results test))
-            "Everything looks good! ヽ(‘ー`)ノ"
-            "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")))
+          (case (:valid? (:results test))
+            false     "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻"
+            :unknown  "Errors occurred during analysis, but no anomalies found. ಠ~ಠ"
+            true      "Everything looks good! ヽ(‘ー`)ノ")))
   test)
 
 (defn run!
