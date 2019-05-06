@@ -203,9 +203,9 @@
   [opts]
   {:client (append-client (txn/client {:val-type "text"}))
    :generator (->> (append-txns {:min-txn-length      1
-                                 :max-txn-length      3
+                                 :max-txn-length      4
                                  :key-count           5
-                                 :max-writes-per-key  2})
+                                 :max-writes-per-key  16})
                    (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
                    gen/seq)
    :checker (append/checker {:anomalies         [:G-single]
