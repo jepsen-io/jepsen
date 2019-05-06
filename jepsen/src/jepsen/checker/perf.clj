@@ -356,6 +356,17 @@
           b' (max b b')]
       [a' b'])))
 
+(defn without-empty-series
+  "Takes a plot, and strips out empty series objects."
+  [plot]
+  (update plot :series (partial filter (comp seq :data))))
+
+(defn has-data?
+  "Takes a plot and returns true iff it has at least one series with
+  data points."
+  [plot]
+  (boolean (some (comp seq :data) (:series plot))))
+
 (defn with-range
   "Takes a plot object. Where xrange or yrange are not provided, fills them in
   by iterating over each series :data."
