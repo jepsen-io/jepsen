@@ -5,7 +5,8 @@
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
 
@@ -128,7 +129,7 @@
      (let [parent (exec :dirname dest)]
        (exec :mkdir :-p parent))
 
-     (try
+     (try+
        (cd tmpdir
            ; Extract archive to tmpdir
            (if (re-find #".*\.zip$" url)
@@ -151,21 +152,23 @@
                ; Move all roots to dest
                (exec :mv tmpdir dest))))
 
-       (catch RuntimeException e
-         (condp re-find (.getMessage e)
-           #"tar: Unexpected EOF"
-           (if local-file
-             ; Nothing we can do to recover here
-             (throw (RuntimeException.
-                      (str "Local archive " local-file " on node "
-                           *host*
-                           " is corrupt: unexpected EOF.")))
-             (do (info "Retrying corrupt archive download")
-                 (exec :rm :-rf file)
-                 (install-archive! url dest force?)))
+       (catch [:type :jepsen.control/nonzero-exit] e
+         (let [err (:err e)]
+           (if (or (re-find #"tar: Unexpected EOF" err)
+                   (re-find #"This does not look like a tar archive" err))
+             (if local-file
+               ; Nothing we can do to recover here
+               (throw (RuntimeException.
+                        (str "Local archive " local-file " on node "
+                             *host*
+                             " is corrupt: " err)))
+               ; Retry download once; maybe it was abnormally terminated
+               (do (info "Retrying corrupt archive download")
+                   (exec :rm :-rf file)
+                   (install-archive! url dest force?)))
 
-           ; Throw by default
-           (throw e)))
+             ; Throw by default
+             (throw+ e))))
 
        (finally
          ; Clean up tmpdir
