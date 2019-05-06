@@ -96,7 +96,7 @@
        (control/on-nodes ~test (partial os/teardown! (:os ~test))))))
 
 (defn snarf-logs!
-  "Downloads logs for a test."
+  "Downloads logs for a test. Updates symlinks."
   [test]
   ; Download logs
   (locking snarf-logs!
@@ -127,7 +127,17 @@
                 (catch java.lang.IllegalArgumentException e
                   ; This is a jsch bug where the file is just being
                   ; created
-                  (info remote "doesn't exist"))))))))))
+                  (info remote "doesn't exist"))))))))
+    (store/update-symlinks! test)))
+
+(defn maybe-snarf-logs!
+  "Snarfs logs, swallows and logs all throwables. Why? Because we do this when
+  we encounter an error and abort, and we don't want an error here to supercede
+  the root cause that made us abort."
+  [test]
+  (try (snarf-logs! test)
+       (catch Throwable t
+         (warn t "Error snarfing logs and updating symlinks"))))
 
 (defmacro with-log-snarfing
   "Evaluates body and ensures logs are snarfed afterwards. Will also download
@@ -143,9 +153,9 @@
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
        ~@body
+       (snarf-logs! test)
        (finally
-         (snarf-logs! ~test)
-         (store/update-symlinks! ~test)
+         (maybe-snarf-logs! ~test)
          (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
 
 (defmacro with-db
