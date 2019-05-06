@@ -102,7 +102,7 @@
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
-  #{:partition
+  #{:partitions
     :partition-one
     :partition-half
     :partition-ring
