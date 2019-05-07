@@ -172,9 +172,9 @@
   (start-db! test node)
   (wait-page "http://127.0.0.1:10080/status"))
 
-(defn stop-pd! [test node] (cu/stop-daemon! pd-bin pd-pid-file))
-(defn stop-kv! [test node] (cu/stop-daemon! kv-bin kv-pid-file))
-(defn stop-db! [test node] (cu/stop-daemon! db-bin db-pid-file))
+(defn stop-pd! [test node] (c/su (cu/stop-daemon! pd-bin pd-pid-file)))
+(defn stop-kv! [test node] (c/su (cu/stop-daemon! kv-bin kv-pid-file)))
+(defn stop-db! [test node] (c/su (cu/stop-daemon! db-bin db-pid-file)))
 
 (defn stop!
   "Stops all daemons"
