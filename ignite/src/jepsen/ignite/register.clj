@@ -21,7 +21,7 @@
 (defrecord Client [conn cache config]
   client/Client
   (open! [this test node]
-    (let [config (ignite/configure-client (:nodes test))
+    (let [config (ignite/configure-client (:nodes test) (:pds test))
       conn (Ignition/start (.getCanonicalPath config))
       cache (.getOrCreateCache conn "JepsenCache")]
       (assoc this :conn conn :cache cache :config config)))

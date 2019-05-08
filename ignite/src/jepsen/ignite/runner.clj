@@ -100,6 +100,10 @@
     :default  :noop
     :parse-fn keyword
     :validate [#{:centos :debian :noop} "One of `centos` or `debian` or 'noop'"]]
+   ["-p" "--pds NAME" "Persistence Data Store."
+    :default  :false
+    :parse-fn str
+    :validate [#{"true" "false"} "One of `true` or `false`"]]
    ["-nemesis" "--nemesis Nemesis"
     "What Nemesis to use"
     :default jepsen.nemesis/noop
