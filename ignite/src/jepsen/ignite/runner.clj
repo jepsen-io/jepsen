@@ -4,10 +4,10 @@
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer :all]
             [jepsen.cli :as jc]
-            [jepsen.nemesis :as nemesis]
             [jepsen.core :as jepsen]
             [jepsen.ignite  [register :as register]
-                            [bank     :as bank]])
+                            [bank     :as bank]
+                            [nemesis  :as nemesis]])
   (:import (org.apache.ignite.cache CacheMode CacheAtomicityMode CacheWriteSynchronizationMode)
            (org.apache.ignite.transactions TransactionConcurrency TransactionIsolation)))
 
@@ -45,8 +45,9 @@
    "REPEATABLE_READ" TransactionIsolation/REPEATABLE_READ})
 
 (def nemesis-types
-  {"noop"                   nemesis/noop
-  "partition-random-halves" nemesis/partition-random-halves})
+  {"noop"                   jepsen.nemesis/noop
+  "partition-random-halves" nemesis/partition-random-halves
+  "kill-node"               nemesis/kill-node})
 
 (def opt-spec
   "Command line options for tools.cli"
@@ -101,7 +102,7 @@
     :validate [#{:centos :debian :noop} "One of `centos` or `debian` or 'noop'"]]
    ["-nemesis" "--nemesis Nemesis"
     "What Nemesis to use"
-    :default nemesis/noop
+    :default jepsen.nemesis/noop
     :parse-fn nemesis-types
     :validate [identity (jc/one-of nemesis-types)]]])
 

@@ -63,7 +63,7 @@
   [node test]
   (info node "Starting server node")
     (c/cd server-dir
-      (c/exec "bin/ignite.sh" (str server-dir "server-ignite-" node ".xml") :-v (c/lit (str ">" logfile " 2>&1 &")))))
+      (c/exec "bin/ignite.sh" (str server-dir "server-ignite-" node ".xml") :-v (c/lit (str ">>" logfile " 2>&1 &")))))
 
 (defn await-cluster-started
   "Waits for the grid cluster started."
@@ -73,6 +73,13 @@
       (catch Exception e true))) (do
         (info node "Waiting for cluster started")
         (Thread/sleep 3000))))
+
+(defn stop!
+  "Shuts down server."
+  [node test]
+  (c/su
+    (meh (c/exec :pkill :-9 :-f "org.apache.ignite.startup.cmdline.CommandLineStartup")))
+  (info node "Apache Ignite stopped"))
 
 (defn nuke!
   "Shuts down server and destroys all data."
