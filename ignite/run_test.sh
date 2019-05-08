@@ -15,4 +15,5 @@ lein run test \
   --backups 3 \
   --os noop \
   --nemesis noop \
-  --version 2.7.0
+  --version 2.7.0 \
+  --pds true
