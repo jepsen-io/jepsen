@@ -856,7 +856,8 @@
          anomalies  (:anomalies opts)]
      (reify checker/Checker
        (check [this test history checker-opts]
-         (let [g1a           (when (:G1a anomalies) (g1a-cases history))
+         (let [history       (remove (comp #{:nemesis} :process) history)
+               g1a           (when (:G1a anomalies) (g1a-cases history))
                g1b           (when (:G1b anomalies) (g1b-cases history))
                dups          (duplicates history)
                sorted-values (sorted-values history)
