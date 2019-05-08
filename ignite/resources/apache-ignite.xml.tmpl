@@ -76,14 +76,14 @@
             </bean>
         </property>
 
-        <property name="autoActivationEnabled" value="##pds##"/>
+        <property name="autoActivationEnabled" value="false"/>
 
         <!-- Enabling Apache Ignite native persistence. -->
         <property name="dataStorageConfiguration">
             <bean class="org.apache.ignite.configuration.DataStorageConfiguration">
                 <property name="defaultDataRegionConfiguration">
                     <bean class="org.apache.ignite.configuration.DataRegionConfiguration">
-                        <property name="persistenceEnabled" value="true"/>
+                        <property name="persistenceEnabled" value="##pds##"/>
                         <property name="metricsEnabled" value="true"/>
                         <property name="metricsRateTimeInterval" value="1000"/>
                     </bean>
