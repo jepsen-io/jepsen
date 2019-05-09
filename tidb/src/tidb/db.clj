@@ -152,7 +152,7 @@
   "Waits for a status page to become available"
   [url]
   (with-retry [delay 1000
-               tries 10] ; 1024 seconds
+               tries 11] ; 2048 seconds
     (c/exec :curl :--fail url)
     (catch Throwable e
       (info "Waiting for page" url)
