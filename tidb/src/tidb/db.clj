@@ -3,10 +3,10 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [dom-top.core :refer [with-retry]]
-            [jepsen
-              [core :as jepsen]
-              [control :as c]
-              [db :as db]]
+            [jepsen [core :as jepsen]
+                    [control :as c]
+                    [db :as db]
+                    [faketime :as faketime]]
             [jepsen.control.util :as cu]
             [slingshot.slingshot :refer [try+ throw+]]
             [tidb.sql :as sql]))
@@ -174,9 +174,19 @@
   (start-db! test node)
   (wait-page "http://127.0.0.1:10080/status"))
 
-(defn stop-pd! [test node] (c/su (cu/stop-daemon! pd-bin pd-pid-file)))
-(defn stop-kv! [test node] (c/su (cu/stop-daemon! kv-bin kv-pid-file)))
-(defn stop-db! [test node] (c/su (cu/stop-daemon! db-bin db-pid-file)))
+(defn stop-pd! [test node] (c/su
+                             ; Faketime wrapper means we only kill the wrapper
+                             ; script, not the underlying binary
+                             (cu/stop-daemon! pd-bin pd-pid-file)
+                             (cu/grepkill! pd-bin)
+                             (info :pd-stopped (try+ (c/exec :ps :aux c/| :grep pd-bin c/| :grep :-v :grep)
+                                                     (catch [:type :jepsen.control/nonzero-exit] e (:out e))))))
+
+(defn stop-kv! [test node] (c/su (cu/stop-daemon! kv-bin kv-pid-file)
+                                 (cu/grepkill! kv-bin)))
+
+(defn stop-db! [test node] (c/su (cu/stop-daemon! db-bin db-pid-file)
+                                 (cu/grepkill! db-bin)))
 
 (defn stop!
   "Stops all daemons"
@@ -209,7 +219,9 @@
       (cu/install-archive! (tarball-url test) tidb-dir)
       (c/exec :ln :-s (str tidb-bin-dir "/" pdctl-bin) (str "/bin/" pdctl-bin))
       (info "Syncing disks to avoid slow fsync on db start")
-      (c/exec :sync))))
+      (c/exec :sync))
+    ; Add faketime wrappers
+    (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0 1)))
 
 (defn db
   "TiDB"

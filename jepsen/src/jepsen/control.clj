@@ -128,7 +128,7 @@
               :cmd (:cmd action)}
              result)
       nil ; cause
-      "Command exited with non-zero status %s on node %s:\n%s\n\nSTDIN:\n%s\n\nSTDOUT:\n%s\n\nSTDERR:\n%s"
+      "Command exited with non-zero status %d on node %s:\n%s\n\nSTDIN:\n%s\n\nSTDOUT:\n%s\n\nSTDERR:\n%s"
       exit
       (:host result)
       (:cmd action)
