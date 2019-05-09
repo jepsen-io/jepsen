@@ -63,7 +63,7 @@
   [node test]
   (info node "Starting server node")
     (c/cd server-dir
-      (c/exec "bin/ignite.sh" (str server-dir "server-ignite-" node ".xml") :-v (c/lit (str ">" logfile " 2>&1 &")))))
+      (c/exec "bin/ignite.sh" (str server-dir "server-ignite-" node ".xml") :-v (c/lit (str ">>" logfile " 2>&1 &")))))
 
 (defn await-cluster-started
   "Waits for the grid cluster started."
@@ -72,7 +72,16 @@
     (= true (try (c/exec :egrep (c/lit (str "\"Topology snapshot \\[.*?, servers\\=" (count (:nodes test)) ",\"")) logfile)
       (catch Exception e true))) (do
         (info node "Waiting for cluster started")
-        (Thread/sleep 3000))))
+        (Thread/sleep 3000)))
+  (c/cd server-dir
+     (c/exec "bin/control.sh"  (str "--activate --host " node))))
+
+(defn stop!
+  "Shuts down server."
+  [node test]
+  (c/su
+    (meh (c/exec :pkill :-9 :-f "org.apache.ignite.startup.cmdline.CommandLineStartup")))
+  (info node "Apache Ignite stopped"))
 
 (defn nuke!
   "Shuts down server and destroys all data."
@@ -82,22 +91,23 @@
     (c/exec :rm :-rf server-dir))
   (info node "Apache Ignite nuked"))
 
-(defn configure [addresses client-mode]
+(defn configure [addresses client-mode pds]
   "Creates a config file."
   (-> (slurp "resources/apache-ignite.xml.tmpl")
     (str/replace "##addresses##" (clojure.string/join "\n" (map #(str "\t<value>" % ":47500..47509</value>") addresses)))
     (str/replace "##instancename##" (str (UUID/randomUUID)))
-    (str/replace "##clientmode##" (str client-mode))))
+    (str/replace "##clientmode##" (str client-mode))
+    (str/replace "##pds##" pds)))
 
-(defn configure-server [addresses node]
+(defn configure-server [addresses node pds]
   "Creates a server config file and uploads it to the given node."
-  (c/exec :echo (configure addresses false) :> (str server-dir "server-ignite-" node ".xml")))
+  (c/exec :echo (configure addresses false pds) :> (str server-dir "server-ignite-" node ".xml")))
 
-(defn configure-client [addresses]
+(defn configure-client [addresses pds]
   "Creates a client config file."
   (let [config-file (File/createTempFile "jepsen-ignite-config" ".xml")
         config-file-path (.getCanonicalPath config-file)]
-    (spit config-file-path (configure addresses true))
+    (spit config-file-path (configure addresses true pds))
      config-file))
 
 (defn db
@@ -114,7 +124,7 @@
           (c/exec :chown :-R (str user ":" user) server-dir)
          )
        (c/sudo user
-        (configure-server (:nodes test) node)
+        (configure-server (:nodes test) node (:pds test))
         (start! node test)
         (await-cluster-started node test))
          )
@@ -176,4 +186,5 @@
                     :debian debian/os
                     :noop jepsen.os/noop)
      :db      (db (:version options))
+     :pds     (:pds options)
      :nemesis (:nemesis options)}))

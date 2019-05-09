@@ -12,7 +12,9 @@
             [tidb.sql :as sql]))
 
 (def tidb-dir       "/opt/tidb")
+(def tidb-bin-dir   "/opt/tidb/bin")
 (def pd-bin         "pd-server")
+(def pdctl-bin      "pd-ctl")
 (def kv-bin         "tikv-server")
 (def db-bin         "tidb-server")
 (def pd-config-file (str tidb-dir "/pd.conf"))
@@ -205,6 +207,7 @@
       (info node "installing TiDB")
       (info (tarball-url test))
       (cu/install-archive! (tarball-url test) tidb-dir)
+      (c/exec :ln :-s (str tidb-bin-dir "/" pdctl-bin) (str "/bin/" pdctl-bin))
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))))
 
