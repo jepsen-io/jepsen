@@ -178,9 +178,7 @@
                              ; Faketime wrapper means we only kill the wrapper
                              ; script, not the underlying binary
                              (cu/stop-daemon! pd-bin pd-pid-file)
-                             (cu/grepkill! pd-bin)
-                             (info :pd-stopped (try+ (c/exec :ps :aux c/| :grep pd-bin c/| :grep :-v :grep)
-                                                     (catch [:type :jepsen.control/nonzero-exit] e (:out e))))))
+                             (cu/grepkill! pd-bin)))
 
 (defn stop-kv! [test node] (c/su (cu/stop-daemon! kv-bin kv-pid-file)
                                  (cu/grepkill! kv-bin)))
@@ -217,11 +215,15 @@
       (info node "installing TiDB")
       (info (tarball-url test))
       (cu/install-archive! (tarball-url test) tidb-dir)
-      (c/exec :ln :-s (str tidb-bin-dir "/" pdctl-bin) (str "/bin/" pdctl-bin))
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))
     ; Add faketime wrappers
-    (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0 1)))
+    (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0 1)
+    ; Can't do this yet; tikv uses clock_id 6, which faketime 0.9.6 doesn't
+    ; know about, and under 0.9.7, tikv just segfaults. :(
+    ; (faketime/wrap! (str tidb-bin-dir "/" kv-bin) 0 1)
+    ; (faketime/wrap! (str tidb-bin-dir "/" db-bin) 0 1)
+    ))
 
 (defn db
   "TiDB"

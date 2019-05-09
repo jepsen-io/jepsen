@@ -62,7 +62,7 @@
       (let [nodes  (take 1 (util/random-nonempty-subset (:nodes test)))
             pd-ctl (fn [& cmds]
                       ; Execute a pd-ctl command.
-                      (try (c/exec :echo cmds :| :pd-ctl :-d)
+                      (try (c/exec :echo cmds :| (str db/tidb-bin-dir "/" db/pdctl-bin) :-d)
                         (catch RuntimeException e
                           (info "fail to " cmds))))]
         (assoc op :value
