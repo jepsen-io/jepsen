@@ -47,7 +47,9 @@
   supports."
   {:append          {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
-                     :read-lock         [nil "FOR UPDATE"]}
+                     :read-lock         [nil "FOR UPDATE"]
+                     :use-index         [true false]
+                     :predicate-read    [true false]}
    :bank            {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :update-in-place   [true false]
@@ -202,6 +204,10 @@
                     " update-in-place")
                   (when (:read-lock opts)
                     (str " select " (:read-lock opts)))
+                  (when (:predicate-read opts)
+                    " predicate-read")
+                  (when (:use-index opts)
+                     " use-index")
                   (when-not (= [:interval] (keys (:nemesis opts)))
                     (str " nemesis " (->> (dissoc (:nemesis opts)
                                                    :interval
