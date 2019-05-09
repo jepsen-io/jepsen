@@ -218,11 +218,11 @@
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))
     ; Add faketime wrappers
-    (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0 1)
+    (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0 (faketime/rand-factor 5))
     ; Can't do this yet; tikv uses clock_id 6, which faketime 0.9.6 doesn't
     ; know about, and under 0.9.7, tikv just segfaults. :(
     ; (faketime/wrap! (str tidb-bin-dir "/" kv-bin) 0 1)
-    ; (faketime/wrap! (str tidb-bin-dir "/" db-bin) 0 1)
+    (faketime/wrap! (str tidb-bin-dir "/" db-bin) 0 (faketime/rand-factor 1.5))
     ))
 
 (defn db

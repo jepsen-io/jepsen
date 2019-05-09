@@ -29,3 +29,13 @@
       (do (c/exec :mv cmd cmd')
           (c/exec :echo wrapper :> cmd)
           (c/exec :chmod "a+x" cmd)))))
+
+(defn rand-factor
+  "Helpful for choosing faketime rates. Takes a factor (e.g. 2.5) and produces
+  a random number selected from a distribution around 1, with minimum and
+  maximum constrained such that factor * min = max. Intuitively, the fastest
+  clock can be no more than twice as fast as the slowest."
+  [factor]
+  (let [max (/ 2 (+ 1 (/ factor)))
+        min (/ max factor)]
+    (+ min (rand (- max min)))))
