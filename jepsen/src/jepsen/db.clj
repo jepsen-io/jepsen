@@ -36,7 +36,7 @@
     (loop [tries cycle-tries]
       ; Tear down every node
       (info "Tearing down DB")
-      (control/on-nodes test (fcatch (partial teardown! db)))
+      (control/on-nodes test (partial teardown! db))
 
       ; Start up every node
       (if (= :retry (try+
