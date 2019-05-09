@@ -124,9 +124,17 @@
   (if (zero? exit)
     result
     (throw+
-     (merge {:type ::nonzero-exit
-             :cmd (:cmd action)}
-            result))))
+      (merge {:type ::nonzero-exit
+              :cmd (:cmd action)}
+             result)
+      nil ; cause
+      "Command exited with non-zero status %s on node %s:\n%s\n\nSTDIN:\n%s\n\nSTDOUT:\n%s\n\nSTDERR:\n%s"
+      exit
+      (:host result)
+      (:cmd action)
+      (:in result)
+      (:out result)
+      (:err result))))
 
 (defn just-stdout
   "Returns the stdout from an ssh result, trimming any newlines at the end."
