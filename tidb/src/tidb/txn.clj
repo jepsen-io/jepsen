@@ -72,7 +72,7 @@
             (c/with-txn op [c conn]
               (assoc op :type :ok, :value
                      (mapv (partial mop! c test table-count) txn)))
-            (c/with-txn-aborts op
+            (c/with-error-handling op
               (assoc op :type :ok, :value
                      (mapv (partial mop! conn test table-count) txn))))))
 

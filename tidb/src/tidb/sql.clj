@@ -7,11 +7,11 @@
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def txn-timeout     5000)
-(def connect-timeout 10000)
-(def socket-timeout  20000)
+(def connect-timeout 1000)
+(def socket-timeout  10000)
 (def open-timeout
-  "How long will we wait for an open call?"
-  100000)
+  "How long will we wait for an open call by default"
+  1000)
 
 (defn conn-spec
   "jdbc connection spec for a node."
@@ -43,24 +43,26 @@
 (defn open
   "Opens a connection to the given node."
   ([node test]
-  (timeout open-timeout
-           (throw+ {:type :connect-timed-out
-                    :node node})
-           (util/retry 1
-                       (try
-                         (let [spec   (assoc (conn-spec node)
-                                             ::node node
-                                             ::test test)
-                               conn   (j/get-connection spec)
-                               spec'  (j/add-connection spec conn)]
-                           (assert spec')
-                           (init-conn! spec' test))
-                         (catch java.sql.SQLNonTransientConnectionException e
-                           ; Conn refused
-                           (throw e))
-                         (catch Throwable t
-                           (info t "Unexpected connection error, retrying")
-                           (throw t)))))))
+   (open node test open-timeout))
+  ([node test open-timeout]
+   (timeout open-timeout
+            (throw+ {:type :connect-timed-out
+                     :node node})
+            (util/retry 1
+                        (try
+                          (let [spec   (assoc (conn-spec node)
+                                              ::node node
+                                              ::test test)
+                                conn   (j/get-connection spec)
+                                spec'  (j/add-connection spec conn)]
+                            (assert spec')
+                            (init-conn! spec' test))
+                          (catch java.sql.SQLNonTransientConnectionException e
+                            ; Conn refused
+                            (throw e))
+                          (catch Throwable t
+                            (info t "Unexpected connection error, retrying")
+                            (throw t)))))))
 
 (defn close!
   "Given a JDBC connection, closes it and returns the underlying spec."
@@ -112,7 +114,8 @@
   and inserting a record."
   [node]
   (info "Waiting for" node)
-  (if (let [c (open node {})]
+  ; Give it a loooong time to open
+  (if (let [c (open node {} 100000)]
         (try
           (j/execute! c ["create table if not exists jepsen_await
                          (id int primary key, val int)"])
@@ -139,6 +142,7 @@
     (let [~conn conn#] ; Rebind the conn symbol to our current connection
       ~@body)
     (catch java.sql.SQLNonTransientConnectionException e#
+      ; Narrator: it was, in fact, transient.
       (when (zero? tries#)
         (throw e#))
       (info "Connection failure; retrying...")
@@ -181,14 +185,27 @@
        res#)))
 
 (defmacro with-error-handling
-  "Common error handling for errors"
+  "Common error handling for errors, including txn aborts."
   [op & body]
-  `(try ~@body
-        (catch java.sql.SQLNonTransientConnectionException e#
-          (condp = (.getMessage e#)
-            "WSREP has not yet prepared node for application use"
-            (assoc ~op :type :fail, :value (.getMessage e#))
-            (throw e#)))))
+  `(try
+    (with-txn-aborts ~op ~@body)
+
+    (catch java.sql.BatchUpdateException e#
+      (condp re-find (.getMessage e#)
+        #"Query timed out" (assoc ~op :type :info, :error :query-timed-out)
+        (throw e#)))
+
+    (catch java.sql.SQLNonTransientConnectionException e#
+      (condp re-find (.getMessage e#)
+        #"Connection timed out" (assoc ~op :type :info, :error :conn-timed-out)
+        (throw e#)))
+
+    (catch clojure.lang.ExceptionInfo e#
+      (cond (= "Connection is closed" (:cause (:rollback e#)))
+            (assoc ~op :type :info, :error :conn-closed-rollback-failed)
+
+            true (do (info e# :caught (pr-str (ex-data e#)))
+                     (throw e#))))))
 
 (defmacro with-txn
   "Executes body in a transaction, with a timeout, automatically retrying
