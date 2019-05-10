@@ -278,7 +278,7 @@
     (:schedules n) (assoc :shuffle-leader true
                           :shuffle-region true
                           :random-merge true)
-    (:partitions n) (assoc :partition-one true
+    (:partition n) (assoc :partition-one true
                            :partition-half true
                            :partition-ring true)))
 

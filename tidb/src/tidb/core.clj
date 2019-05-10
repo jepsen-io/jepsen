@@ -107,7 +107,7 @@
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
-  #{:partitions
+  #{:partition
     :partition-one
     :partition-half
     :partition-ring
@@ -135,12 +135,13 @@
         [:kill]
         [:pause]
         [:clock-skew]
-        [:partitions]
+        [:partition]
         [:shuffle-leader]
         [:shuffle-region]
         [:random-merge]
+        [:schedules]
         ; Combined
-        [:kill :pause :clock-skew :partitions :schedules]]
+        [:kill :pause :clock-skew :partition :schedules]]
        (map (fn [faults] (zipmap faults (repeat true))))))
 
 (def plot-spec
