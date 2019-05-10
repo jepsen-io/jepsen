@@ -217,11 +217,13 @@
       (cu/install-archive! (tarball-url test) tidb-dir)
       (info "Syncing disks to avoid slow fsync on db start")
       (c/exec :sync))
+    ; We need a special fork of faketime specifically for tikv, which uses
+    ; CLOCK_MONOTONIC_COARSE (not supported by 0.9.6 stock), and jemalloc
+    ; (segfaults on 0.9.7).
+    (faketime/install-0.9.6-jepsen1!)
     ; Add faketime wrappers
     (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0 (faketime/rand-factor 5))
-    ; Can't do this yet; tikv uses clock_id 6, which faketime 0.9.6 doesn't
-    ; know about, and under 0.9.7, tikv just segfaults. :(
-    ; (faketime/wrap! (str tidb-bin-dir "/" kv-bin) 0 1)
+    (faketime/wrap! (str tidb-bin-dir "/" kv-bin) 0 (faketime/rand-factor 10))
     (faketime/wrap! (str tidb-bin-dir "/" db-bin) 0 (faketime/rand-factor 1.5))
     ))
 

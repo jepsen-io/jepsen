@@ -5,6 +5,22 @@
             [jepsen.control :as c]
             [jepsen.control.util :as cu]))
 
+(defn install-0.9.6-jepsen1!
+  "Installs our fork of 0.9.6 (the last version which worked with jemalloc),
+  which includes a patch to support CLOCK_MONOTONIC_COARSE and
+  CLOCK_REALTIME_COARSE. Gosh, this is SUCH a hack."
+  []
+  (c/su
+    (c/exec :mkdir :-p "/tmp/jepsen")
+    (c/cd "/tmp/jepsen"
+          (when-not (cu/exists? "libfaketime-jepsen")
+            (c/exec :git :clone "https://github.com/jepsen-io/libfaketime.git"
+                    "libfaketime-jepsen"))
+          (c/cd "libfaketime-jepsen"
+                (c/exec :git :checkout "0.9.6-jepsen1")
+                (c/exec :make)
+                (c/exec :make :install)))))
+
 (defn script
   "A sh script which invokes cmd with a faketime wrapper. Takes an initial
   offset in seconds, and a clock rate to run at."
