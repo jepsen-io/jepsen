@@ -223,7 +223,7 @@
     (faketime/install-0.9.6-jepsen1!)
     ; Add faketime wrappers
     (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0 (faketime/rand-factor 5))
-    (faketime/wrap! (str tidb-bin-dir "/" kv-bin) 0 (faketime/rand-factor 10))
+    (faketime/wrap! (str tidb-bin-dir "/" kv-bin) 0 (faketime/rand-factor 5))
     (faketime/wrap! (str tidb-bin-dir "/" db-bin) 0 (faketime/rand-factor 1.5))
     ))
 
