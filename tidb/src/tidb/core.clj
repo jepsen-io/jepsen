@@ -48,7 +48,6 @@
   {:append          {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :read-lock         [nil "FOR UPDATE"]
-                     :use-index         [true false]
                      :predicate-read    [true false]}
    :bank            {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
