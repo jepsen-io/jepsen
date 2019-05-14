@@ -115,10 +115,11 @@
        e        (gensym 'e)     ; errors
        conn-sym (gensym 'conn)  ; local conn reference
        retry `(do (when (zero? ~tries)
+                    (info "Out of retries!")
                     (throw ~e))
                   (info "Connection failure; retrying...")
                   (Thread/sleep (rand-int 2000))
-                  (~'retry (reopen! ~conn) (dec ~tries)))]
+                  (~'retry (reopen! ~conn-sym) (dec ~tries)))]
  `(dt/with-retry [~conn-sym ~conn
                   ~tries    5]
     (let [~conn ~conn-sym] ; Rebind the conn symbol to our current connection
