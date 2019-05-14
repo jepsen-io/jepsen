@@ -259,7 +259,12 @@
 
 (def cli-opts
   "Command line options for tools.cli"
-  [[nil "--force-reinstall" "Don't re-use an existing TiDB directory"]
+  [[nil "--faketime MAX_RATIO"
+    "Use faketime to skew clock rates up to MAX_RATIO"
+    :parse-fn #(Double/parseDouble %)
+    :validate [pos? "should be a positive number"]]
+
+    [nil "--force-reinstall" "Don't re-use an existing TiDB directory"]
 
     [nil "--nemesis-interval SECONDS"
     "Roughly how long to wait between nemesis operations. Default: 10s."

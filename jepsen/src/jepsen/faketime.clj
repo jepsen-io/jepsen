@@ -46,6 +46,14 @@
           (c/exec :echo wrapper :> cmd)))
     (c/exec :chmod "a+x" cmd)))
 
+(defn unwrap!
+  "If a wrapper is installed, remove it and replace it with the original
+  .nofaketime version of the binary."
+  [cmd]
+  (let [cmd' (str cmd ".no-faketime")]
+    (when (cu/exists? cmd')
+      (c/exec :mv cmd' cmd))))
+
 (defn rand-factor
   "Helpful for choosing faketime rates. Takes a factor (e.g. 2.5) and produces
   a random number selected from a distribution around 1, with minimum and
