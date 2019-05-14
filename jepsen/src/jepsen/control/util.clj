@@ -60,6 +60,22 @@
    :--connect-timeout 60
    :--read-timeout 60])
 
+(defn wget-helper!
+  "A helper for wget! and cached-wget!. Calls wget with options; catches name
+  resolution and other network errors, and retries them. EC2 name resolution
+  can be surprisingly flaky."
+  [& args]
+  (loop [tries 5]
+    (let [res (try+
+                (exec :wget args)
+                (catch [:type :jepsen.control/nonzero-exit, :exit 4] e
+                  (if (pos? tries)
+                    ::retry
+                    (throw e))))]
+      (if (= ::retry res)
+        (recur (dec tries))
+        res))))
+
 (defn wget!
   "Downloads a string URL and returns the filename as a string. Skips if the
   file already exists."
@@ -70,7 +86,7 @@
      (when force?
        (exec :rm :-f filename))
      (when (not (exists? filename))
-       (exec :wget std-wget-opts url))
+       (wget-helper! std-wget-opts url))
      filename)))
 
 (def wget-cache-dir
@@ -101,7 +117,7 @@
        (info "Downloading" url)
        (do (exec :mkdir :-p wget-cache-dir)
            (cd wget-cache-dir
-               (exec :wget std-wget-opts :-O dest-file url))))
+               (wget-helper! std-wget-opts :-O dest-file url))))
      dest-file)))
 
 (defn install-archive!
