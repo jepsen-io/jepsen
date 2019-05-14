@@ -115,6 +115,12 @@
                   tries#  5]
     (let [~conn conn#] ; Rebind the conn symbol to our current connection
       ~@body)
+    (catch java.sql.SQLTimeoutException e#
+      (when (zero? tries#)
+        (throw e#))
+      (info "Timed out, retrying...")
+      (Thread/sleep (rand-int 2000))
+      (~'retry (reopen! conn#) (dec tries#)))
     (catch java.sql.SQLNonTransientConnectionException e#
       ; Narrator: it was, in fact, transient.
       (when (zero? tries#)
