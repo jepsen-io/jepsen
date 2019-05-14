@@ -165,12 +165,15 @@
                    :url   url})))))
 
 (defn start!
-  "Starts all daemons, waiting for each one's health page in turn."
+  "Starts all daemons, waiting for each one's health page in turn. Uses
+  synchronization barriers, and should be called concurrently on ALL nodes."
   [test node]
   (start-pd! test node)
   (wait-page (str "http://127.0.0.1:" client-port "/health"))
+  (jepsen/synchronize test)
   (start-kv! test node)
   (wait-page "http://127.0.0.1:20180/status")
+  (jepsen/synchronize test)
   (start-db! test node)
   (wait-page "http://127.0.0.1:10080/status"))
 
