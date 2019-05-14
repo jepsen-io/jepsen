@@ -43,8 +43,8 @@
       (do (info "Installing faketime wrapper.")
           (c/exec :echo wrapper :> cmd))
       (do (c/exec :mv cmd cmd')
-          (c/exec :echo wrapper :> cmd)
-          (c/exec :chmod "a+x" cmd)))))
+          (c/exec :echo wrapper :> cmd)))
+    (c/exec :chmod "a+x" cmd)))
 
 (defn rand-factor
   "Helpful for choosing faketime rates. Takes a factor (e.g. 2.5) and produces
