@@ -105,32 +105,6 @@
   ([db table row opts]
    (j/insert! db table row (default opts :timeout (/ txn-timeout 1000)))))
 
-(def await-id
-  "Used to generate unique identifiers for awaiting cluster stabilization"
-  (atom 0))
-
-(defn await-node
-  "Waits for a node to become ready by opening a connection, creating a table,
-  and inserting a record."
-  [node]
-  (info "Waiting for" node)
-  ; Give it a loooong time to open
-  (if (let [c (open node {} 100000)]
-        (try
-          (j/execute! c ["create table if not exists jepsen_await
-                         (id int primary key, val int)"])
-          (j/insert! c "jepsen_await" {:id  (swap! await-id inc)
-                                       :val (rand-int 5)})
-          true
-          (finally
-            (close! c))))
-    (info node "ready")
-    (recur node)))
-
-(def rollback-msg
-  "mariadb drivers have a few exception classes that use this message"
-  "Deadlock found when trying to get lock; try restarting transaction")
-
 (defmacro with-conn-failure-retry
  "TiDB tends to be flaky for a few seconds after starting up, which can wind
   up breaking our setup code. This macro adds a little bit of backoff and retry
@@ -148,6 +122,34 @@
       (info "Connection failure; retrying...")
       (Thread/sleep (rand-int 2000))
       (~'retry (reopen! conn#) (dec tries#)))))
+
+(def await-id
+  "Used to generate unique identifiers for awaiting cluster stabilization"
+  (atom 0))
+
+(defn await-node
+  "Waits for a node to become ready by opening a connection, creating a table,
+  and inserting a record."
+  [node]
+  (info "Waiting for" node)
+  ; Give it a loooong time to open
+  (if (let [c (open node {} 100000)]
+        (try
+          (with-conn-failure-retry c
+            (j/execute! c ["create table if not exists jepsen_await
+                           (id int primary key, val int)"]))
+          (with-conn-failure-retry c
+            (j/insert! c "jepsen_await" {:id  (swap! await-id inc)
+                                         :val (rand-int 5)}))
+          true
+          (finally
+            (close! c))))
+    (info node "ready")
+    (recur node)))
+
+(def rollback-msg
+  "mariadb drivers have a few exception classes that use this message"
+  "Deadlock found when trying to get lock; try restarting transaction")
 
 (defmacro capture-txn-abort
   "Converts aborted transactions to an ::abort keyword"
