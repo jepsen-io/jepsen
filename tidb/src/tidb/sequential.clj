@@ -53,15 +53,11 @@
 
   (setup! [this test]
     (c/with-conn-failure-retry conn
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          ; use first node to exec ddl
-          (info "Creating tables" (pr-str (table-names table-count)))
-          (doseq [t (table-names table-count)]
-            (c/execute! conn [(str "drop table if exists " t)])
-            (c/execute! conn [(str "create table if not exists " t
-                                   " (tkey varchar(255) primary key)")])
-            (info "Created table" t))))))
+      (info "Creating tables" (pr-str (table-names table-count)))
+      (doseq [t (table-names table-count)]
+        (c/execute! conn [(str "create table if not exists " t
+                               " (tkey varchar(255) primary key)")])
+        (info "Created table" t))))
 
   (invoke! [this test op]
     (let [ks (subkeys (:key-count test) (:value op))]
