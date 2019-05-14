@@ -111,23 +111,24 @@
   for those conditions."
  [conn & body]
  (assert (symbol? conn))
- `(dt/with-retry [conn#   ~conn
-                  tries#  5]
-    (let [~conn conn#] ; Rebind the conn symbol to our current connection
+ (let [tries    (gensym 'tries) ; try count
+       e        (gensym 'e)     ; errors
+       conn-sym (gensym 'conn)  ; local conn reference
+       retry `(do (when (zero? ~tries)
+                    (throw ~e))
+                  (info "Connection failure; retrying...")
+                  (Thread/sleep (rand-int 2000))
+                  (~'retry (reopen! ~conn) (dec ~tries)))]
+ `(dt/with-retry [~conn-sym ~conn
+                  ~tries    5]
+    (let [~conn ~conn-sym] ; Rebind the conn symbol to our current connection
       ~@body)
-    (catch java.sql.SQLTimeoutException e#
-      (when (zero? tries#)
-        (throw e#))
-      (info "Timed out, retrying...")
-      (Thread/sleep (rand-int 2000))
-      (~'retry (reopen! conn#) (dec tries#)))
-    (catch java.sql.SQLNonTransientConnectionException e#
-      ; Narrator: it was, in fact, transient.
-      (when (zero? tries#)
-        (throw e#))
-      (info "Connection failure; retrying...")
-      (Thread/sleep (rand-int 2000))
-      (~'retry (reopen! conn#) (dec tries#)))))
+    (catch java.sql.SQLException ~e
+      (condp re-find (.getMessage ~e)
+        #"called on closed connection" ~retry
+        (throw ~e)))
+    (catch java.sql.SQLTimeoutException ~e ~retry)
+    (catch java.sql.SQLNonTransientConnectionException ~e ~retry))))
 
 (def await-id
   "Used to generate unique identifiers for awaiting cluster stabilization"
