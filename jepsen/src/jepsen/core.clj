@@ -17,7 +17,7 @@
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [dom-top.core :as dt :refer [real-pmap]]
+            [dom-top.core :as dt]
             [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
@@ -36,6 +36,22 @@
   (:import (java.util.concurrent CyclicBarrier
                                  CountDownLatch
                                  TimeUnit)))
+
+(def uninteresting-exceptions
+  "Exceptions which are less interesting to us."
+  #{java.util.concurrent.BrokenBarrierException
+    InterruptedException})
+
+(defn real-pmap
+  "Real-pmap throws the first exception it gets, which might be something
+  unhelpful like InterruptedException or BrokenBarrierException. This variant
+  works like real-pmap, but throws more interesting exceptions when possible."
+  [f coll]
+  (let [[results exceptions] (dt/real-pmap-helper f coll)]
+    (when (seq exceptions)
+      (throw (or (first (remove uninteresting-exceptions exceptions))
+                 (first exceptions))))
+    results))
 
 (defn synchronize
   "A synchronization primitive for tests. When invoked, blocks until all nodes
