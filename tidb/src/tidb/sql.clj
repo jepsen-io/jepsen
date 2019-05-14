@@ -144,9 +144,8 @@
           (with-conn-failure-retry c
             (j/execute! c ["create table if not exists jepsen_await
                            (id int primary key, val int)"]))
-          (with-conn-failure-retry c
             (j/insert! c "jepsen_await" {:id  (swap! await-id inc)
-                                         :val (rand-int 5)}))
+                                         :val (rand-int 5)})
           true
           (finally
             (close! c))))
