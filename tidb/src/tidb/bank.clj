@@ -18,18 +18,21 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (c/with-conn-failure-retry conn
-      (c/execute! conn ["create table if not exists accounts
-                        (id     int not null primary key,
-                        balance bigint not null)"])
-      (doseq [a (:accounts test)]
-        (try
-          (with-txn-retries conn
-            (c/insert! conn :accounts {:id      a
-                                       :balance (if (= a (first (:accounts test)))
-                                                  (:total-amount test)
-                                                  0)}))
-          (catch java.sql.SQLIntegrityConstraintViolationException e nil)))))
+    ; sigh, tidb falls over if it gets more than a handful of contended
+    ; requests per second; let's try to make its life easier
+    (locking BankClient
+      (c/with-conn-failure-retry conn
+        (c/execute! conn ["create table if not exists accounts
+                          (id     int not null primary key,
+                          balance bigint not null)"])
+        (doseq [a (:accounts test)]
+          (try
+            (with-txn-retries conn
+              (c/insert! conn :accounts {:id      a
+                                         :balance (if (= a (first (:accounts test)))
+                                                    (:total-amount test)
+                                                    0)}))
+            (catch java.sql.SQLIntegrityConstraintViolationException e nil))))))
 
   (invoke! [this test op]
     (with-txn op [c conn]
