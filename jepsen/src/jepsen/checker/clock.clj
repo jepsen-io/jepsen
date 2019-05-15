@@ -71,4 +71,5 @@
             (perf/without-empty-series)
             (perf/with-range)
             (perf/with-nemeses history (:nemeses (:plot test)))
-            (perf/plot!))))))
+            (perf/plot!)))))
+  {:valid? true})
