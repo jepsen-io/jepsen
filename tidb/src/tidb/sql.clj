@@ -121,17 +121,17 @@
                   (Thread/sleep (rand-int 2000))
                   (~'retry (reopen! ~conn-sym) (dec ~tries)))]
  `(dt/with-retry [~conn-sym ~conn
-                  ~tries    5]
+                  ~tries    16]
     (let [~conn ~conn-sym] ; Rebind the conn symbol to our current connection
       ~@body)
+    (catch java.sql.SQLTimeoutException ~e ~retry)
+    (catch java.sql.SQLNonTransientConnectionException ~e ~retry)
     (catch java.sql.SQLException ~e
       (condp re-find (.getMessage ~e)
         #"called on closed connection" ~retry
-        (throw ~e)))
-    (catch java.sql.SQLTimeoutException ~e ~retry)
-    (catch java.sql.SQLNonTransientConnectionException ~e ~retry)
+        (do (info "with-conn-failure-retry not sure how to handle SQLException with message" ~e)
+            (throw ~e))))
     (catch Throwable ~e
-      (warn ~e "with-conn-failure-retry can't handle exception")
       (throw ~e)))))
 
 (def await-id
