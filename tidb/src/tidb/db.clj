@@ -313,7 +313,16 @@
 
         (start! test node)
 
-        (sql/await-node node)))
+        ; For reasons I cannot explain, sometimes TiDB just... fails to reach a
+        ; usable state despite waiting hundreds of seconds to open a
+        ; connection. I've lowered the await-node timeout, and if we fail here,
+        ; we'll nuke the entire setup process and try again. <sigh>
+        (try+ (sql/await-node node)
+              (catch java.sql.SQLException e
+                ; siiiiiiiigh
+                (throw+ {:type :jepsen.db/setup-failed}))
+              (catch [:type :connect-timed-out] e
+                (throw+ {:type :jepsen.db/setup-failed})))))
 
     (teardown! [_ test node]
       (c/su

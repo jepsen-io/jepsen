@@ -128,7 +128,8 @@
     (catch java.sql.SQLNonTransientConnectionException ~e ~retry)
     (catch java.sql.SQLException ~e
       (condp re-find (.getMessage ~e)
-        #"called on closed connection" ~retry
+        #"Information schema is changed"  ~retry
+        #"called on closed connection"    ~retry
         (do (info "with-conn-failure-retry not sure how to handle SQLException with message" ~e)
             (throw ~e))))
     (catch Throwable ~e
@@ -143,9 +144,10 @@
   and inserting a record."
   [node]
   (info "Waiting for" node)
-  ; Give it a loooong time to open
-  (if (let [c (open node {} 100000)]
+  ; Give it 30 seconds to open a connection
+  (if (let [c (open node {} 30000)]
         (try
+          ; And however long it takes to run these
           (with-conn-failure-retry c
             (j/execute! c ["create table if not exists jepsen_await
                            (id int primary key, val int)"]))
