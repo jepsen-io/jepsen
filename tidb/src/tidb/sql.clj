@@ -7,11 +7,11 @@
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def txn-timeout     5000)
-(def connect-timeout 1000)
+(def connect-timeout 5000)
 (def socket-timeout  10000)
 (def open-timeout
   "How long will we wait for an open call by default"
-  1000)
+  5000)
 
 (defn conn-spec
   "jdbc connection spec for a node."
@@ -129,7 +129,10 @@
         #"called on closed connection" ~retry
         (throw ~e)))
     (catch java.sql.SQLTimeoutException ~e ~retry)
-    (catch java.sql.SQLNonTransientConnectionException ~e ~retry))))
+    (catch java.sql.SQLNonTransientConnectionException ~e ~retry)
+    (catch Throwable ~e
+      (warn ~e "with-conn-failure-retry can't handle exception")
+      (throw ~e)))))
 
 (def await-id
   "Used to generate unique identifiers for awaiting cluster stabilization"

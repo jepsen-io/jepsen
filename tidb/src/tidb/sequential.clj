@@ -52,12 +52,13 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (c/with-conn-failure-retry conn
-      (info "Creating tables" (pr-str (table-names table-count)))
-      (doseq [t (table-names table-count)]
-        (c/execute! conn [(str "create table if not exists " t
-                               " (tkey varchar(255) primary key)")])
-        (info "Created table" t))))
+    (locking SequentialClient
+      (c/with-conn-failure-retry conn
+        (info "Creating tables" (pr-str (table-names table-count)))
+        (doseq [t (table-names table-count)]
+          (c/execute! conn [(str "create table if not exists " t
+                                 " (tkey varchar(255) primary key)")])
+          (info "Created table" t)))))
 
   (invoke! [this test op]
     (let [ks (subkeys (:key-count test) (:value op))]
