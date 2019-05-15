@@ -6,7 +6,8 @@
             [jepsen [core :as jepsen]
                     [control :as c]
                     [db :as db]
-                    [faketime :as faketime]]
+                    [faketime :as faketime]
+                    [util :as util]]
             [jepsen.control.util :as cu]
             [slingshot.slingshot :refer [try+ throw+]]
             [tidb.sql :as sql]))
@@ -150,32 +151,95 @@
       :--config    db-config-file
       :--log-file  db-log-file)))
 
-(defn wait-page
-  "Waits for a status page to become available"
+(defn page-ready?
+  "Fetches a status page URL on the local node, and returns true iff the page
+  was available."
   [url]
-  (with-retry [delay 1000
-               tries 11] ; 2048 seconds
+  (try+
     (c/exec :curl :--fail url)
-    (catch Throwable e
-      (info "Waiting for page" url)
-      (if (pos? tries)
-          (do (Thread/sleep delay)
-              (retry (* 2 delay) (dec tries)))
-          (throw+ {:type  :wait-page
-                   :url   url})))))
+    (catch [:type :jepsen.control/nonzero-exit] _ false)))
+
+(defn pd-ready?
+  "Is Placement Driver ready?"
+  []
+  (page-ready? (str "http://127.0.0.1:" client-port "/health")))
+
+(defn kv-ready?
+  "Is TiKV ready?"
+  []
+  (page-ready? "http://127.0.0.1:20180/status"))
+
+(defn db-ready?
+  "Is TiDB ready?"
+  []
+  (page-ready? "http://127.0.0.1:10080/status"))
+
+(defn restart-loop*
+  "TiDB is fragile on startup; processes love to crash if they can't complete
+  their initial requests to network dependencies. We try to work around this by
+  checking whether the daemon is running, and restarting it if necessary.
+
+  Takes a name (used for error messages and logging), a function which starts
+  the node, and a status function which returns one of three states:
+
+  :starting - The node is still starting up
+  :ready    - The node is (hopefully) ready to serve requests
+  :crashed  - The node crashed
+
+  We call start, then poll the status function until we see :ready or :crashed.
+  If ready, returns. If :crashed, restarts the node and tries again."
+  [name start! get-status]
+  (let [deadline (+ (util/linear-time-nanos) (util/secs->nanos 300))]
+    ; First startup!
+    (start!)
+
+    (loop [status :init]
+      (when (< deadline (util/linear-time-nanos))
+        ; Out of time
+        (throw+ {:type :restart-loop-timed-out, :service name}))
+
+      (when (= status :crashed)
+        ; Need to restart
+        (info name "crashed during startup; restarting")
+        (start!))
+
+      ; Give it a bit
+      (Thread/sleep 1000)
+
+      ; OK, how's it doing?
+      (let [status (get-status)]
+        (if (= status :ready)
+          ; Done
+          status
+          ; Still working
+          (recur status))))))
+
+(defmacro restart-loop
+  "Macro form of restart-loop*: takes two forms instead of two functions."
+  [name start! get-status]
+  `(restart-loop* ~name
+                  (fn ~'start!     [] ~start!)
+                  (fn ~'get-status [] ~get-status)))
 
 (defn start!
   "Starts all daemons, waiting for each one's health page in turn. Uses
   synchronization barriers, and should be called concurrently on ALL nodes."
   [test node]
-  (start-pd! test node)
-  (wait-page (str "http://127.0.0.1:" client-port "/health"))
+  (restart-loop :pd (start-pd! test node)
+                (cond (pd-ready?)                       :ready
+                      (cu/daemon-running? pd-pid-file)  :starting
+                      true                              :crashed))
   (jepsen/synchronize test)
-  (start-kv! test node)
-  (wait-page "http://127.0.0.1:20180/status")
+  (restart-loop :kv (start-kv! test node)
+                (cond (kv-ready?)                       :ready
+                      (cu/daemon-running? kv-pid-file)  :starting
+                      true                              :crashed))
+
   (jepsen/synchronize test)
-  (start-db! test node)
-  (wait-page "http://127.0.0.1:10080/status"))
+  (restart-loop :db (start-db! test node)
+                (cond (db-ready?)                       :ready
+                      (cu/daemon-running? db-pid-file)  :starting
+                      true                              :crashed)))
 
 (defn stop-pd! [test node] (c/su
                              ; Faketime wrapper means we only kill the wrapper
