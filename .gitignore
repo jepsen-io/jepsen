@@ -9,7 +9,8 @@ repl-port
 *.war
 *.deb
 *~
-.*.swp
+*.sw?
+.*.sw?
 *.log
 log.txt
 lib
@@ -31,3 +32,4 @@ bench/**
 .idea
 *.iml
 jepsen/doc
+.session.vim

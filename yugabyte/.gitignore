@@ -11,3 +11,5 @@ pom.xml.asc
 /.nrepl-port
 .hgignore
 .hg/
+.session.vim
+*.sw?

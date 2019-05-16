@@ -289,15 +289,22 @@
   [node]
   [; Data files!
    :--fs_data_dirs         ce-data-dir
+
    ; Limit memory to 2GB
    :--memory_limit_hard_bytes 2147483648
+
    ; Fewer shards to improve perf
    :--yb_num_shards_per_tserver 4
+
    ; YB can do weird things with loopback interfaces, so... bind explicitly
    :--rpc_bind_addresses (cn/ip node)
+
    ; Seconds before declaring an unavailable node dead and initiating a raft
    ; membership change
    ;:--follower_unavailable_considered_failed_sec 10)
+
+   ; Disable YugaByte call-home analytics
+   :--callhome_enabled=false
    ])
 
 (def experimental-tuning-flags

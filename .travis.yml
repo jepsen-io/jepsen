@@ -6,14 +6,23 @@ jdk:
 branches:
   only:
     - master
+    - master-yb
 addons:
   apt:
     packages:
       - gnuplot
       - gnuplot-x11
+      - python-pip
 before_install:
   - cd ${TRAVIS_BUILD_DIR}/jepsen
-script: lein do clean, test
+script: |
+  (
+    set -euo pipefail
+    pip install --user pycodestyle
+    pycodestyle --max-line-length=100 ../yugabyte/run-jepsen.py
+    lein do clean, test
+  )
+
 notifications:
   email:
     on_success: never
