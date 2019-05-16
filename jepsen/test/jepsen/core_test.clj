@@ -79,7 +79,7 @@
                                 (teardown! [_ test node]
                                   (swap! db-teardowns assoc node
                                          (control/exec :hostname))
-                                  (control/exec :rm nonce-file))
+                                  (control/exec :rm :-f nonce-file))
 
                                 db/Primary
                                 (setup-primary! [_ test node]
