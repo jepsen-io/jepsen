@@ -349,22 +349,7 @@
 (defn write-fressian!
   "Write the entire test as a .fressian file"
   [test]
-  (let [test (apply dissoc test (nonserializable-keys test))
-        _    (info "Test keys:" (->> test
-                                     sort
-                                     (map (fn [[k v]]
-                                            [k (type v)]))
-                                     pprint
-                                     with-out-str))]
-        ;test (select-keys test [:auto-retry-limit
-        ;                        :concurrency
-        ;                        :history
-        ;                        :name
-        ;                        :nemesis-long-recovery
-        ;                        :nodes
-        ;                        :plot
-        ;                        :results
-        ;                        :start-time])]
+  (let [test (apply dissoc test (nonserializable-keys test))]
     (with-open [file   (io/output-stream (fressian-file! test))]
       (let [out (fress/create-writer file :handlers write-handlers)]
         (fress/write-object out test)))))
