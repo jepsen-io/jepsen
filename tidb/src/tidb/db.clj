@@ -321,6 +321,8 @@
               (catch java.sql.SQLException e
                 ; siiiiiiiigh
                 (throw+ {:type :jepsen.db/setup-failed}))
+              (catch [:type :restart-loop-timed-out] e
+                (throw+ {:type :jepsen.db/setup-failed}))
               (catch [:type :connect-timed-out] e
                 (throw+ {:type :jepsen.db/setup-failed})))))
 

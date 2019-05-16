@@ -124,6 +124,7 @@
                   ~tries    16]
     (let [~conn ~conn-sym] ; Rebind the conn symbol to our current connection
       ~@body)
+    (catch java.sql.BatchUpdateException ~e ~retry)
     (catch java.sql.SQLTimeoutException ~e ~retry)
     (catch java.sql.SQLNonTransientConnectionException ~e ~retry)
     (catch java.sql.SQLException ~e
