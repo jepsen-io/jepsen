@@ -7,7 +7,7 @@
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def txn-timeout     5000)
-(def connect-timeout 5000)
+(def connect-timeout 10000)
 (def socket-timeout  10000)
 (def open-timeout
   "How long will we wait for an open call by default"
