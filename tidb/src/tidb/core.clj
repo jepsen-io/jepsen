@@ -21,7 +21,8 @@
                   [nemesis :as nemesis]
                   [register :as register]
                   [sequential :as sequential]
-                  [sets :as set]]))
+                  [sets :as set]
+                  [table :as table]]))
 
 (def oses
   "Supported operating systems"
@@ -40,7 +41,8 @@
    :register        register/workload
    :set             set/workload
    :set-cas         set/cas-workload
-   :sequential      sequential/workload})
+   :sequential      sequential/workload
+   :table           table/workload})
 
 (def workload-options
   "For each workload, a map of workload options to all values that option
@@ -73,7 +75,8 @@
                      :auto-retry-limit  [10 0]
                      :read-lock         [nil "FOR UPDATE"]}
    :sequential      {:auto-retry        [true false]
-                     :auto-retry-limit  [10 0]}})
+                     :auto-retry-limit  [10 0]}
+   :table           {}})
 
 (def workload-options-expected-to-pass
   "Workload options restricted to only those we expect to pass."
