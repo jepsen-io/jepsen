@@ -50,9 +50,17 @@
                      :node node})
             (util/retry 1
                         (try
-                          (let [spec   (assoc (conn-spec node)
-                                              ::node node
-                                              ::test test)
+                          (let [spec (assoc (conn-spec node)
+                                            ::node node
+                                            ; jdbc is gonna convert everything
+                                            ; in the spec to a string at some
+                                            ; point, so we scrupulously do NOT
+                                            ; want to pass it the full test, or
+                                            ; it'll blow out RAM.
+                                            ::test (select-keys
+                                                     test
+                                                     [:auto-retry
+                                                      :auto-retry-limit]))
                                 conn   (j/get-connection spec)
                                 spec'  (j/add-connection spec conn)]
                             (assert spec')
