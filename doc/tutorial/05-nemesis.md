@@ -40,10 +40,10 @@ it receives a `:start` op, and heals the network when it receives a `:stop`.
           :db         (db "v3.1.5")
           :client     (Client. nil)
           :nemesis    (nemesis/partition-random-halves)
-          :model      (model/cas-register)
           :checker    (checker/compose
                         {:perf      (checker/perf)
-                         :linear    (checker/linearizable)
+                         :linear    (checker/linearizable {:model     (model/cas-register)
+                                                           :algorithm :linear})
                          :timeline  (timeline/html)})
           :generator  (->> (gen/mix [r w cas])
                            (gen/stagger 1)

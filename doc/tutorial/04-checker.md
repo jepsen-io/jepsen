@@ -91,8 +91,8 @@ returned.
 To analyze the history, we'll specify a `:checker` for the test, and provide a
 `:model` to specify how the system *should* behave.
 `checker/linearizable` uses the Knossos linearizability checker to verify that
-every operation appears take place atomically between its invocation and
-completion. The linearizable checker requires a model and to specify a specific
+every operation appears to take place atomically between its invocation and
+completion. The linearizable checker requires a model and to specify a particular
 algorithm which we pass to it in an options map.
 
 ```clj
