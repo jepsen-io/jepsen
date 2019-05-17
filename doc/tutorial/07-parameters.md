@@ -27,7 +27,7 @@ Now, let's pass that option specification to the CLI:
             args)
 ```
 
-If we re-run our test with `lein run test -q ...", we'll see a new `:quorum` option in our test map:
+If we re-run our test with `lein run test -q ...`, we'll see a new `:quorum` option in our test map:
 
 ```clj
 10:02:42.532 [main] INFO  jepsen.cli - Test options:
@@ -179,7 +179,6 @@ as a rate per second, and change our hardcoded limit on each key's generator to 
             :db         (db "v3.1.5")
             :client     (Client. nil)
             :nemesis    (nemesis/partition-random-halves)
-            :model      (model/cas-register)
             :checker    (checker/compose
                           {:perf  (checker/perf)
                            :indep (independent/checker
