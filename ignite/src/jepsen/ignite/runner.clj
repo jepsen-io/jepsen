@@ -104,6 +104,9 @@
     :default  :false
     :parse-fn str
     :validate [#{"true" "false"} "One of `true` or `false`"]]
+   [nil "--url URL" "URL to Ignite zip to install, has precedence over --version"
+    :default nil
+    :parse-fn str]
    ["-nemesis" "--nemesis Nemesis"
     "What Nemesis to use"
     :default jepsen.nemesis/noop
