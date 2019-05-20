@@ -20,6 +20,7 @@
             [knossos.model           :as model])
   (:import (java.io File)
            (java.util UUID)
+           (org.apache.ignite.configuration CacheConfiguration)
            (org.apache.ignite Ignition IgniteCache)
            (clojure.lang ExceptionInfo)
            jepsen.os.debian.Debian
@@ -57,6 +58,13 @@
   (ensure-user! [os user]
     ;User should be created manually
     ))
+
+(defn ignite-url
+  "Constructs the URL; either passing through the test's URL, or
+  constructing one from the version."
+  [test]
+  (or (:url test)
+    (str "https://archive.apache.org/dist/ignite/"(:version test)"/apache-ignite-"(:version test)"-bin.zip")))
 
 (defn start!
   "Starts server for the given node."
@@ -119,10 +127,8 @@
        (c/su
          (install-jdk8! (:os test))
          (ensure-user! (:os test) user)
-        (let [url (str "https://archive.apache.org/dist/ignite/" version "/apache-ignite-" version "-bin.zip")]
-          (cu/install-archive! url server-dir))
-          (c/exec :chown :-R (str user ":" user) server-dir)
-         )
+         (cu/install-archive! (ignite-url test) server-dir)
+         (c/exec :chown :-R (str user ":" user) server-dir))
        (c/sudo user
         (configure-server (:nodes test) node (:pds test))
         (start! node test)
@@ -135,6 +141,15 @@
     db/LogFiles
       (log-files [_ test node]
       [logfile])))
+
+(defn getCacheConfiguration
+  [cache-config]
+  (let [cfg (new CacheConfiguration "JepsenCache")]
+    (.setBackups                  cfg (:backups          cache-config))
+    (.setCacheMode                cfg (:cache-mode       cache-config))
+    (.setAtomicityMode            cfg (:atomicity-mode   cache-config))
+    (.setWriteSynchronizationMode cfg (:write-sync-mode  cache-config))
+    (.setReadFromBackup           cfg (:read-from-backup cache-config))))
 
 (defn get-cache-config
   [options]
