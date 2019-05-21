@@ -1,4 +1,4 @@
-(defproject tidb "0.1.0"
+(defproject tidb "0.1.1-SNAPSHOT"
   :description "Jepsen testing for TiDB"
   :url "https://pingcap.com/index"
   :license {:name "Eclipse Public License"

@@ -129,21 +129,56 @@
     ; Special-case generators
     :restart-kv-without-pd})
 
+(def process-faults
+  "Faults affecting individual processes"
+  [:kill-pd :kill-kv :kill-db :pause-pd :pause-kv :pause-db])
+
+(def network-faults
+  "Faults affecting the network"
+  [:partition])
+
+(def schedule-faults
+  "Faults using the internal tidb scheduler"
+  [:shuffle-leader :shuffle-region :random-merge])
+
+(def clock-faults
+  "Clock skew issues"
+  [:clock-skew])
+
+(defn cartesian-product
+  [as bs]
+  (for [a as, b bs]
+    [a b]))
+
 (def all-nemeses
   "All nemesis specs to run as a part of a complete test suite."
-  (->> [; No faults
-        []
-        ; Single faults
-        [:kill]
-        [:pause]
-        [:clock-skew]
-        [:partition]
-        [:shuffle-leader]
-        [:shuffle-region]
-        [:random-merge]
-        [:schedules]
-        ; Combined
-        [:kill :pause :clock-skew :partition :schedules]]
+  (->> (concat
+         ; No faults
+         [[]]
+         ; Single types of faults
+         (map vector process-faults)
+         (map vector network-faults)
+         (map vector schedule-faults)
+         (map vector clock-faults)
+         ; Compound faults of one class
+         [[:kill]
+          [:pause]
+          [:schedules]]
+         ; Clock skew plus other faults
+         (cartesian-product clock-faults
+                            (concat process-faults
+                                    network-faults
+                                    schedule-faults))
+         ; Schedules plus process & network faults
+         (cartesian-product schedule-faults
+                            (concat process-faults
+                                    network-faults))
+        ; Everything
+        [(concat process-faults
+                 network-faults
+                 schedule-faults
+                 clock-faults)])
+       ; Convert to maps like {:fault-type true}
        (map (fn [faults] (zipmap faults (repeat true))))))
 
 (def plot-spec
