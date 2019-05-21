@@ -224,12 +224,12 @@
         (throw e#)))
 
     (catch clojure.lang.ExceptionInfo e#
-      (cond (= "Connection is closed" (:cause (:rollback e#)))
+      (cond (= "Connection is closed" (:cause (:rollback (ex-data e#))))
             (assoc ~op :type :info, :error :conn-closed-rollback-failed)
 
             (= "createStatement() is called on closed connection"
-               (:cause (:rollback e#)))
-            (assoc ~op :type :info, :error :conn-closed-rollback-failed)
+               (:cause (:rollback (ex-data e#))))
+            (assoc ~op :type :fail, :error :conn-closed-rollback-failed)
 
             true (do (info e# :caught (pr-str (ex-data e#)))
                      (throw e#))))))
