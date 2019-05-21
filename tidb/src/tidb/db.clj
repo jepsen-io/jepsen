@@ -2,6 +2,8 @@
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojure.java.io :as io]
+            [clj-http.client :as http]
+            [cheshire.core :as json]
             [dom-top.core :refer [with-retry]]
             [jepsen [core :as jepsen]
                     [control :as c]
@@ -98,6 +100,43 @@
   (configure-pd!)
   (configure-kv!)
   (configure-db!))
+
+(defn pd-api-path
+  "Constructs an API path for the PD located on the given node."
+  [node & path-components]
+  (str "http://" node ":2379/pd/api/v1/" (str/join "/" path-components)))
+
+(defn pd-members
+  "All members of the cluster"
+  [node]
+  (-> (pd-api-path node "members")
+      (http/get {:as :json})
+      :body))
+
+(defn pd-leader
+  "Gets the current PD leader."
+  [node]
+  (-> (pd-api-path node "leader")
+      (http/get {:as :json})
+      :body))
+
+(defn pd-transfer-leader!
+  "Transfer leadership to the given leader map."
+  [node next-leader]
+  (assert (map? next-leader))
+  (-> (pd-api-path node "leader" "transfer" (:name next-leader))
+      (http/post)))
+
+(defmacro await-http
+  "Loops body until HTTP call returns, retrying 500 and 503 errors."
+  [& body]
+  `(loop []
+     (let [res# (try+ ~@body
+                      (catch [:status 500] _# ::retry)
+                      (catch [:status 503] _# ::retry))]
+       (if (= ::retry res#)
+         (recur)
+         res#))))
 
 (defn start-pd!
   "Starts the placement driver daemon"
@@ -268,6 +307,12 @@
       (str "http://download.pingcap.org/tidb-" (:version test)
            "-linux-amd64.tar.gz")))
 
+(defn setup-faketime!
+  "Configures the faketime wrapper for this node, so that the given binary runs
+  at the given rate."
+  [bin rate]
+  (c/su (faketime/wrap! (str tidb-bin-dir "/" bin) 0 rate)))
+
 (defn install!
   "Downloads archive and extracts it to our local tidb-dir, if it doesn't exist
   already. If test contains a :force-reinstall key, we always install a fresh
@@ -290,12 +335,9 @@
           ; jemalloc (segfaults on 0.9.7).
           (faketime/install-0.9.6-jepsen1!)
           ; Add faketime wrappers
-          (faketime/wrap! (str tidb-bin-dir "/" pd-bin) 0
-                          (faketime/rand-factor ratio))
-          (faketime/wrap! (str tidb-bin-dir "/" kv-bin) 0
-                          (faketime/rand-factor ratio))
-          (faketime/wrap! (str tidb-bin-dir "/" db-bin) 0
-                          (faketime/rand-factor ratio)))
+          (setup-faketime! pd-bin (faketime/rand-factor ratio))
+          (setup-faketime! kv-bin (faketime/rand-factor ratio))
+          (setup-faketime! db-bin (faketime/rand-factor ratio)))
       (c/cd tidb-bin-dir
             ; Destroy faketime wrappers, if applicable.
             (faketime/unwrap! pd-bin)

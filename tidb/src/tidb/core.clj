@@ -127,6 +127,7 @@
     :random-merge
     :clock-skew
     ; Special-case generators
+    :slow-primary
     :restart-kv-without-pd})
 
 (def process-faults

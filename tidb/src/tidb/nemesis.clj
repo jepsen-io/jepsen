@@ -13,7 +13,8 @@
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [tidb.db :as db]
-            [clojure.tools.logging :refer :all]))
+            [clojure.tools.logging :refer :all]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn process-nemesis
   "A nemesis that can pause, resume, start, stop, and kill tidb, tikv, and pd."
@@ -84,6 +85,30 @@
 
     (teardown! [this test])))
 
+(defn slow-primary-nemesis
+  "A nemesis for creating slow, isolated primaries."
+  []
+  (reify nemesis/Nemesis
+    (setup! [this test] this)
+
+    (invoke! [this test op]
+      (try+
+        (let [contact     (first (:nodes test))
+              members     (:members (db/pd-members contact))
+              slow-leader (rand-nth members)]
+          (info :members members)
+          (info :slow-leader slow-leader)
+          (info :leader (db/pd-leader contact))
+          (db/pd-transfer-leader! contact slow-leader)
+          (info :leader' (db/await-http (db/pd-leader contact)))
+          (Thread/sleep 5000)
+          (info :leader' (db/pd-leader contact))
+          (assoc op :value :done))
+        (catch [:status 503] e
+          (assoc op :type :info, :value :failed, :error e))))
+
+    (teardown! [this test])))
+
 (defn full-nemesis
   "Merges together all nemeses"
   []
@@ -95,6 +120,7 @@
      #{:shuffle-leader  :del-shuffle-leader
        :shuffle-region  :del-shuffle-region
        :random-merge    :del-random-merge}  (schedule-nemesis)
+     #{:slow-primary}                       (slow-primary-nemesis)
      {:start-partition :start
       :stop-partition  :stop}               (nemesis/partitioner nil)
      {:reset-clock          :reset
@@ -242,6 +268,27 @@
             (gen/sleep 70)
             (op :resume-pd)]))
 
+(defn slow-primary-generator
+  "A special generator which tries to create a situation in which a primary,
+  running slower than the rest of the cluster, is isolated from a majority
+  component of the cluster, which elects a new, faster primary. Because the old
+  primary's clock runs slow, we expect that the slow node may fail to step down
+  before the new primary comes to power, allowing the two to issue timestamps
+  concurrently."
+  []
+  ; First, pick a node to be our slow primary.
+  ; Force that node to
+  ; run at speed 2.
+  ; Make that node run at speed 2
+  ; Force that node to be the primary by...
+    ; Restarting every other node at speed 1
+  ; Force that node to be slow *and* the leader by...
+    ; Restarting every other node at speed 3
+  ; Isolate that node into a minority partition
+  (gen/delay 20
+             (gen/seq
+               (cycle [{:type :info, :f :slow-primary}]))))
+
 (defn full-generator
   "Takes a nemesis options map `n`. If `n` has a :long-recovery option, builds
   a generator which alternates between faults (mixed-generator) and long
@@ -250,6 +297,9 @@
   [n]
   (cond (:restart-kv-without-pd n)
         (restart-kv-without-pd-generator)
+
+        (:slow-primary n)
+        (slow-primary-generator)
 
         (:long-recovery n)
         (let [mix     #(gen/time-limit 120 (mixed-generator n))
