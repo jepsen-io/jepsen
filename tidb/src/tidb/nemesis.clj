@@ -93,19 +93,55 @@
 
     (invoke! [this test op]
       (try+
+        ; Figure out who we're going to slow down
         (let [contact     (first (:nodes test))
               members     (:members (db/pd-members contact))
-              slow-leader (rand-nth members)]
+              slow-leader (rand-nth members)
+              slow-node   (->> test db/tidb-map
+                               (keep (fn [[node m]]
+                                       (when (= (:name slow-leader) (:pd m))
+                                         node)))
+                               first)]
           (info :members members)
-          (info :slow-leader slow-leader)
-          (info :leader (db/pd-leader contact))
+          (info :slow-leader slow-node slow-leader)
+
+          ; Slow down slow-leader and make sure other nodes are all running
+          ; normally.
+          (c/on-nodes test
+                      (fn [test node]
+                        (db/setup-faketime! db/pd-bin (if (= node slow-node)
+                                                        0.5
+                                                        1))
+                        (db/stop-pd! test node)
+                        (db/start-pd! test node)))
+
+          ; Transfer leadership to slow node
+          (info :leader (db/await-http (db/pd-leader contact)))
           (db/pd-transfer-leader! contact slow-leader)
           (info :leader' (db/await-http (db/pd-leader contact)))
-          (Thread/sleep 5000)
-          (info :leader' (db/pd-leader contact))
+
+          ; Isolate slow node
+          (let [fast-nodes  (shuffle (remove #{slow-node} (:nodes test)))
+                nodes       (cons slow-node fast-nodes)
+                components  (nemesis/bisect nodes)
+                grudge      (nemesis/complete-grudge components)]
+            (info :partitioning components)
+            (net/drop-all! test grudge)
+
+            ; Report on transition
+            (dotimes [i 50]
+              (info :leader (db/await-http
+                              (info "asking" (last nodes) "for current leader")
+                              (db/pd-leader (last nodes))))
+              (Thread/sleep 100)))
+
+          (info :final-leader (db/await-http (db/pd-leader contact)))
           (assoc op :value :done))
         (catch [:status 503] e
-          (assoc op :type :info, :value :failed, :error e))))
+          (assoc op
+                 :type  :info
+                 :value :failed
+                 :error (dissoc e :http-client)))))
 
     (teardown! [this test])))
 
@@ -285,9 +321,12 @@
   ; Force that node to be slow *and* the leader by...
     ; Restarting every other node at speed 3
   ; Isolate that node into a minority partition
-  (gen/delay 20
-             (gen/seq
-               (cycle [{:type :info, :f :slow-primary}]))))
+  (->> [{:type :info, :f :slow-primary}
+        (gen/sleep 10)
+        {:type :info, :f :stop-partition}
+        (gen/sleep 10)]
+       cycle
+       gen/seq))
 
 (defn full-generator
   "Takes a nemesis options map `n`. If `n` has a :long-recovery option, builds

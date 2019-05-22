@@ -311,6 +311,7 @@
   "Configures the faketime wrapper for this node, so that the given binary runs
   at the given rate."
   [bin rate]
+  (info "Configuring" bin "to run at" (str rate "x realtime"))
   (c/su (faketime/wrap! (str tidb-bin-dir "/" bin) 0 rate)))
 
 (defn install!
