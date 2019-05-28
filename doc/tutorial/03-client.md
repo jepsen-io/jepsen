@@ -98,7 +98,7 @@ connected clients later.
           :client (Client. nil)}))
 ```
 
-Now, let's complete our `setup!` function by connecting to etcd. The
+Now, let's complete our `open!` function by connecting to etcd. The
 [Verschlimmbesserung docs](https://github.com/aphyr/verschlimmbesserung#usage)
 tell us that every function takes a Verschlimmbesserung client, created with
 `(connect url)`. That client is what we'll store in `conn`. Let's have
@@ -137,7 +137,7 @@ Verschlimmbesserung time out requests after 5 seconds, too.
 Remember, the initial client *has no connections*--like a stem cell, it has the
 *potential* to become an active client but doesn't do any work directly. We
 call `(Client. nil)` to construct that initial client--its conn will be filled
-in when Jepsen calls `setup!`.
+in when Jepsen calls `open!`.
 
 ## Reads
 
@@ -332,7 +332,7 @@ We can use that to determine the `:type` of the CaS operation.
 ```
 
 The `let` binding here uses *destructuring*: it breaks apart the `[old-value
-new-value]` pair from the operation's `:value` field into `value` and `value'`.
+new-value]` pair from the operation's `:value` field into `old` and `new`.
 Since all values except `false` and `nil` are logically true, we can use the
 result of the `cas!` call as our predicate in `if`.
 
@@ -345,7 +345,7 @@ $ lein run test
 ...
 INFO [2017-03-30 22:38:51,892] jepsen worker 1 - jepsen.util 1  :invoke :cas  [3 1]
 WARN [2017-03-30 22:38:51,936] jepsen worker 1 - jepsen.core Process 1 indeterminate
-clojure.lang.ExceptionInfo: throw+: {:errorCode 100, :message "Key not found", :cause "/r", :index 11, :status 404}
+clojure.lang.ExceptionInfo: throw+: {:errorCode 100, :message "Key not found", :cause "/foo", :index 11, :status 404}
   at slingshot.support$stack_trace.invoke(support.clj:201) ~[na:na]
   ...
 ```
@@ -372,11 +372,10 @@ error code.
       (case (:f op)
         :read (assoc op :type :ok, :value (parse-long (v/get conn "foo")))
         :write (do (v/reset! conn "foo" (:value op))
-                   (assoc op :type, :ok))
+                   (assoc op :type :ok))
         :cas (try+
-               (let [[value value'] (:value op)]
-                 (assoc op :type (if (v/cas! conn "foo" value value'
-                                             {:prev-exist? true})
+               (let [[old new] (:value op)]
+                 (assoc op :type (if (v/cas! conn "foo" old new)
                                    :ok
                                    :fail)))
                (catch [:errorCode 100] ex
