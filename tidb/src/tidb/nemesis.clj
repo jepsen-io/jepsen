@@ -110,7 +110,7 @@
           (c/on-nodes test
                       (fn [test node]
                         (db/setup-faketime! db/pd-bin (if (= node slow-node)
-                                                        0.5
+                                                        1
                                                         1))
                         (db/stop-pd! test node)
                         (db/start-pd! test node)))
@@ -129,13 +129,14 @@
             (net/drop-all! test grudge)
 
             ; Report on transition
-            (dotimes [i 50]
+            (dotimes [i 30]
               (info :leader (db/await-http
                               (info "asking" (last nodes) "for current leader")
                               (db/pd-leader (last nodes))))
-              (Thread/sleep 100)))
+              (Thread/sleep 100))
 
-          (info :final-leader (db/await-http (db/pd-leader contact)))
+            (info :final-leader (db/await-http (db/pd-leader (last nodes)))))
+
           (assoc op :value :done))
         (catch [:status 503] e
           (assoc op
@@ -322,9 +323,9 @@
     ; Restarting every other node at speed 3
   ; Isolate that node into a minority partition
   (->> [{:type :info, :f :slow-primary}
-        (gen/sleep 10)
+        (gen/sleep 30)
         {:type :info, :f :stop-partition}
-        (gen/sleep 10)]
+        (gen/sleep 30)]
        cycle
        gen/seq))
 
