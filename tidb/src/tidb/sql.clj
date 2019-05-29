@@ -31,13 +31,20 @@
 
   Returns conn."
   [conn test]
-  (j/execute! conn ["set @@tidb_disable_txn_auto_retry = ?"
-                    (if (:auto-retry test) 0 1)])
+  (when-not (= :default (:auto-retry test))
+    (info :setting-auto-retry (:auto-retry test))
+    (j/execute! conn ["set @@tidb_disable_txn_auto_retry = ?"
+                      (if (:auto-retry test) 0 1)]))
+
   ; COOL STORY: disable_txn_auto_retry doesn't actually disable all automatic
   ; transaction retries. It only disables retries on conflicts. TiDB has
   ; another retry mechanism on timeouts, which will still take effect. We have
   ; to set this limit too.
-  (j/execute! conn ["set @@tidb_retry_limit = ?" (:auto-retry-limit test 10)])
+  (when-not (= :default (:auto-retry-limit test))
+    (info :setting-auto-retry-limit (:auto-retry-limit test 10))
+    (j/execute! conn ["set @@tidb_retry_limit = ?"
+                      (:auto-retry-limit test 10)]))
+
   conn)
 
 (defn open

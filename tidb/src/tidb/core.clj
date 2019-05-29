@@ -343,7 +343,7 @@
     :validate [pos? "Must be positive"]]
 
    ["-v" "--version VERSION" "What version of TiDB should to install"
-    :default "v3.0.0-beta.1"]
+    :default "3.0.0-beta.1"]
 
    [nil "--tarball-url URL" "URL to TiDB tarball to install, has precedence over --version"
     :default nil]])
@@ -362,13 +362,21 @@
 
 (def single-test-opts
   "CLI options for running a single test"
-  [[nil "--auto-retry" "Enables automatic retries (the default for TiDB)"
-    :default false]
+  [[nil "--auto-retry MODE" "Enables automatic retries (the default for TiDB). Mode should be 'true', 'false', or 'default'"
+    :parse-fn {"true"     true
+               "false"    false
+               "default"  :default}
+    :validate [identity "must be one of 'true', 'false', or 'default'"]
+    :default  :default]
 
-   [nil "--auto-retry-limit COUNT" "How many automatic retries can we execute?"
-    :default 10
-    :parse-fn parse-long
-    :validate [(complement neg?) "Must not be negative"]]
+   [nil "--auto-retry-limit COUNT" "How many automatic retries can we execute? The special value \"default\" means use whatever TiDB does by default."
+    :default  :default
+    :parse-fn (fn [x]
+                (if (= "default" x)
+                  :default
+                  (parse-long x)))
+    :validate [(fn [x] (or (= :default x) (not (neg? x))))
+               "Must not be negative"]]
 
    [nil "--predicate-read" "If present, try to read using a query over a secondary key, rather than by primary key. Implied by --use-index."
     :default false]

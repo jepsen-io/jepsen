@@ -304,7 +304,7 @@
   constructing one from the version."
   [test]
   (or (:tarball-url test)
-      (str "http://download.pingcap.org/tidb-" (:version test)
+      (str "http://download.pingcap.org/tidb-v" (:version test)
            "-linux-amd64.tar.gz")))
 
 (defn setup-faketime!
@@ -324,7 +324,8 @@
   cluster."
   [test node]
   (c/su
-    (when (or (:force-reinstall test) (not (cu/exists? tidb-dir)))
+    (when (or (:force-reinstall test)
+              (not (cu/exists? tidb-dir)))
       (info node "installing TiDB")
       (info (tarball-url test))
       (cu/install-archive! (tarball-url test) tidb-dir)
