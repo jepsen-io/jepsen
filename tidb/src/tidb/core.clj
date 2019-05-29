@@ -111,6 +111,7 @@
   "These are the types of failures that the nemesis can perform."
   #{:partition
     :partition-one
+    :partition-pd-leader
     :partition-half
     :partition-ring
     :kill

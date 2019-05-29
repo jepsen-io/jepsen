@@ -110,7 +110,7 @@
           (c/on-nodes test
                       (fn [test node]
                         (db/setup-faketime! db/pd-bin (if (= node slow-node)
-                                                        1
+                                                        0.1
                                                         1))
                         (db/stop-pd! test node)
                         (db/start-pd! test node)))
@@ -182,6 +182,18 @@
   (op :start-partition
      (->> test :nodes nemesis/split-one nemesis/complete-grudge)
      :partition-type :single-node))
+
+(defn partition-pd-leader-gen
+  "A generator for a partition that isolates the current PD leader in a
+  minority."
+  [test process]
+  (let [leader (db/await-http
+                 (db/pd-leader-node test (rand-nth (:nodes test))))
+        followers (shuffle (remove #{leader} (:nodes test)))
+        nodes       (cons leader followers)
+        components  (split-at 1 nodes) ; Maybe later rand(n/2+1?)
+        grudge      (nemesis/complete-grudge components)]
+    (op :start-partition, grudge, :partition-type :pd-leader)))
 
 (defn partition-half-gen
   "A generator for a partition that cuts the network in half."
@@ -257,9 +269,10 @@
              (op :del-shuffle-region))
           (o {:random-merge (op :random-merge)}
              (op :del-random-merge))
-          (o {:partition-one  partition-one-gen
-              :partition-half partition-half-gen
-              :partition-ring partition-ring-gen}
+          (o {:partition-one        partition-one-gen
+              :partition-pd-leader  partition-pd-leader-gen
+              :partition-half       partition-half-gen
+              :partition-ring       partition-ring-gen}
              (op :stop-partition))
           (opt-mix n {:clock-skew (clock-gen)})]
          ; For all options relevant for this nemesis, mix them together
@@ -368,9 +381,10 @@
     (:schedules n) (assoc :shuffle-leader true
                           :shuffle-region true
                           :random-merge true)
-    (:partition n) (assoc :partition-one true
-                           :partition-half true
-                           :partition-ring true)))
+    (:partition n) (assoc :partition-one        true
+                          :partition-pd-leader  true
+                          :partition-half      true
+                          :partition-ring      true)))
 
 (defn nemesis
   "Composite nemesis and generator, given test options."

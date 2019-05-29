@@ -120,6 +120,16 @@
       (http/get {:as :json})
       :body))
 
+(defn pd-leader-node
+  "Returns the name of the node which is the current PD leader."
+  [test node]
+  (let [leader-name (:name (pd-leader node))]
+    (->> (tidb-map test)
+         (keep (fn [[node m]]
+                 (when (= leader-name (:pd m))
+                   node)))
+         first)))
+
 (defn pd-transfer-leader!
   "Transfer leadership to the given leader map."
   [node next-leader]
