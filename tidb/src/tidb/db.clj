@@ -32,6 +32,7 @@
 (def kv-data-dir    (str tidb-dir "/data/kv"))
 (def db-config-file (str tidb-dir "/db.conf"))
 (def db-log-file    (str tidb-dir "/db.log"))
+(def db-slow-file   (str tidb-dir "/slow.log"))
 (def db-stdout      (str tidb-dir "/db.stdout"))
 (def db-pid-file    (str tidb-dir "/db.pid"))
 
@@ -396,6 +397,7 @@
     db/LogFiles
     (log-files [_ test node]
       [db-log-file
+       db-slow-file
        db-stdout
        kv-log-file
        kv-stdout
