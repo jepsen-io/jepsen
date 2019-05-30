@@ -227,6 +227,13 @@
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
       (apply ssh/scp-from s args))
+    (catch clojure.lang.ExceptionInfo e
+      (if (and (pos? tries)
+               (re-find #"disconnect error" (.getMessage e)))
+        (do (Thread/sleep (+ 1000 (rand-int 1000)))
+            (retry (dec tries)))
+        (throw+ (assoc (debug-data)
+                       :type ::download-failed))))
     (catch com.jcraft.jsch.JSchException e
       (if (and (pos? tries)
                (or (= "session is down" (.getMessage e))

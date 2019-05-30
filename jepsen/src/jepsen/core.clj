@@ -152,6 +152,9 @@
   the root cause that made us abort."
   [test]
   (try (snarf-logs! test)
+       (catch clojure.lang.ExceptionInfo e
+         (warn e (str "Error snarfing logs and updating symlinks\n")
+               (with-out-str (pprint (ex-data e)))))
        (catch Throwable t
          (warn t "Error snarfing logs and updating symlinks"))))
 
