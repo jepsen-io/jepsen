@@ -5,6 +5,7 @@
             [clj-http.client :as http]
             [cheshire.core :as json]
             [dom-top.core :refer [with-retry]]
+            [fipp.edn :refer [pprint]]
             [jepsen [core :as jepsen]
                     [control :as c]
                     [db :as db]
@@ -13,6 +14,11 @@
             [jepsen.control.util :as cu]
             [slingshot.slingshot :refer [try+ throw+]]
             [tidb.sql :as sql]))
+
+(def replica-count
+  "This should probably be used to generate max-replicas in pd.conf as well,
+  but for now we'll just write it in both places."
+  3)
 
 (def tidb-dir       "/opt/tidb")
 (def tidb-bin-dir   "/opt/tidb/bin")
@@ -137,6 +143,13 @@
   (assert (map? next-leader))
   (-> (pd-api-path node "leader" "transfer" (:name next-leader))
       (http/post)))
+
+(defn pd-regions
+  "All PD regions"
+  [node]
+  (-> (pd-api-path node "regions")
+      (http/get {:as :json})
+      :body))
 
 (defmacro await-http
   "Loops body until HTTP call returns, retrying 500 and 503 errors."
@@ -357,6 +370,39 @@
             (faketime/unwrap! kv-bin)
             (faketime/unwrap! db-bin)))))
 
+(defn region-ready?
+  "Does the given region have enough replicas?"
+  [region]
+  (->> (:peers region)
+       (remove :is_learner)
+       count
+       (<= replica-count)))
+
+(defn wait-for-replica-count
+  "TiDB start with a single replica, and only adds more later. We have to wait
+  for it to do that before starting our tests if we want to be able to test
+  things like failover. <sigh>"
+  [node]
+  (loop [tries 1000]
+    (when (zero? tries)
+      (throw+ {:type :gave-up-waiting-for-replica-count}))
+
+    (let [regions (await-http (pd-regions node))]
+      ;(info :regions (with-out-str (pprint regions)))
+      (info :region-replicas (->> (:regions regions)
+                                  (map (fn [region]
+                                         [(:id region)
+                                          (->> (:peers region)
+                                               (remove :is_learner)
+                                               count)]))
+                                  (into (sorted-map))
+                                  pprint
+                                  with-out-str))
+      (if (every? region-ready? (:regions regions))
+        true
+        (do (Thread/sleep 10000)
+            (recur (dec tries)))))))
+
 (defn db
   "TiDB"
   []
@@ -368,15 +414,20 @@
 
         (start! test node)
 
+        (jepsen/synchronize test)
+
         ; For reasons I cannot explain, sometimes TiDB just... fails to reach a
         ; usable state despite waiting hundreds of seconds to open a
         ; connection. I've lowered the await-node timeout, and if we fail here,
         ; we'll nuke the entire setup process and try again. <sigh>
-        (try+ (sql/await-node node)
+        (try+ (wait-for-replica-count node)
+              (sql/await-node node)
               (catch java.sql.SQLException e
                 ; siiiiiiiigh
                 (throw+ {:type :jepsen.db/setup-failed}))
               (catch [:type :restart-loop-timed-out] e
+                (throw+ {:type :jepsen.db/setup-failed}))
+              (catch [:type :gave-up-waiting-for-replica-count] e
                 (throw+ {:type :jepsen.db/setup-failed}))
               (catch [:type :connect-timed-out] e
                 (throw+ {:type :jepsen.db/setup-failed})))))
