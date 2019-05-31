@@ -240,6 +240,8 @@
             (assoc ~op :type :fail, :error :conn-closed-rollback-failed)
 
             true (do (info e# :caught (pr-str (ex-data e#)))
+                     (info :caught-rollback (:rollback (ex-data e#)))
+                     (info :caught-cause    (:cause (:rollback (ex-data e#))))
                      (throw e#))))))
 
 (defmacro with-txn
