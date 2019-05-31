@@ -144,8 +144,9 @@
     (catch java.sql.SQLNonTransientConnectionException ~e ~retry)
     (catch java.sql.SQLException ~e
       (condp re-find (.getMessage ~e)
-        #"Information schema is changed"  ~retry
-        #"called on closed connection"    ~retry
+        #"Resolve lock timeout"           ~retry ; high contention
+        #"Information schema is changed"  ~retry ; ???
+        #"called on closed connection"    ~retry ; definitely didn't happen
         (do (info "with-conn-failure-retry not sure how to handle SQLException with message" ~e)
             (throw ~e))))
     (catch Throwable ~e
