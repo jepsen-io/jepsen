@@ -284,21 +284,25 @@
                   (fn ~'start!     [] ~start!)
                   (fn ~'get-status [] ~get-status)))
 
-(defn start!
-  "Starts all daemons, waiting for each one's health page in turn. Uses
-  synchronization barriers, and should be called concurrently on ALL nodes."
+(defn start-wait-pd!
+  "Starts PD, waiting for the health page to come online."
   [test node]
   (restart-loop :pd (start-pd! test node)
                 (cond (pd-ready?)                       :ready
                       (cu/daemon-running? pd-pid-file)  :starting
-                      true                              :crashed))
-  (jepsen/synchronize test)
+                      true                              :crashed)))
+
+(defn start-wait-kv!
+  "Starts TiKV, waiting for the health page to come online."
+  [test node]
   (restart-loop :kv (start-kv! test node)
                 (cond (kv-ready?)                       :ready
                       (cu/daemon-running? kv-pid-file)  :starting
-                      true                              :crashed))
+                      true                              :crashed)))
 
-  (jepsen/synchronize test)
+(defn start-wait-db!
+  "Starts TiDB, waiting for the health page to come online."
+  [test node]
   (restart-loop :db (start-db! test node)
                 (cond (db-ready?)                       :ready
                       (cu/daemon-running? db-pid-file)  :starting
@@ -412,24 +416,42 @@
         (install! test node)
         (configure!)
 
-        (start! test node)
+        (try+ (start-wait-pd! test node)
+              ; If we don't synchronize, KV might explode because PD isn't
+              ; fully available
+              (jepsen/synchronize test)
 
-        (jepsen/synchronize test)
+              (start-wait-kv! test node)
+              (jepsen/synchronize test)
 
-        ; For reasons I cannot explain, sometimes TiDB just... fails to reach a
-        ; usable state despite waiting hundreds of seconds to open a
-        ; connection. I've lowered the await-node timeout, and if we fail here,
-        ; we'll nuke the entire setup process and try again. <sigh>
-        (try+ (wait-for-replica-count node)
+              ; We have to wait for every region to become totally replicated
+              ; before starting TiDB: if we start TiDB first, it might take 80+
+              ; minutes to converge.
+              (wait-for-replica-count node)
+              (jepsen/synchronize test)
+
+              ; OK, now we can start TiDB itself
+              (start-wait-db! test node)
+
+              ; For reasons I cannot explain, sometimes TiDB just... fails to
+              ; reach a usable state despite waiting hundreds of seconds to
+              ; open a connection. I've lowered the await-node timeout, and if
+              ; we fail here, we'll nuke the entire setup process and try
+              ; again. <sigh>
               (sql/await-node node)
-              (catch java.sql.SQLException e
-                ; siiiiiiiigh
-                (throw+ {:type :jepsen.db/setup-failed}))
-              (catch [:type :restart-loop-timed-out] e
-                (throw+ {:type :jepsen.db/setup-failed}))
+
               (catch [:type :gave-up-waiting-for-replica-count] e
                 (throw+ {:type :jepsen.db/setup-failed}))
+
+              (catch [:type :restart-loop-timed-out] e
+                (throw+ {:type :jepsen.db/setup-failed}))
+
               (catch [:type :connect-timed-out] e
+                ; sigh
+                (throw+ {:type :jepsen.db/setup-failed}))
+
+              (catch java.sql.SQLException e
+                ; siiiiiiiigh
                 (throw+ {:type :jepsen.db/setup-failed})))))
 
     (teardown! [_ test node]
