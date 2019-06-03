@@ -147,6 +147,7 @@
         #"Resolve lock timeout"           ~retry ; high contention
         #"Information schema is changed"  ~retry ; ???
         #"called on closed connection"    ~retry ; definitely didn't happen
+        #"Region is unavailable"          ~retry ; okay fine
         (do (info "with-conn-failure-retry not sure how to handle SQLException with message" ~e)
             (throw ~e))))
     (catch Throwable ~e
