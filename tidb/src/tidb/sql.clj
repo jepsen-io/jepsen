@@ -136,7 +136,7 @@
                   (Thread/sleep (rand-int 2000))
                   (~'retry (reopen! ~conn-sym) (dec ~tries)))]
  `(dt/with-retry [~conn-sym ~conn
-                  ~tries    16]
+                  ~tries    32]
     (let [~conn ~conn-sym] ; Rebind the conn symbol to our current connection
       ~@body)
     (catch java.sql.BatchUpdateException ~e ~retry)
@@ -148,10 +148,8 @@
         #"Information schema is changed"  ~retry ; ???
         #"called on closed connection"    ~retry ; definitely didn't happen
         #"Region is unavailable"          ~retry ; okay fine
-        (do (info "with-conn-failure-retry not sure how to handle SQLException with message" ~e)
-            (throw ~e))))
-    (catch Throwable ~e
-      (throw ~e)))))
+        (do (info "with-conn-failure-retry isn't sure how to handle SQLException with message" (pr-str (class (.getMessage ~e))) (pr-str (.getMessage ~e)))
+            (throw ~e)))))))
 
 (def await-id
   "Used to generate unique identifiers for awaiting cluster stabilization"
