@@ -385,6 +385,14 @@
   {:appender :console
    :pattern "%p\t[%t] %c: %m%n"})
 
+(def default-logging-overrides
+  "Logging overrides that we apply by default"
+  {"clj-libssh2.session"         :warn
+   "clj-libssh2.authentication"  :warn
+   "clj-libssh2.known-hosts"     :warn
+   "clj-libssh2.ssh"             :warn
+   "clj-libssh2.channel"         :warn})
+
 (defn start-logging!
   "Starts logging to a file in the test's directory. Also updates current
   symlink. Test may include a :logging key, which should be a map with the
@@ -400,7 +408,8 @@
                   :encoder :pattern
                   :pattern "%d{ISO8601}{GMT}\t%p\t[%t] %c: %m%n"
                   :file (.getCanonicalPath (path! test "jepsen.log"))}]
-     :overrides (:overrides (:logging test))})
+     :overrides (merge default-logging-overrides
+                       (:overrides (:logging test)))})
   (update-current-symlink! test))
 
 (defn stop-logging!
