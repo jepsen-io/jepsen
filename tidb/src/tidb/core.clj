@@ -85,6 +85,23 @@
                              :auto-retry-limit  [0])
                      workload-options)))
 
+(def quick-workload-options
+  "A restricted set of workload options which skips some redundant tests and
+  avoids testing auto-retry or read locks."
+  (-> (util/map-vals #(assoc %
+                             :auto-retry        [:default]
+                             :auto-retry-limit  [:default]
+                             :use-index         [true]
+                             :update-in-place   [false]
+                             :read-lock         [nil])
+                             workload-options)
+      ; Bank-multitable is, I think, more likely to fail than bank, and the two
+      ; test the same invariants in similar ways. Long-fork, monotonic, and
+      ; seqwuential are covered by append (though less efficiently, I suspect).
+      ; :table isn't as high-priority a correctness check, since it applies
+      ; only to DDL.
+      (dissoc :bank :long-fork :monotonic :sequential :table)))
+
 (defn all-combos
   "Takes a map of options to collections of values for that option. Computes a
   collection of maps with the combinatorial expansion of every possible option
@@ -175,6 +192,24 @@
          (cartesian-product schedule-faults
                             (concat process-faults
                                     network-faults))
+        ; Everything
+        [(concat process-faults
+                 network-faults
+                 schedule-faults
+                 clock-faults)])
+       ; Convert to maps like {:fault-type true}
+       (map (fn [faults] (zipmap faults (repeat true))))))
+
+(def quick-nemeses
+  "A restricted set of failures for quick testing"
+  (->> (concat
+         ; No faults
+         [[]]
+         ; Single types of faults
+         (map vector process-faults)
+         (map vector network-faults)
+         (map vector schedule-faults)
+         (map vector clock-faults)
         ; Everything
         [(concat process-faults
                  network-faults
@@ -351,7 +386,10 @@
 
 (def test-all-opts
   "CLI options for running the entire test suite."
-  [["-w" "--workload NAME"
+  [[nil "--quick" "Runs a limited set of workloads and nemeses for faster testing."
+    :default false]
+
+   ["-w" "--workload NAME"
     "Test workload to run. If omitted, runs all workloads"
     :parse-fn keyword
     :default nil
@@ -412,12 +450,21 @@
     :run      (fn [{:keys [options]}]
                 (info "CLI options:\n" (with-out-str (pprint options)))
                 (let [w         (:workload options)
-                      workload-opts (if (:only-workloads-expected-to-pass options)
+                      workload-opts (cond
+                                      (:quick options)
+                                      quick-workload-options
+
+                                      (:only-workloads-expected-to-pass options)
                                       workload-options-expected-to-pass
+
+                                      true
                                       workload-options)
                       workloads (cond->> (all-workload-options workload-opts)
                                   w (filter (comp #{w} :workload)))
-                      tests (for [nemesis   all-nemeses
+                      nemeses   (cond
+                                  (:quick options)  quick-nemeses
+                                  true              all-nemeses)
+                      tests (for [nemesis   nemeses
                                   workload  workloads
                                   i         (range (:test-count options))]
                               (do
