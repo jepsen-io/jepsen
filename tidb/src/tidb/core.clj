@@ -91,7 +91,7 @@
   (-> (util/map-vals #(assoc %
                              :auto-retry        [:default]
                              :auto-retry-limit  [:default]
-                             :use-index         [true]
+                             :use-index         (filter true? (:use-index %))
                              :update-in-place   [false]
                              :read-lock         [nil])
                              workload-options)
