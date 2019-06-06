@@ -5,6 +5,7 @@
         clojure.pprint
         clojure.tools.logging)
   (:require [clojure.string :as str]
+            [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.tests :as tst]
@@ -15,6 +16,8 @@
             [jepsen.checker :as checker]
             [jepsen.nemesis :as nemesis]
             [knossos.model :as model]))
+
+(use-fixtures :once quiet-logging)
 
 (defn tracking-client
   "Tracks connections in an atom."
@@ -36,6 +39,24 @@
 
      (close! [c test]
        (swap! conns disj uid)))))
+
+(deftest most-interesting-exception-test
+  ; Verifies that we get interesting, rather than interrupted or broken barrier
+  ; exceptions, out of tests
+  (let [db (reify db/DB
+             (setup! [this test node]
+               ; One thread throws
+               (when (= (nth (:nodes test) 2) node)
+                      (throw (RuntimeException. "hi")))
+
+               (throw (java.util.concurrent.BrokenBarrierException. "oops")))
+
+             (teardown! [this test node]))
+        test (assoc tst/noop-test
+                    :name   "interesting exception"
+                    :db     db
+                    :ssh    {:dummy? true})]
+    (is (thrown-with-msg? RuntimeException #"^hi$" (run! test)))))
 
 (deftest ^:integration basic-cas-test
   (let [state (atom nil)

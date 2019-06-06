@@ -7,12 +7,12 @@
 (defn quiet-logging
   "Quiets down logging"
   [f]
-  (prn :start-logging)
   (unilog/start-logging!
     {:level     "info"
      :console   false
      :appenders [store/console-appender]
      :overrides (merge store/default-logging-overrides
-                       {})})
+                       {"jepsen.db"   :error
+                        "jepsen.core" :error})})
   (f)
   (store/stop-logging!))

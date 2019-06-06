@@ -53,8 +53,6 @@
                                           (partial setup-primary! db)))
 
                       nil
-                      (catch RuntimeException e
-                        (info :caught e))
                       (catch [:type ::setup-failed] e
                         (if (< 1 tries)
                           (do (info :throwable (pr-str (type (:throwable &throw-context))))
