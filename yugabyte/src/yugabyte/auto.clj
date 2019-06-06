@@ -354,8 +354,7 @@
               (when (:experimental-tuning-flags test)
                 experimental-tuning-flags)
               :--master_addresses   (master-addresses test)
-              :--replication_factor (:replication-factor test)
-              :--v 3)))
+              :--replication_factor (:replication-factor test))))
 
     (start-tserver! [db test node]
       (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
