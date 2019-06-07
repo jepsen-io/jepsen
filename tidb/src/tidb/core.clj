@@ -88,13 +88,20 @@
 (def quick-workload-options
   "A restricted set of workload options which skips some redundant tests and
   avoids testing auto-retry or read locks."
-  (-> (util/map-vals #(assoc %
-                             :auto-retry        [:default]
-                             :auto-retry-limit  [:default]
-                             :use-index         (filter true? (:use-index %))
-                             :update-in-place   [false]
-                             :read-lock         [nil])
-                             workload-options)
+  (-> (util/map-vals (fn [opts]
+                       (let [opts (-> opts
+                                      (assoc
+                                        :auto-retry        [:default]
+                                        :auto-retry-limit  [:default]
+                                        :update-in-place   [false]
+                                        :read-lock         [nil])
+                                      (update :use-index
+                                              (partial filter true?)))]
+                         ; Don't generate an empty use-index option
+                         (if (seq (:use-index opts))
+                           opts
+                           (dissoc opts :use-index))))
+                     workload-options)
       ; Bank-multitable is, I think, more likely to fail than bank, and the two
       ; test the same invariants in similar ways. Long-fork, monotonic, and
       ; seqwuential are covered by append (though less efficiently, I suspect).
