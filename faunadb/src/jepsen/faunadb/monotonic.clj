@@ -273,7 +273,11 @@
                                [[:set :title (str (:name test) " sequential by process")]
                                 [:set :ylabel "register value"]
                                 [:set :xlabel "faunadb timestamp"]])
-                  :series (vals series)}]
+                  :series (map (fn [process points]
+                                 {:title (str process)
+                                  :with :linespoints
+                                  :data points})
+                               series)}]
         (when (perf/has-data? plot)
           (-> plot
               (perf/without-empty-series)
