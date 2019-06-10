@@ -276,7 +276,9 @@
                   :series (map (fn [process points]
                                  {:title (str process)
                                   :with :linespoints
-                                  :data points})
+                                  :data points
+                                  :pointtype 2
+                                  :linetype (colors process)})
                                series)}]
         (when (perf/has-data? plot)
           (-> plot
