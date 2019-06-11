@@ -175,6 +175,7 @@
                                     nil)
                    "failed"   (case sub
                                 "Result: signal" false
+                                "Result: timeout" false
                                 nil)
                    "inactive" (case sub
                                 "dead" false
