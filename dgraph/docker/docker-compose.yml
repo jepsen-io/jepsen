@@ -4,6 +4,8 @@ services:
     volumes:
       - ${GOPATH}/bin:/gobin # Mounts $GOPATH/bin on host to /gobin for easy access to binaries.
   jaeger:
+    networks:
+      - jepsen
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
     hostname: jaeger

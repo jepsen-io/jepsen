@@ -55,17 +55,21 @@
           nodes       (util/polysort (keys datasets))
           node-names  (short-node-names nodes)
           output-path (.getCanonicalPath (store/path! test (:subdirectory opts)
-                                                      "clock-skew.png"))]
-      (when (some seq (vals datasets))
-        (-> {:preamble (concat (perf/preamble output-path)
-                               [[:set :title (str (:name test) " clock skew")]
-                                [:set :ylabel "Skew (s)"]])
-             :series   (remove nil?
-                               (for [node node-names]
-                                 (when (seq (get datasets node))
-                                   {:title node
-                                    :with  :steps
-                                    :data  (get datasets node)})))}
+                                                      "clock-skew.png"))
+          plot {:preamble (concat (perf/preamble output-path)
+                                  [[:set :title (str (:name test)
+                                                     " clock skew")]
+                                   [:set :ylabel "Skew (s)"]])
+                :series   (map (fn [node node-name]
+                                 {:title node-name
+                                  :with  :steps
+                                  :data  (get datasets node)})
+                               nodes
+                               node-names)}]
+      (when (perf/has-data? plot)
+        (-> plot
+            (perf/without-empty-series)
             (perf/with-range)
             (perf/with-nemeses history (:nemeses (:plot test)))
-            (perf/plot!))))))
+            (perf/plot!)))))
+  {:valid? true})

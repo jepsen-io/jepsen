@@ -88,7 +88,12 @@ register. Reads are similar, except that we always allow reads of `nil` to pass
 through. This allows us to satisfy histories which include reads that never
 returned.
 
-We'll add this to our test by providing a `:model` field.
+To analyze the history, we'll specify a `:checker` for the test, and provide a
+`:model` to specify how the system *should* behave.
+`checker/linearizable` uses the Knossos linearizability checker to verify that
+every operation appears to take place atomically between its invocation and
+completion. The linearizable checker requires a model and to specify a particular
+algorithm which we pass to it in an options map.
 
 ```clj
 (defn etcd-test
@@ -101,8 +106,8 @@ We'll add this to our test by providing a `:model` field.
           :os         debian/os
           :db         (db "v3.1.5")
           :client     (Client. nil)
-          :model      (model/cas-register)
-          :checker    (checker/linearizable)
+          :checker    (checker/linearizable {:model     (model/cas-register)
+                                             :algorithm :linear})
           :generator  (->> (gen/mix [r w cas])
                            (gen/stagger 1)
                            (gen/nemesis nil)
@@ -110,31 +115,26 @@ We'll add this to our test by providing a `:model` field.
 
 ```
 
-To analyze the history, we'll specify a `:checker` for the test.
-`checker/linearizable` uses the Knossos linearizability checker to verify that
-every operation appears take place atomically between its invocation and
-completion. It'll use the test's `:model` to specify how the system *should*
-behave.
-
 Running the test, we can confirm the checker's results:
 
 ```bash
 $ lein run test
 ...
-INFO [2017-03-31 17:38:16,855] jepsen worker 0 - jepsen.util 0  :invoke :write  1
-INFO [2017-03-31 17:38:16,861] jepsen worker 0 - jepsen.util 0  :ok :write  1
+INFO [2019-04-17 17:38:16,855] jepsen worker 0 - jepsen.util 0  :invoke :write  1
+INFO [2019-04-17 17:38:16,861] jepsen worker 0 - jepsen.util 0  :ok :write  1
 ...
-INFO [2017-03-31 17:38:19,307] main - jepsen.core {:valid? true,
+INFO [2019-04-18 03:53:32,714] jepsen test runner - jepsen.core {:valid? true,
  :configs
  ({:model {:value 1},
    :last-op
-   {:type :ok,
+   {:process 3,
+    :type :ok,
     :f :write,
     :value 1,
-    :process 0,
-    :time 15534211500,
-    :index 37},
+    :index 151,
+    :time 14796541900},
    :pending []}),
+ :analyzer :linear,
  :final-paths ()}
 
 
@@ -154,8 +154,9 @@ performance graphs.
 
 ```clj
          :checker (checker/compose
-                    {:perf   (checker/perf)
-                     :linear (checker/linearizable)})
+                     {:perf   (checker/perf)
+                      :linear (checker/linearizable {:model     (model/cas-register)
+                                                     :algorithm :linear})})
 ```
 
 ```bash
@@ -176,10 +177,11 @@ We can also generate HTML visualizations of the history. Let's add the `jepsen.c
 And add that checker to the test:
 
 ```clj
-          :checker    (checker/compose
-                        {:perf      (checker/perf)
-                         :linear    (checker/linearizable)
-                         :timeline  (timeline/html)})
+          :checker (checker/compose
+                     {:perf   (checker/perf)
+                      :linear (checker/linearizable {:model     (model/cas-register)
+                                                     :algorithm :linear})
+                      :timeline (timeline/html)})
 ```
 
 Now we can plot how different processes performed operations over time--which

@@ -5,7 +5,8 @@
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
 
@@ -59,6 +60,22 @@
    :--connect-timeout 60
    :--read-timeout 60])
 
+(defn wget-helper!
+  "A helper for wget! and cached-wget!. Calls wget with options; catches name
+  resolution and other network errors, and retries them. EC2 name resolution
+  can be surprisingly flaky."
+  [& args]
+  (loop [tries 5]
+    (let [res (try+
+                (exec :wget args)
+                (catch [:type :jepsen.control/nonzero-exit, :exit 4] e
+                  (if (pos? tries)
+                    ::retry
+                    (throw e))))]
+      (if (= ::retry res)
+        (recur (dec tries))
+        res))))
+
 (defn wget!
   "Downloads a string URL and returns the filename as a string. Skips if the
   file already exists."
@@ -69,7 +86,7 @@
      (when force?
        (exec :rm :-f filename))
      (when (not (exists? filename))
-       (exec :wget std-wget-opts url))
+       (wget-helper! std-wget-opts url))
      filename)))
 
 (def wget-cache-dir
@@ -100,7 +117,7 @@
        (info "Downloading" url)
        (do (exec :mkdir :-p wget-cache-dir)
            (cd wget-cache-dir
-               (exec :wget std-wget-opts :-O dest-file url))))
+               (wget-helper! std-wget-opts :-O dest-file url))))
      dest-file)))
 
 (defn install-archive!
@@ -128,7 +145,7 @@
      (let [parent (exec :dirname dest)]
        (exec :mkdir :-p parent))
 
-     (try
+     (try+
        (cd tmpdir
            ; Extract archive to tmpdir
            (if (re-find #".*\.zip$" url)
@@ -151,21 +168,23 @@
                ; Move all roots to dest
                (exec :mv tmpdir dest))))
 
-       (catch RuntimeException e
-         (condp re-find (.getMessage e)
-           #"tar: Unexpected EOF"
-           (if local-file
-             ; Nothing we can do to recover here
-             (throw (RuntimeException.
-                      (str "Local archive " local-file " on node "
-                           *host*
-                           " is corrupt: unexpected EOF.")))
-             (do (info "Retrying corrupt archive download")
-                 (exec :rm :-rf file)
-                 (install-archive! url dest force?)))
+       (catch [:type :jepsen.control/nonzero-exit] e
+         (let [err (:err e)]
+           (if (or (re-find #"tar: Unexpected EOF" err)
+                   (re-find #"This does not look like a tar archive" err))
+             (if local-file
+               ; Nothing we can do to recover here
+               (throw (RuntimeException.
+                        (str "Local archive " local-file " on node "
+                             *host*
+                             " is corrupt: " err)))
+               ; Retry download once; maybe it was abnormally terminated
+               (do (info "Retrying corrupt archive download")
+                   (exec :rm :-rf file)
+                   (install-archive! url dest force?)))
 
-           ; Throw by default
-           (throw e)))
+             ; Throw by default
+             (throw+ e))))
 
        (finally
          ; Clean up tmpdir
@@ -193,17 +212,17 @@
   ([pattern]
    (grepkill! 9 pattern))
   ([signal pattern]
-   (try
-     (exec :ps :aux
-           | :grep pattern
-           | :grep :-v "grep"
-           | :awk "{print $2}"
-           | :xargs :kill (str "-" signal))
-     ; Occasionally returns nonzero exit status and empty strings for reasons I
-     ; don't understand but think are fine?
-     (catch RuntimeException e
-       (when-not (re-find #"^\s*$" (.getMessage e))
-         (throw e))))))
+   ; Hahaha we'd like to use pkill here, but because we run sudo commands in a
+   ; bash wrapper (`bash -c "pkill ..."`), we'd end up matching the bash wrapper
+   ; and killing that as WELL, so... grep and awk it is! The grep -v makes sure
+   ; we don't kill the grep process OR the bash process executing it.
+   (try+ (exec :ps :aux
+               | :grep pattern
+               | :grep :-v "grep"
+               | :awk "{print $2}"
+               | :xargs :--no-run-if-empty :kill (str "-" signal))
+         (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
+           nil))))
 
 (defn start-daemon!
   "Starts a daemon process, logging stdout and stderr to the given file.
@@ -220,7 +239,7 @@
   [opts bin & args]
   (info "starting" (.getName (file (name bin))))
   (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
-        "Jepsen starting" bin (str/join " " args)
+        "Jepsen starting" bin (escape args)
         :>> (:logfile opts))
   (apply exec :start-stop-daemon :--start
          (when (:background? opts true) [:--background :--no-close])

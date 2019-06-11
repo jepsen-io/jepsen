@@ -9,13 +9,20 @@
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
-            [dom-top.core :refer [bounded-future]]
+            [dom-top.core :as dt :refer [bounded-future]]
             [fipp.edn :as fipp]
             [knossos.history :as history])
   (:import (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
            (java.io File
                     RandomAccessFile)))
+
+(defn default
+  "Like assoc, but only fills in values which are NOT present in the map."
+  [m k v]
+  (if (contains? m k)
+    m
+    (assoc m k v)))
 
 (defn exception?
   "Is x an Exception?"
@@ -43,13 +50,24 @@
     (name x))
     (pr-str x))
 
+(def uninteresting-exceptions
+  "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
+  #{java.util.concurrent.BrokenBarrierException
+    InterruptedException})
+
 (defn real-pmap
-  "Like pmap, but launches futures instead of using a bounded threadpool."
+  "Like pmap, but runs a thread per element, which prevents deadlocks when work
+  elements have dependencies. The dom-top real-pmap throws the first exception
+  it gets, which might be something unhelpful like InterruptedException or
+  BrokenBarrierException. This variant works like that real-pmap, but throws
+  more interesting exceptions when possible."
   [f coll]
-  (->> coll
-       (map (fn launcher [x] (future (f x))))
-       doall
-       (map deref)))
+  (let [[results exceptions] (dt/real-pmap-helper f coll)]
+    (when (seq exceptions)
+      (throw (or (first (remove (comp uninteresting-exceptions class)
+                                exceptions))
+                 (first exceptions))))
+    results))
 
 (defn processors
   "How many processors on this platform?"
@@ -652,30 +670,33 @@
   ([history opts]
    ;; Default to :start and :stop if no region keys are provided
    (let [start (:start opts #{:start})
-         stop  (:stop  opts #{:stop})]
-     ; First, group nemesis ops into pairs (one for invoke, one for
-     ; complete)
-     (->> history
-          (filter #(= :nemesis (:process %)))
-          (partition 2)
-          ; Verify that every pair has identical :fs. It's possible
-          ; that nemeses might, some day, log more types of :info
-          ; ops, maybe not in a call-response pattern, but that'll
-          ; break us.
-          (filter (fn [[a b]] (= (:f a) (:f b))))
-          ; Now move through all nemesis ops, keeping track of all start pairs,
-          ; and closing those off when we see a stop pair.
-          (reduce (fn [[intervals starts :as state] [a b :as pair]]
-               (let [f (:f a)]
-                 (cond (start f)  [intervals (conj starts pair)]
-                       (stop f)   [(->> starts
-                                        (mapcat (fn [[s1 s2]]
-                                                  [[s1 a] [s2 b]]))
-                                        (into intervals))
-                                   []]
-                       true        state)))
-             [[] []])
-          first))))
+         stop  (:stop  opts #{:stop})
+         [intervals starts]
+         ; First, group nemesis ops into pairs (one for invoke, one for
+         ; complete)
+         (->> history
+              (filter #(= :nemesis (:process %)))
+              (partition 2)
+              ; Verify that every pair has identical :fs. It's possible
+              ; that nemeses might, some day, log more types of :info
+              ; ops, maybe not in a call-response pattern, but that'll
+              ; break us.
+              (filter (fn [[a b]] (= (:f a) (:f b))))
+              ; Now move through all nemesis ops, keeping track of all start
+              ; pairs, and closing those off when we see a stop pair.
+              (reduce (fn [[intervals starts :as state] [a b :as pair]]
+                        (let [f (:f a)]
+                          (cond (start f)  [intervals (conj starts pair)]
+                                (stop f)   [(->> starts
+                                                 (mapcat (fn [[s1 s2]]
+                                                           [[s1 a] [s2 b]]))
+                                                 (into intervals))
+                                            []]
+                                true        state)))
+                      [[] []]))]
+     ; Complete unfinished intervals
+     (into intervals (mapcat (fn [[s1 s2]] [[s1 nil] [s2 nil]]) starts)))))
+
 
 (defn longest-common-prefix
   "Given a collection of sequences, finds the longest sequence which is a

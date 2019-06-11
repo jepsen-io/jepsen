@@ -1,4 +1,6 @@
 (ns jepsen.txn.micro-op
+  "Transactions are made up of micro-operations. This namespace helps us work
+  with those."
   (:refer-clojure :exclude [key val]))
 
 (defn f

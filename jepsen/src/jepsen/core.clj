@@ -17,11 +17,12 @@
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [dom-top.core :as dt :refer [real-pmap]]
+            [dom-top.core :as dt]
             [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
                                           fcatch
+                                          real-pmap
                                           relative-time-nanos]]
             [jepsen.os :as os]
             [jepsen.db :as db]
@@ -96,7 +97,7 @@
        (control/on-nodes ~test (partial os/teardown! (:os ~test))))))
 
 (defn snarf-logs!
-  "Downloads logs for a test."
+  "Downloads logs for a test. Updates symlinks."
   [test]
   ; Download logs
   (locking snarf-logs!
@@ -127,7 +128,20 @@
                 (catch java.lang.IllegalArgumentException e
                   ; This is a jsch bug where the file is just being
                   ; created
-                  (info remote "doesn't exist"))))))))))
+                  (info remote "doesn't exist"))))))))
+    (store/update-symlinks! test)))
+
+(defn maybe-snarf-logs!
+  "Snarfs logs, swallows and logs all throwables. Why? Because we do this when
+  we encounter an error and abort, and we don't want an error here to supercede
+  the root cause that made us abort."
+  [test]
+  (try (snarf-logs! test)
+       (catch clojure.lang.ExceptionInfo e
+         (warn e (str "Error snarfing logs and updating symlinks\n")
+               (with-out-str (pprint (ex-data e)))))
+       (catch Throwable t
+         (warn t "Error snarfing logs and updating symlinks"))))
 
 (defmacro with-log-snarfing
   "Evaluates body and ensures logs are snarfed afterwards. Will also download
@@ -142,10 +156,11 @@
                              (store/update-symlinks! ~test))))]
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
-       ~@body
-       (finally
+       (let [res# (do ~@body)]
          (snarf-logs! ~test)
-         (store/update-symlinks! ~test)
+         res#)
+       (finally
+         (maybe-snarf-logs! ~test)
          (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
 
 (defmacro with-db
@@ -459,9 +474,10 @@
           (when (:error (:results test))
             (str "\n\n" (:error (:results test))))
           "\n\n"
-          (if (:valid? (:results test))
-            "Everything looks good! ヽ(‘ー`)ノ"
-            "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")))
+          (case (:valid? (:results test))
+            false     "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻"
+            :unknown  "Errors occurred during analysis, but no anomalies found. ಠ~ಠ"
+            true      "Everything looks good! ヽ(‘ー`)ノ")))
   test)
 
 (defn run!

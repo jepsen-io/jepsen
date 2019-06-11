@@ -111,7 +111,7 @@ is a bit weird.
 2. If you intend to log in with a private key, make sure your SSH agent is
    running.
    - `ssh-add -l` should show the key you use to log in.
-   - If your agent isn't running, try lauching one with `ssh-agent`.
+   - If your agent isn't running, try launching one with `ssh-agent`.
    - If your agent shows no keys, you might need to add it with `ssh-add`.
    - If you're SSHing to a control node, SSH might be forwarding your local
      agent's keys rather than using those on the control node. Try `ssh -a` to

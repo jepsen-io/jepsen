@@ -36,7 +36,7 @@
     (loop [tries cycle-tries]
       ; Tear down every node
       (info "Tearing down DB")
-      (control/on-nodes test (fcatch (partial teardown! db)))
+      (control/on-nodes test (partial teardown! db))
 
       ; Start up every node
       (if (= :retry (try+
@@ -53,8 +53,6 @@
                                           (partial setup-primary! db)))
 
                       nil
-                      (catch RuntimeException e
-                        (info :caught e))
                       (catch [:type ::setup-failed] e
                         (if (< 1 tries)
                           (do (info :throwable (pr-str (type (:throwable &throw-context))))

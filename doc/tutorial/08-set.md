@@ -195,7 +195,7 @@ dispatch based on `:f`, and use a similar error handler.
     (try+
       (case (:f op)
         :read (assoc op
-                     :type :ok,
+                     :type :ok
                      :value (read-string
                               (v/get conn k {:quorum? (:quorum test)})))
 ```
@@ -316,10 +316,11 @@ generator, based on the set workload.
             :db         (db "v3.1.5")
             :client     (Client. nil)
             :nemesis    (nemesis/partition-random-halves)
-            :model      (model/cas-register)
             :checker    (checker/compose
                           {:perf      (checker/perf)
-                           :linear    (independent/checker (checker/linearizable))
+                           :linear    (independent/checker (checker/linearizable 
+                                                             {:model     (model/cas-register)
+                                                              :algorithm :linear}))
                            :timeline  (independent/checker (timeline/html))})
             :generator  (->> (independent/concurrent-generator
                                10
@@ -411,7 +412,8 @@ Let's rewrite the linearizable register test as a workload, so it has the same s
   {:client    (Client. nil)
    :checker   (independent/checker
                 (checker/compose
-                  {:linear   (checker/linearizable)
+                  {:linear   (checker/linearizable {:model     (model/cas-register)
+                                                    :algorithm :linear})
                    :timeline (timeline/html)}))
 ```
 
@@ -468,7 +470,6 @@ name.
             :os         debian/os
             :db         (db "v3.1.5")
             :nemesis    (nemesis/partition-random-halves)
-            :model      (model/cas-register)
             :client     (:client workload)
             :checker    (checker/compose
                           {:perf     (checker/perf)

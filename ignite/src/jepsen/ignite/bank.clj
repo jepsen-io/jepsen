@@ -58,7 +58,7 @@
    transaction-config]
   client/Client
   (open! [this test node]
-    (let [ignite-config-file (ignite/configure-client (:nodes test))
+    (let [ignite-config-file (ignite/configure-client (:nodes test) (:pds test))
           conn               (Bank. (.getCanonicalPath ignite-config-file))]
       (.setAccountCache
        conn

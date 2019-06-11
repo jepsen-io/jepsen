@@ -9,8 +9,8 @@
   B: read y
   B: read x
 
-  A's process order enforces that x must be visible before y, so we should
-  always read both or neither.
+  A's process order enforces that x must be visible before y; we should never
+  observe y alone.
 
   Splits keys up onto different tables to make sure they fall in different
   shard ranges"
@@ -21,7 +21,6 @@
              [generator :as gen]
              [independent :as independent]
              [util :as util :refer [meh]]]
-            [clojure.java.jdbc :as j]
             [clojure.set :as set]
             [clojure.tools.logging :refer :all]
             [tidb.sql :as c :refer :all]
@@ -53,16 +52,13 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (c/with-conn-failure-retry conn
-      (locking tbl-created?
-        (when (compare-and-set! tbl-created? false true)
-          ; use first node to exec ddl
-          (info "Creating tables" (pr-str (table-names table-count)))
-          (doseq [t (table-names table-count)]
-            (j/execute! conn [(str "drop table if exists " t)])
-            (j/execute! conn [(str "create table if not exists " t
-                                   " (tkey varchar(255) primary key)")])
-            (info "Created table" t))))))
+    (locking SequentialClient
+      (c/with-conn-failure-retry conn
+        (info "Creating tables" (pr-str (table-names table-count)))
+        (doseq [t (table-names table-count)]
+          (c/execute! conn [(str "create table if not exists " t
+                                 " (tkey varchar(255) primary key)")])
+          (info "Created table" t)))))
 
   (invoke! [this test op]
     (let [ks (subkeys (:key-count test) (:value op))]
@@ -71,7 +67,7 @@
         (do (doseq [k ks]
               (let [table (key->table table-count k)]
                 (with-txn-retries
-                  (j/insert! conn table {:tkey k}))))
+                  (c/insert! conn table {:tkey k}))))
             (assoc op :type :ok))
         :read
         (->> ks
@@ -79,7 +75,7 @@
              (mapv (fn [k]
                      (first
                        (with-txn-retries
-                         (j/query conn [(str "select tkey from "
+                         (c/query conn [(str "select tkey from "
                                              (key->table table-count k)
                                              " where tkey = ?") k]
                                   {:row-fn :tkey})))))

@@ -42,18 +42,14 @@
        clojure.lang.PersistentHashSet
        {"persistent-hash-set" (reify WriteHandler
                                 (write [_ w set]
-                                  (.writeTag w "persistent-hash-set"
-                                             (count set))
-                                  (doseq [e set]
-                                    (.writeObject w e))))}
+                                  (.writeTag w "persistent-hash-set" 1)
+                                  (.writeObject w (seq set))))}
 
        clojure.lang.PersistentTreeSet
        {"persistent-sorted-set" (reify WriteHandler
                                   (write [_ w set]
-                                    (.writeTag w "persistent-sorted-set"
-                                               (count set))
-                                    (doseq [e set]
-                                      (.writeObject w e))))}
+                                    (.writeTag w "persistent-sorted-set" 1)
+                                    (.writeObject w (seq set))))}
 
        clojure.lang.MapEntry
        {"map-entry" (reify WriteHandler
@@ -91,19 +87,13 @@
 
        "persistent-hash-set" (reify ReadHandler
                                (read [_ rdr tag component-count]
-                                 (let [s (transient #{})]
-                                   (dotimes [_ component-count]
-                                     (conj! s (.readObject rdr)))
-                                   (persistent! s))))
+                                 (assert (= 1 component-count))
+                                 (into #{} (.readObject rdr))))
 
        "persistent-sorted-set" (reify ReadHandler
                                  (read [_ rdr tag component-count]
-                                   (loop [i component-count
-                                          s (sorted-set)]
-                                     (if (pos? i)
-                                       (recur (dec i)
-                                              (conj s (.readObject rdr)))
-                                       s))))
+                                   (assert (= 1 component-count))
+                                   (into (sorted-set) (.readObject rdr))))
 
        "map-entry" (reify ReadHandler
                      (read [_ rdr tag component-count]
@@ -395,6 +385,14 @@
   {:appender :console
    :pattern "%p\t[%t] %c: %m%n"})
 
+(def default-logging-overrides
+  "Logging overrides that we apply by default"
+  {"clj-libssh2.session"         :warn
+   "clj-libssh2.authentication"  :warn
+   "clj-libssh2.known-hosts"     :warn
+   "clj-libssh2.ssh"             :warn
+   "clj-libssh2.channel"         :warn})
+
 (defn start-logging!
   "Starts logging to a file in the test's directory. Also updates current
   symlink. Test may include a :logging key, which should be a map with the
@@ -410,7 +408,8 @@
                   :encoder :pattern
                   :pattern "%d{ISO8601}{GMT}\t%p\t[%t] %c: %m%n"
                   :file (.getCanonicalPath (path! test "jepsen.log"))}]
-     :overrides (:overrides (:logging test))})
+     :overrides (merge default-logging-overrides
+                       (:overrides (:logging test)))})
   (update-current-symlink! test))
 
 (defn stop-logging!

@@ -8,7 +8,6 @@
             [jepsen.tests.bank :as bank]
             [knossos.op :as op]
             [clojure.core.reducers :as r]
-            [clojure.java.jdbc :as j]
             [tidb.sql :as c :refer :all]
             [tidb.basic :as basic]
             [clojure.tools.logging :refer :all]))
@@ -19,24 +18,27 @@
     (assoc this :conn (c/open node test)))
 
   (setup! [this test]
-    (c/with-conn-failure-retry conn
-      (j/execute! conn ["create table if not exists accounts
-                        (id     int not null primary key,
-                        balance bigint not null)"])
-      (doseq [a (:accounts test)]
-        (try
-          (with-txn-retries conn
-            (j/insert! conn :accounts {:id      a
-                                       :balance (if (= a (first (:accounts test)))
-                                                  (:total-amount test)
-                                                  0)}))
-          (catch java.sql.SQLIntegrityConstraintViolationException e nil)))))
+    ; sigh, tidb falls over if it gets more than a handful of contended
+    ; requests per second; let's try to make its life easier
+    (locking BankClient
+      (c/with-conn-failure-retry conn
+        (c/execute! conn ["create table if not exists accounts
+                          (id     int not null primary key,
+                          balance bigint not null)"])
+        (doseq [a (:accounts test)]
+          (try
+            (with-txn-retries conn
+              (c/insert! conn :accounts {:id      a
+                                         :balance (if (= a (first (:accounts test)))
+                                                    (:total-amount test)
+                                                    0)}))
+            (catch java.sql.SQLIntegrityConstraintViolationException e nil))))))
 
   (invoke! [this test op]
     (with-txn op [c conn]
       (try
         (case (:f op)
-          :read (->> (j/query c [(str "select * from accounts")])
+          :read (->> (c/query c [(str "select * from accounts")])
                      (map (juxt :id :balance))
                      (into (sorted-map))
                      (assoc op :type :ok, :value))
@@ -44,13 +46,13 @@
           :transfer
           (let [{:keys [from to amount]} (:value op)
                 b1 (-> c
-                       (j/query [(str "select * from accounts where id = ? "
+                       (c/query [(str "select * from accounts where id = ? "
                                       (:read-lock test)) from]
                                 {:row-fn :balance})
                        first
                        (- amount))
                 b2 (-> c
-                       (j/query [(str "select * from accounts where id = ? "
+                       (c/query [(str "select * from accounts where id = ? "
                                       (:read-lock test))
                                  to]
                                 {:row-fn :balance})
@@ -62,11 +64,11 @@
                   (assoc op :type :fail, :value [:negative to b2])
                   true
                   (if (:update-in-place test)
-                    (do (j/execute! c ["update accounts set balance = balance - ? where id = ?" amount from])
-                        (j/execute! c ["update accounts set balance = balance + ? where id = ?" amount to])
+                    (do (c/execute! c ["update accounts set balance = balance - ? where id = ?" amount from])
+                        (c/execute! c ["update accounts set balance = balance + ? where id = ?" amount to])
                         (assoc op :type :ok))
-                    (do (j/update! c :accounts {:balance b1} ["id = ?" from])
-                        (j/update! c :accounts {:balance b2} ["id = ?" to])
+                    (do (c/update! c :accounts {:balance b1} ["id = ?" from])
+                        (c/update! c :accounts {:balance b2} ["id = ?" to])
                         (assoc op :type :ok)))))))))
 
   (teardown! [_ test])
@@ -92,12 +94,12 @@
           (c/with-conn-failure-retry conn
             (doseq [a (:accounts test)]
               (info "Creating table accounts" a)
-              (j/execute! conn [(str "create table if not exists accounts" a
+              (c/execute! conn [(str "create table if not exists accounts" a
                                      "(id     int not null primary key,"
                                      "balance bigint not null)")])
               (try
                 (info "Populating account" a)
-                (j/insert! conn (str "accounts" a)
+                (c/insert! conn (str "accounts" a)
                            {:id 0
                             :balance (if (= a (first (:accounts test)))
                                        (:total-amount test)
@@ -112,7 +114,7 @@
           :read
           (->> (:accounts test)
                (map (fn [x]
-                      [x (->> (j/query c [(str "select balance from accounts"
+                      [x (->> (c/query c [(str "select balance from accounts"
                                                x)]
                                        {:row-fn :balance})
                               first)]))
@@ -124,14 +126,14 @@
                 from (str "accounts" from)
                 to   (str "accounts" to)
                 b1 (-> c
-                       (j/query
+                       (c/query
                         [(str "select balance from " from
                               " " (:read-lock test))]
                         {:row-fn :balance})
                        first
                        (- amount))
                 b2 (-> c
-                       (j/query [(str "select balance from " to
+                       (c/query [(str "select balance from " to
                                       " " (:read-lock test))]
                                 {:row-fn :balance})
                        first
@@ -142,11 +144,11 @@
                   (assoc op :type :fail, :error [:negative to b2])
                   true
                   (if (:update-in-place test)
-                    (do (j/execute! c [(str "update " from " set balance = balance - ? where id = 0") amount])
-                        (j/execute! c [(str "update " to " set balance = balance + ? where id = 0") amount])
+                    (do (c/execute! c [(str "update " from " set balance = balance - ? where id = 0") amount])
+                        (c/execute! c [(str "update " to " set balance = balance + ? where id = 0") amount])
                         (assoc op :type :ok))
-                    (do (j/update! c from {:balance b1} ["id = 0"])
-                        (j/update! c to {:balance b2} ["id = 0"])
+                    (do (c/update! c from {:balance b1} ["id = 0"])
+                        (c/update! c to {:balance b2} ["id = 0"])
                         (assoc op :type :ok)))))))))
 
   (teardown! [_ test])

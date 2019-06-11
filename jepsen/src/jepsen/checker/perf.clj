@@ -340,7 +340,7 @@
     ; If it's a zero-width interval, give it exactly 1 on either side.
     [(dec a) (inc a)]
     (let [; How big is the range?
-          size (Math/abs (- b a))
+          size (Math/abs (- (double b) (double a)))
           ; Divide the range into tenths
           grid (/ size 10)
           ; What's the nearest power of 10?
@@ -355,6 +355,17 @@
           a' (min a a')
           b' (max b b')]
       [a' b'])))
+
+(defn without-empty-series
+  "Takes a plot, and strips out empty series objects."
+  [plot]
+  (update plot :series (partial filter (comp seq :data))))
+
+(defn has-data?
+  "Takes a plot and returns true iff it has at least one series with
+  data points."
+  [plot]
+  (boolean (some (comp seq :data) (:series plot))))
 
 (defn with-range
   "Takes a plot object. Where xrange or yrange are not provided, fills them in
@@ -461,9 +472,9 @@
           ; Datasets
           data        (map :data series)]
       ; Go!
-      (info (with-out-str
-              (pprint commands)
-              (pprint (map (partial take 2) data))))
+      ;(info (with-out-str
+      ;        (pprint commands)
+      ;        (pprint (map (partial take 2) data))))
       (try (g/raw-plot! commands data)
            (catch java.io.IOException _
              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))
