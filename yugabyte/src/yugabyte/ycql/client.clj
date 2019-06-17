@@ -1,11 +1,11 @@
-(ns yugabyte.client
+(ns yugabyte.ycql.client
   "Helper functions for working with Cassaforte clients."
   (:require [clojurewerkz.cassaforte [client :as c]
                                      [query :as q]
                                      [policies :as policies]
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
-			      [clojure.pprint :refer [pprint]]
+            [clojure.pprint :refer [pprint]]
             [jepsen [util :as util]]
             [jepsen.control.net :as cn]
             [dom-top.core :as dt]
