@@ -5,17 +5,17 @@
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [clojurewerkz.cassaforte.client :as cassandra]
             [clj-http.client :as http]
             [dom-top.core :as dt]
-            [jepsen [control :as c]
-                    [db :as db]
-                    [util :as util :refer [meh timeout]]]
-            [jepsen.control [net :as cn]
-                            [util :as cu]]
-            [jepsen.os [debian :as debian]
-                       [centos :as centos]]
-            [yugabyte.client :as yc])
+            [jepsen.control :as c]
+            [jepsen.db :as db]
+            [jepsen.util :as util :refer [meh timeout]]
+            [jepsen.control.net :as cn]
+            [jepsen.control.util :as cu]
+            [jepsen.os.debian :as debian]
+            [jepsen.os.centos :as centos]
+            [yugabyte.ycql.client]
+            [yugabyte.ysql.client])
   (:import jepsen.os.debian.Debian
            jepsen.os.centos.CentOS))
 
@@ -29,9 +29,9 @@
 (def installed-url-file (str dir "/installed-url"))
 
 (def max-bump-time-ops-per-test
-   "Upper bound on number of bump time ops per test, needed to estimate max
-   clock skew between servers"
-   100)
+  "Upper bound on number of bump time ops per test, needed to estimate max
+  clock skew between servers"
+  100)
 
 ; OS-level polymorphic functions for Yugabyte
 (defprotocol OS
@@ -176,6 +176,7 @@
 (defn start! [db test node]
   "Start both master and tserver. Only starts master if this node is a master
   node. Waits for masters and tservers."
+  (info "Starting master and tserver for" (name (:api test)) "API")
   (when (master-node? test node)
     (start-master! db test node)
     (await-masters test))
@@ -183,7 +184,9 @@
   (start-tserver! db test node)
   (await-tservers test)
 
-  (yc/await-setup node)
+  (if (= (:api test) :ycql)
+    (yugabyte.ycql.client/await-setup node)
+    ()) ; So far it looks like we don't need that for YSQL?
   :started)
 
 (defn stop! [db test node]
@@ -218,17 +221,6 @@
   [db]
   (kill! "yb-master")
   (stop-master! db))
-
-(defn wait-for-recovery
-  "Waits for the driver to report all nodes are up"
-  [timeout-secs conn]
-  (timeout (* 1000 timeout-secs)
-           (throw (RuntimeException.
-                    (str "Driver didn't report all nodes were up in "
-                         timeout-secs "s - failing")))
-           (while (->> (cassandra/get-hosts conn)
-                       (map :is-up) and not)
-             (Thread/sleep 500))))
 
 (defn version
   "Returns a map of version information by calling `bin/yb-master --version`,
@@ -300,6 +292,21 @@
    ;:--follower_unavailable_considered_failed_sec 10)
    ])
 
+(defn master-api-opts
+  "API-specific options for master"
+  [api node]
+  (if (= api :ysql)
+    [:--use_initial_sys_catalog_snapshot]
+    []))
+
+(defn tserver-api-opts
+  "API-specific options for tserver"
+  [api node]
+  (if (= api :ysql)
+    [:--start_pgsql_proxy
+     :--pgsql_proxy_bind_address (cn/ip node)]
+    []))
+
 (def experimental-tuning-flags
   ; Speed up recovery from partitions and crashes. Right now it looks like
   ; these actually make the cluster slower to, or unable to, recover.
@@ -320,7 +327,7 @@
         (c/cd dir
               ; Post-install takes forever, so let's try and skip this on
               ; subsequent runs
-              (let [url (or (:url test) (get-ce-url (:version test)))
+              (let [url           (or (:url test) (get-ce-url (:version test)))
                     installed-url (get-installed-url)]
                 (when-not (= url installed-url)
                   (info "Replacing version" installed-url "with" url)
@@ -333,7 +340,7 @@
                   (c/su (info "Post-install script")
                         (c/exec "./bin/post_install.sh")
 
-                        (c/exec :echo url (c/lit (str ">>" installed-url-file)))
+                        (c/exec :echo url :>> installed-url-file)
                         (info "Done with setup")))))))
 
     (start-master! [db test node]
@@ -347,7 +354,9 @@
               (when (:experimental-tuning-flags test)
                 experimental-tuning-flags)
               :--master_addresses   (master-addresses test)
-              :--replication_factor (:replication-factor test))))
+              :--replication_factor (:replication-factor test)
+              (master-api-opts (:api test) node)
+              )))
 
     (start-tserver! [db test node]
       (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
@@ -364,6 +373,8 @@
               :--enable_tracing
               :--rpc_slow_query_threshold_ms 1000
               :--load_balancer_max_concurrent_adds 10
+              (tserver-api-opts (:api test) node)
+
               ; Heartbeats
               ;:--heartbeat_interval_ms 100
               ;:--heartbeat_rpc_timeout_ms 1500
@@ -392,6 +403,12 @@
     (teardown! [db test node]
       (stop! db test node)
       (wipe! db))
+
+    db/Primary
+    (setup-primary! [this test node]
+      "Executed once on a first node in list (i.e. n1 by default) after per-node setup is done"
+      ; NOOP placeholder, can be used to initialize cluster for different APIs
+      )
 
     db/LogFiles
     (log-files [_ _ _]
@@ -443,12 +460,8 @@
           (c/exec :echo (str "--max_clock_skew_usec="
                              (->> (:max-clock-skew-ms test) (* 1000) (* 2) (* max-bump-time-ops-per-test)))
                   (c/lit ">>") tserver-conf)
-          (do
-            ; Sync clocks on all servers since we are not testing clock skew. Try to stop ntpd, because it won't
-            ; let ntpdate to sync clocks.
-            (try (c/su (c/exec :service :ntpd :stop))
-                 (catch RuntimeException e))
-            (c/su (c/exec :ntpdate :-b "pool.ntp.org")))))
+          ; Sync clocks on all servers since we are not testing clock skew.
+          (c/su (c/exec :ntpdate :-b "pool.ntp.org"))))
       (start! this test node))
 
     (teardown! [this test node]
