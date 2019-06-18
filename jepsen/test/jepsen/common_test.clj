@@ -12,7 +12,9 @@
      :console   false
      :appenders [store/console-appender]
      :overrides (merge store/default-logging-overrides
-                       {"jepsen.db"   :error
-                        "jepsen.core" :error})})
+                       {"jepsen.db"           :error
+                        "jepsen.core"         :error
+                        "jepsen.generator"    :error
+                        "jepsen.independent"  :error})})
   (f)
   (store/stop-logging!))
