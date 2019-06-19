@@ -6,6 +6,7 @@
             [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util]
             [jepsen.control.net :as cn]
+            [jepsen.client :as client]
             [jepsen.reconnect :as rc]
             [dom-top.core :as dt]
             [wall.hack :as wh]
@@ -56,6 +57,17 @@
                                             spec'))))
        :close close-conn
        :log?  true})))
+
+(defprotocol YSQLYbClient
+  "Used by defclient macro in conjunction with jepsen.client/Client specifying actual logic"
+  (setup-cluster! [client test c conn-wrapper]
+    "Called once on a random node to set up database/cluster state for testing.")
+  (invoke-op! [client test operation c conn-wrapper]
+    "Apply an operation to the client, returning an operation to be appended to the history.
+    If it throws retryable error, can be called again.")
+  (teardown-cluster! [client test c conn-wrapper]
+    "Called once on a random node to tear down the client/database/cluster when work is complete.
+    If it throws retryable error, can be called again."))
 
 (defn exception-to-op
   "Takes an exception and maps it to a partial op, like {:type :info, :error
@@ -126,8 +138,8 @@
   "Like jepsen.reconnect/with-conn, but also asserts that the connection has
   not been closed. If it has, throws an ex-info with :type :conn-not-ready.
   Delays by 1 second to allow time for the DB to recover."
-  [[c client] & body]
-  `(rc/with-conn [~c ~client]
+  [[c conn-wrapper] & body]
+  `(rc/with-conn [~c ~conn-wrapper]
                  (when (.isClosed (j/db-find-connection ~c))
                    (Thread/sleep 1000)
                    (throw (ex-info "Connection not yet ready."
@@ -153,7 +165,7 @@
                  (throw (RuntimeException. "timeout"))
                  ~@body))
 
-(defmacro with-txn-retry
+(defmacro with-retry
   "Catches YSQL \"try again\"-style errors and retries body a bunch of times,
   with exponential backoffs."
   [& body]
@@ -170,9 +182,9 @@
                         (throw e#)))))
 
 (defmacro with-txn
-  "Wrap a evaluation within a SQL transaction."
-  [[c conn] & body]
-  `(j/with-db-transaction [~c ~conn {:isolation isolation-level}]
+  "Wrap evaluation within an SQL transaction using the default isolation level."
+  [c & body]
+  `(j/with-db-transaction [~c ~c {:isolation isolation-level}]
                           ~@body))
 
 
@@ -206,3 +218,101 @@
   "Like jdbc execute!!, but includes a default timeout."
   [conn sql-params]
   (j/execute! conn sql-params {:timeout default-timeout}))
+
+; Should probably be the last definition in order to have access to everything else
+(defmacro defclient
+  "Helper for defining YSQL clients.
+  Takes a new class name symbol and a definition of YSQLClientBase record
+  whose methods will be wrapped and called.
+  This approach is (arguably) cleaner than the one used for YCQL defclient.
+  Separate defrecord, among other things, allows to clearly see
+  compile-time errors caused by protocol misusage.
+
+  Example:
+
+    (defrecord YSQLMyYbClient [arg1 arg2 arg3]
+      c/YSQLYbClient
+
+      (setup-cluster! [this test c conn-wrapper]
+        (do-stuff-once-with c))
+
+      (invoke-op! [this test op c conn-wrapper]
+        (case (:f op)
+          ...))
+
+      (teardown-cluster! [this test c conn-wrapper]
+        (c/drop-table c \"my-table\"))
+
+
+    (c/defclient YSQLMyClient YSQLMyYbClient)
+
+
+    ; To create a client instance:
+    (->YSQLMyClient arg1 arg2 arg3)
+    "
+  [class-name inner-client-record]
+
+  ; Since this macro is insanely complex, I'll try to thoroughly comment what's happening here.
+  ; Good luck.
+
+  ; First, before we start with the actual macro output, we analyze inner-client-record constructor
+  ; in order to get a grip on its arguments list.
+  ; For that we're doing a bunch of string manipulations with the inner-client-record's symbol name.
+
+  (let [inner-ctor-ns-prefix (if (qualified-symbol? inner-client-record)
+                               (str (namespace inner-client-record) "/")
+                               "")
+        inner-ctor-sym       (symbol (str inner-ctor-ns-prefix "->" (name inner-client-record)))
+        inner-ctor-meta      (meta (resolve inner-ctor-sym))
+        inner-ctor-args-vec  (first (:arglists inner-ctor-meta))]
+
+    ; Now we're getting to the output.
+    ; We define a record with a given name extending jepsen.client/Client, which takes an
+    ; instance of inner-client (among other things) and delegates logic to it, wrapping it into
+    ; helper methods.
+
+    `(do (defrecord ~class-name [~'conn-wrapper ~'inner-client ~'setup? ~'teardown?]
+           client/Client
+
+           (open! [~'this ~'test ~'node]
+             (assoc ~'this :conn-wrapper (conn-wrapper ~'node)))
+
+           (setup! [~'this ~'test]
+             (once-per-cluster
+               ~'setup?
+               (info "Running setup")
+               (with-conn
+                 [~'c ~'conn-wrapper]
+                 (setup-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper))))
+
+           (invoke! [~'this ~'test ~'op]
+             (with-errors
+               ~'op
+               (with-conn
+                 [~'c ~'conn-wrapper]
+                 (with-retry
+                   (invoke-op! ~'inner-client ~'test ~'op ~'c ~'conn-wrapper)))))
+
+           (teardown! [~'this ~'test]
+             (once-per-cluster
+               ~'teardown?
+               (info "Running teardown")
+               (with-timeout
+                 (with-conn
+                   [~'c ~'conn-wrapper]
+                   (with-retry
+                     (teardown-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper))))))
+
+           (close! [~'this ~'test]
+             (rc/close! ~'conn-wrapper)))
+
+         ; Lastly, we redefine a ->Constructor helper for the newfound record, forcing it to take
+         ; the same arguments as inner-client-record.
+         ; We use those to construct inner-client-record and pass it to the
+         ; newfound record constructor.
+
+         (defn ~(symbol (str "->" class-name))
+           ~inner-ctor-args-vec
+           (let [~'inner-client (new ~inner-client-record ~@inner-ctor-args-vec)]
+             (new ~class-name nil ~'inner-client (atom false) (atom false)))))
+    ))
