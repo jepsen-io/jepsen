@@ -265,14 +265,14 @@
 
   Example:
 
-		(c/defclient CQLBank []
-			(setup! [this test]
-				(do-stuff-with conn))
+    (c/defclient CQLBank []
+      (setup! [this test]
+        (do-stuff-with conn))
 
-			(invoke! [this test op]
+      (invoke! [this test op]
         ...)
 
-			(teardown! [this test]))"
+      (teardown! [this test]))"
   [name keyspace fields & exprs]
   (let [[interfaces methods opts] (#'clojure.core/parse-opts+specs
                                     (cons 'jepsen.client/Client exprs))
@@ -289,13 +289,13 @@
                              (and (list? expr)
                                   (= 'setup! (first expr))))
                            exprs))]
-		`(do (defrecord ~name ~(conj (vec fields) 'conn 'keyspace-created)
-					 jepsen.client/Client
-					 (open! [~'this ~'test ~'node]
-						 (let [conn# (connect ~'node)]
-							 (when (realized? ~'keyspace-created)
+    `(do (defrecord ~name ~(conj (vec fields) 'conn 'keyspace-created)
+           jepsen.client/Client
+           (open! [~'this ~'test ~'node]
+             (let [conn# (connect ~'node)]
+               (when (realized? ~'keyspace-created)
                  (cql/use-keyspace conn# ~keyspace))
-							 (assoc ~'this :conn conn#)))
+               (assoc ~'this :conn conn#)))
 
            (setup! [~'this ~'test]
              (locking ~'keyspace-created
@@ -304,16 +304,16 @@
                (cql/use-keyspace ~'conn ~keyspace)
                ~@setup-code))
 
-					 (close! [~'this ~'test]
-						 (c/disconnect! ~'conn))
+           (close! [~'this ~'test]
+             (c/disconnect! ~'conn))
 
-					 ~@exprs)
+           ~@exprs)
 
-				 ; Constructor
-				 (defn ~(symbol (str "->" name))
-					 ~(vec fields)
-					 ; Pass user fields, conn, keyspace-created
-					 (new ~name ~@fields nil (promise))))))
+         ; Constructor
+         (defn ~(symbol (str "->" name))
+           ~(vec fields)
+           ; Pass user fields, conn, keyspace-created
+           (new ~name ~@fields nil (promise))))))
 
 (defn await-setup
   "Used at the start of a test. Takes a node, opens a connection to it, and
