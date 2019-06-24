@@ -1,4 +1,7 @@
 (ns yugabyte.multi-key-acid
+  "Given a single table of two-column composite key and one value column,
+  execute reads and transactional batches of writes.
+  Verify that history remains linearizable."
   (:require [clojure.tools.logging :refer [debug info warn]]
             [jepsen.client :as client]
             [jepsen.checker :as checker]

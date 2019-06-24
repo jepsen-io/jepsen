@@ -1,5 +1,4 @@
 (ns yugabyte.ycql.set
-  "Adds elements to sets and reads them back"
   (:require [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [info]]
             [clojurewerkz.cassaforte.query :as q]

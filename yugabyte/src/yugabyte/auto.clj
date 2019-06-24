@@ -424,6 +424,7 @@
               (log-files-without-symlinks ce-master-log-dir)
               (log-files-without-symlinks ce-tserver-log-dir)))))
 
+; WARNING: This is probably heavily outdated.
 (defn enterprise-edition
   "Enterprise edition of YugabyteDB. Relies on EE already being installed."
   []

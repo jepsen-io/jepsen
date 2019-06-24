@@ -1,5 +1,4 @@
 (ns yugabyte.ycql.bank
-  "Simulates transfers between bank accounts"
   (:refer-clojure :exclude [test])
   (:require [clojure.tools.logging :refer [debug info warn]]
             [clojure.core.reducers :as r]

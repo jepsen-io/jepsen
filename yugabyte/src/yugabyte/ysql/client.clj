@@ -32,6 +32,49 @@
    :connectTimeout (/ default-timeout 1000)
    :socketTimeout  (/ default-timeout 1000)})
 
+(defn query
+  "Like jdbc query, but includes a default timeout in ms.
+  Requires query to be wrapped in a vector."
+  [conn sql-params]
+  (j/query conn sql-params {:timeout default-timeout}))
+
+(defn insert!
+  "Like jdbc insert!, but includes a default timeout."
+  [conn table values]
+  (j/insert! conn table values {:timeout default-timeout}))
+
+(defn update!
+  "Like jdbc update!, but includes a default timeout."
+  [conn table values where]
+  (j/update! conn table values where {:timeout default-timeout}))
+
+(defn execute!
+  "Like jdbc execute!!, but includes a default timeout."
+  [conn sql-params]
+  (j/execute! conn sql-params {:timeout default-timeout}))
+
+(defn select-first-row
+  "Selects a first row from table with a WHERE-clause, returning nil if no rows were found"
+  [conn table-name where-clause]
+  (let [query-string (str "SELECT * FROM " table-name " WHERE " where-clause " LIMIT 1")
+        query-res    (query conn query-string)
+        res          (first query-res)]
+    res))
+
+(defn select-single-value
+  "Selects a single value from table with a WHERE-clause yielding single row"
+  [conn table-name column-kw where-clause]
+  (let [query-string (str "SELECT " (name column-kw) " FROM " table-name " WHERE " where-clause " LIMIT 1")
+        query-res    (query conn query-string)
+        res          (get (first query-res) column-kw)]
+    res))
+
+(defn in
+  "Constructs an SQL IN clause string"
+  [coll]
+  (assert (not-empty coll) "Cannot create IN clause for empty values collection")
+  (str "IN (" (str/join ", " coll) ")"))
+
 (defn close-conn
   "Given a JDBC connection, closes it and returns the underlying spec."
   [conn]
@@ -99,6 +142,17 @@
         #"(?i)Operation expired"
         {:type :fail, :error [:operation-expired m]}
 
+        ;
+        ; Errors in test spec, do not suppress throwing
+        ;
+
+        #"(?i)Syntax error"
+        nil
+
+        #"(?i)Column .+ does not exist"
+        nil
+
+        ; Unknown (other) SQL error
         {:type :info, :error [:psql-exception m]})
 
       ; Happens when with-conn macro detects a closed connection
@@ -132,7 +186,11 @@
   ([c table-name]
    (drop-table c table-name false))
   ([c table-name if-exists?]
-   (j/execute! c [(str "DROP TABLE " (if if-exists? "IF EXISTS " "") table-name)])))
+   (execute! c (str "DROP TABLE " (if if-exists? "IF EXISTS " "") table-name))))
+
+(defn drop-index
+  [c index-name]
+  (execute! c (str "DROP INDEX " index-name)))
 
 (defmacro with-conn
   "Like jepsen.reconnect/with-conn, but also asserts that the connection has
@@ -198,26 +256,15 @@
             (merge ~op ex-op#)
             (throw e#)))))
 
-(defn query
-  "Like jdbc query, but includes a default timeout in ms.
-  Requires query to be wrapped in a vector."
-  [conn sql-params]
-  (j/query conn sql-params {:timeout default-timeout}))
-
-(defn insert!
-  "Like jdbc insert!, but includes a default timeout."
-  [conn table values]
-  (j/insert! conn table values {:timeout default-timeout}))
-
-(defn update!
-  "Like jdbc update!, but includes a default timeout."
-  [conn table values where]
-  (j/update! conn table values where {:timeout default-timeout}))
-
-(defn execute!
-  "Like jdbc execute!!, but includes a default timeout."
-  [conn sql-params]
-  (j/execute! conn sql-params {:timeout default-timeout}))
+(defn assert-involves-index
+  "Verifies that executing given query uses index with the given name"
+  [c query-str index-name]
+  (let [explanation     (query c (str "EXPLAIN " query-str))
+        explanation-str (pr-str explanation)]
+    (assert
+      (.contains explanation-str index-name)
+      (str "Query '" query-str "' does not involve index '" index-name "'!"
+           " Query explanation: \n" explanation-str))))
 
 ; Should probably be the last definition in order to have access to everything else
 (defmacro defclient
@@ -283,7 +330,8 @@
                (info "Running setup")
                (with-conn
                  [~'c ~'conn-wrapper]
-                 (setup-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper))))
+                 (setup-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper))
+               (info "Setup sucessful")))
 
            (invoke! [~'this ~'test ~'op]
              (with-errors
