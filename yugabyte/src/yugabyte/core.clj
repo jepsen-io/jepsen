@@ -26,32 +26,43 @@
             [yugabyte.ycql.set]
             [yugabyte.ycql.single-key-acid]
             [yugabyte.ysql.bank]
-            [yugabyte.ysql.counter])
+            [yugabyte.ysql.counter]
+            [yugabyte.ysql.long-fork]
+            [yugabyte.ysql.multi-key-acid]
+            [yugabyte.ysql.set]
+            [yugabyte.ysql.single-key-acid])
   (:import (jepsen.client Client)))
 
-(def noop-test (fn [opts] (merge tests/noop-test opts)))
+(defn noop-test
+  "NOOP test, exists to validate setup/teardown phases"
+  [opts]
+  (merge tests/noop-test opts))
 
-(def sleep-test
-  (fn [opts] (merge tests/noop-test
-                    {:client (reify Client
-                               (setup! [this test]
-                                 (let [wait-sec 120] (info " === Sleeping for" wait-sec "s ===")
-                                                     (Thread/sleep (* wait-sec 1000))))
-                               (teardown! [this test])
-                               (invoke! [this test op] (assoc op :type :ok))
-                               (open! [this test node] this)
-                               (close! [this test]))}
-                    opts)))
-
-(defn with-client
-  [workload client]
-  "Wraps a workload function to add :client entry to the result"
-  (fn [opts] (assoc (workload opts) :client client)))
+(defn sleep-test
+  "NOOP test that gives you time to log into nodes and poke around, trying stuff manually.
+  Sleeps for durations specified by --time-limit (in seconds), defaults to 60."
+  [opts]
+  (merge tests/noop-test
+         {:client (reify Client
+                    (setup! [this test]
+                      (let [wait-sec (:time-limit opts)]
+                        (info "Sleeping for" wait-sec "s...")
+                        (Thread/sleep (* wait-sec 1000))))
+                    (teardown! [this test])
+                    (invoke! [this test op] (assoc op :type :ok))
+                    (open! [this test node] this)
+                    (close! [this test]))}
+         opts))
 
 (defn is-stub-workload
   "Whether workload defined by the given keyword is just a stub, or is a real one"
   [w]
   (or (= (name w) "none") (= (name w) "sleep")))
+
+(defn with-client
+  [workload client]
+  "Wraps a workload function to add :client entry to the result"
+  (fn [opts] (assoc (workload opts) :client client)))
 
 (def workloads-ycql
   "A map of workload names to functions that can take option maps and construct workloads."
@@ -60,18 +71,26 @@
          :set             (with-client set/workload (yugabyte.ycql.set/->CQLSetClient))
          :set-index       (with-client set/workload (yugabyte.ycql.set/->CQLSetIndexClient))
          :bank            (with-client bank/workload-allow-neg (yugabyte.ycql.bank/->CQLBank))
-         :bank-multitable (with-client bank/workload-allow-neg (yugabyte.ycql.bank/->CQLMultiBank))
+         ; Shouldn't be used until we support transactions with selects.
+         ; :bank-multitable (with-client bank/workload-allow-neg (yugabyte.ycql.bank/->CQLMultiBank))
          :long-fork       (with-client long-fork/workload (yugabyte.ycql.long-fork/->CQLLongForkIndexClient))
          :single-key-acid (with-client single-key-acid/workload (yugabyte.ycql.single-key-acid/->CQLSingleKey))
          :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ycql.multi-key-acid/->CQLMultiKey))})
 
 (def workloads-ysql
   "A map of workload names to functions that can take option maps and construct workloads."
-  #:ysql{:none    noop-test
-         :sleep   sleep-test
-         :counter (with-client counter/workload (yugabyte.ysql.counter/->YSQLCounterClient))
+  #:ysql{:none            noop-test
+         :sleep           sleep-test
+         :counter         (with-client counter/workload (yugabyte.ysql.counter/->YSQLCounterClient))
+         :set             (with-client set/workload (yugabyte.ysql.set/->YSQLSetClient))
+         ; This one doesn't work because of https://github.com/YugaByte/yugabyte-db/issues/1554
+         ; :set-index       (with-client set/workload (yugabyte.ysql.set/->YSQLSetIndexClient))
          ; We'd rather allow negatives for now because it makes reproducing error easier
-         :bank    (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLBankClient true))})
+         :bank            (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLBankClient true))
+         :bank-multitable (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLMultiBankClient true))
+         :long-fork       (with-client long-fork/workload (yugabyte.ysql.long-fork/->YSQLLongForkClient))
+         :single-key-acid (with-client single-key-acid/workload (yugabyte.ysql.single-key-acid/->YSQLSingleKeyAcidClient))
+         :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))})
 
 (def workloads
   (merge workloads-ycql workloads-ysql))

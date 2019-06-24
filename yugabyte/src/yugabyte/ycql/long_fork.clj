@@ -1,6 +1,4 @@
 (ns yugabyte.ycql.long-fork
-  "Looks for instances of long fork: a snapshot isolation violation involving
-  incompatible orders of writes to disparate objects"
   (:refer-clojure :exclude [test])
   (:require [clojure [pprint :refer [pprint]]]
             [clojure.tools.logging :refer [info]]
