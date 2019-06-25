@@ -59,10 +59,11 @@
   [w]
   (or (= (name w) "none") (= (name w) "sleep")))
 
-(defn with-client
-  [workload client]
-  "Wraps a workload function to add :client entry to the result"
-  (fn [opts] (assoc (workload opts) :client client)))
+(defmacro with-client
+  [workload client-ctor]
+  "Wraps a workload function to add :client entry to the result.
+  Made as macro to re-evaluate client on every invocation."
+  `(fn [~'opts] (assoc (~workload ~'opts) :client ~client-ctor)))
 
 (def workloads-ycql
   "A map of workload names to functions that can take option maps and construct workloads."
@@ -106,7 +107,8 @@
   "Only workloads and options that we think should pass. Also used for
   test-all."
   (-> workload-options
-      (dissoc :ycql/bank-multitable)))
+      (dissoc :ycql/bank-multitable
+              :ysql/sleep)))
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
