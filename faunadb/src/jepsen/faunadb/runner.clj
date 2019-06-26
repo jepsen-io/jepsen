@@ -231,6 +231,9 @@
    [nil "--wait-for-convergence" "Don't start operations until data movement has completed"
     :default false]
 
+   [nil "--accelerate-indexes" "Use FaunaDB accelerated index builds."
+    :default false]
+
    ["-r" "--replicas NUM" "Number of replicas"
     :default 3
     :parse-fn parse-long
