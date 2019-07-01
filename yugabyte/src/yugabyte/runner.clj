@@ -51,15 +51,6 @@
     :parse-fn keyword
     :validate [#{:centos :debian} "One of `centos` or `debian`"]]
 
-   ["-d" "--db NAME" "Database variant: either community-edition (ce for short), or enterprise edition (ee for short)"
-    :default :community-edition
-    :parse-fn {"ce"                 :community-edition
-               "community-edition"  :community-edition
-               "ee"                 :enterprise-edition
-               "enterprise-edition" :enterprise-edition}
-    :validate [#{:community-edition :enterprise-edition}
-               "Either community-edition or enterprise edition"]]
-
    [nil "--experimental-tuning-flags" "Enable some experimental tuning flags which are supposed to help YB recover faster"
     :default false]
 

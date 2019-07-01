@@ -205,9 +205,7 @@
     :os (case (:os opts)
           :centos centos/os
           :debian debian/os)
-    :db (case (:db opts)
-          :community-edition (auto/community-edition)
-          :enterprise-edition (auto/enterprise-edition))))
+    :db (auto/->YugaByteDB)))
 
 (defn test-2
   "Second phase of test construction. Builds the workload and nemesis, and
