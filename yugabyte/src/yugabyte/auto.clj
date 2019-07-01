@@ -1,7 +1,5 @@
 (ns yugabyte.auto
-  "Shared automation functions for configuring, starting and stopping nodes.
-  Comes in two flavors: one for the community edition, and one for the
-  enterprise edition."
+  "Shared automation functions for configuring, starting and stopping nodes."
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -25,7 +23,6 @@
 
 (def master-log-dir  (str dir "/master/logs"))
 (def tserver-log-dir (str dir "/tserver/logs"))
-(def tserver-conf    (str dir "/tserver/conf/server.conf"))
 (def installed-url-file (str dir "/installed-url"))
 
 (def max-bump-time-ops-per-test
@@ -47,11 +44,6 @@
     ; TODO: figure out the yum invocation we need here
     ))
 
-; We're going to have two variants of the DB: one for the community edition,
-; and one for the enterprise edition. They have different data paths and
-; binaries, but share *some* logic, so we're going to have some polymorphic
-; functions here for the specific bits they do differently. DBs will implement
-; this protocol directly.
 (defprotocol Auto
   (install!       [db test])
   (start-master!  [db test node])
@@ -63,8 +55,6 @@
 (defn master-nodes
   "Given a test, returns the nodes we run masters on."
   [test]
-  ; Right now you must run the same number of masters as --replication-factor.
-  ; Maybe? YB's not sure.
   (let [nodes (take (:replication-factor test)
                     (:nodes test))]
     (assert (= (count nodes) (:replication-factor test))
@@ -250,8 +240,8 @@
           ; Probably not installed
           )))
 
-(defn get-ce-url
-  "Returns URL to community edition tarball for specific released version"
+(defn get-download-url
+  "Returns URL to tarball for specific released version"
   [version]
   (str "https://downloads.yugabyte.com/yugabyte-ce-" version "-linux.tar.gz"))
 
@@ -317,171 +307,103 @@
    :--rpc_connection_timeout_ms                   1500
    ])
 
-(defn community-edition
-  "Constructs a DB for installing and running the community edition"
+(defrecord YugaByteDB
   []
-  (reify
-    Auto
-    (install! [db test]
-      (c/su
-        (c/cd dir
-              ; Post-install takes forever, so let's try and skip this on
-              ; subsequent runs
-              (let [url           (or (:url test) (get-ce-url (:version test)))
-                    installed-url (get-installed-url)]
-                (when-not (= url installed-url)
-                  (info "Replacing version" installed-url "with" url)
-                  (install-python! (:os test))
-                  (assert (re-find #"Python 2\.7"
-                                   (c/exec :python :--version (c/lit "2>&1"))))
+  Auto
+  (install! [db test]
+    (c/su
+      (c/cd dir
+            ; Post-install takes forever, so let's try and skip this on
+            ; subsequent runs
+            (let [url           (or (:url test) (get-download-url (:version test)))
+                  installed-url (get-installed-url)]
+              (when-not (= url installed-url)
+                (info "Replacing version" installed-url "with" url)
+                (install-python! (:os test))
+                (assert (re-find #"Python 2\.7"
+                                 (c/exec :python :--version (c/lit "2>&1"))))
 
-                  (info "Installing tarball")
-                  (cu/install-archive! url dir)
-                  (c/su (info "Post-install script")
-                        (c/exec "./bin/post_install.sh")
+                (info "Installing tarball")
+                (cu/install-archive! url dir)
+                (c/su (info "Post-install script")
+                      (c/exec "./bin/post_install.sh")
 
-                        (c/exec :echo url :>> installed-url-file)
-                        (info "Done with setup")))))))
+                      (c/exec :echo url :>> installed-url-file)
+                      (info "Done with setup")))))))
 
-    (start-master! [db test node]
-      (c/su (c/exec :mkdir :-p ce-master-log-dir)
-            (cu/start-daemon!
-              {:logfile ce-master-logfile
-               :pidfile ce-master-pidfile
-               :chdir   dir}
-              ce-master-bin
-              (ce-shared-opts node)
-              (when (:experimental-tuning-flags test)
-                experimental-tuning-flags)
-              :--master_addresses   (master-addresses test)
-              :--replication_factor (:replication-factor test)
-              (master-api-opts (:api test) node)
-              )))
+  (start-master! [db test node]
+    (c/su (c/exec :mkdir :-p ce-master-log-dir)
+          (cu/start-daemon!
+            {:logfile ce-master-logfile
+             :pidfile ce-master-pidfile
+             :chdir   dir}
+            ce-master-bin
+            (ce-shared-opts node)
+            (when (:experimental-tuning-flags test)
+              experimental-tuning-flags)
+            :--master_addresses (master-addresses test)
+            :--replication_factor (:replication-factor test)
+            (master-api-opts (:api test) node)
+            )))
 
-    (start-tserver! [db test node]
-      (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
-            (cu/start-daemon!
-              {:logfile ce-tserver-logfile
-               :pidfile ce-tserver-pidfile
-               :chdir   dir}
-              ce-tserver-bin
-              (ce-shared-opts node)
-              (when (:experimental-tuning-flags test)
-                experimental-tuning-flags)
-              :--tserver_master_addrs (master-addresses test)
-              ; Tracing
-              :--enable_tracing
-              :--rpc_slow_query_threshold_ms 1000
-              :--load_balancer_max_concurrent_adds 10
-              (tserver-api-opts (:api test) node)
+  (start-tserver! [db test node]
+    (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
+          (cu/start-daemon!
+            {:logfile ce-tserver-logfile
+             :pidfile ce-tserver-pidfile
+             :chdir   dir}
+            ce-tserver-bin
+            (ce-shared-opts node)
+            (when (:experimental-tuning-flags test)
+              experimental-tuning-flags)
+            :--tserver_master_addrs (master-addresses test)
+            ; Tracing
+            :--enable_tracing
+            :--rpc_slow_query_threshold_ms 1000
+            :--load_balancer_max_concurrent_adds 10
+            (tserver-api-opts (:api test) node)
 
-              ; Heartbeats
-              ;:--heartbeat_interval_ms 100
-              ;:--heartbeat_rpc_timeout_ms 1500
-              ;:--retryable_rpc_single_call_timeout_ms 2000
-              ;:--rpc_connection_timeout_ms 1500
-              ;:--leader_failure_exp_backoff_max_delta_ms 1000
-              ;:--leader_failure_max_missed_heartbeat_period 3
-              ;:--consensus_rpc_timeout_ms 300
-              ;:--client_read_write_timeout_ms 6000
-              )))
+            ; Heartbeats
+            ;:--heartbeat_interval_ms 100
+            ;:--heartbeat_rpc_timeout_ms 1500
+            ;:--retryable_rpc_single_call_timeout_ms 2000
+            ;:--rpc_connection_timeout_ms 1500
+            ;:--leader_failure_exp_backoff_max_delta_ms 1000
+            ;:--leader_failure_max_missed_heartbeat_period 3
+            ;:--consensus_rpc_timeout_ms 300
+            ;:--client_read_write_timeout_ms 6000
+            )))
 
-    (stop-master! [db]
-      (c/su (cu/stop-daemon! ce-master-bin ce-master-pidfile)))
+  (stop-master! [db]
+    (c/su (cu/stop-daemon! ce-master-bin ce-master-pidfile)))
 
-    (stop-tserver! [db]
-      (c/su (cu/stop-daemon! ce-tserver-bin ce-tserver-pidfile)))
+  (stop-tserver! [db]
+    (c/su (cu/stop-daemon! ce-tserver-bin ce-tserver-pidfile)))
 
-    (wipe! [db]
-      (c/su (c/exec :rm :-rf ce-data-dir)))
+  (wipe! [db]
+    (c/su (c/exec :rm :-rf ce-data-dir)))
 
-    db/DB
-    (setup! [db test node]
-      (install! db test)
-      (start! db test node))
+  db/DB
+  (setup! [db test node]
+    (install! db test)
+    (start! db test node))
 
-    (teardown! [db test node]
-      (stop! db test node)
-      (wipe! db))
+  (teardown! [db test node]
+    (stop! db test node)
+    (wipe! db))
 
-    db/Primary
-    (setup-primary! [this test node]
-      "Executed once on a first node in list (i.e. n1 by default) after per-node setup is done"
-      ; NOOP placeholder, can be used to initialize cluster for different APIs
-      )
+  db/Primary
+  (setup-primary! [this test node]
+    "Executed once on a first node in list (i.e. n1 by default) after per-node setup is done"
+    ; NOOP placeholder, can be used to initialize cluster for different APIs
+    )
 
-    db/LogFiles
-    (log-files [_ _ _]
-      (concat [ce-master-logfile
-               ce-tserver-logfile]
-              (log-files-without-symlinks ce-master-log-dir)
-              (log-files-without-symlinks ce-tserver-log-dir)))))
-
-; WARNING: This is probably heavily outdated.
-(defn enterprise-edition
-  "Enterprise edition of YugabyteDB. Relies on EE already being installed."
-  []
-  (reify
-    Auto
-    (install! [db test]
-      ; We assume the DB is already installed
-      )
-
-    (start-master! [db test node]
-      (info "Starting master")
-      (info (c/exec (c/lit "if [[ -e /home/yugabyte/master/master.out ]]; then /home/yugabyte/bin/yb-server-ctl.sh master start; fi"))))
-
-    (start-tserver! [db test node]
-      (info "Starting tserver")
-      (info (c/exec (c/lit "/home/yugabyte/bin/yb-server-ctl.sh tserver start"))))
-
-    (stop-master! [db]
-      (info "Stopping master")
-      (info (meh (c/exec (c/lit "if [[ -e /home/yugabyte/master/master.out ]]; then /home/yugabyte/bin/yb-server-ctl.sh master stop; sleep 1; pkill -9 yb-master || true; fi")))))
-
-    (stop-tserver! [db]
-      (info "Stopping tserver")
-      (info (meh (c/exec (c/lit "/home/yugabyte/bin/yb-server-ctl.sh tserver stop; sleep 1; pkill -9 yb-tserver || true")))))
-
-    (wipe! [db]
-      (info "Deleting data and log files")
-      (meh (c/exec :rm :-r (c/lit (str "/mnt/d*/yb-data/master/*"))))
-      (meh (c/exec :rm :-r (c/lit (str "/mnt/d*/yb-data/tserver/*"))))
-      (meh (c/exec :mkdir "/mnt/d0/yb-data/master/logs"))
-      (meh (c/exec :mkdir "/mnt/d0/yb-data/tserver/logs"))
-      (meh (c/exec :sed :-i "/--placement_uuid/d" tserver-conf)))
-
-    db/DB
-    (setup! [this test node]
-      (install! this test)
-
-      (c/exec :sed :-i "/--max_clock_skew_usec/d" tserver-conf)
-      (let [max-skew-ms (test :max-clock-skew-ms)]
-        (if (some? max-skew-ms)
-          (c/exec :echo (str "--max_clock_skew_usec="
-                             (->> (:max-clock-skew-ms test) (* 1000) (* 2) (* max-bump-time-ops-per-test)))
-                  (c/lit ">>") tserver-conf)
-          ; Sync clocks on all servers since we are not testing clock skew.
-          (c/su (c/exec :ntpdate :-b "pool.ntp.org"))))
-      (start! this test node))
-
-    (teardown! [this test node]
-      (info "Tearing down YugaByteDB...")
-      (stop! this test node)
-      (wipe! this))
-
-    db/LogFiles
-    (log-files [_ test node]
-      (concat
-        ; Filter out symlinks.
-        (when (master-node? test node)
-          (try (remove (partial re-matches #".*\/yb-master.(INFO|WARNING|ERROR)")
-                       (cu/ls-full master-log-dir))
-               (catch RuntimeException e [])))
-        (try (remove (partial re-matches #".*\/yb-tserver.(INFO|WARNING|ERROR)")
-                     (cu/ls-full tserver-log-dir))
-             (catch RuntimeException e []))
-        [tserver-conf]))))
+  db/LogFiles
+  (log-files [_ _ _]
+    (concat [ce-master-logfile
+             ce-tserver-logfile]
+            (log-files-without-symlinks ce-master-log-dir)
+            (log-files-without-symlinks ce-tserver-log-dir))))
 
 (defn running-masters
   "Returns a list of nodes where master process is running."
