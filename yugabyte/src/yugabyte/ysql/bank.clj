@@ -12,6 +12,14 @@
 ; Single-table bank test
 ;
 
+(defn- read-accounts-map
+  "Read {id balance} accounts map from a unified bank table"
+  [op c]
+  (->> (str "SELECT id, balance FROM " table-name)
+       (c/query c)
+       (map (juxt :id :balance))
+       (into (sorted-map))))
+
 (defrecord YSQLBankYbClient [allow-negatives?]
   c/YSQLYbClient
 
@@ -30,16 +38,12 @@
   (invoke-op! [this test op c conn-wrapper]
     (case (:f op)
       :read
-      (->> (str "SELECT id, balance FROM " table-name)
-           (c/query c)
-           (map (juxt :id :balance))
-           (into (sorted-map))
-           (assoc op :type :ok, :value))
+      (assoc op :type :ok, :value (read-accounts-map op c))
 
       :transfer
-      (let [{:keys [from to amount]} (:value op)]
-        (c/with-txn
-          c
+      (c/with-txn
+        c
+        (let [{:keys [from to amount]} (:value op)]
           (let [b-from-before (c/select-single-value c table-name :balance (str "id = " from))
                 b-to-before   (c/select-single-value c table-name :balance (str "id = " to))
                 b-from-after  (- b-from-before amount)
