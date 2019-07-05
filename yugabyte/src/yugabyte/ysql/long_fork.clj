@@ -34,6 +34,7 @@
         :read (let [ks   (seq (lf/op-read-keys op))
                     ; Look up values by the value index
                     vs   (->> (long-fork-index-query ks)
+                              (c/query op c)
                               (map (juxt :key2 :val))
                               (into (sorted-map)))
                     ; Rewrite txn to use those values
@@ -45,9 +46,9 @@
                 (assoc op :type :ok :value txn'))
 
         :write (let [[[_ k v]] txn]
-                 (do (c/insert! c table-name {:key  k
-                                              :key2 k
-                                              :val  v})
+                 (do (c/insert! op c table-name {:key  k
+                                                 :key2 k
+                                                 :val  v})
                      (assoc op :type :ok))))))
 
   (teardown-cluster! [this test c conn-wrapper]

@@ -10,7 +10,8 @@
             [jepsen.reconnect :as rc]
             [dom-top.core :as dt]
             [wall.hack :as wh]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]]
+            [yugabyte.utils :as yutil]))
 
 (def default-timeout "Default timeout for operations in ms" 30000)
 
@@ -33,42 +34,66 @@
    :connectTimeout (/ default-timeout 1000)
    :socketTimeout  (/ default-timeout 1000)})
 
+(defn- append-op-index
+  "Append /* <:op-index> */ to a given SQL statement or its part,
+  useful while digging through server-side logs.
+  If the given SQL contains a sequence, commented op-index
+  will be appended to a first element."
+  [op sql]
+  (if (sequential? sql)
+    (concat [(append-op-index op (first sql))] (rest sql))
+    (str sql " /* op-index " (:op-index op) " */ ")))
+
 (defn query
   "Like jdbc query, but includes a default timeout in ms.
-  Requires query to be wrapped in a vector."
-  [conn sql-params]
-  (j/query conn sql-params {:timeout default-timeout}))
+  If op is given, appends :op-index comment."
+  ([op conn sql-params]
+   (query conn (append-op-index op sql-params)))
+  ([conn sql-params]
+   (j/query conn sql-params {:timeout default-timeout})))
 
 (defn insert!
-  "Like jdbc insert!, but includes a default timeout."
-  [conn table values]
-  (j/insert! conn table values {:timeout default-timeout}))
+  "Like jdbc insert!, but includes a default timeout and (optionally) :op-index comment."
+  ([op conn table values]
+   (insert! conn (append-op-index op table) values))
+  ([conn table values]
+   (j/insert! conn table values {:timeout default-timeout})))
 
 (defn update!
-  "Like jdbc update!, but includes a default timeout."
-  [conn table values where]
-  (j/update! conn table values where {:timeout default-timeout}))
+  "Like jdbc update!, but includes a default timeout and (optionally) :op-index comment."
+  ([op conn table values where]
+   (update! conn (append-op-index op table) values where))
+  ([conn table values where]
+   (j/update! conn table values where {:timeout default-timeout})))
 
 (defn execute!
-  "Like jdbc execute!!, but includes a default timeout."
-  [conn sql-params]
-  (j/execute! conn sql-params {:timeout default-timeout}))
+  "Like jdbc execute!, but includes a default timeout and (optionally) :op-index comment."
+  ([op conn sql-params]
+   (execute! conn (append-op-index op sql-params)))
+  ([conn sql-params]
+   (j/execute! conn sql-params {:timeout default-timeout})))
 
 (defn select-first-row
-  "Selects a first row from table with a WHERE-clause, returning nil if no rows were found"
-  [conn table-name where-clause]
-  (let [query-string (str "SELECT * FROM " table-name " WHERE " where-clause " LIMIT 1")
-        query-res    (query conn query-string)
-        res          (first query-res)]
-    res))
+  "Selects a first row from table with a WHERE-clause, returning nil if no rows were found.
+  f op is given, appends :op-index comment to a query."
+  ([conn table-name where-clause]
+   (select-first-row nil conn table-name where-clause))
+  ([op conn table-name where-clause]
+   (let [query-string (str "SELECT * FROM " table-name " WHERE " where-clause " LIMIT 1")
+         query-res    (query op conn query-string)
+         res          (first query-res)]
+     res)))
 
 (defn select-single-value
-  "Selects a single value from table with a WHERE-clause yielding single row"
-  [conn table-name column-kw where-clause]
-  (let [query-string (str "SELECT " (name column-kw) " FROM " table-name " WHERE " where-clause " LIMIT 1")
-        query-res    (query conn query-string)
-        res          (get (first query-res) column-kw)]
-    res))
+  "Selects a single value from table with a WHERE-clause yielding single row.
+  If op is given, appends :op-index comment to a query."
+  ([conn table-name column-kw where-clause]
+   (select-single-value nil conn table-name column-kw where-clause))
+  ([op conn table-name column-kw where-clause]
+   (let [query-string (str "SELECT " (name column-kw) " FROM " table-name " WHERE " where-clause " LIMIT 1")
+         query-res    (query op conn query-string)
+         res          (get (first query-res) column-kw)]
+     res)))
 
 (defn in
   "Constructs an SQL IN clause string"
@@ -274,6 +299,8 @@
   "Helper for defining YSQL clients.
   Takes a new class name symbol and a definition of YSQLClientBase record
   whose methods will be wrapped and called.
+  Appends :op-timing with pretty-printed operation start and finish times.
+
   This approach is (arguably) cleaner than the one used for YCQL defclient.
   Separate defrecord, among other things, allows to clearly see
   compile-time errors caused by protocol misusage.
@@ -298,8 +325,7 @@
 
 
     ; To create a client instance:
-    (->YSQLMyClient arg1 arg2 arg3)
-    "
+    (->YSQLMyClient arg1 arg2 arg3)"
   [class-name inner-client-record]
 
   ; Since this macro is insanely complex, I'll try to thoroughly comment what's happening here.
@@ -337,12 +363,15 @@
                (info "Setup sucessful")))
 
            (invoke! [~'this ~'test ~'op]
-             (with-errors
-               ~'op
-               (with-conn
-                 [~'c ~'conn-wrapper]
-                 (with-retry
-                   (invoke-op! ~'inner-client ~'test ~'op ~'c ~'conn-wrapper)))))
+             (let [~'start-dt (yutil/current-pretty-datetime)
+                   ~'op2 (with-errors
+                           ~'op
+                           (with-conn
+                             [~'c ~'conn-wrapper]
+                             (with-retry
+                               (invoke-op! ~'inner-client ~'test ~'op ~'c ~'conn-wrapper))))
+                   ~'op3 (assoc ~'op2 :op-timing [~'start-dt (yutil/current-pretty-datetime)])]
+               ~'op3))
 
            (teardown! [~'this ~'test]
              (once-per-cluster

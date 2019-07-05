@@ -65,13 +65,13 @@
 
   (invoke-op! [this test op c conn-wrapper]
     (case (:f op)
-      :add (do (c/insert! c table-name {:id  (:value op)
-                                        :val (:value op)
-                                        :grp (rand-int group-count)})
+      :add (do (c/insert! op c table-name {:id  (:value op)
+                                           :val (:value op)
+                                           :grp (rand-int group-count)})
                (assoc op :type :ok))
 
       :read (let [value (->> set-index-query
-                             (c/query c)
+                             (c/query op c)
                              (mapv :val))]
               (assoc op :type :ok, :value value))))
 

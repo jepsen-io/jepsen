@@ -19,7 +19,8 @@
             [jepsen.generator :as gen]
             [jepsen.independent :as independent]
             [jepsen.checker.timeline :as timeline]
-            [knossos.model :as model]))
+            [knossos.model :as model]
+            [yugabyte.generator :as ygen]))
 
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
@@ -29,13 +30,14 @@
 (defn workload
   [opts]
   (let [n (count (:nodes opts))]
-    {:generator (independent/concurrent-generator
-                  (* 2 n)
-                  (range)
-                  (fn [k]
-                    (->> (gen/reserve n (gen/mix [w cas cas]) r)
-                         (gen/stagger 1)
-                         (gen/process-limit 20))))
+    {:generator (ygen/with-op-index
+                  (independent/concurrent-generator
+                    (* 2 n)
+                    (range)
+                    (fn [k]
+                      (->> (gen/reserve n (gen/mix [w cas cas]) r)
+                           (gen/stagger 1)
+                           (gen/process-limit 20)))))
      :checker   (independent/checker
                   (checker/compose
                     {:timeline (timeline/html)

@@ -9,7 +9,8 @@
             [jepsen.independent :as independent]
             [jepsen.util :as util]
             [jepsen.checker.timeline :as timeline]
-            [knossos.model :as model])
+            [knossos.model :as model]
+            [yugabyte.generator :as ygen])
   (:import (knossos.model Model)))
 
 (defrecord MultiRegister []
@@ -56,13 +57,14 @@
 (defn workload
   [opts]
   (let [n (count (:nodes opts))]
-    {:generator (independent/concurrent-generator
-                  (* 2 n)
-                  (range)
-                  (fn [k]
-                    (->> (gen/reserve n r w)
-                         (gen/stagger 1)
-                         (gen/process-limit 20))))
+    {:generator (ygen/with-op-index
+                  (independent/concurrent-generator
+                    (* 2 n)
+                    (range)
+                    (fn [k]
+                      (->> (gen/reserve n r w)
+                           (gen/stagger 1)
+                           (gen/process-limit 20)))))
      :checker   (independent/checker
                   (checker/compose
                     {:timeline (timeline/html)

@@ -27,7 +27,7 @@
         (let [k1s  (map mop/key ops)
               ; Look up values
               vs   (->> (str "SELECT k1, val FROM " table-name " WHERE k2 = " k2 " AND k1 " (c/in k1s))
-                        (c/query c)
+                        (c/query op c)
                         (map (juxt :k1 :val))
                         (into {}))
               ; Rewrite ops to use those values
@@ -44,7 +44,7 @@
                                   " VALUES (" k1 ", " k2 ", " v ")"
                                   " ON CONFLICT ON CONSTRAINT " table-name "_pkey"
                                   " DO UPDATE SET val = " v)]
-              (c/execute! c update-str)))
+              (c/execute! op c update-str)))
           (assoc op :type :ok)))))
 
   (teardown-cluster! [this test c conn-wrapper]
