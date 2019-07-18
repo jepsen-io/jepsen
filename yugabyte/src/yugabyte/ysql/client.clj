@@ -148,7 +148,6 @@
   (when-let [m (.getMessage e)]
     (condp instance? e
       java.sql.SQLTransactionRollbackException
-
       {:type :fail, :error [:rollback m]}
 
       ; So far it looks like all SQL exception are wrapped in BatchUpdateException
@@ -160,7 +159,7 @@
         {:type :info, :error [:batch-update m]})
 
       org.postgresql.util.PSQLException
-      (condp re-find (.getMessage e)
+      (condp re-find m
         #"(?i)Conflicts with [- a-z]+ transaction"
         {:type :fail, :error [:conflicting-transaction m]}
 
@@ -170,6 +169,30 @@
         ; Happens upon concurrent updates even without explicit transactions
         #"(?i)Operation expired"
         {:type :fail, :error [:operation-expired m]}
+
+        ; Happens upon network partition,
+        ; usually invoked upon RPC request timeout
+        #"(?i)Timed out after deadline expired"
+        {:type :info, :error [:timeout m]}
+
+        ; Happens when tserver has been stopped,
+        ; invoked from PG backend via ProcessInterrupts as a part of CHECK_FOR_INTERRUPTS macro
+        #"(?i)Terminating connection due to administrator command"
+        {:type :fail, :error [:conn-closed m]}
+
+        ;
+        ; PG driver-level errors
+        ; Happens when client connection with yb-tserver has been disrupted
+        ; (usually results in operation failure, but we can't guarantee that)
+        ;
+
+        ; Might happen on basically any stage
+        #"(?i)This connection has been closed"
+        {:type :info, :error [:conn-closed m]}
+
+        ; Happens when there's a problem communicating with server
+        #"(?i)An I/O error occurred while sending to the backend"
+        {:type :info, :error [:data-sending-failed m]}
 
         ;
         ; Errors in test spec, do not suppress throwing
@@ -184,14 +207,21 @@
         ; Unknown (other) SQL error
         {:type :info, :error [:psql-exception m]})
 
-      ; Happens when with-conn macro detects a closed connection
       clojure.lang.ExceptionInfo
-      (condp = (:type (ex-data e))
-        :conn-not-ready {:type :fail, :error :conn-not-ready}
-        nil)
+      (if-let [e2 (:rollback (ex-data e))]
+        ; Process wrapped exception, if any - happens e.g. when tserver has been stopped
+        (exception-to-op e2)
+
+        ; Happens when with-conn macro detects a closed connection
+        (condp = (:type (ex-data e))
+          :conn-not-ready {:type :fail, :error :conn-not-ready}
+          nil))
 
       (condp re-find m
         #"^timeout$"
+        {:type :info, :error :timeout}
+
+        #"timed out"
         {:type :info, :error :timeout}
 
         nil))))
@@ -201,7 +231,8 @@
   [ex]
   (let [op     (exception-to-op ex)                         ; either {:type ... :error ...} or nil
         op-str (str op)]
-    (re-find #"(?i)try again" op-str)))
+    (or (re-find #"(?i)try again" op-str)
+        (re-find #"(?i)restart read required" op-str))))
 
 (defmacro once-per-cluster
   "Runs the given code once per cluster. Requires an atomic boolean (set to false)
@@ -377,11 +408,12 @@
              (once-per-cluster
                ~'teardown?
                (info "Running teardown")
-               (with-timeout
-                 (with-conn
-                   [~'c ~'conn-wrapper]
-                   (with-retry
-                     (teardown-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper))))))
+               (with-errors
+                 (with-timeout
+                   (with-conn
+                     [~'c ~'conn-wrapper]
+                     (with-retry
+                       (teardown-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper)))))))
 
            (close! [~'this ~'test]
              (rc/close! ~'conn-wrapper)))

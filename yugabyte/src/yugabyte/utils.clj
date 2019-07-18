@@ -11,9 +11,9 @@
              m))
 
 (defn pretty-datetime
-  "Pretty-prints given datetime as yyyy-MM-dd_HH:mm:sss.SSS"
+  "Pretty-prints given datetime as yyyy-MM-dd_HH:mm:ss.SSS"
   [dt]
-  (let [dtf (SimpleDateFormat. "yyyy-MM-dd_HH:mm:sss.SSS")]
+  (let [dtf (SimpleDateFormat. "yyyy-MM-dd_HH:mm:ss.SSS")]
     (.format dtf dt)))
 
 (defn current-pretty-datetime
