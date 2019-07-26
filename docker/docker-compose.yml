@@ -1,4 +1,4 @@
-version: '3.7'
+version: '3.4'
 x-node:
   &default-node
   build: ./node
@@ -8,6 +8,7 @@ x-node:
     - jepsen
 
 services:
+
   control:
     container_name: jepsen-control
     hostname: control

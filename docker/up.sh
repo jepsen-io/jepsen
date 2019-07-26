@@ -97,13 +97,13 @@ fi
 
 # Make sure folders referenced in control Dockerfile exist and don't contain leftover files
 rm -rf ./control/jepsen
-mkdir -p ./control/jepsen/jepsen
+mkdir -p ./control/jepsen
 # Copy the jepsen directory if we're not mounting the JEPSEN_ROOT
 if [ ! "$DEV" ]; then
     # Dockerfile does not allow `ADD ..`. So we need to copy it here in setup.
     INFO "Copying .. to control/jepsen"
     (
-        (cd ..; tar --exclude=./docker --exclude=./.git --exclude-ignore=.gitignore -cf - .)  | tar Cxf ./control/jepsen -
+        cd ..; tar zcf jepsen.tgz jepsen; mv jepsen.tgz docker/control/jepsen; cd docker/control/jepsen; tar xf jepsen.tgz; rm -f jepsen.tgz
     )
 fi
 
