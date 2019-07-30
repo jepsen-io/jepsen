@@ -14,7 +14,7 @@
                  [tea-time "1.0.1"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.1"]
-                 [http-kit "2.1.18"]
+                 [http-kit "2.3.0"]
                  [ring "1.6.0-beta5"]
                  [hiccup "1.0.5"]
                  [metametadata/multiset "0.1.1"]
