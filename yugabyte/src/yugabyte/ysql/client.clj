@@ -20,6 +20,9 @@
 
 (def ysql-port 5433)
 
+(def max-retry-attempts "Maximum number of attempts to be performed by with-retry" 30)
+(def max-delay-between-retries-ms "Maximum delay between retries for with-retry" 200)
+
 (defn db-spec
   "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
@@ -42,7 +45,7 @@
   [op sql]
   (if (sequential? sql)
     (concat [(append-op-index op (first sql))] (rest sql))
-    (str sql " /* op-index " (:op-index op) " */ ")))
+    (str sql " /* :op-index " (:op-index op) " */ ")))
 
 (defn query
   "Like jdbc query, but includes a default timeout in ms.
@@ -135,8 +138,7 @@
   (setup-cluster! [client test c conn-wrapper]
     "Called once on a random node to set up database/cluster state for testing.")
   (invoke-op! [client test operation c conn-wrapper]
-    "Apply an operation to the client, returning an operation to be appended to the history.
-    If it throws retryable error, can be called again.")
+    "Apply an operation to the client, returning an operation to be appended to the history.")
   (teardown-cluster! [client test c conn-wrapper]
     "Called once on a random node to tear down the client/database/cluster when work is complete.
     If it throws retryable error, can be called again."))
@@ -179,6 +181,15 @@
         ; invoked from PG backend via ProcessInterrupts as a part of CHECK_FOR_INTERRUPTS macro
         #"(?i)Terminating connection due to administrator command"
         {:type :fail, :error [:conn-closed m]}
+
+        ; Happens when transaction conflict detected
+        #"(?i)try again"
+        {:type :fail, :error [:try-again m], :retryable? true}
+
+        ; Happens when server can't determine whether the value was written before or
+        ; after transaction start
+        #"(?i)restart read required"
+        {:type :fail, :error [:restart-read-required m], :retryable? true}
 
         ;
         ; PG driver-level errors
@@ -229,10 +240,8 @@
 (defn retryable?
   "Whether given exception indicates that an operation can be retried"
   [ex]
-  (let [op     (exception-to-op ex)                         ; either {:type ... :error ...} or nil
-        op-str (str op)]
-    (or (re-find #"(?i)try again" op-str)
-        (re-find #"(?i)restart read required" op-str))))
+  (let [op (exception-to-op ex)]                            ; either {:type ... :error ...} or nil
+    (= (:retryable? op) true)))
 
 (defmacro once-per-cluster
   "Runs the given code once per cluster. Requires an atomic boolean (set to false)
@@ -285,18 +294,16 @@
 
 (defmacro with-retry
   "Catches YSQL \"try again\"-style errors and retries body a bunch of times,
-  with exponential backoffs."
+  with randomized delays between retries."
   [& body]
-  `(util/with-retry [attempts# 30
-                     backoff# 20]
+  `(util/with-retry [attempts# max-retry-attempts]
                     ~@body
 
                     (catch java.sql.SQLException e#
                       (if (and (pos? attempts#)
                                (retryable? e#))
-                        (do (Thread/sleep backoff#)
-                            (~'retry (dec attempts#)
-                              (* backoff# (+ 4 (* 0.5 (- (rand) 0.5))))))
+                        (do (Thread/sleep (rand-int max-delay-between-retries-ms))
+                            (~'retry (dec attempts#)))
                         (throw e#)))))
 
 (defmacro with-txn

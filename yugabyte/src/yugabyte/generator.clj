@@ -5,11 +5,10 @@
   "Append :op-index integer to every operation emitted by the given generator.
   Value starts at 1 and increments by 1 for every subsequent emitted operation."
   [gen]
-  (let [ctr          (atom 1)
+  (let [ctr          (atom 0)
         add-index-fn (fn [op] (locking ctr
-                                (let [old-val @ctr]
-                                  (compare-and-set! ctr old-val (inc old-val))
-                                  (assoc op :op-index old-val))))]
+                                (let [new-val (swap! ctr inc)]
+                                  (assoc op :op-index new-val))))]
     (gen/map add-index-fn gen)))
 
 (defn workload-with-op-index
