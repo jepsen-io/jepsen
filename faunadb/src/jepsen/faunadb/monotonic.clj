@@ -269,21 +269,23 @@
                (store/path! test (:subdirectory opts)
                             (str "sequential " filename ".png")))]
     (try
-      (g/raw-plot!
-        (concat (perf/preamble path)
-                (perf/nemesis-regions* history)
-                (perf/nemesis-lines history)
-                [['set 'title (str (:name test) " sequential by process")]
-                 '[set ylabel "register value"]
-                 '[set xlabel "faunadb timestamp"]
-                 ['plot (apply g/list
-                               (for [[process points] series]
-                                 ["-"
-                                  'with       'linespoints
-                                  'pointtype  2
-                                  'linetype   (colors process)
-                                  'title      (str process)]))]])
-        (vals series))
+      (let [plot {:preamble (concat (perf/preamble path)
+                               [[:set :title (str (:name test) " sequential by process")]
+                                [:set :ylabel "register value"]
+                                [:set :xlabel "faunadb timestamp"]])
+                  :series (map (fn [process points]
+                                 {:title (str process)
+                                  :with :linespoints
+                                  :data points
+                                  :pointtype 2
+                                  :linetype (colors process)})
+                               series)}]
+        (when (perf/has-data? plot)
+          (-> plot
+              (perf/without-empty-series)
+              (perf/with-range)
+              (perf/with-nemeses history (:nemeses (:plot test)))
+              (perf/plot!))))
       {:valid? true}
       (catch java.io.IOException _
         (throw (IllegalStateException. "Error rendering plot; verify gnuplot is installed and reachable"))))))
