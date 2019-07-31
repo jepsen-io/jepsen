@@ -406,8 +406,7 @@
                            ~'op
                            (with-conn
                              [~'c ~'conn-wrapper]
-                             (with-retry
-                               (invoke-op! ~'inner-client ~'test ~'op ~'c ~'conn-wrapper))))
+                             (invoke-op! ~'inner-client ~'test ~'op ~'c ~'conn-wrapper)))
                    ~'op3 (assoc ~'op2 :op-timing [~'start-dt (yutil/current-pretty-datetime)])]
                ~'op3))
 
