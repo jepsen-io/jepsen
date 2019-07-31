@@ -243,7 +243,7 @@
 (defn get-download-url
   "Returns URL to tarball for specific released version"
   [version]
-  (str "https://downloads.yugabyte.com/yugabyte-ce-" version "-linux.tar.gz"))
+  (str "https://downloads.yugabyte.com/yugabyte-" version "-linux.tar.gz"))
 
 (defn log-files-without-symlinks
   "Takes a directory, and returns a list of logfiles in that direcory, skipping

@@ -194,7 +194,9 @@
   name, OS, DB."
   [opts]
   (assoc opts
-    :name (str "yb " (:version opts)
+    :name (str "yb " (-> (or (:url opts) (:version opts))
+                         (str/split #"/")
+                         (last))
                " " (name (:workload opts))
                (when-not (= [:interval] (keys (:nemesis opts)))
                  (str " nemesis " (->> (dissoc (:nemesis opts) :interval)
