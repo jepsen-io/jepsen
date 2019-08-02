@@ -35,7 +35,11 @@
                          ; on conflict, in postgres, needs fully qualified
                          ; column names.
                          [(str "insert into " table " (k, v) values (?, ?) "
-                               "on conflict (k) do update set "
+                               ; I think on conflict here breaks *some* of the
+                               ; time, but not always, when we use a unique
+                               ; constraint instead of primary key.
+                               ; "on conflict (k) do update set "
+                               "on conflict on constraint append_k_key do update set "
                                "v = CONCAT(" table ".v, ',', ?)")
                           k (str v) (str v)])
              v))])
@@ -46,9 +50,9 @@
 
   (setup-cluster! [this test c conn-wrapper]
     (c/execute! c (j/create-table-ddl table
-                                      [[:k :int]
-                                       [:v :text]
-                                       ["PRIMARY KEY" "(k)"]])))
+                                      [[:k :int "unique"]
+                                       [:v :text]])))
+                                       ;["PRIMARY KEY" "(k)"]])))
 
   (invoke-op! [this test op c conn-wrapper]
     (let [txn       (:value op)
