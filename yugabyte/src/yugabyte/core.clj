@@ -10,6 +10,7 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
+            [yugabyte [append :as append]]
             [yugabyte.auto :as auto]
             [yugabyte.bank :as bank]
             [yugabyte.counter :as counter]
@@ -25,6 +26,7 @@
             [yugabyte.ycql.multi-key-acid]
             [yugabyte.ycql.set]
             [yugabyte.ycql.single-key-acid]
+            [yugabyte.ysql [append :as ysql.append]]
             [yugabyte.ysql.bank]
             [yugabyte.ysql.counter]
             [yugabyte.ysql.long-fork]
@@ -91,7 +93,8 @@
          :bank-multitable (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLMultiBankClient true))
          :long-fork       (with-client long-fork/workload (yugabyte.ysql.long-fork/->YSQLLongForkClient))
          :single-key-acid (with-client single-key-acid/workload (yugabyte.ysql.single-key-acid/->YSQLSingleKeyAcidClient))
-         :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))})
+         :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))
+         :append          (with-client append/workload (ysql.append/->Client))})
 
 (def workloads
   (merge workloads-ycql workloads-ysql))
