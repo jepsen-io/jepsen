@@ -36,7 +36,6 @@
   micro-op."
   [conn test [f k v]]
   (let [table (table-for test k)]
-    (info :table table)
     [f k (case f
            :r (some-> conn
                       (c/query [(str "select (v) from " table

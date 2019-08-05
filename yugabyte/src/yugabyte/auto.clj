@@ -46,6 +46,7 @@
 
 (defprotocol Auto
   (install!       [db test])
+  (configure!     [db test node])
   (start-master!  [db test node])
   (start-tserver! [db test node])
   (stop-master!   [db])
@@ -307,6 +308,12 @@
    :--rpc_connection_timeout_ms                   1500
    ])
 
+(def limits-conf
+  "Ulimits, in the format for /etc/security/limits.conf."
+  "
+root hard nofile 1048576
+root soft nofile 1048576")
+
 (defrecord YugaByteDB
   []
   Auto
@@ -330,6 +337,16 @@
 
                       (c/exec :echo url :>> installed-url-file)
                       (info "Done with setup")))))))
+
+  (configure! [db test node]
+    ; YB will explode after creating just a handful of tables if we don't raise
+    ; ulimits. This is sort of a hack; it won't take effect for the current
+    ; session, but will on the second and subsequent runs. We can't run
+    ; `ulimit` directly because the shell context doesn't carry over to
+    ; subsequent commands. Should write a subshell exec thing to handle this at
+    ; some point.
+    (c/su (c/exec :echo limits-conf :> "/etc/security/limits.d/jepsen.conf")
+          (info (c/exec :ulimit :-a))))
 
   (start-master! [db test node]
     (c/su (c/exec :mkdir :-p ce-master-log-dir)
@@ -386,6 +403,7 @@
   db/DB
   (setup! [db test node]
     (install! db test)
+    (configure! db test node)
     (start! db test node))
 
   (teardown! [db test node]
