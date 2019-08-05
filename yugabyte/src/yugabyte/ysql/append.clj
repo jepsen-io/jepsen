@@ -39,6 +39,8 @@
                                ; time, but not always, when we use a unique
                                ; constraint instead of primary key.
                                ; "on conflict (k) do update set "
+                               ;
+                               ; Nope, it breaks both ways!
                                "on conflict on constraint append_k_key do update set "
                                "v = CONCAT(" table ".v, ',', ?)")
                           k (str v) (str v)])

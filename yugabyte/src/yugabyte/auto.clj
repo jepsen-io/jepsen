@@ -138,8 +138,8 @@
 (defn await-tservers
   "Waits until all tservers for a test are online, according to this node."
   [test]
-  (dt/with-retry [tries 20]
-    (when (< 0 tries 20)
+  (dt/with-retry [tries 60]
+    (when (< 0 tries)
       (info "Waiting for tservers to come online")
       (Thread/sleep 1000))
 
