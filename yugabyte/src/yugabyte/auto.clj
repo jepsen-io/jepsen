@@ -345,8 +345,7 @@ root soft nofile 1048576")
     ; `ulimit` directly because the shell context doesn't carry over to
     ; subsequent commands. Should write a subshell exec thing to handle this at
     ; some point.
-    (c/su (c/exec :echo limits-conf :> "/etc/security/limits.d/jepsen.conf")
-          (info (c/exec :ulimit :-a))))
+    (c/su (c/exec :echo limits-conf :> "/etc/security/limits.d/jepsen.conf")))
 
   (start-master! [db test node]
     (c/su (c/exec :mkdir :-p ce-master-log-dir)
