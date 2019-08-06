@@ -887,7 +887,7 @@
    (wr-txns opts {:active-keys (vec (range (:key-count opts 2)))}))
   ([opts state]
    (lazy-seq
-     (let [min-length           (:min-txn-length opts 0)
+     (let [min-length           (:min-txn-length opts 1)
            max-length           (:max-txn-length opts 2)
            max-writes-per-key   (:max-writes-per-key opts 32)
            key-count            (:key-count opts 2)
