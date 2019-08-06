@@ -168,7 +168,14 @@
         #"(?i)Catalog Version Mismatch"
         {:type :fail, :error [:catalog-version-mismatch m]}
 
-        ; Happens upon concurrent updates even without explicit transactions
+        ; This type of error can, on occasion, be indeterminate: the
+        ; transaction may have actually committed.
+        #"Error during commit: Operation expired: Transaction expired"
+        {:type :info, :error [:commit-transaction-expired]}
+
+        ; Happens upon concurrent updates even without explicit transactions.
+        ; I'm not sure if there are other types of "Operation Expired" errors
+        ; so I've left this here.
         #"(?i)Operation expired"
         {:type :fail, :error [:operation-expired m]}
 
