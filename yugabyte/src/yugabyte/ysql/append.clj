@@ -70,9 +70,9 @@
          (map (fn [table]
                 (info "Creating table" table)
                 (c/execute! c (j/create-table-ddl table
-                                                  [[:k :int "unique"]
+                                                  [;[:k :int "unique"]
+                                                   [:k :int "PRIMARY KEY"]
                                                    [:v :text]]))))
-                                                 ;["PRIMARY KEY" "(k)"]]))))
          dorun))
 
   (invoke-op! [this test op c conn-wrapper]
