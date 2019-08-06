@@ -72,7 +72,8 @@
                 (c/execute! c (j/create-table-ddl table
                                                   [;[:k :int "unique"]
                                                    [:k :int "PRIMARY KEY"]
-                                                   [:v :text]]))))
+                                                   [:v :text]]
+                                                  {:conditional? true}))))
          dorun))
 
   (invoke-op! [this test op c conn-wrapper]
