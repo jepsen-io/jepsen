@@ -12,8 +12,9 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
-            [yugabyte.ycql.client]
-            [yugabyte.ysql.client])
+            [yugabyte.ycql.client :as ycql.client]
+            [yugabyte.ysql.client :as ysql.client]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import jepsen.os.debian.Debian
            jepsen.os.centos.CentOS))
 
@@ -163,6 +164,18 @@
         #"Leader not yet replicated NoOp"           (retry (dec tries))
         #"Not the leader"                           (retry (dec tries))
         (throw e)))))
+
+(defn check-ysql
+  "Connects to the YSQL interface and immediately disconnects. YB just...
+  doesn't accept connections sometimes, so we use this to give up on the setup
+  process if the cluster looks broken. Hack hack hack."
+  [node]
+  (try+
+    (-> node
+        ysql.client/open-conn
+        ysql.client/close-conn)
+    (catch [:type :connection-timed-out] e
+      (throw+ {:type :jepsen.db/setup-failed}))))
 
 (defn start! [db test node]
   "Start both master and tserver. Only starts master if this node is a master
@@ -403,7 +416,8 @@ root soft nofile 1048576")
   (setup! [db test node]
     (install! db test)
     (configure! db test node)
-    (start! db test node))
+    (start! db test node)
+    (check-ysql node))
 
   (teardown! [db test node]
     (stop! db test node)

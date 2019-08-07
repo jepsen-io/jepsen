@@ -104,6 +104,22 @@
   (assert (not-empty coll) "Cannot create IN clause for empty values collection")
   (str "IN (" (str/join ", " coll) ")"))
 
+(defn open-conn
+  "Opens a connection to the given node."
+  [node]
+  (util/timeout default-timeout
+                (throw+ {:type :connection-timed-out
+                         :node node})
+                (util/retry 0.1
+                            (let [spec  (db-spec node)
+                                  conn  (j/get-connection spec)
+                                  spec' (j/add-connection spec conn)]
+                              (.setTransactionIsolation conn conn-isolation-level)
+                              (assert spec')
+                              (assert (= (.getTransactionIsolation conn)
+                                         conn-isolation-level))
+                              spec'))))
+
 (defn close-conn
   "Given a JDBC connection, closes it and returns the underlying spec."
   [conn]
@@ -117,19 +133,7 @@
   (rc/open!
     (rc/wrapper
       {:name  node
-       :open  (fn open []
-                (util/timeout default-timeout
-                              (throw (RuntimeException.
-                                       (str "Connection to " node " timed out")))
-                              (util/retry 0.1
-                                          (let [spec  (db-spec node)
-                                                conn  (j/get-connection spec)
-                                                spec' (j/add-connection spec conn)]
-                                            (.setTransactionIsolation conn conn-isolation-level)
-                                            (assert spec')
-                                            (assert (= (.getTransactionIsolation conn)
-                                                       conn-isolation-level))
-                                            spec'))))
+       :open  (partial open-conn node)
        :close close-conn
        :log?  true})))
 
