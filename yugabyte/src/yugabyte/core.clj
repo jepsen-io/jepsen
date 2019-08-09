@@ -26,7 +26,8 @@
             [yugabyte.ycql.multi-key-acid]
             [yugabyte.ycql.set]
             [yugabyte.ycql.single-key-acid]
-            [yugabyte.ysql [append :as ysql.append]]
+            [yugabyte.ysql [append :as ysql.append]
+                           [append-table :as ysql.append-table]]
             [yugabyte.ysql.bank]
             [yugabyte.ysql.counter]
             [yugabyte.ysql.long-fork]
@@ -94,7 +95,8 @@
          :long-fork       (with-client long-fork/workload (yugabyte.ysql.long-fork/->YSQLLongForkClient))
          :single-key-acid (with-client single-key-acid/workload (yugabyte.ysql.single-key-acid/->YSQLSingleKeyAcidClient))
          :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))
-         :append          (with-client append/workload (ysql.append/->Client))})
+         :append          (with-client append/workload (ysql.append/->Client))
+         :append-table    (with-client append/workload (ysql.append-table/->Client))})
 
 (def workloads
   (merge workloads-ycql workloads-ysql))
