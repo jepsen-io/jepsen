@@ -23,11 +23,48 @@
   [i]
   (str "append" i))
 
+(defn insert-using-count!
+  "Inserts a row with value v into a table, returning v. Key is derived from
+  the count of rows in the table."
+  [conn table v]
+  (let [k (-> (c/query conn [(str "select count(*) from " table)])
+              first
+              :count)]
+    (c/execute! conn [(str "insert into " table " (k, v) values (?, ?)") k v])
+    v))
+
+(defn insert-now!
+  "Inserts a value v into a table, returning v. Key is computed using NOW()."
+  [conn table v]
+  (c/execute! conn [(str "insert into " table " (k, v) values (NOW(), ?)") v])
+  v)
+
+(defn insert-txn-timestamp!
+  "Inserts a value v into a table, returning v. Key is derived from
+  TRANSACTION_TIMESTAMP."
+  [conn table v]
+  (c/execute! conn [(str "insert into " table " (k, v) values (TRANSACTION_TIMESTAMP(), ?)") v])
+  v)
+
 (defn insert!
-  "Inserts a row with value v into a table, returning v."
+  "Inserts a row with value v into a table, returning v. Key is assigned
+  automatically."
   [conn table v]
   (c/execute! conn [(str "insert into " table " (v) values (?)") v])
   v)
+
+(defn read-ordered
+  "Reads every value in table ordered by k."
+  [conn table]
+  (let [res (c/query conn [(str "select k, v from " table " order by k")])]
+    (info "table" table "has" (map (juxt :k :v) res))
+    (mapv :v res)))
+
+(defn read-natural
+  "Reads every value in table using natural ordering."
+  [conn table]
+  (->> (c/query conn [(str "select (v) from " table)])
+       (mapv :v)))
 
 (defn create-table!
   "Creates a table for the given relation. Swallows already-exists errors,
@@ -35,7 +72,10 @@
   [conn table-name]
   (try
     (c/execute! conn (j/create-table-ddl table-name
-                                         [[:k :SERIAL]
+                                         [
+                                         ;[:k :SERIAL]
+                                         ;[:k :int]
+                                          [:k :timestamp :default "NOW()"]
                                           [:v :int]]
                                          {:conditional? true}))
     (catch org.postgresql.util.PSQLException e
@@ -78,8 +118,7 @@
   [conn test [f k v]]
   (let [table (table-name k)]
       [f k (case f
-             :r (->> (c/query conn [(str "select (v) from " table " order by k")])
-                     (mapv :v))
+             :r      (read-ordered conn table)
              :append (insert! conn table v))]))
 
 (defrecord InternalClient []
