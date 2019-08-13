@@ -229,6 +229,7 @@
                           (assoc op
                                  :type :info
                                  :time (relative-time-nanos)
+                                 :exception e
                                  :error (str "indeterminate: "
                                              (if (.getCause e)
                                                (.. e getCause getMessage)

@@ -261,6 +261,8 @@
         checker  (if (is-stub-workload (:workload opts))
                    (:checker workload)
                    (checker/compose {:perf     perf
+                                     :stats    (checker/stats)
+                                     :unhandled-exceptions (checker/unhandled-exceptions)
                                      :clock    (checker/clock-plot)
                                      :workload (:checker workload)}))]
     (merge tests/noop-test
