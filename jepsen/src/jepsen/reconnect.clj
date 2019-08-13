@@ -110,7 +110,7 @@
                   (when (identical? ~c (conn ~wrapper))
                     ; This is the same conn that yielded the error
                     (when (:log? ~wrapper)
-                      (warn (str "Encountered error with conn "
+                      (warn e# (str "Encountered error with conn "
                                  (pr-str (:name ~wrapper))
                                  "; reopening")))
                     (reopen! ~wrapper)))
