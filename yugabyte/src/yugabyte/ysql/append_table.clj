@@ -6,7 +6,14 @@
   Jepsen's cycle-detection system.
 
   Lists are encoded as rows in a table; key names are table names, and the set
-  of all rows determines the list contents."
+  of all rows determines the list contents.
+
+  This test requires a way to order table contents, and as far as I can tell,
+  there's no safe, transactional way to order inserts in YB. SERIAL columns
+  aren't actually ordered; we can't use txn begin times (e.g. NOW()) because
+  they might not reflect commit orders, and there's no way to get (presently)
+  txn commit times. We can use COUNT(*), but that reads the whole table... Not
+  sure what to do here."
   (:require [clojure.string :as str]
             [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer [info]]
@@ -108,7 +115,7 @@
                   `(create-table! ~conn ~table-sym)
                   body)
         (catch Exception e#
-          (info e# "with-table caught")
+          ; (info e# "with-table caught")
           (throw e#)))))
 
 (defn mop!

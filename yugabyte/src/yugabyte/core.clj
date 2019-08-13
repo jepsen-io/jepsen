@@ -113,7 +113,8 @@
   test-all."
   (-> workload-options
       (dissoc :ycql/bank-multitable
-              :ysql/sleep)))
+              :ysql/sleep
+              :ysql/append-table)))
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
