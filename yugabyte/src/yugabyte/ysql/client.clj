@@ -414,6 +414,7 @@
     ; which takes an instance of inner-client (among other things) and
     ; delegates logic to it, wrapping it into helper methods.
 
+    ; KRK: why is this macro avoiding hygenic gensyms?
     `(do (defrecord ~class-name [~'conn-wrapper ~'inner-client ~'setup? ~'teardown?]
            client/Client
 
@@ -432,10 +433,8 @@
 
            (invoke! [~'this ~'test ~'op]
              (let [~'start-dt (yutil/current-pretty-datetime)
-                   ~'op2 (with-errors
-                           ~'op
-                           (with-conn
-                             [~'c ~'conn-wrapper]
+                   ~'op2 (with-conn [~'c ~'conn-wrapper]
+                           (with-errors ~'op
                              (invoke-op! ~'inner-client ~'test ~'op ~'c ~'conn-wrapper)))
                    ~'op3 (assoc ~'op2 :op-timing [~'start-dt (yutil/current-pretty-datetime)])]
                ~'op3))

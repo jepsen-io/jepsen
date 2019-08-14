@@ -9,8 +9,8 @@
 
 (defn workload
   [opts]
-  (append/test {:key-count          3
-                :max-txn-length     4
-                :max-writes-per-key 24
+  (append/test {:key-count          5
+                :max-txn-length     5
+                :max-writes-per-key 32
                 :anomalies         [:G1 :G2]
                 :additional-graphs [cycle/realtime-graph]}))
