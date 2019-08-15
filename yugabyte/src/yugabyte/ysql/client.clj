@@ -295,7 +295,8 @@
      (catch org.postgresql.util.PSQLException e#
        (let [m# (.getMessage e#)]
          (if (or (re-find #"duplicate key value violates unique constraint" m#)
-                 (re-find #"A relation has an associated type of the same name" m#))
+                 (re-find #"A relation has an associated type of the same name" m#)
+                 (re-find #"Operation expired: Transaction expired" m#))
            (do (info "Caught" m# "during DDL setup; retrying.")
                (Thread/sleep (rand-int max-delay-between-retries-ms))
                (~'retry (dec attempts#)))

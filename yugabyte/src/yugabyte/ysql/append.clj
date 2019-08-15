@@ -39,7 +39,8 @@
     [f k (case f
            :r (some-> conn
                       (c/query [(str "select (v) from " table
-                                     " where k = ?") k])
+                                     " where (k2 * 2) - ? = ?") k k])
+                                     ; " where k = ?") k])
                       first
                       :v
                       (str/split #",")
@@ -49,7 +50,8 @@
            (do (c/execute! conn
                            ; on conflict, in postgres, needs fully qualified
                            ; column names.
-                           [(str "insert into " table " (k, v) values (?, ?) "
+                           [(str "insert into " table
+                                 " (k, k2, v) values (?, ?, ?) "
                                  ; I think on conflict here breaks *some* of
                                  ; the time, but not always, when we use a
                                  ; unique constraint instead of primary key.
@@ -57,7 +59,7 @@
                                  ; Nope, it breaks both ways!
                                  ; "on conflict on constraint append_k_key do update set "
                                  "v = CONCAT(" table ".v, ',', ?)")
-                            k (str v) (str v)])
+                            k k (str v) (str v)])
                v))]))
 
 
@@ -72,6 +74,7 @@
                 (c/execute! c (j/create-table-ddl table
                                                   [;[:k :int "unique"]
                                                    [:k :int "PRIMARY KEY"]
+                                                   [:k2 :int]
                                                    [:v :text]]
                                                   {:conditional? true}))))
          dorun))
