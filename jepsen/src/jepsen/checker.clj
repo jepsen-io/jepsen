@@ -137,15 +137,17 @@
       (let [exes (->> history
                       (filter :exception)
                       (filter #(= :info (:type %)))
-                      (group-by (comp class :exception))
+                      ; TODO: do we want the first or last :via?
+                      (group-by (comp :type first :via :exception))
                       vals
                       (sort-by count)
                       reverse
-                      (map (fn [exes]
-                             (let [ex (first exes)]
-                               {:count (count exes)
-                                :class (class (:exception ex))
-                                :example ex}))))]
+                      (map (fn [ops]
+                             (let [op (first ops)
+                                   e  (:exception op)]
+                               {:count (count ops)
+                                :class (-> e :via first :type)
+                                :example op}))))]
         (if (seq exes)
           {:valid?      true
            :exceptions  exes}

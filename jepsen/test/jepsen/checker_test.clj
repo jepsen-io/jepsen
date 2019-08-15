@@ -2,7 +2,8 @@
   (:refer-clojure :exclude [set])
   (:use jepsen.checker
         clojure.test)
-  (:require [knossos [history :as history]
+  (:require [clojure.datafy :refer [datafy]]
+            [knossos [history :as history]
              [model :as model]
              [core :refer [ok-op invoke-op fail-op]]
              [op :as op]]
@@ -11,17 +12,17 @@
             [jepsen.util :as util]))
 
 (deftest unhandled-exceptions-test
-  (let [e1 (IllegalArgumentException. "bad args")
-        e2 (IllegalArgumentException. "bad args 2")
-        e3 (IllegalStateException. "bad state")]
+  (let [e1 (datafy (IllegalArgumentException. "bad args"))
+        e2 (datafy (IllegalArgumentException. "bad args 2"))
+        e3 (datafy (IllegalStateException. "bad state"))]
   (is (= {:valid? true
           :exceptions
-          [{:class IllegalArgumentException
+          [{:class 'java.lang.IllegalArgumentException
             :count 2
             :example {:process 0, :type :info, :f :foo, :value 1,
                       :exception e1
                       :error ["Whoops!"]}}
-           {:class IllegalStateException
+           {:class 'java.lang.IllegalStateException
             :example {:process 0, :type :info, :f :foo, :value 1,
                       :exception e3, :error :oh-no}
             :count 1}]}

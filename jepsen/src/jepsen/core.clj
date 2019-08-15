@@ -17,6 +17,7 @@
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
+            [clojure.datafy :refer [datafy]]
             [dom-top.core :as dt]
             [knossos.op :as op]
             [knossos.history :as history]
@@ -229,7 +230,7 @@
                           (assoc op
                                  :type :info
                                  :time (relative-time-nanos)
-                                 :exception e
+                                 :exception (datafy e)
                                  :error (str "indeterminate: "
                                              (if (.getCause e)
                                                (.. e getCause getMessage)
