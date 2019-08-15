@@ -326,8 +326,8 @@
 (def limits-conf
   "Ulimits, in the format for /etc/security/limits.conf."
   "
-root hard nofile 1048576
-root soft nofile 1048576")
+* hard nofile 1048576
+* soft nofile 1048576")
 
 (defrecord YugaByteDB
   []
@@ -378,7 +378,8 @@ root soft nofile 1048576")
             )))
 
   (start-tserver! [db test node]
-    (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
+    (c/su (info "ulimit\n" (c/exec :ulimit :-a))
+          (c/exec :mkdir :-p ce-tserver-log-dir)
           (cu/start-daemon!
             {:logfile ce-tserver-logfile
              :pidfile ce-tserver-pidfile
