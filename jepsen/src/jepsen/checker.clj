@@ -173,7 +173,9 @@
   []
   (reify Checker
     (check [this test history opts]
-      (let [history (remove op/invoke? history)
+      (let [history (->> history
+                         (remove op/invoke?)
+                         (remove (comp #{:nemesis} :process)))
             groups (->> history
                         (group-by :f)
                         (map (fn [[f subhistory]]
