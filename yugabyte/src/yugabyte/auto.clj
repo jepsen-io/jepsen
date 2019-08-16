@@ -280,8 +280,6 @@
 (def ce-tserver-logfile (str ce-tserver-log-dir "/stdout"))
 (def ce-tserver-pidfile (str dir "/tserver.pid"))
 
-(def postgres-bin       (str dir "/postgres/bin/postgres"))
-
 (defn ce-shared-opts
   "Shared options for both master and tserver"
   [node]
@@ -411,7 +409,7 @@
 
   (stop-tserver! [db]
     (c/su (cu/stop-daemon! ce-tserver-bin ce-tserver-pidfile))
-    (c/su (cu/grepkill! postgres-bin)))
+    (c/su (cu/grepkill! "postgres")))
 
   (wipe! [db]
     (c/su (c/exec :rm :-rf ce-data-dir)))
