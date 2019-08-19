@@ -47,21 +47,16 @@
                       (->> (mapv #(Long/parseLong %))))
 
            :append
-           (do (c/execute! conn
-                           ; on conflict, in postgres, needs fully qualified
-                           ; column names.
+           (let [r (c/execute! conn
+                               [(str "update " table
+                                     " set v = CONCAT(v, ',', ?) "
+                                     "where (k2 * 2) - ? = ?") v k k])]
+             (when (= [0] r)
+               ; No rows updated
+               (c/execute! conn
                            [(str "insert into " table
-                                 " (k, k2, v) values (?, ?, ?) "
-                                 ; I think on conflict here breaks *some* of
-                                 ; the time, but not always, when we use a
-                                 ; unique constraint instead of primary key.
-                                 "on conflict (k) do update set "
-                                 ; Nope, it breaks both ways!
-                                 ; "on conflict on constraint append_k_key do update set "
-                                 "v = CONCAT(" table ".v, ',', ?)")
-                            k k (str v) (str v)])
-               v))]))
-
+                                 "(k, k2, v) values (?, ?, ?)") k k v]))
+             v))]))
 
 (defrecord InternalClient []
   c/YSQLYbClient
