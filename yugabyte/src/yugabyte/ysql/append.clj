@@ -30,51 +30,67 @@
   [test k]
   (table-name (mod (hash k) (table-count test))))
 
+(def keys-per-row 2)
+
+(defn row-for
+  "What row should we use for the given key?"
+  [test k]
+  (quot k keys-per-row))
+
+(defn col-for
+  "What column should we use for the given key?"
+  [test k]
+  (str "v" (mod k keys-per-row)))
+
 (defn read-primary
   "Reads a key based on primary key"
-  [conn table k]
+  [conn table row col]
   (some-> conn
-          (c/query [(str "select (v) from " table " where k = ?") k])
+          (c/query [(str "select (" col ") from " table " where k = ?") row])
           first
-          :v
+          (get (keyword col))
+          (util/spy)
           (str/split #",")
-          (->> (mapv #(Long/parseLong %)))))
+          (->> ; Append might generate a leading , if the row already exists
+               (remove str/blank?)
+               (mapv #(Long/parseLong %)))))
 
 (defn append-primary!
   "Writes a key based on primary key."
-  [conn table k v]
+  [conn table row col v]
   (let [r (c/execute! conn [(str "update " table
-                                 " set v = CONCAT(v, ',', ?) "
-                                 "where k = ?") v k])]
+                                 " set " col " = CONCAT(" col ", ',', ?) "
+                                 "where k = ?") v row])]
     (when (= [0] r)
       ; No rows updated
       (c/execute! conn
                   [(str "insert into " table
-                        "(k, k2, v) values (?, ?, ?)") k k v]))
+                        " (k, k2, " col ") values (?, ?, ?)") row row v]))
     v))
 
 (defn read-secondary
   "Reads a key based on a predicate over a secondary key, k2"
-  [conn table k]
+  [conn table row col]
   (some-> conn
-          (c/query [(str "select (v) from " table " where (k2 * 2) - ? = ?")
-                    k k])
+          (c/query [(str "select (" col ") from " table
+                         " where (k2 * 2) - ? = ?")
+                    col col])
           first
-          :v
+          (get (keyword col))
           (str/split #",")
           (->> (mapv #(Long/parseLong %)))))
 
 (defn append-secondary!
   "Writes a key based on a predicate over a secondary key, k2. Returns v."
-  [conn table k v]
+  [conn table row col v]
   (let [r (c/execute! conn [(str "update " table
-                                 " set v = CONCAT(v, ',', ?) "
-                                 "where (k2 * 2) - ? = ?") v k k])]
+                                 " set " col " = CONCAT(" col ", ',', ?) "
+                                 "where (k2 * 2) - ? = ?") v row row])]
     (when (= [0] r)
       ; No rows updated
       (c/execute! conn
                   [(str "insert into " table
-                        "(k, k2, v) values (?, ?, ?)") k k v]))
+                        "(k, k2, " col ") values (?, ?, ?)") row row v]))
     v))
 
 (defn mop!
@@ -82,10 +98,12 @@
   f is either :r for read or :append for list append. Returns the completed
   micro-op."
   [conn test [f k v]]
-  (let [table (table-for test k)]
+  (let [table (table-for test k)
+        row   (row-for test k)
+        col   (col-for test k)]
     [f k (case f
-           :r       (read-primary conn table k)
-           :append  (append-primary! conn table k v))]))
+           :r       (read-primary     conn table row col)
+           :append  (append-primary!  conn table row col v))]))
 
 (defrecord InternalClient []
   c/YSQLYbClient
@@ -95,12 +113,16 @@
          (map table-name)
          (map (fn [table]
                 (info "Creating table" table)
-                (c/execute! c (j/create-table-ddl table
-                                                  [;[:k :int "unique"]
-                                                   [:k :int "PRIMARY KEY"]
-                                                   [:k2 :int]
-                                                   [:v :text]]
-                                                  {:conditional? true}))))
+                (c/execute! c (j/create-table-ddl
+                                table
+                                (into
+                                  [;[:k :int "unique"]
+                                   [:k :int "PRIMARY KEY"]
+                                   [:k2 :int]]
+                                  ; Columns for n values packed in this row
+                                  (map (fn [i] [(col-for test i) :text])
+                                       (range keys-per-row)))
+                                {:conditional? true}))))
          dorun))
 
   (invoke-op! [this test op c conn-wrapper]
