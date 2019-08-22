@@ -49,7 +49,6 @@
           (c/query [(str "select (" col ") from " table " where k = ?") row])
           first
           (get (keyword col))
-          (util/spy)
           (str/split #",")
           (->> ; Append might generate a leading , if the row already exists
                (remove str/blank?)
