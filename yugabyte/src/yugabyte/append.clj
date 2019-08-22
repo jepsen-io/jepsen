@@ -4,13 +4,15 @@
   the entire list) or appends (adding a single number to whatever the present
   value of the given list is). We detect cycles in these transactions using
   Jepsen's cycle-detection system."
-  (:require [jepsen.tests.cycle :as cycle]
+  (:require [jepsen.generator :as gen]
+            [jepsen.tests.cycle :as cycle]
             [jepsen.tests.cycle.append :as append]))
 
 (defn workload
   [opts]
-  (append/test {:key-count          5
-                :max-txn-length     5
-                :max-writes-per-key 32
-                :anomalies         [:G1 :G2]
-                :additional-graphs [cycle/realtime-graph]}))
+  (update (append/test {:key-count          5
+                        :max-txn-length     5
+                        :max-writes-per-key 1024
+                        :anomalies         [:G1 :G2]
+                        :additional-graphs [cycle/realtime-graph]})
+          :generator (partial gen/stagger 1/5)))

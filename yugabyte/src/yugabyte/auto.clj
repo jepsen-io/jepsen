@@ -293,7 +293,9 @@
    :--rpc_bind_addresses (cn/ip node)
    ; Seconds before declaring an unavailable node dead and initiating a raft
    ; membership change
-   ;:--follower_unavailable_considered_failed_sec 10)
+   ;:--follower_unavailable_considered_failed_sec 10
+   ; Clock skew threshold
+   :--max_clock_skew_usec 1
    ])
 
 (defn master-api-opts
