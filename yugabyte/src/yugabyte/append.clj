@@ -10,9 +10,9 @@
 
 (defn workload
   [opts]
-  (update (append/test {:key-count          5
-                        :max-txn-length     5
-                        :max-writes-per-key 1024
-                        :anomalies         [:G1 :G2]
-                        :additional-graphs [cycle/realtime-graph]})
-          :generator (partial gen/stagger 1/5)))
+  (-> (append/test {:key-count          32
+                    :max-txn-length     4
+                    :max-writes-per-key 1024
+                    :anomalies         [:G1 :G2]
+                    :additional-graphs [cycle/realtime-graph]})))
+;     (update :generator (partial gen/stagger 1/5)))
