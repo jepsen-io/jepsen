@@ -3,6 +3,7 @@
   (:require [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.client :as client]
+            [jepsen.control :as control]
             [jepsen.nemesis :as nemesis]
             [jepsen.generator :as gen]
             [knossos.model :as model]
@@ -13,15 +14,16 @@
   "Boring test stub.
   Typically used as a basis for writing more complex tests.
   "
-  {:nodes     ["n1" "n2" "n3" "n4" "n5"]
-   :name      "noop"
-   :os        os/noop
-   :db        db/noop
-   :net       net/iptables
-   :client    client/noop
-   :nemesis   nemesis/noop
-   :generator gen/void
-   :checker   (checker/unbridled-optimism)})
+  {:nodes      ["n1" "n2" "n3" "n4" "n5"]
+   :name       "noop"
+   :os         os/noop
+   :db         db/noop
+   :net        net/iptables
+   :controller control/ssh
+   :client     client/noop
+   :nemesis    nemesis/noop
+   :generator  gen/void
+   :checker    (checker/unbridled-optimism)})
 
 (defn atom-db
   "Wraps an atom as a database."

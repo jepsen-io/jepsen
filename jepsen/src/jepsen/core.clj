@@ -496,6 +496,7 @@
   :logging    Logging options; see jepsen.store/start-logging!
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
+  :controller The remote controller: given by the Controller protocol
   :client     A client for the database
   :nemesis    A client for failures
   :generator  A generator of operations to apply to the DB
@@ -553,33 +554,34 @@
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
               _    (info "Running test:\n" (with-out-str (pprint test)))
-              test (control/with-ssh (:ssh test)
-                     (with-resources [sessions
-                                      (bound-fn* control/session)
-                                      control/disconnect
-                                      (:nodes test)]
-                       ; Index sessions by node name and add to test
-                       (let [test (->> sessions
-                                       (map vector (:nodes test))
-                                       (into {})
-                                       (assoc test :sessions))]
-                         ; Setup
-                         (with-os test
-                           (with-db test
-                             (generator/with-threads
-                               (cons :nemesis (range (:concurrency test)))
-                               (util/with-relative-time
-                                 ; Run a single case
-                                 (let [test (assoc test :history
-                                                   (run-case! test))
-                                       ; Remove state
-                                       test (dissoc test
-                                                    :barrier
-                                                    :active-histories
-                                                    :sessions)]
-                                   (info "Run complete, writing")
-                                   (when (:name test) (store/save-1! test))
-                                   (analyze! test)))))))))]
+              test (control/with-controller (:controller test)
+                     (control/with-ssh (:ssh test)
+                       (with-resources [sessions
+                                        (bound-fn* control/session)
+                                        control/disconnect
+                                        (:nodes test)]
+                         ; Index sessions by node name and add to test
+                         (let [test (->> sessions
+                                         (map vector (:nodes test))
+                                         (into {})
+                                         (assoc test :sessions))]
+                           ; Setup
+                           (with-os test
+                             (with-db test
+                               (generator/with-threads
+                                 (cons :nemesis (range (:concurrency test)))
+                                 (util/with-relative-time
+                                   ; Run a single case
+                                   (let [test (assoc test :history
+                                                     (run-case! test))
+                                         ; Remove state
+                                         test (dissoc test
+                                                      :barrier
+                                                      :active-histories
+                                                      :sessions)]
+                                     (info "Run complete, writing")
+                                     (when (:name test) (store/save-1! test))
+                                     (analyze! test))))))))))]
           (log-results test)))
       (catch Throwable t
         (warn t "Test crashed!")
