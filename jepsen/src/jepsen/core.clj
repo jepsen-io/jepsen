@@ -496,7 +496,7 @@
   :logging    Logging options; see jepsen.store/start-logging!
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
-  :controller The remote controller: given by the Controller protocol
+  :remote     The remote to use for control actions: given by the Remote protocol
   :client     A client for the database
   :nemesis    A client for failures
   :generator  A generator of operations to apply to the DB
@@ -554,7 +554,7 @@
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
               _    (info "Running test:\n" (with-out-str (pprint test)))
-              test (control/with-controller (:controller test)
+              test (control/with-remote (:remote test)
                      (control/with-ssh (:ssh test)
                        (with-resources [sessions
                                         (bound-fn* control/session)

@@ -4,7 +4,7 @@
   scripts to open connections to various nodes.
 
   Note that a whole bunch of this namespace refers to things as 'ssh',
-  although they really can apply to any controller, not just SSH."
+  although they really can apply to any remote, not just SSH."
   (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap with-thread-name]]
@@ -15,25 +15,24 @@
             [slingshot.slingshot :refer [try+ throw+]]))
 
 
-(defprotocol Controller
+(defprotocol Remote
   (connect [this host]
-    "Set up the controller to work with a particular node. Returns a
-    Controller which is ready to accept actions via `execute!` and `upload!`
-    and `download!`.")
+    "Set up the remote to work with a particular node. Returns a Remote which
+    is ready to accept actions via `execute!` and `upload!` and `download!`.")
   (disconnect! [this]
-    "Disconnect a controller that has been connected to a host.")
+    "Disconnect a remote that has been connected to a host.")
   (execute! [this action]
-    "Execute the specified action in a controller connected a host.")
+    "Execute the specified action in a remote connected a host.")
   (upload! [this local-paths remote-path rest]
     "Copy the specified local-path to the remote-path on the connected host.
     The `rest` argument is a sequence of additional arguments to be
     interpreted by the underlying implementation; for example, with a clj-ssh
-    controller, these args are the remainder args to `scp-to`.")
+    remote, these args are the remainder args to `scp-to`.")
   (download! [this remote-paths local-path rest]
     "Copy the specified remote-paths to the local-path on the connected host.
     The `rest` argument is a sequence of additional arguments to be
     interpreted by the underlying implementation; for example, with a clj-ssh
-    controller, these args are the remainder args to `scp-from`."))
+    remote, these args are the remainder args to `scp-from`."))
 
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
@@ -332,8 +331,8 @@
       (ssh/connect))))
 
 
-(defrecord SSHController [session]
-  Controller
+(defrecord SSHRemote [session]
+  Remote
   (connect [this host]
     (assoc this :session (if *dummy*
                            {:dummy true}
@@ -359,18 +358,16 @@
     (when-not (:dummy session)
       (apply ssh/scp-from session remote-paths local-path rest))))
 
-(def ssh
-  "A controller that does things via clj-ssh."
-  (SSHController. nil))
+(def ssh "A remote that does things via clj-ssh." (SSHRemote. nil))
 
-(def ^:dynamic *controller* "The controller to use for remote actions." ssh)
+(def ^:dynamic *remote* "The remote to use for remote control actions." ssh)
 
 (defn session
   "Wraps control session in a wrapper for reconnection."
   [host]
-  (let [controller *controller*]
+  (let [remote *remote*]
     (rc/open!
-     (rc/wrapper {:open  (fn [] (connect controller host))
+     (rc/wrapper {:open  (fn [] (connect remote host))
                   :name  [:control host]
                   :close disconnect!
                   :log?  true}))))
@@ -380,10 +377,10 @@
   [session]
   (rc/close! session))
 
-(defmacro with-controller
-  "Takes a controller and evaluates body with that controller in that scope."
-  [controller & body]
-  `(binding [*controller* ~controller] ~@body))
+(defmacro with-remote
+  "Takes a remote and evaluates body with that remote in that scope."
+  [remote & body]
+  `(binding [*remote* ~remote] ~@body))
 
 (defmacro with-ssh
   "Takes a map of SSH configuration and evaluates body in that scope. Catches

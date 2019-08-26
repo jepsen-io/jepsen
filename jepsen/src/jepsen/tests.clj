@@ -14,16 +14,16 @@
   "Boring test stub.
   Typically used as a basis for writing more complex tests.
   "
-  {:nodes      ["n1" "n2" "n3" "n4" "n5"]
-   :name       "noop"
-   :os         os/noop
-   :db         db/noop
-   :net        net/iptables
-   :controller control/ssh
-   :client     client/noop
-   :nemesis    nemesis/noop
-   :generator  gen/void
-   :checker    (checker/unbridled-optimism)})
+  {:nodes     ["n1" "n2" "n3" "n4" "n5"]
+   :name      "noop"
+   :os        os/noop
+   :db        db/noop
+   :net       net/iptables
+   :remote    control/ssh
+   :client    client/noop
+   :nemesis   nemesis/noop
+   :generator gen/void
+   :checker   (checker/unbridled-optimism)})
 
 (defn atom-db
   "Wraps an atom as a database."
