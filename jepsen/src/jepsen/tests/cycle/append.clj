@@ -2,6 +2,7 @@
   "Detects cycles in histories where operations are transactions over named
   lists lists, and operations are either appends or reads. Used with
   jepsen.tests.cycle."
+  (:refer-clojure :exclude [test])
   (:require [jepsen [checker :as checker]
                     [generator :as gen]
                     [txn :as txn :refer [reduce-mops]]
@@ -144,6 +145,57 @@
                         :writer   writer
                         :element  (peek v)}))))))))
 
+(def unknown-prefix
+  "A marker we use in a list to identify an unknown prefix."
+  '...)
+
+(defn op-internal-case
+  "Given an op, returns a map describing internal consistency violations, or
+  nil otherwise. Our maps are:
+
+      {:op        The operation which went wrong
+       :mop       The micro-operation which went wrong
+       :expected  The state we expected to observe. Either a definite list
+                  like [1 2 3] or a postfix like ['... 3]}"
+  [op]
+  ; We maintain a map of keys to expected states.
+  (->> (:value op)
+       (reduce (fn [[state error] [f k v :as mop]]
+                 (case f
+                   :append [(assoc! state k
+                                    (conj (get state k [unknown-prefix]) v))
+                            error]
+                   :r      (let [s (get state k)]
+                             (if (and s ; We have an expected state
+                                      (if (= unknown-prefix (first s))
+                                        ; We don't know the prefix.
+                                        (let [i (- (inc (count v)) (count s))]
+                                          (or (neg? i) ; Bounds check
+                                              (not= (subvec s 1) ; Postfix =
+                                                    (subvec v i))))
+                                        ; We do know the full state for k
+                                        (not= s v)))
+                               ; Not equal!
+                               (reduced [state
+                                         {:op       op
+                                          :mop      mop
+                                          :expected s}])
+                               ; OK, or we just don't know
+                               [(assoc! state k v) error]))))
+               [(transient {}) nil])
+       second))
+
+(defn internal-cases
+  "Given a history, finds operations which exhibit internal consistency
+  violations: e.g. some read [:r k v] in the transaction fails to observe a v
+  consistent with that transaction's previous append operations, including
+  whatever (initially unknown) state k began with."
+  [history]
+  (->> history
+       (filter op/ok?)
+       (keep op-internal-case)
+       seq))
+
 (defn prefix?
   "Given two sequences, returns true iff A is a prefix of B."
   [a b]
@@ -268,7 +320,7 @@
   [history]
   (->> history
        op-mops
-       (keep (fn [[op [f k v :as mop]]]
+       (keep (fn check-op [[op [f k v :as mop]]]
                  (when (= f :r)
                    (let [dups (->> (frequencies v)
                                    (filter (comp (partial < 1) val))
@@ -859,6 +911,7 @@
          (let [history       (remove (comp #{:nemesis} :process) history)
                g1a           (when (:G1a anomalies) (g1a-cases history))
                g1b           (when (:G1b anomalies) (g1b-cases history))
+               internal      (internal-cases history)
                dups          (duplicates history)
                sorted-values (sorted-values history)
                incmp-order   (incompatible-orders sorted-values)
@@ -867,6 +920,7 @@
                anomalies (cond-> cycles
                            dups         (assoc :duplicate-elements dups)
                            incmp-order  (assoc :incompatible-order incmp-order)
+                           internal     (assoc :internal internal)
                            (seq g1a)    (assoc :G1a g1a)
                            (seq g1b)    (assoc :G1b g1b))]
            (if (empty? anomalies)
