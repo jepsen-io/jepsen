@@ -295,7 +295,7 @@
    ; membership change
    ;:--follower_unavailable_considered_failed_sec 10
    ; Clock skew threshold
-   :--max_clock_skew_usec 1
+   ; :--max_clock_skew_usec 1
    ])
 
 (defn master-api-opts
