@@ -113,6 +113,8 @@
   test-all."
   (-> workload-options
       (dissoc :ycql/bank-multitable
+              :ycql/none
+              :ysql/none
               :ysql/sleep
               :ysql/append-table)))
 
