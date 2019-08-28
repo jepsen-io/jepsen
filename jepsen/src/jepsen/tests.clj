@@ -3,6 +3,7 @@
   (:require [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.client :as client]
+            [jepsen.control :as control]
             [jepsen.nemesis :as nemesis]
             [jepsen.generator :as gen]
             [knossos.model :as model]
@@ -18,6 +19,7 @@
    :os        os/noop
    :db        db/noop
    :net       net/iptables
+   :remote    control/ssh
    :client    client/noop
    :nemesis   nemesis/noop
    :generator gen/void

@@ -156,7 +156,7 @@
 
 (def default-nonserializable-keys
   "What keys in a test can't be serialized to disk, by default?"
-  #{:db :os :net :client :checker :nemesis :generator :model})
+  #{:db :os :net :client :checker :nemesis :generator :model :remote})
 
 (defn nonserializable-keys
   "What keys in a test can't be serialized to disk? The union of default
