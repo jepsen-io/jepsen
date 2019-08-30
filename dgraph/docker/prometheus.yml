@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 10s
+scrape_configs:
+  - job_name: 'dgraph'
+    # Keeping scrape_interval as low as 1s.
+    # The nemesis could be killing Alphas/Zeros every 10s.
+    scrape_interval: 1s
+    metrics_path: '/debug/prometheus_metrics'
+    static_configs:
+      - targets:
+        # Dgraph Alpha
+        - 'n1:8080'
+        - 'n2:8080'
+        - 'n3:8080'
+        - 'n4:8080'
+        - 'n5:8080'
+        # Dgraph Zero
+        - 'n1:6080'
+        - 'n2:6080'
+        - 'n3:6080'
+        - 'n4:6080'
+        - 'n5:6080'
+  - job_name: 'node-exporter'
+    scrape_interval: 10s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+        - 'node-exporter:9100'
