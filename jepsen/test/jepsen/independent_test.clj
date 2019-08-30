@@ -2,10 +2,13 @@
   (:require [clojure.test :refer :all]
             [clojure.pprint :refer [pprint]]
             [clojure.set :as set]
+            [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.independent :refer :all]
             [jepsen.checker :as checker]
             [jepsen.generator :as gen]
             [jepsen.generator-test :as gen-test :refer [ops]]))
+
+(use-fixtures :once quiet-logging)
 
 (deftest sequential-generator-test
   (testing "empty keys"

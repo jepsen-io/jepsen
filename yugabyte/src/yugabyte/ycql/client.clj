@@ -1,11 +1,11 @@
-(ns yugabyte.client
+(ns yugabyte.ycql.client
   "Helper functions for working with Cassaforte clients."
   (:require [clojurewerkz.cassaforte [client :as c]
                                      [query :as q]
                                      [policies :as policies]
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
-			      [clojure.pprint :refer [pprint]]
+            [clojure.pprint :refer [pprint]]
             [jepsen [util :as util]]
             [jepsen.control.net :as cn]
             [dom-top.core :as dt]
@@ -162,7 +162,9 @@
 
   Also you, like, literally *can't* tell Cassaforte (or maybe Cassandra's
   client or CQL or YB?) to create an index if it doesn't exist, so we're
-  swallowing the duplicate table execeptions here"
+  swallowing the duplicate table execeptions here.
+  TODO: update YB Cassaforte fork, so we can use `CREATE INDEX IF NOT EXISTS`.
+  "
   [conn & index-args]
   (let [statement (if (and (= 1 (count index-args))
                            (string? (first index-args)))
@@ -170,7 +172,7 @@
                     (apply q/create-index index-args))]
     (try (execute-with-timeout! conn 30000 statement)
          (catch InvalidQueryException e
-           (if (re-find #"Target index already exists" (.getMessage e))
+           (if (re-find #"already exists" (.getMessage e))
              :already-exists
              (throw e))))))
 
@@ -263,14 +265,14 @@
 
   Example:
 
-		(c/defclient CQLBank []
-			(setup! [this test]
-				(do-stuff-with conn))
+    (c/defclient CQLBank []
+      (setup! [this test]
+        (do-stuff-with conn))
 
-			(invoke! [this test op]
+      (invoke! [this test op]
         ...)
 
-			(teardown! [this test]))"
+      (teardown! [this test]))"
   [name keyspace fields & exprs]
   (let [[interfaces methods opts] (#'clojure.core/parse-opts+specs
                                     (cons 'jepsen.client/Client exprs))
@@ -287,13 +289,13 @@
                              (and (list? expr)
                                   (= 'setup! (first expr))))
                            exprs))]
-		`(do (defrecord ~name ~(conj (vec fields) 'conn 'keyspace-created)
-					 jepsen.client/Client
-					 (open! [~'this ~'test ~'node]
-						 (let [conn# (connect ~'node)]
-							 (when (realized? ~'keyspace-created)
+    `(do (defrecord ~name ~(conj (vec fields) 'conn 'keyspace-created)
+           jepsen.client/Client
+           (open! [~'this ~'test ~'node]
+             (let [conn# (connect ~'node)]
+               (when (realized? ~'keyspace-created)
                  (cql/use-keyspace conn# ~keyspace))
-							 (assoc ~'this :conn conn#)))
+               (assoc ~'this :conn conn#)))
 
            (setup! [~'this ~'test]
              (locking ~'keyspace-created
@@ -302,16 +304,16 @@
                (cql/use-keyspace ~'conn ~keyspace)
                ~@setup-code))
 
-					 (close! [~'this ~'test]
-						 (c/disconnect! ~'conn))
+           (close! [~'this ~'test]
+             (c/disconnect! ~'conn))
 
-					 ~@exprs)
+           ~@exprs)
 
-				 ; Constructor
-				 (defn ~(symbol (str "->" name))
-					 ~(vec fields)
-					 ; Pass user fields, conn, keyspace-created
-					 (new ~name ~@fields nil (promise))))))
+         ; Constructor
+         (defn ~(symbol (str "->" name))
+           ~(vec fields)
+           ; Pass user fields, conn, keyspace-created
+           (new ~name ~@fields nil (promise))))))
 
 (defn await-setup
   "Used at the start of a test. Takes a node, opens a connection to it, and

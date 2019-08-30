@@ -1,10 +1,10 @@
 (ns yugabyte.nemesis
   (:require [clojure.tools.logging :refer :all]
             [clojure.pprint :refer [pprint]]
-            [jepsen [control :as c]
-             [generator :as gen]
-             [nemesis :as nemesis]
-             [util :as util :refer [meh timeout]]]
+            [jepsen.control :as c]
+            [jepsen.generator :as gen]
+            [jepsen.nemesis :as nemesis]
+            [jepsen.util :as util :refer [meh timeout]]
             [jepsen.nemesis.time :as nt]
             [slingshot.slingshot :refer [try+]]
             [yugabyte.auto :as auto]))
@@ -45,6 +45,27 @@
 
     (teardown! [this test])))
 
+(defn clock-nemesis-wrapper
+  "Wrapper around standard Jepsen clock-nemesis which stops ntp service in addition to ntpd.
+  Won't be needed after https://github.com/jepsen-io/jepsen/pull/397"
+  []
+  (let [clock-nemesis (nt/clock-nemesis)]
+    (reify nemesis/Nemesis
+      (setup! [nem test]
+        (c/with-test-nodes test (nt/install!))
+        ; Try to stop ntpd service in case it is present and running.
+        (c/with-test-nodes test
+                           (try (c/su (c/exec :service :ntp :stop))
+                                (catch RuntimeException e))
+                           (try (c/su (c/exec :service :ntpd :stop))
+                                (catch RuntimeException e)))
+        (nt/reset-time! test)
+        nem)
+
+      (invoke! [_ test op] (nemesis/invoke! clock-nemesis test op))
+
+      (teardown! [_ test] (nemesis/teardown! clock-nemesis test)))))
+
 (defn full-nemesis
   "Merges together all nemeses"
   []
@@ -59,7 +80,7 @@
      {:reset-clock          :reset
       :strobe-clock         :strobe
       :check-clock-offsets  :check-offsets
-      :bump-clock           :bump}    (nt/clock-nemesis)}))
+      :bump-clock           :bump}    (clock-nemesis-wrapper)}))
 
 ; Generators
 

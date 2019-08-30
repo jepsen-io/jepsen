@@ -316,10 +316,11 @@ generator, based on the set workload.
             :db         (db "v3.1.5")
             :client     (Client. nil)
             :nemesis    (nemesis/partition-random-halves)
-            :model      (model/cas-register)
             :checker    (checker/compose
                           {:perf      (checker/perf)
-                           :linear    (independent/checker (checker/linearizable))
+                           :linear    (independent/checker (checker/linearizable 
+                                                             {:model     (model/cas-register)
+                                                              :algorithm :linear}))
                            :timeline  (independent/checker (timeline/html))})
             :generator  (->> (independent/concurrent-generator
                                10

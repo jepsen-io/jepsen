@@ -24,32 +24,45 @@ Quickstart:
 To run a single workload, use `lein run test`:
 
 ```
-lein run test -o debian --version 1.1.14 -w set --nemesis partition
+lein run test -o debian --version 1.2.10.0 --workload ycql/counter --nemesis partition
 ```
 
-This command runs the set test against version 1.1.14, with network partitions, assuming nodes run Debian Jessie.
+This command runs the set test against version 1.2.10.0, with network partitions, assuming nodes run Debian Jessie.
 
 To run a full suite of tests, with various workloads and nemeses, use `lein run
 test-all`
 
 ```
-lein run test-all -o debian --version 1.1.15.0-b16 --url https://s3-us-west-2.amazonaws.com/downloads.yugabyte.com/new/yugabyte-ee-1.1.15.0-b16-centos-x86_64.tar.gz --concurrency 4n --time-limit 300 --only-workloads-expected-to-pass
+lein run test-all -o debian --version 1.2.10.0 --url https://downloads.yugabyte.com/yugabyte-ce-1.2.10.0-linux.tar.gz --concurrency 4n --time-limit 300 --only-workloads-expected-to-pass
 ```
 
 Here, we're testing a specific pre-release tarball of version 1.1.15.0-b16.
 We're running 4 clients per node, running for 300 seconds per test, and
 constraining our run to only those workloads we think should pass.
 
-The following workloads are available with `-w`:
+#### Workloads
 
-- `set` - inserts single records and concurrently reads all of them back.
-- `set-index` - like set, but reads from a small pool of indices
-- `long-fork` - looks for a snapshot isolation violation due to incompatible read orders.
-- `single-key-acid` - concurrent read, write, update if operations on a single row.
-- `multi-key-acid` - concurrent writes to 2 different keys with the same value and reads.
+The following workloads are available with `--workload` (or `-w`).
+Workloads have format `<api-name>/<test-name>`, where `<api-name>` is either `ycql` or `ysql`.
+
+The following tests are available for both YCQL and YSQL:
+
 - `counter` - concurrent counter increments.
+- `set` - inserts single records and concurrently reads all of them back.
 - `bank` - concurrent transfers between rows of a shared table.
+- `long-fork` - looks for a snapshot isolation violation due to incompatible read orders.
+- `single-key-acid` - each workers group is doing concurrent read, write, update-if operations on on their designated row.
+- `multi-key-acid` - concurrent reads and write batches to a table with two-column composite key.
+
+YCQL-specific tests:
+
+- `set-index` - like set, but reads from a small pool of indices
+
+YSQL-specific tests:
+
 - `bank-multitable` - like bank, but across different tables.
+
+#### Nemeses
 
 The following nemeses are available with `--nemesis`. Nemeses can be combined
 with commas, like `--nemesis partition,clock-skew`:

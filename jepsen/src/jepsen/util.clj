@@ -9,7 +9,7 @@
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
-            [dom-top.core :refer [bounded-future]]
+            [dom-top.core :as dt :refer [bounded-future]]
             [fipp.edn :as fipp]
             [knossos.history :as history])
   (:import (java.util.concurrent.locks LockSupport)
@@ -50,13 +50,24 @@
     (name x))
     (pr-str x))
 
+(def uninteresting-exceptions
+  "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
+  #{java.util.concurrent.BrokenBarrierException
+    InterruptedException})
+
 (defn real-pmap
-  "Like pmap, but launches futures instead of using a bounded threadpool."
+  "Like pmap, but runs a thread per element, which prevents deadlocks when work
+  elements have dependencies. The dom-top real-pmap throws the first exception
+  it gets, which might be something unhelpful like InterruptedException or
+  BrokenBarrierException. This variant works like that real-pmap, but throws
+  more interesting exceptions when possible."
   [f coll]
-  (->> coll
-       (map (fn launcher [x] (future (f x))))
-       doall
-       (map deref)))
+  (let [[results exceptions] (dt/real-pmap-helper f coll)]
+    (when (seq exceptions)
+      (throw (or (first (remove (comp uninteresting-exceptions class)
+                                exceptions))
+                 (first exceptions))))
+    results))
 
 (defn processors
   "How many processors on this platform?"

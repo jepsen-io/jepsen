@@ -32,24 +32,30 @@
   the graph has any strongly connected components--e.g. cycles."
   (:require [jepsen [checker :as checker]
                     [generator :as gen]
+                    [store :as store]
                     [txn :as txn]
                     [util :as util]]
             [jepsen.txn.micro-op :as mop]
             [knossos [op :as op]
-                     [history :refer [pair-index]]]
+                     [history :refer [pair-index+]]]
             [clojure.tools.logging :refer [info error warn]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
+            [clojure.string :as str]
             [fipp.edn :refer [pprint]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan DirectedGraph
                                Graphs
+                               Graphs$Edge
                                ICollection
+                               IEdge
                                IList
                                ISet
                                IGraph
                                Set
-                               SortedMap)))
+                               SortedMap)
+           (java.util.function BinaryOperator
+                               Function)))
 
 ; Convert stuff back to Clojure data structures
 (defprotocol ToClj
@@ -59,6 +65,12 @@
   IList
   (->clj [l]
     (iterator-seq (.iterator l)))
+
+  IEdge
+  (->clj [e]
+    {:from  (.from e)
+     :to    (.to e)
+     :value (.value e)})
 
   ISet
   (->clj [s]
@@ -85,6 +97,16 @@
   nil
   (->clj [x] x))
 
+(defn directed-graph
+  "Constructs a fresh directed graph."
+  []
+  (DirectedGraph.))
+
+(defn linear
+  "Bifurcan's analogue to (transient g)"
+  [^DirectedGraph graph]
+  (.linear graph))
+
 (defn forked
   "Bifurcan's analogue to (persistent! g)"
   [^DirectedGraph graph]
@@ -96,26 +118,106 @@
   (try (.in g v)
        (catch IllegalArgumentException e)))
 
+(def union-edge
+  "A binary operator performing set union on the values of edges."
+  (reify BinaryOperator
+    (apply [_ a b]
+      (set/union a b))))
+
+(defn edge
+  "Returns the edge between two vertices."
+  [^IGraph g a b]
+  (.edge g a b))
+
+(defn edges
+  "A lazy seq of all edges."
+  [^IGraph g]
+  ; We work around a bug in bifurcan which returns edges backwards!
+  (map (fn [^IEdge e]
+         (Graphs$Edge. (.value e) (.to e) (.from e)))
+       (.edges g)))
+
 (defn link
-  "Helper for linking Bifurcan graphs."
-  [^DirectedGraph graph node succ]
-  (assert (not (nil? node)))
-  (assert (not (nil? succ)))
-  (.link graph node succ))
+  "Helper for linking Bifurcan graphs. Optionally takes a relationship,
+  which is added to the value set of the edge."
+  ([graph node succ]
+   (assert (not (nil? node)))
+   (assert (not (nil? succ)))
+   (.link graph node succ))
+  ([^DirectedGraph graph node succ relationship]
+   (assert (not (nil? node)))
+   (assert (not (nil? succ)))
+   (.link graph node succ #{relationship} union-edge)))
 
 (defn link-to-all
   "Given a graph g, links x to all ys."
-  [g x ys]
-  (if (seq ys)
-    (recur (link g x (first ys)) x (next ys))
-    g))
+  ([g x ys]
+   (link-to-all g x ys nil))
+  ([g x ys rel]
+   (if (seq ys)
+     (recur (link g x (first ys) rel) x (next ys) rel)
+     g)))
+
+(defn link-all-to
+  "Given a graph g, links all xs to y."
+  ([g xs y]
+   (if (seq xs)
+     (recur (link (first xs) y) (next xs) y)
+     g))
+  ([g xs y relationship]
+   (if (seq xs)
+     (recur (link g (first xs) y relationship) (next xs) y relationship)
+     g)))
 
 (defn link-all-to-all
   "Given a graph g, links all xs to all ys."
-  [g xs ys]
-  (if (seq xs)
-    (recur (link-to-all g (first xs) ys) (next xs) ys)
-    g))
+  ([g xs ys]
+   (link-all-to-all g xs ys nil))
+  ([g xs ys rel]
+   (if (seq xs)
+     (recur (link-to-all g (first xs) ys rel) (next xs) ys rel)
+     g)))
+
+(defn unlink
+  "Heper for unlinking Bifurcan graphs."
+  [^IGraph g a b]
+  (.unlink g a b))
+
+(defn keep-edge-values
+  "Transforms a graph by applying a function (f edge-value) to each edge in the
+  graph. Where the function returns `nil`, removes that edge altogether."
+  [f ^DirectedGraph g]
+  (forked
+    (reduce (fn [^IGraph g, ^IEdge edge]
+              (let [v' (f (.value edge))]
+                (if (nil? v')
+                  ; Remove edge
+                  (.unlink g (.from edge) (.to edge))
+                  ; Update existing edge
+                  (.link g (.from edge) (.to edge) v'))))
+            (linear g)
+            ; Note that we iterate over an immutable copy of g, and mutate a
+            ; linear version in-place, to avoid seeing our own mutations during
+            ; iteration.
+            (edges (forked g)))))
+
+(defn remove-relationship
+  "Filters a graph, removing the given relationship from it."
+  [g rel]
+  (keep-edge-values (fn [rs]
+                      (let [rs' (disj rs rel)]
+                        (when (seq rs')
+                          rs')))
+                    g))
+
+(defn project-relationship
+  "Filters a graph to just those edges with the given relationship."
+  [g rel]
+  ; Might as well re-use this, we're gonna build it a lot.
+  (let [rs' #{rel}]
+    (keep-edge-values (fn [rs] (when (contains? rs rel) rs'))
+                      g)))
+
 
 (defn map->bdigraph
   "Turns a sequence of [node, successors] pairs (e.g. a map) into a bifurcan
@@ -139,11 +241,11 @@
      s)))
 
 (defn ^DirectedGraph digraph-union
-  "Takes the union of n graphs."
+  "Takes the union of n graphs, merging edges with union."
   ([] (DirectedGraph.))
   ([a] a)
   ([^DirectedGraph a ^DirectedGraph b]
-   (.merge a b))
+   (.merge a b union-edge))
   ([a b & more]
    (reduce digraph-union a (cons b more))))
 
@@ -184,20 +286,56 @@
 ; - An Analyzer, which which examines a history and produces a pair of:
 ; - A Graph of dependencies over completion ops, and
 ; - An Explainer, which can explain cycles between those ops.
-;
+
 ; We write our Analyzers as a function (f history) => [graph explainer]. Graphs
 ; are Bifurcan DirectedGraphs. Explainers have a protocol, because we're going
 ; to pack some cached state into them.
-(defprotocol Explainer
-  (explain-pair
+(defprotocol DataExplainer
+  (explain-pair-data
     [_ a b]
-    "Given a pair of operations, explain why b depends on a. `nil` indicates
-    that b does not depend on a."))
+    "Given a pair of operations a and b, explains why b depends on a, in the
+    form of a data structure. Returns `nil` if b does not depend on a.")
+
+  (render-explanation
+    [_ explanation a-name b-name]
+    "Given an explanation from explain-pair-data, and short names for a and b,
+    renders a string explaining why a depends on b."))
+
+(defn explain-pair
+  "Given a pair of operations, and short names for them, explain why b
+  depends on a, as a string. `nil` indicates that b does not depend on a."
+  [explainer a-name a b-name b]
+  (when-let [ex (explain-pair-data explainer a b)]
+    (render-explanation explainer ex a-name b-name)))
 
 (defrecord CombinedExplainer [explainers]
-  Explainer
-  (explain-pair [_ a b]
-    (first (keep (fn [e] (explain-pair e a b)) explainers))))
+  DataExplainer
+  (explain-pair-data [this a b]
+    ; This is SUCH an evil hack, but, uh, bear with me.
+    ; When we render an explanation, we have no way to tell what explainer
+    ; knows how to render it, and we don't want to make every explainer have to
+    ; double-check whether they're rendering their own explanations, or if
+    ; they're being passed someone else's. We could have a *wrapper type* here,
+    ; but then we're introducing non-semantic data into the explanation which
+    ; isn't necessary for users, makes it harder to read output, and makes it
+    ; more difficult to test. Routing explanations to the explainers that
+    ; generated them is just *plumbing*, and has no semantic place in our
+    ; data model.
+    ;
+    ; Lord help me, I think this is the first time I've actually wanted to
+    ; think about metadata outside of a macro or compiler context.
+    (when-let [[i ex] (->> explainers
+                           (map-indexed (fn [i e] [i (explain-pair-data e a b)]))
+                           ; Find the first [i explanation] pair where ex is
+                           ; present
+                           (filter second)
+                           first)]
+      (vary-meta ex assoc this i)))
+
+  (render-explanation [this ex a-name b-name]
+    (let [i (get (meta ex) this)]
+      (assert i (str "Not sure where explanation " (pr-str ex) " with meta " (pr-str (meta ex)) " came from!"))
+      (render-explanation (nth explainers i) ex a-name b-name))))
 
 (defn combine
   "Helpful in composing an analysis function for a checker out of multiple
@@ -218,8 +356,8 @@
 ;; Monotonic keys!
 
 (defrecord MonotonicKeyExplainer []
-  Explainer
-  (explain-pair [_ a b]
+  DataExplainer
+  (explain-pair-data [_ a b]
     (let [a (:value a)
           b (:value b)]
       ; Find keys in common
@@ -229,11 +367,17 @@
                      (let [a (get a k)
                            b (get b k)]
                        (when (and a b (< a b))
-                         (reduced (str "which observed " (pr-str k) " = "
-                                       (pr-str a)
-                                       ", and a higher value " (pr-str b)
-                                       " was observed by")))))
-                   nil)))))
+                         (reduced {:type   :monotonic
+                                   :key    k
+                                   :value  a
+                                   :value' b}))))
+                   nil))))
+
+  (render-explanation [_ {:keys [key value value']} a-name b-name]
+    (str a-name " observed " (pr-str key) " = "
+         (pr-str value) ", and " b-name
+         " observed a higher value "
+         (pr-str value'))))
 
 (defn monotonic-key-order
   "Given a key, and a history where ops are maps of keys to values, constructs
@@ -249,7 +393,7 @@
          (partition 2 1)
          ; And build a graph out of them
          (reduce (fn [g [[v1 ops1] [v2 ops2]]]
-                   (link-all-to-all g ops1 ops2))
+                   (link-all-to-all g ops1 ops2 :monotonic-key))
                  (.linear (DirectedGraph.)))
          forked)))
 
@@ -275,16 +419,20 @@
   (->> history
        (filter (comp #{process} :process))
        (partition 2 1)
-       (reduce (fn [g [op1 op2]] (link g op1 op2))
+       (reduce (fn [g [op1 op2]] (link g op1 op2 :process))
                (.linear (DirectedGraph.)))
        forked))
 
 (defrecord ProcessExplainer []
-  Explainer
-  (explain-pair [_ a b]
+  DataExplainer
+  (explain-pair-data [_ a b]
     (when (and (= (:process a) (:process b))
                (< (:index a) (:index b)))
-      (str "which process " (:process a) " completed before"))))
+      {:type      :process
+       :process   (:process a)}))
+
+  (render-explanation [_ {:keys [process]} a-name b-name]
+    (str "process " process " executed " a-name " before " b-name)))
 
 (defn process-graph
   "Analyses histories and relates operations performed sequentially by each
@@ -302,15 +450,27 @@
 ; Realtime order
 
 (defrecord RealtimeExplainer [pairs]
-  Explainer
-  (explain-pair [_ a' b']
+  DataExplainer
+  (explain-pair-data [_ a' b']
     (let [b (get pairs b')]
       (when (< (:index a') (:index b))
-        (str "which completed"
-             (when (and (:time a') (:time b))
-               (str (format "%.3f" (util/nanos->secs (- (:time b) (:time a'))))
-                    " seconds "))
-             " before the invocation of")))))
+        {:type :realtime
+         :a'   a'
+         :b    b})))
+
+  (render-explanation [_ {:keys [a' b]} a'-name b'-name]
+    (str a'-name " completed at index " (:index a') ","
+         (when (and (:time a') (:time b))
+           (let [dt (- (:time b) (:time a'))]
+             ; Times are approximate--what matters is the serialization
+             ; order. If we observe a zero or negative delta, just fudge it.
+             (if (pos? dt)
+               (str (format " %.3f" (util/nanos->secs (- (:time b) (:time a'))))
+                    " seconds")
+               ; Times are inaccurate
+               " just")))
+         " before the invocation of " b'-name
+         ", at index " (:index b))))
 
 (defn realtime-graph
   "Given a history, produces an singleton order graph `{:realtime graph}` which
@@ -345,7 +505,7 @@
   ; completions point to d, and remove those from the buffer.
   ;
   ; OK, first up: we need this index to look forward from invokes to completes.
-  (let [pairs (pair-index history)]
+  (let [pairs (pair-index+ history)]
     (loop [history history
            oks     #{}               ; Our buffer of completed ops
            g       (DirectedGraph.)] ; Our order graph
@@ -357,7 +517,9 @@
           ; failures, but I don't think they'll hurt. We *do* need edges to
           ; crashed ops, because they may complete later on.
           :invoke (let [op' (get pairs op)
-                        g   (reduce (fn [g ok] (link g ok op')) g oks)]
+                        g   (reduce (fn [g ok] (link g ok op' :realtime))
+                                    g
+                                    oks)]
                     (recur (next history) oks g))
           ; An operation has completed. Add it to the oks buffer, and remove
           ; oks that this ok implies must have completed.
@@ -375,328 +537,6 @@
           :info (recur (next history) oks g))
         ; All done!
         [g (RealtimeExplainer. pairs)]))))
-
-; Adya-style dependency graphs over transactions
-
-(defn appends-and-reads-verify-mop-types
-  "Takes a history where operation values are transactions. Verifies that the
-  history contains only reads [:r k v] and appends [:append k v]. Returns nil if the history conforms, or throws an error object otherwise."
-  [history]
-  (let [bad (remove (fn [op] (every? #{:r :append} (map mop/f (:value op))))
-                    history)]
-    (when (seq bad)
-      (throw+ {:valid?    :unknown
-               :type      :unexpected-txn-micro-op-types
-               :message   "history contained operations other than appends or reads"
-               :examples  (take 8 bad)}))))
-
-(defn reduce-mops
-  "Takes a history of operations, where each operation op has a :value which is
-  a transaction made up of [f k v] micro-ops. Runs a reduction over every
-  micro-op, where the reduction function is of the form (f state op [f k v]).
-  Saves you having to do endless nested reduces."
-  [f init-state history]
-  (reduce (fn op [state op]
-            (reduce (fn mop [state mop]
-                      (f state op mop))
-                    state
-                    (:value op)))
-          init-state
-          history))
-
-(defn appends-and-reads-verify-unique-appends
-  "Takes a history of txns made up of appends and reads, and checks to make
-  sure that every invoke appending a value to a key chose a unique value."
-  [history]
-  (reduce-mops (fn [written op [f k v]]
-                 (if (and (op/invoke? op) (= :append f))
-                   (let [writes-of-k (written k #{})]
-                     (if (contains? writes-of-k v)
-                       (throw+ {:valid?   :unknown
-                                :type     :duplicate-appends
-                                :op       op
-                                :key      k
-                                :value    v
-                                :message  (str "value " v " appended to key " k
-                                               " multiple times!")})
-                       (assoc written k (conj writes-of-k v))))
-                   ; Something other than an invoke append, whatever
-                   written))
-               {}
-               history))
-
-(defn prefix?
-  "Given two sequences, returns true iff A is a prefix of B."
-  [a b]
-  (and (<= (count a) (count b))
-       (loop [a a
-              b b]
-         (cond (nil? (seq a))           true
-               (= (first a) (first b))  (recur (next a) (next b))
-               true                     false))))
-
-(defn appends-and-reads-sorted-values
-  "Takes a history where operation values are transactions, and every micro-op
-  in a transaction is an append or a read. Computes a map of keys to all
-  distinct observed values for that key, ordered by length."
-  [history]
-  (->> history
-       ; Build up a map of keys to sets of observed values for those keys
-       (reduce (fn [states op]
-                 (reduce (fn [states [f k v]]
-                           (if (= :r f)
-                             ; Good, this is a read
-                             (-> states
-                                 (get k #{})
-                                 (conj v)
-                                 (->> (assoc states k)))
-                             ; Something else!
-                             states))
-                         states
-                         (:value op)))
-               {})
-       ; If a total order exists, we should be able
-       ; to sort their values by size and each one
-       ; will be a prefix of the next.
-       (util/map-vals (partial sort-by count))))
-
-(defn appends-and-reads-verify-total-order
-  "Takes a map of keys to observed values (e.g. from
-  `appends-and-reads-sorted-values`, and verifies that for each key, the values
-  read are consistent with a total order of appends. For instance, these values
-  are consistent:
-
-     {:x [[1] [1 2 3]]}
-
-  But these two are not:
-
-     {:x [[1 2] [1 3 2]]}
-
-  ... because the first is not a prefix of the second.
-
-  Returns nil if the history is OK, or throws otherwise."
-  [sorted-values]
-  (let [; For each key, verify the total order.
-        errors (keep (fn ok? [[k values]]
-                       (->> values
-                            ; If a total order exists, we should be able
-                            ; to sort their values by size and each one
-                            ; will be a prefix of the next.
-                            (partition 2 1)
-                            (reduce (fn mop [error [a b]]
-                                      (when-not (prefix? a b)
-                                        (reduced
-                                          {:key    k
-                                           :values [a b]})))
-                                    nil)))
-                     sorted-values)]
-    (when (seq errors)
-      (throw+ {:valid?  false
-               :type    :no-total-state-order
-               :message "observed mutually incompatible orders of appends"
-               :errors  errors}))))
-
-(defn appends-and-reads-verify-no-dups
-  "Given a history, checks to make sure that no read contains *duplicate*
-  copies of the same appended element. Since we only append values once, we
-  should never see them more than that--and if we do, it's really gonna mess up
-  our whole \"total order\" thing!"
-  [history]
-  (reduce-mops (fn [_ op [f k v]]
-                 (when (= f :r)
-                   (let [dups (->> (frequencies v)
-                                   (filter (comp (partial < 1) val))
-                                   (into (sorted-map)))]
-                     (when (seq dups)
-                       (throw+ {:valid?   false
-                                :type     :duplicate-elements
-                                :message  "Observed multiple copies of a value which was only inserted once"
-                                :op         op
-                                :key        k
-                                :value      v
-                                :duplicates dups})))))
-               nil
-               history))
-
-(defn appends-and-reads-append-index
-  "Takes a map of keys to observed values (e.g. from
-  appends-and-reads-sorted-values), and builds a map of keys to indexes on
-  those keys, where each index is a map relating appended values on that key to
-  the order in which they were effectively appended by the database.
-
-    {:x {:indices {v0 0, v1 1, v2 2}
-         :values  [v0 v1 v2]}}
-
-  This allows us to map bidirectionally."
-  [sorted-values]
-  (util/map-vals (fn [values]
-                   ; The last value will be the longest, and since every other
-                   ; is a prefix, it includes all the information we need.
-                   (let [vs (util/fast-last values)]
-                     {:values  vs
-                      :indices (into {} (map vector vs (range)))}))
-                 sorted-values))
-
-(defn appends-and-reads-write-index
-  "Takes a history restricted to oks and infos, and constructs a map of keys to
-  append values to the operations that appended those values."
-  [history]
-  (reduce (fn [index op]
-            (reduce (fn [index [f k v]]
-                      (if (= :append f)
-                        (assoc-in index [k v] op)
-                        index))
-                    index
-                    (:value op)))
-          {}
-          history))
-
-(defn appends-and-reads-read-index
-  "Takes a history restricted to oks and infos, and constructs a map of keys to
-  append values to the operations which observed the state generated by the
-  append of k. The special append value ::init generates the initial (nil)
-  state."
-  [history]
-  (reduce (fn [index op]
-            (reduce (fn [index [f k v]]
-                      (if (= :r f)
-                        (update-in index [k (or (peek v) ::init)] conj op)
-                        index))
-                    index
-                    (:value op)))
-          {}
-          history))
-
-(defrecord AppendsAndReadsExplainer []
-  Explainer
-  (explain-pair [_ a b]
-    "something something"))
-
-(defn appends-and-reads-graph
-  "Some parts of a transaction's dependency graph--for instance,
-  anti-dependency cycles--involve the *version order* of states for a key.
-  Given two transactions: [[:w :x 1]] and [[:w :x 2]], we can't tell whether T1
-  or T2 happened first. This makes it hard to identify read-write and
-  write-write edges, because we can't tell what particular transaction should
-  have overwritten the state observed by a previous transaction.
-
-  However, if we constrain ourselves to transactions whose only mutation is to
-  *append* a value to a key's current state...
-
-    {:f :txn, :value [[:r :x [1 2]] [:append :x 3] [:r :x [1 2 3]]]} ...
-
-  ... we can derive the version order for (almost) any pair of operations on
-  the same key because the order of appends is encoded in every read: if we
-  observe [:r :x [3 1 2]], we know the previous states must have been [3] [3 1]
-  [3 1 2].
-
-  That is, assuming appends actually work correctly. If the database loses
-  appends or reorders them, it's *likely* (but not necessarily the case), that
-  we'll observe states like:
-
-    [1 2 3]
-    [1 3 4]  ; 2 has been lost!
-
-  We can verify these in a single O(appends^2) pass by sorting all observed
-  states for a key by size, and verifying that each is a prefix of the next.
-  Assuming we *do* observe a total order, we can use the longest read value for
-  each key as an order over appends for that key. This order is *almost*
-  complete in that appends which are never read can't be related, but so long
-  as the DB lets us see most of our appends at least once, this should work.
-
-  So then, our strategy here is to compute those orders for each key, then use
-  them to relate successive [w w], [r w], and [w r] pair on that key. [w,w]
-  pairs are a direct write dependency, [w,r] pairs are a direct
-  read-dependency, and [r,w] pairs are direct anti-dependencies.
-
-  For more context, see Adya, Liskov, and O'Neil's 'Generalized Isolation Level
-  Definitions', page 8."
-  ([history]
-   ; Make sure there are only appends and reads
-   (appends-and-reads-verify-mop-types history)
-   ; And that every append is unique
-   (appends-and-reads-verify-unique-appends history)
-   ; And that reads never observe duplicates
-   (appends-and-reads-verify-no-dups history)
-
-   ; We only care about ok and info ops; invocations don't matter, and failed
-   ; ops can't contribute to the state.
-   (let [history       (filter (comp #{:ok :info} :type) history)
-         sorted-values (appends-and-reads-sorted-values history)]
-     ;(prn :sorted-values sorted-values)
-     ; Make sure we can actually compute a version order for each key
-     (appends-and-reads-verify-total-order sorted-values)
-     ; Compute indices
-     (let [append-index (appends-and-reads-append-index sorted-values)
-           write-index  (appends-and-reads-write-index history)
-           read-index   (appends-and-reads-read-index history)
-           ; And build our graph
-           ;_     (prn :append-index append-index)
-           ;_     (prn :write-index  write-index)
-           ;_     (prn :read-index   read-index)
-           graph (appends-and-reads-graph
-                   history append-index write-index read-index)]
-       [graph (AppendsAndReadsExplainer.)])))
-  ; Actually build the DirectedGraph
-  ([history append-index write-index read-index]
-   (reduce
-     (fn op [g op]
-       (reduce
-         (fn mop [g [f k v]]
-           (case f
-             ; OK, we've got a read. What op appended the last thing we saw?
-             :r (if (seq v)
-                  (let [append-op (-> write-index (get k) (get (peek v)))]
-                    (assert append-op)
-                    (if (= op append-op)
-                      ; We appended this particular value, and that append will
-                      ; encode the w-w dependency we need for this read.
-                      g
-                      ; We depend on the other op that appended this.
-                      (link g append-op op)))
-                  ; The read value was empty; we don't depend on anything.
-                  g)
-
-             ; OK, we have an append. We need two classes of edge here: one ww
-             ; edge, for the append we're overwriting, and n rw edges, for
-             ; anyone who read the version immediately prior to us.
-             :append
-             ; So what version did we append?
-             (if-let [index (get-in append-index [k :indices v])]
-               (let [; And what value was appended immediately before us in
-                     ; version order?
-                     prev-v (if (pos? index)
-                              (get-in append-index [k :values (dec index)])
-                              ::init)
-
-                     ; What op wrote that value?
-                     prev-append (when (pos? index)
-                                   (get-in write-index [k prev-v]))
-
-                     ; Link that writer to us
-                     g (if (and (pos? index)             ; (if we weren't first)
-                                (not= prev-append op)) ; (and it wasn't us)
-                         (link g prev-append op)
-                         g)
-
-                     ; And what ops read that previous value?
-                     prev-reads (get-in read-index [k prev-v])
-
-                     ; Link them all to us
-                     g (reduce (fn link-read [g r]
-                                 (if (not= r op)
-                                   (link g r op)
-                                   g))
-                               g
-                               prev-reads)]
-                 g)
-               ; Huh, we actually don't know what index this was--because we
-               ; never read this appended value. Nothing we can infer!
-               g)))
-         g
-         (:value op)))
-     (.linear (DirectedGraph.))
-     history)))
 
 ; Basic kv reads and writes
 
@@ -719,8 +559,8 @@
                {})))
 
 (defrecord WRExplainer []
-  Explainer
-  (explain-pair [_ a b]
+  DataExplainer
+  (explain-pair-data [_ a b]
     (let [writes (txn/ext-writes (:value a))
           reads  (txn/ext-reads  (:value b))]
       (reduce (fn [_ k]
@@ -728,10 +568,15 @@
                       w (get writes k)]
                   (when (= r w)
                     (reduced
-                      (str "which wrote " (pr-str k) " = " (pr-str w)
-                           ", which was read by")))))
+                      {:type  :wr
+                       :key   k
+                       :value w}))))
               nil
-              (keys reads)))))
+              (keys reads))))
+
+  (render-explanation [_ {:keys [key value]} a-name b-name]
+    (str a-name " wrote " (pr-str key) " = " (pr-str value)
+         ", which was read by " b-name)))
 
 (defn wr-graph
   "Given a history where ops are txns (e.g. [[:r :x 2] [:w :y 3]]), constructs
@@ -758,7 +603,8 @@
                                ; OK, in this case, we've got exactly one
                                ; txn that wrote this value, which is good!
                                ; We can generate dependency edges here!
-                               1 (link-to-all graph (first writes) reads)
+                               1 (link-to-all graph (first writes) reads
+                                              :realtime)
 
                                ; But if there's more than one, we can't do this
                                ; sort of cycle analysis because there are
@@ -777,17 +623,6 @@
                (.linear (DirectedGraph.))
                ext-reads))
      (WRExplainer.)]))
-
-; Hooo boy, this blows up BADLY on real-world inputs, so we're gonna hack
-; together a little BFS
-;(defn find-cycle
-;  ([^IGraph graph scc]
-;   (-> graph
-;       (.select (->bset scc)) ; Restrict the graph to this particular scc
-;       (Graphs/cycles)
-;       (->> (sort-by #(.size ^ICollection %)))
-;       first
-;       ->clj)))
 
 (defn prune-alternate-paths
   "If we have two paths [a b d] and [a c d], we don't need both of them,
@@ -823,13 +658,15 @@
                    (map (partial conj path) (.out g tip)))))))
 
 (defn path-shells
-  "Given a graph, and a starting node, constructs shells outwards from that
-  node: collections of longer and longer paths."
-  [g start]
-  (iterate (comp prune-alternate-paths
-                 (partial grow-paths g)
-                 prune-longer-paths)
-           [[start]]))
+  "Given a graph, and a starting collection of paths, constructs shells
+  outwards from those paths: collections of longer and longer paths."
+  [^DirectedGraph g starting-paths]
+  ; The longest possible cycle is the entire graph, plus one.
+  (take (inc (.size g))
+        (iterate (comp prune-alternate-paths
+                       (partial grow-paths g)
+                       prune-longer-paths)
+                 starting-paths)))
 
 (defn loop?
   "Does the given vector begin and end with identical elements, and is longer
@@ -865,6 +702,53 @@
                (transient (vec (repeat (count mapping) nil)))
                mapping))]))
 
+(defn find-cycle-starting-with
+  "Some anomalies consist of a cycle with exactly, or at least, one edge of a
+  particular type. This fuction works like find-cycle, but allows you to pass
+  *two* graphs: an initial graph, which is used for the first step, and a
+  remaining graph, which is used for later steps."
+  [^IGraph initial-graph ^IGraph remaining-graph scc]
+  (let [scc   (->bset scc)
+        ig    (.select initial-graph scc)
+        rg    (.select remaining-graph scc)
+        ; Think about the structure of these two graphs
+        ;
+        ;  I        R
+        ; ┌── d ┆
+        ; ↓   ↑ ┆
+        ; a ──┤ ┆
+        ;     ↓ ┆
+        ; b → c ┆ c → a
+        ;
+        ; In this graph, a cycle starting with I and completing with R can't
+        ; include d, since there is no way for d to continue in R--it's not
+        ; present in that set. Note that this is true even though [a d a] is a
+        ; cycle--it's just a cycle purely in I, rather than a cycle starting in
+        ; I and continuing in R, which is what we're looking for.
+        ;
+        ; Similarly, b can't be in a cycle, because there's no way to *return*
+        ; to b from R, and we know that the final step in our cycle must be a
+        ; transition from R -> I.
+        ;
+        ; In general, a cycle which has one edge from I must cross the boundary
+        ; from I to R, and from R back to I again--otherwise it would not be a
+        ; cycle. We therefore know that the first two vertices must be elements
+        ; of both I *and* R. To encode this, we restrict I to only vertices
+        ; present in R.
+        ig (.select initial-graph (.vertices rg))]
+    ; Start with a vertex in the initial graph
+    (->> (.vertices ig)
+         (keep (fn [start]
+                 ; Expand this vertex out one step using the initial graph
+                 (->> (grow-paths ig [[start]])
+                      ; Then expand those paths into surrounding shells
+                      (path-shells rg)
+                      ; Flatten those into a list of paths
+                      (mapcat identity)
+                      (filter loop?)
+                      first)))
+         first)))
+
 (defn find-cycle
   "Given a graph and a strongly connected component within it, finds a short
   cycle in that component."
@@ -873,40 +757,134 @@
         ; Just to speed up equality checks here, we'll construct an isomorphic
         ; graph with integers standing for our ops, find a cycle in THAT, then
         ; map back to our own space.
-        [gn mapping]  (renumber-graph g)
-        candidate     (first (.vertices gn))
-        paths         (mapcat identity (path-shells gn candidate))]
-    (->> paths
-         (filter loop?)
-         first
-         (mapv mapping))))
+        [gn mapping]  (renumber-graph g)]
+    (->> (.vertices gn)
+         (keep (fn [start]
+                 (when-let [cycle (->> (path-shells gn [[start]])
+                                       (mapcat identity)
+                                       (filter loop?)
+                                       first)]
+                     (mapv mapping cycle))))
+         first)))
+
+(defn explain-binding
+  "Takes a seq of [name op] pairs, and constructs a string naming each op."
+  [bindings]
+  (str "Let:\n"
+       (->> bindings
+            (map (fn [[name txn]]
+                   (str "  " name " = " (pr-str txn))))
+            (str/join "\n"))))
+
+(defn explain-cycle-pair-data
+  "Takes a pair explainer and a pair of ops, and constructs a data structure
+  explaining why a precedes b."
+  [pair-explainer [a b]]
+  (or (explain-pair-data pair-explainer a b)
+      (throw (IllegalStateException.
+               (str "Explainer " (pr-str pair-explainer)
+                    " was unable to explain the relationship"
+                    " between " (pr-str a)
+                    " and " (pr-str b))))))
+
+(defn explain-cycle-ops
+  "Takes an pair explainer, a binding, and a sequence of steps: each an
+  explanation data structure of one pair. Produces a string explaining why they
+  follow in that order."
+  [pair-explainer binding steps]
+  (let [explanations (map (fn [[a-name b-name] step]
+                            (str a-name " < " b-name ", because "
+                                 (render-explanation
+                                   pair-explainer step a-name b-name)))
+                          ; Take pairs of names from the binding
+                          (partition 2 1 (cycle (map first binding)))
+                          steps)
+        prefix       "  - "]
+    (->> explanations
+         (map-indexed (fn [i ex]
+                        (if (= i (dec (count explanations)))
+                          (str prefix "However, " ex ": a contradiction!")
+                          (str prefix ex ".\n"))))
+         str/join)))
+
+; This protocol gives us the ability to take a cycle of operations and produce
+; a data structure describing that cycle, and to render that cycle explanation
+; as a string.
+(defprotocol CycleExplainer
+  (explain-cycle
+    [_ pair-explainer cycle]
+    "Takes a cycle and constructs a data structure describing it.")
+
+  (render-cycle-explanation
+    [_ pair-explainer explanation]
+    "Takes an explanation of a cycle and renders it to a string."))
+
+(def cycle-explainer
+  "This explainer just provides the step-by-step explanation of the
+  relationships between pairs of operations."
+  (reify CycleExplainer
+    (explain-cycle [_ pair-explainer cycle]
+      ; Take pairs of ops from the cycle, and construct an explanation for each.
+      {:cycle cycle
+       :steps (->> cycle
+                   (partition 2 1)
+                   (map (partial explain-cycle-pair-data pair-explainer)))})
+
+    (render-cycle-explanation [_ pair-explainer {:keys [cycle steps]}]
+      ; Number the transactions in the cycle
+      (let [binding (->> (butlast cycle)
+                         (map-indexed (fn [i op] [(str "T" (inc i)) op])))]
+        ; Explain the binding, then each step.
+        (str (explain-binding binding)
+             "\n\nThen:\n"
+             (explain-cycle-ops pair-explainer binding steps))))))
 
 (defn explain-scc
-  "Takes a graph, an explainer, and a strongly connected component (a
-  collection of ops) in that graph. Using those graphs, constructs a chain
-  like:
+  "Takes a graph, a cycle explainer, a pair explainer, and a strongly connected
+  component (a collection of ops) in that graph. Using those graphs, constructs
+  a string explaining the cycle."
+  [graph cycle-explainer pair-explainer scc]
+  (->> (find-cycle graph scc)
+       (explain-cycle cycle-explainer pair-explainer)
+       (render-cycle-explanation cycle-explainer pair-explainer)))
 
-      [op1 relationship op2 relationship ... op1]
+(defn check
+  "Meat of the checker. Takes an analysis function and a history; returns a map
+  of:
 
-  ... illustrating how they form a cycle. For instance:
+      {:graph     The computed graph
+       :explainer The explainer for that graph
+       :cycles    A list of cycles we found
+       :sccs      A set of strongly connected components}"
+  [analyze-fn history]
+  (let [history           (remove (comp #{:nemesis} :process) history)
+        [graph explainer] (analyze-fn history)
+        sccs              (strongly-connected-components graph)
+        cycles            (->> sccs
+                               (sort-by (comp :index first))
+                               (mapv (partial explain-scc graph
+                                              cycle-explainer
+                                              explainer)))]
+    {:graph     graph
+     :explainer explainer
+     :sccs      sccs
+     :cycles    cycles}))
 
-      [{:process 0 :value {:x 5}}
-       [:process 0] {:process 0 :value {:x 3}}
-       [:key :x]    {:process 1 :value {:x 4}}
-       [:key :x]    {:process 0 :value {:x 5}}]"
-  [graph explainer scc]
-  (let [cycle (find-cycle graph scc)]
-    (->> cycle
-         (partition 2 1)
-         (reduce (fn [explanation [a b]]
-                   (if-let [e (explain-pair explainer a b)]
-                     (conj explanation (explain-pair explainer a b) b)
-                     ; uhhhh
-                     (throw (IllegalStateException.
-                              (str "Explainer " (pr-str explainer)
-                                   " was unable to explain the relationship"
-                                   " between" (pr-str a) " and " (pr-str b))))))
-                 [(first cycle)]))))
+(defn write-cycles!
+  "Writes cycles to a file. Opts:
+
+  :subdirectory   What subdirectory to write to
+  :filename       What to call the file"
+  [test opts cycles]
+  (when (and (seq cycles)
+             ; These are purely here so we don't have to fill in test
+             ; maps with names and times in our internal tests.
+             (:name test)
+             (:start-time test))
+    (->> cycles
+         (str/join "\n\n\n")
+         (spit (store/path! test (:subdirectory opts)
+                            (:filename opts "cycles.txt"))))))
 
 (defn checker
   "Takes a function which takes a history and returns a [graph, explainer]
@@ -916,19 +894,16 @@
   (reify checker/Checker
     (check [this test history opts]
       (try+
-        (let [history           (remove (comp #{:nemesis} :process) history)
-              [graph explainer] (analyze-fn history)
-              sccs              (strongly-connected-components graph)]
+        (let [{:keys [graph explainer sccs cycles]} (check analyze-fn history)]
+          (write-cycles! test opts cycles)
           {:valid?     (empty? sccs)
            :scc-count  (count sccs)
-           :cycles     (->> sccs
-                            (sort-by count)
-                            (take 8)
-                            (mapv (partial explain-scc graph explainer)))})
+           :cycles     cycles})
         ; The graph analysis might decide that a certain history isn't
         ; analyzable (perhaps because it violates expectations the analyzer
         ; needed to hold in order to infer dependencies), or it might discover
         ; violations that *can't* be encoded as a part of the dependency graph.
         ; If that happens, the analyzer can throw an exception with a :valid?
         ; key, and we'll simply return the ex-info map.
-        (catch (contains? % :valid?) e e)))))
+        (catch [:valid? false] e e)
+        (catch [:valid? :unknown] e e)))))

@@ -21,7 +21,8 @@
                   [nemesis :as nemesis]
                   [register :as register]
                   [sequential :as sequential]
-                  [sets :as set]]))
+                  [sets :as set]
+                  [table :as table]]))
 
 (def oses
   "Supported operating systems"
@@ -39,12 +40,18 @@
    :append          monotonic/append-workload
    :register        register/workload
    :set             set/workload
-   :sequential      sequential/workload})
+   :set-cas         set/cas-workload
+   :sequential      sequential/workload
+   :table           table/workload})
 
 (def workload-options
   "For each workload, a map of workload options to all values that option
   supports."
-  {:bank            {:auto-retry        [true false]
+  {:append          {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :read-lock         [nil "FOR UPDATE"]
+                     :predicate-read    [true false]}
+   :bank            {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]
                      :update-in-place   [true false]
                      :read-lock         [nil "FOR UPDATE"]}
@@ -64,8 +71,12 @@
                      :use-index         [true false]}
    :set             {:auto-retry        [true false]
                      :auto-retry-limit  [10 0]}
+   :set-cas         {:auto-retry        [true false]
+                     :auto-retry-limit  [10 0]
+                     :read-lock         [nil "FOR UPDATE"]}
    :sequential      {:auto-retry        [true false]
-                     :auto-retry-limit  [10 0]}})
+                     :auto-retry-limit  [10 0]}
+   :table           {}})
 
 (def workload-options-expected-to-pass
   "Workload options restricted to only those we expect to pass."
@@ -73,6 +84,30 @@
                              :auto-retry        [false]
                              :auto-retry-limit  [0])
                      workload-options)))
+
+(def quick-workload-options
+  "A restricted set of workload options which skips some redundant tests and
+  avoids testing auto-retry or read locks."
+  (-> (util/map-vals (fn [opts]
+                       (let [opts (-> opts
+                                      (assoc
+                                        :auto-retry        [:default]
+                                        :auto-retry-limit  [:default]
+                                        :update-in-place   [false]
+                                        :read-lock         [nil])
+                                      (update :use-index
+                                              (partial filter true?)))]
+                         ; Don't generate an empty use-index option
+                         (if (seq (:use-index opts))
+                           opts
+                           (dissoc opts :use-index))))
+                     workload-options)
+      ; Bank-multitable is, I think, more likely to fail than bank, and the two
+      ; test the same invariants in similar ways. Long-fork, monotonic, and
+      ; seqwuential are covered by append (though less efficiently, I suspect).
+      ; :table isn't as high-priority a correctness check, since it applies
+      ; only to DDL.
+      (dissoc :bank :long-fork :monotonic :sequential :table)))
 
 (defn all-combos
   "Takes a map of options to collections of values for that option. Computes a
@@ -100,6 +135,7 @@
   "These are the types of failures that the nemesis can perform."
   #{:partition
     :partition-one
+    :partition-pd-leader
     :partition-half
     :partition-ring
     :kill
@@ -110,21 +146,83 @@
     :pause-pd
     :pause-kv
     :pause-db
+    :schedules
+    :shuffle-leader
+    :shuffle-region
+    :random-merge
     :clock-skew
     ; Special-case generators
+    :slow-primary
     :restart-kv-without-pd})
+
+(def process-faults
+  "Faults affecting individual processes"
+  [:kill-pd :kill-kv :kill-db :pause-pd :pause-kv :pause-db])
+
+(def network-faults
+  "Faults affecting the network"
+  [:partition])
+
+(def schedule-faults
+  "Faults using the internal tidb scheduler"
+  [:shuffle-leader :shuffle-region :random-merge])
+
+(def clock-faults
+  "Clock skew issues"
+  [:clock-skew])
+
+(defn cartesian-product
+  [as bs]
+  (for [a as, b bs]
+    [a b]))
 
 (def all-nemeses
   "All nemesis specs to run as a part of a complete test suite."
-  (->> [; No faults
-        []
-        ; Single faults
-        [:kill]
-        [:pause]
-        [:clock-skew]
-        [:partitions]
-        ; Combined
-        [:kill :pause :clock-skew :partitions]]
+  (->> (concat
+         ; No faults
+         [[]]
+         ; Single types of faults
+         (map vector process-faults)
+         (map vector network-faults)
+         (map vector schedule-faults)
+         (map vector clock-faults)
+         ; Compound faults of one class
+         [[:kill]
+          [:pause]
+          [:schedules]]
+         ; Clock skew plus other faults
+         (cartesian-product clock-faults
+                            (concat process-faults
+                                    network-faults
+                                    schedule-faults))
+         ; Schedules plus process & network faults
+         (cartesian-product schedule-faults
+                            (concat process-faults
+                                    network-faults))
+        ; Everything
+        [(concat process-faults
+                 network-faults
+                 schedule-faults
+                 clock-faults)])
+       ; Convert to maps like {:fault-type true}
+       (map (fn [faults] (zipmap faults (repeat true))))))
+
+(def quick-nemeses
+  "A restricted set of failures for quick testing"
+  (->> (concat
+         ; No faults
+         [[]]
+         ; Single types of faults
+         (map vector process-faults)
+         (map vector network-faults)
+         (map vector schedule-faults)
+         (map vector clock-faults)
+        ; Everything
+        [(concat process-faults
+                 network-faults
+                 schedule-faults
+                 clock-faults)])
+       ; Convert to maps like {:fault-type true}
        (map (fn [faults] (zipmap faults (repeat true))))))
 
 (def plot-spec
@@ -153,6 +251,18 @@
                :color       "#A6A0E9"
                :start       #{:pause-db}
                :stop        #{:resume-db}}
+              {:name        "shuffle-leader"
+               :color       "#A6D0E9"
+               :start       #{:shuffle-leader}
+               :stop        #{:del-shuffle-leader}}
+              {:name        "shuffle-region"
+               :color       "#A6D0C9"
+               :start       #{:shuffle-region}
+               :stop        #{:del-shuffle-region}}
+              {:name        "random-merge"
+               :color       "#A6D0A9"
+               :start       #{:random-merge}
+               :stop        #{:del-random-merge}}
               {:name        "partition"
                :color       "#A0C8E9"
                :start       #{:start-partition}
@@ -176,6 +286,10 @@
                     " update-in-place")
                   (when (:read-lock opts)
                     (str " select " (:read-lock opts)))
+                  (when (:predicate-read opts)
+                    " predicate-read")
+                  (when (:use-index opts)
+                     " use-index")
                   (when-not (= [:interval] (keys (:nemesis opts)))
                     (str " nemesis " (->> (dissoc (:nemesis opts)
                                                    :interval
@@ -227,7 +341,14 @@
 
 (def cli-opts
   "Command line options for tools.cli"
-  [[nil "--nemesis-interval SECONDS"
+  [[nil "--faketime MAX_RATIO"
+    "Use faketime to skew clock rates up to MAX_RATIO"
+    :parse-fn #(Double/parseDouble %)
+    :validate [pos? "should be a positive number"]]
+
+    [nil "--force-reinstall" "Don't re-use an existing TiDB directory"]
+
+    [nil "--nemesis-interval SECONDS"
     "Roughly how long to wait between nemesis operations. Default: 10s."
     :parse-fn parse-long
     :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
@@ -265,14 +386,17 @@
     :validate [pos? "Must be positive"]]
 
    ["-v" "--version VERSION" "What version of TiDB should to install"
-    :default "v3.0.0-beta.1"]
+    :default "3.0.0-beta.1"]
 
    [nil "--tarball-url URL" "URL to TiDB tarball to install, has precedence over --version"
     :default nil]])
 
 (def test-all-opts
   "CLI options for running the entire test suite."
-  [["-w" "--workload NAME"
+  [[nil "--quick" "Runs a limited set of workloads and nemeses for faster testing."
+    :default false]
+
+   ["-w" "--workload NAME"
     "Test workload to run. If omitted, runs all workloads"
     :parse-fn keyword
     :default nil
@@ -284,20 +408,31 @@
 
 (def single-test-opts
   "CLI options for running a single test"
-  [[nil "--auto-retry" "Enables automatic retries (the default for TiDB)"
-    :default false]
+  [[nil "--auto-retry MODE" "Enables automatic retries (the default for TiDB). Mode should be 'true', 'false', or 'default'"
+    :parse-fn {"true"     true
+               "false"    false
+               "default"  :default}
+    :validate [identity "must be one of 'true', 'false', or 'default'"]
+    :default  :default]
 
-   [nil "--auto-retry-limit COUNT" "How many automatic retries can we execute?"
-    :default 10
-    :parse-fn parse-long
-    :validate [(complement neg?) "Must not be negative"]]
+   [nil "--auto-retry-limit COUNT" "How many automatic retries can we execute? The special value \"default\" means use whatever TiDB does by default."
+    :default  :default
+    :parse-fn (fn [x]
+                (if (= "default" x)
+                  :default
+                  (parse-long x)))
+    :validate [(fn [x] (or (= :default x) (not (neg? x))))
+               "Must not be negative"]]
+
+   [nil "--predicate-read" "If present, try to read using a query over a secondary key, rather than by primary key. Implied by --use-index."
+    :default false]
 
    [nil "--read-lock TYPE"
     "What kind of read locks, if any, should we acquire? Default is none; may
     also be 'update'."
     :default nil
     :parse-fn {"update" "FOR UPDATE"}
-    :validate #{nil "FOR UPDATE"}]
+    :validate [#{nil "FOR UPDATE"} "Should be FOR UPDATE"]]
 
    [nil "--update-in-place"
     "If true, performs updates (on some workloads) in place, rather than
@@ -322,12 +457,21 @@
     :run      (fn [{:keys [options]}]
                 (info "CLI options:\n" (with-out-str (pprint options)))
                 (let [w         (:workload options)
-                      workload-opts (if (:only-workloads-expected-to-pass options)
+                      workload-opts (cond
+                                      (:quick options)
+                                      quick-workload-options
+
+                                      (:only-workloads-expected-to-pass options)
                                       workload-options-expected-to-pass
+
+                                      true
                                       workload-options)
                       workloads (cond->> (all-workload-options workload-opts)
                                   w (filter (comp #{w} :workload)))
-                      tests (for [nemesis   all-nemeses
+                      nemeses   (cond
+                                  (:quick options)  quick-nemeses
+                                  true              all-nemeses)
+                      tests (for [nemesis   nemeses
                                   workload  workloads
                                   i         (range (:test-count options))]
                               (do

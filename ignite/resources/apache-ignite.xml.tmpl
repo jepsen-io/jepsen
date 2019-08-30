@@ -75,6 +75,21 @@
                 </property>
             </bean>
         </property>
+
+        <property name="autoActivationEnabled" value="false"/>
+
+        <!-- Enabling Apache Ignite native persistence. -->
+        <property name="dataStorageConfiguration">
+            <bean class="org.apache.ignite.configuration.DataStorageConfiguration">
+                <property name="defaultDataRegionConfiguration">
+                    <bean class="org.apache.ignite.configuration.DataRegionConfiguration">
+                        <property name="persistenceEnabled" value="##pds##"/>
+                    </bean>
+                </property>
+                <property name="walMode" value="LOG_ONLY"/>
+                <property name="walCompactionEnabled" value="true"/>
+            </bean>
+        </property>
     </bean>
     <bean parent="ignite.cfg"/>
 </beans>

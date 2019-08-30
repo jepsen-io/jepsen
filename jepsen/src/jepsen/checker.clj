@@ -124,6 +124,67 @@
   (reify Checker
     (check [this test history opts] {:valid? true})))
 
+(defn unhandled-exceptions
+  "Returns information about unhandled exceptions: a sequence of maps sorted in
+  descending frequency order, each with:
+
+      :class    The class of the exception thrown
+      :count    How many of this exception we observed
+      :example  An example operation"
+  []
+  (reify Checker
+    (check [this test history opts]
+      (let [exes (->> history
+                      (filter :exception)
+                      (filter #(= :info (:type %)))
+                      ; TODO: do we want the first or last :via?
+                      (group-by (comp :type first :via :exception))
+                      vals
+                      (sort-by count)
+                      reverse
+                      (map (fn [ops]
+                             (let [op (first ops)
+                                   e  (:exception op)]
+                               {:count (count ops)
+                                :class (-> e :via first :type)
+                                :example op}))))]
+        (if (seq exes)
+          {:valid?      true
+           :exceptions  exes}
+          {:valid? true})))))
+
+(defn stats-
+  "Helper for computing stats; takes a history (or a subset of a history), and
+  computes a map of statistics for it."
+  [history]
+  (let [ok-count    (count (filter op/ok? history))
+        fail-count  (count (filter op/fail? history))
+        info-count  (count (filter op/info? history))]
+    {:valid?      (pos? ok-count)
+     :count       (+ ok-count fail-count info-count)
+     :ok-count    ok-count
+     :fail-count  fail-count
+     :info-count  info-count}))
+
+(defn stats
+  "Computes basic statistics about success and failure rates, both overall and
+  broken down by :f. Results are valid only if every :f has at some :ok
+  operations; otherwise they're :unknown."
+  []
+  (reify Checker
+    (check [this test history opts]
+      (let [history (->> history
+                         (remove op/invoke?)
+                         (remove (comp #{:nemesis} :process)))
+            groups (->> history
+                        (group-by :f)
+                        (map (fn [[f subhistory]]
+                               [f (stats- subhistory)]))
+                        (into (sorted-map)))]
+        (assoc (stats- history)
+               :by-f    groups
+               :valid?  (merge-valid (map :valid? (vals groups))))))))
+
 (defn linearizable
   "Validates linearizability with Knossos. Defaults to the competition checker,
   but can be controlled by passing either :linear or :wgl.

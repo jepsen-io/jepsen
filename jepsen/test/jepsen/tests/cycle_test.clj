@@ -169,9 +169,7 @@
           history [r00 r00' r10 r10' r11 r11' r01 r01']]
       (is (= {:valid? false
               :scc-count 1
-              :cycles [[r01' "which observed :x = 0, and a higher value 1 was observed by"
-                        r10' "which observed :y = 0, and a higher value 1 was observed by"
-                        r01']]}
+              :cycles ["Let:\n  T1 = {:index 7, :type :ok, :process 0, :f :read, :value {:x 0, :y 1}}\n  T2 = {:index 3, :type :ok, :process 0, :f :read, :value {:x 1, :y 0}}\n\nThen:\n  - T1 < T2, because T1 observed :x = 0, and T2 observed a higher value 1.\n  - However, T2 < T1, because T2 observed :y = 0, and T1 observed a higher value 1: a contradiction!"]}
              (checker/check checker nil history nil)))))
 
   (testing "large histories"
@@ -207,9 +205,7 @@
     (testing "combined invalid"
       (is (= {:valid? false
               :scc-count 1
-              :cycles [[r2 "which observed :x = 0, and a higher value 1 was observed by"
-                        r1 "which process 0 completed before"
-                        r2]]}
+              :cycles ["Let:\n  T1 = {:type :ok, :process 0, :f :read, :value {:x 0}, :index 1}\n  T2 = {:type :ok, :process 0, :f :read, :value {:x 1}, :index 0}\n\nThen:\n  - T1 < T2, because T1 observed :x = 0, and T2 observed a higher value 1.\n  - However, T2 < T1, because process 0 executed T2 before T1: a contradiction!"]}
              (checker/check (checker (combine monotonic-key-graph
                                               process-graph))
                             nil history nil))))))
@@ -326,129 +322,9 @@
       (is (= {a' [b' d'], b' [c'], c' [e'], d' [e'], e' []}
              (o a a' b d b' c d' c' e e'))))))
 
-(deftest append-and-read-graph-test
-  (let [g (comp (partial graph appends-and-reads-graph) vector)
-        ax1       {:type :ok, :value [[:append :x 1]]}
-        ax2       {:type :ok, :value [[:append :x 2]]}
-        ax1ay1    {:type :ok, :value [[:append :x 1] [:append :y 1]]}
-        ax1ry1    {:type :ok, :value [[:append :x 1] [:r :y [1]]]}
-        ax2ay1    {:type :ok, :value [[:append :x 2] [:append :y 1]]}
-        ax2ay2    {:type :ok, :value [[:append :x 2] [:append :y 2]]}
-        az1ax1ay1 {:type :ok, :value [[:append :z 1]
-                                      [:append :x 1]
-                                      [:append :y 1]]}
-        rxay1     {:type :ok, :value [[:r :x nil] [:append :y 1]]}
-        ryax1     {:type :ok, :value [[:r :y nil] [:append :x 1]]}
-        rx121     {:type :ok, :value [[:r :x [1 2 1]]]}
-        rx1ry1    {:type :ok, :value [[:r :x [1]] [:r :y [1]]]}
-        rx1ay2    {:type :ok, :value [[:r :x [1]] [:append :y 2]]}
-        ry12az3   {:type :ok, :value [[:r :y [1 2]] [:append :z 3]]}
-        rz13      {:type :ok, :value [[:r :z [1 3]]]}
-        rx        {:type :ok, :value [[:r :x nil]]}
-        rx1       {:type :ok, :value [[:r :x [1]]]}
-        rx12      {:type :ok, :value [[:r :x [1 2]]]}
-        rx12ry1   {:type :ok, :value [[:r :x [1 2]] [:r :y [1]]]}
-        rx12ry21  {:type :ok, :value [[:r :x [1 2]] [:r :y [2 1]]]}
-        ]
-    (testing "empty history"
-      (is (= {} (g))))
-
-    (testing "one append"
-      (is (= {} (g ax1))))
-
-    (testing "empty read"
-      (is (= {} (g rx))))
-
-    (testing "one append one read"
-      (is (= {ax1 [rx1], rx1 []}
-             (g ax1 rx1))))
-
-    (testing "read empty, append, read"
-      ; This verifies anti-dependencies.
-      ; We need the third read in order to establish ax1's ordering
-      (is (= {rx [ax1] ax1 [rx1] rx1 []}
-             (g rx ax1 rx1))))
-
-    (testing "append, append, read"
-      ; This verifies write dependencies
-      (is (= {ax1 [ax2], ax2 [rx12], rx12 []}
-             (g ax2 ax1 rx12))))
-
-    (testing "serializable figure 3 from Adya, Liskov, O'Neil"
-      (is (= {az1ax1ay1 [rx1ay2 ry12az3]
-              rx1ay2    [ry12az3]
-              ry12az3   [rz13]
-              rz13      []}
-             (g az1ax1ay1 rx1ay2 ry12az3 rz13))))
-
-    (testing "G0: write cycle"
-      (let [t1 ax1ay1
-            t2 ax2ay2
-            ; Establishes that the updates from t1 and t2 were applied in
-            ; different orders
-            t3 rx12ry21]
-        (is (= {t1 [t2 t3], t2 [t1 t3], t3 []}
-               (g t1 t2 t3)))))
-
-    ; TODO: we should do internal consistency checks here as well--see G1a and
-    ; G1b.
-
-    (testing "G1c: circular information flow"
-      ; G0 is a special case of G1c, so for G1c we'll construct a cycle with a
-      ; ww dependency on x and a wr dependency on y. The second transaction
-      ; overwrites the first on x, but the second's write of y is visible to
-      ; the first's read.
-      (let [t1 ax1ry1
-            t2 ax2ay1
-            t3 rx12]
-        (is (= {t1 [t2], t2 [t3 t1], t3 []}
-               (g t1 t2 t3)))))
-
-    (testing "G2: anti-dependency cycle"
-      ; Here, two transactions observe the empty state of a key that the other
-      ; transaction will append to.
-      (is (= {rxay1 [ryax1 rx1ry1], ryax1 [rxay1 rx1ry1], rx1ry1 []}
-             (g rxay1 ryax1 rx1ry1))))
-
-    (testing "reads with duplicates"
-      (let [e (try+ (g rx121)
-                    false
-                    (catch [:type :duplicate-elements] e e))]
-        (is (= (assoc rx121 :index 0) (:op e)))
-        (is (= :x (:key e)))
-        (is (= [1 2 1] (:value e)))
-        (is (= {1 2} (:duplicates e)))))
-
-    (testing "duplicate inserts attempts"
-      (let [ax1ry  {:index 0, :type :invoke, :value [[:append :x 1] [:r :y nil]]}
-            ay2ax1 {:index 1, :type :invoke, :value [[:append :y 2] [:append :x 1]]}
-            e (try+ (g ax1ry ay2ax1)
-                    false
-                    (catch [:type :duplicate-appends] e e))]
-        (is (= ay2ax1 (:op e)))
-        (is (= :x (:key e)))
-        (is (= 1 (:value e)))))
-
-    (testing "incompatible orders"
-      (let [rx12  {:index 0, :type :ok, :value [[:r :x [1 2]]]}
-            rx134 {:index 0, :type :ok, :value [[:r :x [1 3 4]]]}
-            e (try+ (g rx12 rx134)
-                    false
-                    (catch [:type :no-total-state-order] e e))]
-        (is (= [{:key :x
-                 :values [[1 2] [1 3 4]]}]
-               (:errors e)))
-        (is (= {:valid?   false
-                :type     :no-total-state-order
-                :message  "observed mutually incompatible orders of appends"
-                :errors   [{:key :x, :values [[1 2] [1 3 4]]}]}
-               (checker/check (checker appends-and-reads-graph)
-                              nil [rx12 rx134] nil)))))))
-
-
 (deftest path-shells-test
   (let [g     (map->bdigraph {0 [1 2] 1 [3] 2 [3] 3 [0]})
-        paths (path-shells g 0)]
+        paths (path-shells g [[0]])]
     (is (= [[[0]]
             [[0 1] [0 2]]
             [[0 1 3]]
@@ -461,8 +337,30 @@
                           2 [3]
                           3 [4]
                           4 [0 2]})]
-    (is (= [0 1 4 0]
-           (find-cycle g (->clj (.vertices g)))))))
+    (testing "basic cycle"
+      (is (= [0 1 4 0]
+             (find-cycle g (->clj (.vertices g))))))
+
+    ; We may restrict a graph to a particular relationship and look for cycles
+    ; in an SCC found in a larger graph; this should still work.
+    (testing "scc without cycle in graph"
+      (is (= nil
+             (find-cycle g #{0 2 4}))))
+
+    (testing "cycle in restricted scc"
+      (is (= [0 1 4 0]
+             (find-cycle g #{0 1 4}))))))
+
+(deftest find-cycle-starting-with-test
+  (let [initial   (map->bdigraph {0 [1 2]})
+        ; Remaining HAS a cycle, but we don't want to find it.
+        remaining (map->bdigraph {1 [3]
+                                  3 [1 0]})]
+    (testing "without 0"
+      (is (= nil (find-cycle-starting-with initial remaining #{1 2 3}))))
+    (testing "with 0"
+      (is (= [0 1 3 0]
+             (find-cycle-starting-with initial remaining #{0 1 2 3}))))))
 
 (deftest renumber-graph-test
   (is (= [{} []]
@@ -477,3 +375,24 @@
                                                  :z #{}
                                                  :t #{:y}}))
                  0 ->clj))))
+
+(deftest link-test
+  (let [g (-> (directed-graph)
+              (link 1 2 :foo)
+              (link 1 2 :bar))]
+    (is (= #{:foo :bar} (edge g 1 2)))))
+
+(deftest project+remove-relationship-test
+  (let [g (-> (directed-graph)
+              (link 1 2 :foo)
+              (link 1 3 :foo)
+              (link 2 3 :bar)
+              (link 1 2 :bar))]
+    (testing "remove"
+      (is (= #{{:from 1, :to 2, :value #{:bar}}
+               {:from 2, :to 3, :value #{:bar}}}
+             (set (map ->clj (edges (remove-relationship g :foo)))))))
+    (testing "project"
+      (is (= #{{:from 1, :to 2, :value #{:foo}}
+               {:from 1, :to 3, :value #{:foo}}}
+             (set (map ->clj (edges (project-relationship g :foo)))))))))

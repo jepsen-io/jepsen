@@ -175,6 +175,7 @@
                                     nil)
                    "failed"   (case sub
                                 "Result: signal" false
+                                "Result: timeout" false
                                 nil)
                    "inactive" (case sub
                                 "dead" false
@@ -437,6 +438,9 @@
                   (when (topo/manual-log-config? test)
                     {:storage_transaction_log_nodes (topo/log-configuration
                                                        topo)})
+                  (when (:accelerate-indexes test)
+                    {:accelerate_indexes true})
+
                   (when (:datadog-api-key test)
                     {:stats_host "localhost"
                      :stats_port 8125})))

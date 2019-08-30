@@ -9,6 +9,11 @@ import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.transactions.Transaction;
 import org.apache.ignite.transactions.TransactionConcurrency;
 import org.apache.ignite.transactions.TransactionIsolation;
+import org.apache.ignite.cache.query.ScanQuery;
+import org.apache.ignite.cache.query.QueryCursor;
+
+import java.util.stream.Collectors;
+import javax.cache.Cache;
 
 import java.util.*;
 
@@ -90,17 +95,43 @@ public class Bank extends Client {
         return r.nextInt((max - min) + 1) + min;
     }
 
-    public Map<Integer, Integer> getAllAccounts(int                    endIndex,
+   public Map<Integer, Integer> getAllAccounts(int endIndex,
                                                 TransactionConcurrency transactionConcurrency,
-                                                TransactionIsolation   transactionIsolation) {
-        Transaction tx = ignite.transactions().txStart(transactionConcurrency, transactionIsolation);
-        Set<Integer> keys = new HashSet<>();
-        for (int i = 0; i < endIndex; i++) {
-            keys.add(i);
+                                                TransactionIsolation transactionIsolation) {
+        Map<Integer, Integer> accounts;
+        Transaction tx = ignite.transactions().txStart(transactionConcurrency, transactionIsolation, TX_TIMEOUT, 10);
+        try {
+            Set<Integer> keys = new HashSet<>();
+            for (int i = 0; i < endIndex; i++) {
+                keys.add(i);
+            }
+            accounts = accountCache.getAll(keys);
+            tx.commit();
+        } catch (IgniteException ex) {
+            tx.rollback();
+            throw ex;
+        } finally {
+            tx.close();
         }
-        Map<Integer, Integer> accounts = accountCache.getAll(keys);
-        tx.commit();
         return accounts;
+    }
+
+    public Map<Integer, Integer> getAllAccountsScan(int endIndex,
+                                                    TransactionConcurrency transactionConcurrency,
+                                                    TransactionIsolation transactionIsolation) {
+        Map<Integer, Integer> keys;
+        Transaction tx = ignite.transactions().txStart(transactionConcurrency, transactionIsolation, TX_TIMEOUT, 10);
+        try {
+            QueryCursor<Cache.Entry<Integer, Integer>> q = accountCache.query(new ScanQuery(null));
+            keys = q.getAll().stream().collect(Collectors.toMap(i -> i.getKey(), i -> i.getValue()));
+            tx.commit();
+        } catch (IgniteException ex) {
+            tx.rollback();
+            throw ex;
+        } finally {
+            tx.close();
+        }
+        return keys;
     }
 
     public void destroyCache() {

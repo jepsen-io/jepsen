@@ -17,11 +17,13 @@
   (:require [clojure.stacktrace :as trace]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
-            [dom-top.core :as dt :refer [real-pmap]]
+            [clojure.datafy :refer [datafy]]
+            [dom-top.core :as dt]
             [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
                                           fcatch
+                                          real-pmap
                                           relative-time-nanos]]
             [jepsen.os :as os]
             [jepsen.db :as db]
@@ -96,7 +98,7 @@
        (control/on-nodes ~test (partial os/teardown! (:os ~test))))))
 
 (defn snarf-logs!
-  "Downloads logs for a test."
+  "Downloads logs for a test. Updates symlinks."
   [test]
   ; Download logs
   (locking snarf-logs!
@@ -127,7 +129,20 @@
                 (catch java.lang.IllegalArgumentException e
                   ; This is a jsch bug where the file is just being
                   ; created
-                  (info remote "doesn't exist"))))))))))
+                  (info remote "doesn't exist"))))))))
+    (store/update-symlinks! test)))
+
+(defn maybe-snarf-logs!
+  "Snarfs logs, swallows and logs all throwables. Why? Because we do this when
+  we encounter an error and abort, and we don't want an error here to supercede
+  the root cause that made us abort."
+  [test]
+  (try (snarf-logs! test)
+       (catch clojure.lang.ExceptionInfo e
+         (warn e (str "Error snarfing logs and updating symlinks\n")
+               (with-out-str (pprint (ex-data e)))))
+       (catch Throwable t
+         (warn t "Error snarfing logs and updating symlinks"))))
 
 (defmacro with-log-snarfing
   "Evaluates body and ensures logs are snarfed afterwards. Will also download
@@ -142,10 +157,11 @@
                              (store/update-symlinks! ~test))))]
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
-       ~@body
-       (finally
+       (let [res# (do ~@body)]
          (snarf-logs! ~test)
-         (store/update-symlinks! ~test)
+         res#)
+       (finally
+         (maybe-snarf-logs! ~test)
          (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
 
 (defmacro with-db
@@ -214,6 +230,7 @@
                           (assoc op
                                  :type :info
                                  :time (relative-time-nanos)
+                                 :exception (datafy e)
                                  :error (str "indeterminate: "
                                              (if (.getCause e)
                                                (.. e getCause getMessage)
@@ -459,9 +476,10 @@
           (when (:error (:results test))
             (str "\n\n" (:error (:results test))))
           "\n\n"
-          (if (:valid? (:results test))
-            "Everything looks good! ヽ(‘ー`)ノ"
-            "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻")))
+          (case (:valid? (:results test))
+            false     "Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻"
+            :unknown  "Errors occurred during analysis, but no anomalies found. ಠ~ಠ"
+            true      "Everything looks good! ヽ(‘ー`)ノ")))
   test)
 
 (defn run!
@@ -478,6 +496,7 @@
   :logging    Logging options; see jepsen.store/start-logging!
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
+  :remote     The remote to use for control actions: given by the Remote protocol
   :client     A client for the database
   :nemesis    A client for failures
   :generator  A generator of operations to apply to the DB
@@ -535,33 +554,34 @@
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
               _    (info "Running test:\n" (with-out-str (pprint test)))
-              test (control/with-ssh (:ssh test)
-                     (with-resources [sessions
-                                      (bound-fn* control/session)
-                                      control/disconnect
-                                      (:nodes test)]
-                       ; Index sessions by node name and add to test
-                       (let [test (->> sessions
-                                       (map vector (:nodes test))
-                                       (into {})
-                                       (assoc test :sessions))]
-                         ; Setup
-                         (with-os test
-                           (with-db test
-                             (generator/with-threads
-                               (cons :nemesis (range (:concurrency test)))
-                               (util/with-relative-time
-                                 ; Run a single case
-                                 (let [test (assoc test :history
-                                                   (run-case! test))
-                                       ; Remove state
-                                       test (dissoc test
-                                                    :barrier
-                                                    :active-histories
-                                                    :sessions)]
-                                   (info "Run complete, writing")
-                                   (when (:name test) (store/save-1! test))
-                                   (analyze! test)))))))))]
+              test (control/with-remote (:remote test)
+                     (control/with-ssh (:ssh test)
+                       (with-resources [sessions
+                                        (bound-fn* control/session)
+                                        control/disconnect
+                                        (:nodes test)]
+                         ; Index sessions by node name and add to test
+                         (let [test (->> sessions
+                                         (map vector (:nodes test))
+                                         (into {})
+                                         (assoc test :sessions))]
+                           ; Setup
+                           (with-os test
+                             (with-db test
+                               (generator/with-threads
+                                 (cons :nemesis (range (:concurrency test)))
+                                 (util/with-relative-time
+                                   ; Run a single case
+                                   (let [test (assoc test :history
+                                                     (run-case! test))
+                                         ; Remove state
+                                         test (dissoc test
+                                                      :barrier
+                                                      :active-histories
+                                                      :sessions)]
+                                     (info "Run complete, writing")
+                                     (when (:name test) (store/save-1! test))
+                                     (analyze! test))))))))))]
           (log-results test)))
       (catch Throwable t
         (warn t "Test crashed!")

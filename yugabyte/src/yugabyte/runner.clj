@@ -1,14 +1,14 @@
 (ns yugabyte.runner
   "Runs YugaByteDB tests."
   (:gen-class)
-  (:require [clojure [pprint :refer [pprint]]
-                     [string :as str]]
+  (:require [clojure.pprint :refer [pprint]]
+            [clojure.string :as str]
             [clojure.tools.logging :refer :all]
-            [jepsen [core :as jepsen]
-                    [cli :as cli]
-                    [store :as store]]
-            [yugabyte [core :as core]
-                      [nemesis :as nemesis]]))
+            [jepsen.core :as jepsen]
+            [jepsen.cli :as cli]
+            [jepsen.store :as store]
+            [yugabyte.core :as core]
+            [yugabyte.nemesis :as nemesis]))
 
 (defn parse-long [x] (Long/parseLong x))
 
@@ -22,22 +22,34 @@
          (map (fn [o] [(keyword o) true]))
          (into {}))))
 
+(defn one-of
+  "Like jepsen.cli/one-of but doesn't 'eat' namespaces"
+  [coll]
+  (let [stringify      (fn [s] (if (qualified-keyword? s)
+                                 (str (namespace s) "/" (name s))
+                                 (name s)))
+        coll-keys      (if (map? coll) (keys coll) coll)
+        coll-key-names (sort (map stringify coll-keys))]
+    (str "Must be one of " (str/join ", " coll-key-names))))
+
+
+(defn log-test
+  [t attempt]
+  (info "Testing" (:name t) "attempt #" attempt)
+  t)
+
+;
 ; Options
+;
+; For the options format, see clojure.tools.cli/parse-opts
+;
+
 (def cli-opts
   "Options for single or multiple tests."
   [["-o" "--os NAME" "Operating system: either centos or debian."
-    :default  :centos
+    :default :centos
     :parse-fn keyword
     :validate [#{:centos :debian} "One of `centos` or `debian`"]]
-
-   ["-d" "--db NAME" "Database variant: either community-edition (ce for short), or enterprise edition (ee for short)"
-    :default :community-edition
-    :parse-fn {"ce"                 :community-edition
-               "community-edition"  :community-edition
-               "ee"                 :enterprise-edition
-               "enterprise-edition" :enterprise-edition}
-    :validate [#{:community-edition :enterprise-edition}
-               "Either community-edition or enterprise edition"]]
 
    [nil "--experimental-tuning-flags" "Enable some experimental tuning flags which are supposed to help YB recover faster"
     :default false]
@@ -82,7 +94,10 @@
     :default false]
 
    [nil "--version VERSION" "What version of Yugabyte to install"
-    :default "1.1.10.0"]
+    :default "1.3.1.0"]
+
+   [nil "--table-count INT" "Number of tables to spread rows across."
+    :default 5]
 
    [nil "--url URL" "URL to Yugabyte tarball to install, has precedence over --version"
     :default nil]
@@ -99,56 +114,55 @@
     "Test workload to run. If omitted, runs all workloads"
     :parse-fn keyword
     :default nil
-    :validate [core/workloads (cli/one-of core/workloads)]]])
+    :validate [core/workloads (one-of core/workloads)]]])
 
 (def single-test-opts
-	"Command line options for single tests"
-	[["-w" "--workload NAME" "Test workload to run"
-		:parse-fn keyword
-		:missing (str "--workload " (cli/one-of core/workloads))
-		:validate [core/workloads (cli/one-of core/workloads)]]])
+  "Command line options for single tests"
+  [["-w" "--workload NAME" "Test workload to run"
+    :parse-fn keyword
+    :missing (str "--workload " (one-of core/workloads))
+    :validate [core/workloads (one-of core/workloads)]]])
 
-(defn log-test
-  [t attempt]
-  (info "Testing" (:name t) "attempt #" attempt)
-  t)
+;
+; Subcommands
+;
 
 (defn test-all-cmd
-	"A command that runs a whole suite of tests in one go."
-	[]
-	{"test-all"
-	 {:opt-spec (concat cli/test-opt-spec cli-opts test-all-opts)
-		:opt-fn   cli/test-opt-fn
-		:usage    "Runs all tests"
-		:run      (fn [{:keys [options]}]
-								(info "CLI options:\n" (with-out-str (pprint options)))
-								(let [w             (:workload options)
-											workload-opts (if (:only-workloads-expected-to-pass options)
+  "A command that runs a whole suite of tests in one go."
+  []
+  {"test-all"
+   {:opt-spec (concat cli/test-opt-spec cli-opts test-all-opts)
+    :opt-fn   cli/test-opt-fn
+    :usage    "Runs all tests"
+    :run      (fn [{:keys [options]}]
+                (info "CLI options:\n" (with-out-str (pprint options)))
+                (let [w             (:workload options)
+                      workload-opts (if (:only-workloads-expected-to-pass options)
                                       core/workload-options-expected-to-pass
                                       core/workload-options)
-											workloads (cond->> (core/all-workload-options
-                                           workload-opts)
-																	w (filter (comp #{w} :workload)))
-											tests (for [nemesis   core/all-nemeses
-                                  workload  workloads
-																	i         (range (:test-count options))]
-                              (-> options
-                                  (merge workload)
-                                  (update :nemesis merge nemesis)))
-                      results (->> tests
-                                   (map-indexed
-                                     (fn [i test-opts]
-                                       (let [test (core/yb-test test-opts)]
-                                         (try
-                                           (info "\n\n\nTest "
-                                                 (inc i) "/" (count tests))
-                                           (let [test' (jepsen/run! test)]
-                                             [(.getPath (store/path test'))
-                                              (:valid? (:results test'))])
-                                           (catch Exception e
-                                             (warn e "Test crashed")
-                                             [(:name test) :crashed])))))
-                                   (group-by second))]
+                      workloads     (cond->> (core/all-workload-options
+                                               workload-opts)
+                                             w (filter (comp #{w} :workload)))
+                      tests         (for [nemesis  core/all-nemeses
+                                          workload workloads
+                                          i        (range (:test-count options))]
+                                      (-> options
+                                          (merge workload)
+                                          (update :nemesis merge nemesis)))
+                      results       (->> tests
+                                         (map-indexed
+                                           (fn [i test-opts]
+                                             (let [test (core/yb-test test-opts)]
+                                               (try
+                                                 (info "\n\n\nTest "
+                                                       (inc i) "/" (count tests))
+                                                 (let [test' (jepsen/run! test)]
+                                                   [(.getPath (store/path test'))
+                                                    (:valid? (:results test'))])
+                                                 (catch Exception e
+                                                   (warn e "Test crashed")
+                                                   [(:name test) :crashed])))))
+                                         (group-by second))]
 
                   (println "\n")
 
@@ -169,10 +183,10 @@
                     (dorun (map (comp println first) (results false))))
 
                   (println)
-                  (println (count (results true))      "successes")
-                  (println (count (results :unknown))  "unknown")
-                  (println (count (results :crashed))  "crashed")
-                  (println (count (results false))     "failures")))}})
+                  (println (count (results true)) "successes")
+                  (println (count (results :unknown)) "unknown")
+                  (println (count (results :crashed)) "crashed")
+                  (println (count (results false)) "failures")))}})
 
 (defn -main
   "Handles CLI arguments"
