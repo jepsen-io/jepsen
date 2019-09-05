@@ -26,15 +26,17 @@
        (gen/stagger 1/100)))
 
 (defn bad-row
-  "Is this particular row illegal--e.g. does it contain a `null`?"
+  "Is this particular row illegal--e.g. does it contain a `null`? Returns row
+  if true."
   [row]
-  (some nil? (vals row)))
+  (and (seq (filter nil? (vals row)))
+       row))
 
 (defn bad-table
   "Does this collection of rows have a bad row in it? If so, returns that row,
   otherwise nil."
   [table]
-  (some bad-row table))
+  (seq (filter bad-row table)))
 
 (defn bad-read
   "Does this read op have a bad row in it? Returns that row if so, otherwise

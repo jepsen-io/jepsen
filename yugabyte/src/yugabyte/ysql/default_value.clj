@@ -25,7 +25,7 @@
 (defn insert!
   "Inserts a row into a table."
   [conn table]
-  (c/execute! conn [(str "insert into " table " DEFAULT VALUES")]))
+  (c/execute! conn [(str "insert into " table " (dummy) values (?)") 1]))
 
 (defn read-ordered
   "Reads every value in table ordered by k."
@@ -44,7 +44,7 @@
   [conn table]
   (try
     (c/execute! conn (j/create-table-ddl table
-                                         [[:k :serial :primary :key]
+                                         [[:dummy :int]
                                           [:v :int :default "0"]]
                                          {:conditional? true}))
     (catch org.postgresql.util.PSQLException e
