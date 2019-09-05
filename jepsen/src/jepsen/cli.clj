@@ -176,10 +176,12 @@ Options:\n")
         all-nodes     (->> (concat nodes-file
                                    nodes
                                    node)
-                           vec)]
+                           vec)
+        front-nodes (:front-nodes options all-nodes)]
     (assoc parsed :options (-> options
                                (dissoc :node :nodes-file)
-                               (assoc  :nodes all-nodes)))))
+                               (assoc  :nodes all-nodes)
+                               (assoc  :front-nodes front-nodes)))))
 
 (defn rename-keys
   "Given a map m, and a map of keys to replacement keys, yields m with keys

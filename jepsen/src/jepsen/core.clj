@@ -427,13 +427,13 @@
     ; Register history with test's active set.
     (swap! (:active-histories test) conj history)
 
-    (let [client-nodes (if (empty? (:nodes test))
+    (let [client-nodes (if (empty? (:front-nodes test))
                          ; If you gave us an empty node set, we'll
                          ; still give you :concurrency client, but
                          ; with nil nodes.
                          (repeat (:concurrency test) nil)
                          (->> test
-                              :nodes
+                              :front-nodes
                               cycle
                               (take (:concurrency test))))
           clients (mapv (partial client-worker test)
@@ -486,6 +486,7 @@
   "Runs a test. Tests are maps containing
 
   :nodes      A sequence of string node names involved in the test
+  :front-nodes A sequence of front node will accept client request
   :concurrency  (optional) How many processes to run concurrently
   :ssh        SSH credential information: a map containing...
     :username           The username to connect with   (root)
@@ -516,7 +517,7 @@
 
   3. Create the nemesis
 
-  4. Fork the client into one client for each node
+  4. Fork the client into one client for each front node
 
   5. Fork a thread for each client, each of which requests operations from
      the generator until the generator returns nil
@@ -542,7 +543,7 @@
 
                           ; Number of concurrent workers
                           :concurrency (or (:concurrency test)
-                                           (count (:nodes test)))
+                                           (count (:front-nodes test)))
 
                           ; Synchronization point for nodes
                           :barrier (let [c (count (:nodes test))]
