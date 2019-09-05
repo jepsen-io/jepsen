@@ -19,3 +19,52 @@ services:
       - "9411:9411"
     environment:
       - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+  grafana:
+    networks:
+      - jepsen
+    image: grafana/grafana
+    container_name: grafana
+    hostname: grafana
+    environment:
+    - GF_AUTH_ANONYMOUS_ENABLED=true
+    - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    ports:
+    - 3000:3000
+    volumes:
+    - type: volume
+      source: grafana-volume
+      target: /var/lib/grafana
+      read_only: false
+  node-exporter:
+    networks:
+      - jepsen
+    image: quay.io/prometheus/node-exporter
+    container_name: node-exporter
+    pid: host
+    working_dir: /working/jaeger
+    volumes:
+    - type: bind
+      source: /
+      target: /host
+      read_only: true
+  prometheus:
+    networks:
+      - jepsen
+    image: prom/prometheus
+    container_name: prometheus
+    hostname: prometheus
+    ports:
+    - 9090:9090
+    volumes:
+    - type: volume
+      source: prometheus-volume
+      target: /prometheus
+      read_only: false
+    - type: bind
+      source: $JEPSEN_ROOT/dgraph/docker/prometheus.yml
+      target: /etc/prometheus/prometheus.yml
+      read_only: true
+
+volumes:
+  grafana-volume: {}
+  prometheus-volume: {}
