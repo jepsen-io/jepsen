@@ -75,12 +75,10 @@
   nodes across the test."
   ([] (reset-time! "time.google.com"))
   ([opt]
-   (let [do-reset-time (fn [ntp-server] (c/su (c/exec :ntpdate :-b ntp-server)))]
-     (if-not opt
-       (reset-time!)
-       (if-let [nodes (:nodes opt)]
-         (c/on-nodes nodes (reset-time! (:ntp-server opt)))
-         (reset-time! opt))))))
+   (if (instance? String opt)
+     (c/su (c/exec :ntpdate :-b opt))
+     (c/with-test-nodes opt
+       (if-let [n (:ntp-server opt)] (reset-time! n) (reset-time!))))))
 
 (defn bump-time!
   "Adjusts the clock by delta milliseconds. Returns the time offset from the
