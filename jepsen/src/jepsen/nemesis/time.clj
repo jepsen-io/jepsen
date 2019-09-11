@@ -73,8 +73,14 @@
 (defn reset-time!
   "Resets the local node's clock to NTP. If a test is given, resets time on all
   nodes across the test."
-  ([]     (c/su (c/exec :ntpdate :-b "time.google.com")))
-  ([test] (c/with-test-nodes test (reset-time!))))
+  ([] (reset-time! "time.google.com"))
+  ([opt]
+   (let [do-reset-time (fn [ntp-server] (c/su (c/exec :ntpdate :-b ntp-server)))]
+     (if-not opt
+       (reset-time!)
+       (if-let [nodes (:nodes opt)]
+         (c/on-nodes nodes (reset-time! (:ntp-server opt)))
+         (reset-time! opt))))))
 
 (defn bump-time!
   "Adjusts the clock by delta milliseconds. Returns the time offset from the
@@ -113,7 +119,7 @@
     (invoke! [_ test op]
       (let [res (case (:f op)
                   :reset (c/on-nodes test (:value op) (fn [test node]
-                                                        (reset-time!)
+                                                        (reset-time! (:ntp-server test))
                                                         (current-offset)))
 
                   :check-offsets (c/on-nodes test (fn [test node]
