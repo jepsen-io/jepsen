@@ -95,7 +95,7 @@
      (for [[pkg version] pkgs]
        (when (not= version (installed-version pkg))
          (info "Installing" pkg version)
-         (c/exec :pkgin :-y :install 
+         (c/exec :pkgin :-y :install
                  (str (name pkg) "-" version)))))
 
                                         ; Install any version

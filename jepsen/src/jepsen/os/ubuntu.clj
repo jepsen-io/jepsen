@@ -38,7 +38,8 @@
                 :iproute2
                 :rsyslog
                 :sudo
-                :logrotate]))
+                :logrotate
+                :ntpdate]))
 
     (meh (net/heal! (:net test) test)))
 

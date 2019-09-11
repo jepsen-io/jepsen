@@ -172,7 +172,8 @@
                 :iproute
                 :rsyslog
                 :logrotate
-                :dirmngr])
+                :dirmngr
+                :ntpdate])
       (try+ (install [:libzip4])
             (catch [:exit 100] _
               ; Wrong package name; let's use the old one for jessie

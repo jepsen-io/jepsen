@@ -42,13 +42,15 @@
 
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
-  []
+  [test]
   (c/su
-   (try (compile-tools!)
+   (try
+     (compile-tools!)
      (catch RuntimeException e
-       (try (debian/install [:build-essential])
-         (catch RuntimeException e
-           (centos/install [:gcc])))
+       (condp = (:os test)
+         debian/os (debian/install [:build-essential])
+         centos/os (centos/install [:gcc])
+         nil)
        (compile-tools!)))))
 
 (defn parse-time
@@ -98,7 +100,7 @@
   []
   (reify nemesis/Nemesis
     (setup! [nem test]
-      (c/with-test-nodes test (install!))
+      (c/with-test-nodes test (install! test))
       ; Try to stop ntpd service in case it is present and running.
       (c/with-test-nodes test
         (try (c/su (c/exec :service :ntp :stop))

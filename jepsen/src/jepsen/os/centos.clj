@@ -151,7 +151,8 @@
                 :iptables
                 :ncurses-devel
                 :iproute
-                :logrotate]))
+                :logrotate
+                :ntpdate]))
 
     (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
