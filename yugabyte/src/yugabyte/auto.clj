@@ -165,18 +165,6 @@
         #"Not the leader"                           (retry (dec tries))
         (throw e)))))
 
-(defn check-ysql
-  "Connects to the YSQL interface and immediately disconnects. YB just...
-  doesn't accept connections sometimes, so we use this to give up on the setup
-  process if the cluster looks broken. Hack hack hack."
-  [node]
-  (try+
-    (-> node
-        ysql.client/open-conn
-        ysql.client/close-conn)
-    (catch [:type :connection-timed-out] e
-      (throw+ {:type :jepsen.db/setup-failed}))))
-
 (defn start! [db test node]
   "Start both master and tserver. Only starts master if this node is a master
   node. Waits for masters and tservers."
@@ -188,9 +176,12 @@
   (start-tserver! db test node)
   (await-tservers test)
 
-  (if (= (:api test) :ycql)
-    (yugabyte.ycql.client/await-setup node)
-    ()) ; So far it looks like we don't need that for YSQL?
+  (case (:api test)
+    :ycql
+    (ycql.client/await-setup node)
+
+    :ysql
+    (ysql.client/check-setup-successful node))
   :started)
 
 (defn stop! [db test node]
@@ -422,8 +413,7 @@
   (setup! [db test node]
     (install! db test)
     (configure! db test node)
-    (start! db test node)
-    (check-ysql node))
+    (start! db test node))
 
   (teardown! [db test node]
     (stop! db test node)

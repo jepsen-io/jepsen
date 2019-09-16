@@ -127,6 +127,18 @@
     (.close c))
   (dissoc conn :connection))
 
+(defn check-setup-successful
+  "Connects to the YSQL interface and immediately disconnects. YB just...
+  doesn't accept connections sometimes, so we use this to give up on the setup
+  process if the cluster looks broken. Hack hack hack."
+  [node]
+  (try+
+    (-> node
+        open-conn
+        close-conn)
+    (catch [:type :connection-timed-out] e
+      (throw+ {:type :jepsen.db/setup-failed}))))
+
 (defn conn-wrapper
   "Constructs a network client for a node, and opens it"
   [node]
