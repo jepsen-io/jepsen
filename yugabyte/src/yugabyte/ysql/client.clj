@@ -104,6 +104,22 @@
   (assert (not-empty coll) "Cannot create IN clause for empty values collection")
   (str "IN (" (str/join ", " coll) ")"))
 
+(defn open-conn
+  "Opens a connection to the given node."
+  [node]
+  (util/timeout default-timeout
+                (throw+ {:type :connection-timed-out
+                         :node node})
+                (util/retry 0.1
+                            (let [spec  (db-spec node)
+                                  conn  (j/get-connection spec)
+                                  spec' (j/add-connection spec conn)]
+                              (.setTransactionIsolation conn conn-isolation-level)
+                              (assert spec')
+                              (assert (= (.getTransactionIsolation conn)
+                                         conn-isolation-level))
+                              spec'))))
+
 (defn close-conn
   "Given a JDBC connection, closes it and returns the underlying spec."
   [conn]
@@ -117,19 +133,7 @@
   (rc/open!
     (rc/wrapper
       {:name  node
-       :open  (fn open []
-                (util/timeout default-timeout
-                              (throw (RuntimeException.
-                                       (str "Connection to " node " timed out")))
-                              (util/retry 0.1
-                                          (let [spec  (db-spec node)
-                                                conn  (j/get-connection spec)
-                                                spec' (j/add-connection spec conn)]
-                                            (.setTransactionIsolation conn conn-isolation-level)
-                                            (assert spec')
-                                            (assert (= (.getTransactionIsolation conn)
-                                                       conn-isolation-level))
-                                            spec'))))
+       :open  (partial open-conn node)
        :close close-conn
        :log?  true})))
 
@@ -168,7 +172,14 @@
         #"(?i)Catalog Version Mismatch"
         {:type :fail, :error [:catalog-version-mismatch m]}
 
-        ; Happens upon concurrent updates even without explicit transactions
+        ; This type of error can, on occasion, be indeterminate: the
+        ; transaction may have actually committed.
+        #"Error during commit: Operation expired: Transaction expired"
+        {:type :info, :error [:commit-transaction-expired]}
+
+        ; Happens upon concurrent updates even without explicit transactions.
+        ; I'm not sure if there are other types of "Operation Expired" errors
+        ; so I've left this here.
         #"(?i)Operation expired"
         {:type :fail, :error [:operation-expired m]}
 
@@ -273,6 +284,24 @@
                                    {:type :conn-not-ready})))
                  ~@body))
 
+(defmacro with-ddl-retry
+  "YB loves to throw all kinds of exceptions for DDL operations, like
+  encountering OID conflicts when creating multiple tables in a row, or
+  violating uniqueness constraints. This macro catches those and retries them a
+  few times, to raise our chances of running a test successfully."
+  [& body]
+  `(util/with-retry [attempts# max-retry-attempts]
+     ~@body
+     (catch org.postgresql.util.PSQLException e#
+       (let [m# (.getMessage e#)]
+         (if (or (re-find #"duplicate key value violates unique constraint" m#)
+                 (re-find #"A relation has an associated type of the same name" m#)
+                 (re-find #"Operation expired: Transaction expired" m#))
+           (do (info "Caught" m# "during DDL setup; retrying.")
+               (Thread/sleep (rand-int max-delay-between-retries-ms))
+               (~'retry (dec attempts#)))
+           (throw e#))))))
+
 (defn with-idempotent
   "Takes a predicate on operation functions, and an op, presumably resulting
   from a client call. If (idempotent? (:f op)) is truthy, remaps :info types to
@@ -366,12 +395,13 @@
     (->YSQLMyClient arg1 arg2 arg3)"
   [class-name inner-client-record]
 
-  ; Since this macro is insanely complex, I'll try to thoroughly comment what's happening here.
-  ; Good luck.
+  ; Since this macro is insanely complex, I'll try to thoroughly comment what's
+  ; happening here. Good luck.
 
-  ; First, before we start with the actual macro output, we analyze inner-client-record constructor
-  ; in order to get a grip on its arguments list.
-  ; For that we're doing a bunch of string manipulations with the inner-client-record's symbol name.
+  ; First, before we start with the actual macro output, we analyze
+  ; inner-client-record constructor in order to get a grip on its arguments
+  ; list. For that we're doing a bunch of string manipulations with the
+  ; inner-client-record's symbol name.
 
   (let [inner-ctor-ns-prefix (if (qualified-symbol? inner-client-record)
                                (str (namespace inner-client-record) "/")
@@ -381,10 +411,11 @@
         inner-ctor-args-vec  (first (:arglists inner-ctor-meta))]
 
     ; Now we're getting to the output.
-    ; We define a record with a given name extending jepsen.client/Client, which takes an
-    ; instance of inner-client (among other things) and delegates logic to it, wrapping it into
-    ; helper methods.
+    ; We define a record with a given name extending jepsen.client/Client,
+    ; which takes an instance of inner-client (among other things) and
+    ; delegates logic to it, wrapping it into helper methods.
 
+    ; KRK: why is this macro avoiding hygenic gensyms?
     `(do (defrecord ~class-name [~'conn-wrapper ~'inner-client ~'setup? ~'teardown?]
            client/Client
 
@@ -395,17 +426,16 @@
              (once-per-cluster
                ~'setup?
                (info "Running setup")
-               (with-conn
-                 [~'c ~'conn-wrapper]
-                 (setup-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper))
+               (with-ddl-retry
+                 (with-conn
+                   [~'c ~'conn-wrapper]
+                   (setup-cluster! ~'inner-client ~'test ~'c ~'conn-wrapper)))
                (info "Setup sucessful")))
 
            (invoke! [~'this ~'test ~'op]
              (let [~'start-dt (yutil/current-pretty-datetime)
-                   ~'op2 (with-errors
-                           ~'op
-                           (with-conn
-                             [~'c ~'conn-wrapper]
+                   ~'op2 (with-conn [~'c ~'conn-wrapper]
+                           (with-errors ~'op
                              (invoke-op! ~'inner-client ~'test ~'op ~'c ~'conn-wrapper)))
                    ~'op3 (assoc ~'op2 :op-timing [~'start-dt (yutil/current-pretty-datetime)])]
                ~'op3))

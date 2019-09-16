@@ -10,6 +10,8 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
+            [yugabyte [append :as append]
+                      [default-value :as default-value]]
             [yugabyte.auto :as auto]
             [yugabyte.bank :as bank]
             [yugabyte.counter :as counter]
@@ -25,6 +27,9 @@
             [yugabyte.ycql.multi-key-acid]
             [yugabyte.ycql.set]
             [yugabyte.ycql.single-key-acid]
+            [yugabyte.ysql [append :as ysql.append]
+                           [append-table :as ysql.append-table]
+                           [default-value :as ysql.default-value]]
             [yugabyte.ysql.bank]
             [yugabyte.ysql.counter]
             [yugabyte.ysql.long-fork]
@@ -91,7 +96,10 @@
          :bank-multitable (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLMultiBankClient true))
          :long-fork       (with-client long-fork/workload (yugabyte.ysql.long-fork/->YSQLLongForkClient))
          :single-key-acid (with-client single-key-acid/workload (yugabyte.ysql.single-key-acid/->YSQLSingleKeyAcidClient))
-         :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))})
+         :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))
+         :append          (with-client append/workload (ysql.append/->Client))
+         :append-table    (with-client append/workload (ysql.append-table/->Client))
+         :default-value   (with-client default-value/workload (ysql.default-value/->Client))})
 
 (def workloads
   (merge workloads-ycql workloads-ysql))
@@ -108,7 +116,10 @@
   test-all."
   (-> workload-options
       (dissoc :ycql/bank-multitable
-              :ysql/sleep)))
+              :ycql/none
+              :ysql/none
+              :ysql/sleep
+              :ysql/append-table)))
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform."
@@ -255,6 +266,8 @@
         checker  (if (is-stub-workload (:workload opts))
                    (:checker workload)
                    (checker/compose {:perf     perf
+                                     :stats    (checker/stats)
+                                     :unhandled-exceptions (checker/unhandled-exceptions)
                                      :clock    (checker/clock-plot)
                                      :workload (:checker workload)}))]
     (merge tests/noop-test

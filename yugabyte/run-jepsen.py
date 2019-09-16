@@ -46,7 +46,7 @@ SINGLE_TEST_RUN_TIME_FOR_SET_TEST = 300
 
 TEST_AND_ANALYSIS_TIMEOUT_SEC = 1200  # Includes test results analysis.
 NODES_FILE = os.path.expanduser("~/code/jepsen/nodes")
-DEFAULT_TARBALL_URL = "https://downloads.yugabyte.com/yugabyte-ce-1.2.4.0-linux.tar.gz"
+DEFAULT_TARBALL_URL = "https://downloads.yugabyte.com/yugabyte-1.3.1.0-linux.tar.gz"
 
 TESTS = [
    "single-key-acid",
@@ -71,7 +71,8 @@ NEMESES = [
     "partition-half",
     "partition-one",
     "partition-ring",
-    "partition"
+    "partition",
+    # "clock-skew",
 ]
 
 SCRIPT_DIR = os.path.abspath(os.path.dirname(sys.argv[0]))

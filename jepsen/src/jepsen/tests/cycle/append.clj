@@ -2,6 +2,7 @@
   "Detects cycles in histories where operations are transactions over named
   lists lists, and operations are either appends or reads. Used with
   jepsen.tests.cycle."
+  (:refer-clojure :exclude [test])
   (:require [jepsen [checker :as checker]
                     [generator :as gen]
                     [txn :as txn :refer [reduce-mops]]
@@ -144,6 +145,57 @@
                         :writer   writer
                         :element  (peek v)}))))))))
 
+(def unknown-prefix
+  "A marker we use in a list to identify an unknown prefix."
+  '...)
+
+(defn op-internal-case
+  "Given an op, returns a map describing internal consistency violations, or
+  nil otherwise. Our maps are:
+
+      {:op        The operation which went wrong
+       :mop       The micro-operation which went wrong
+       :expected  The state we expected to observe. Either a definite list
+                  like [1 2 3] or a postfix like ['... 3]}"
+  [op]
+  ; We maintain a map of keys to expected states.
+  (->> (:value op)
+       (reduce (fn [[state error] [f k v :as mop]]
+                 (case f
+                   :append [(assoc! state k
+                                    (conj (get state k [unknown-prefix]) v))
+                            error]
+                   :r      (let [s (get state k)]
+                             (if (and s ; We have an expected state
+                                      (if (= unknown-prefix (first s))
+                                        ; We don't know the prefix.
+                                        (let [i (- (inc (count v)) (count s))]
+                                          (or (neg? i) ; Bounds check
+                                              (not= (subvec s 1) ; Postfix =
+                                                    (subvec v i))))
+                                        ; We do know the full state for k
+                                        (not= s v)))
+                               ; Not equal!
+                               (reduced [state
+                                         {:op       op
+                                          :mop      mop
+                                          :expected s}])
+                               ; OK, or we just don't know
+                               [(assoc! state k v) error]))))
+               [(transient {}) nil])
+       second))
+
+(defn internal-cases
+  "Given a history, finds operations which exhibit internal consistency
+  violations: e.g. some read [:r k v] in the transaction fails to observe a v
+  consistent with that transaction's previous append operations, including
+  whatever (initially unknown) state k began with."
+  [history]
+  (->> history
+       (filter op/ok?)
+       (keep op-internal-case)
+       seq))
+
 (defn prefix?
   "Given two sequences, returns true iff A is a prefix of B."
   [a b]
@@ -268,7 +320,7 @@
   [history]
   (->> history
        op-mops
-       (keep (fn [[op [f k v :as mop]]]
+       (keep (fn check-op [[op [f k v :as mop]]]
                  (when (= f :r)
                    (let [dups (->> (frequencies v)
                                    (filter (comp (partial < 1) val))
@@ -859,6 +911,7 @@
          (let [history       (remove (comp #{:nemesis} :process) history)
                g1a           (when (:G1a anomalies) (g1a-cases history))
                g1b           (when (:G1b anomalies) (g1b-cases history))
+               internal      (internal-cases history)
                dups          (duplicates history)
                sorted-values (sorted-values history)
                incmp-order   (incompatible-orders sorted-values)
@@ -867,6 +920,7 @@
                anomalies (cond-> cycles
                            dups         (assoc :duplicate-elements dups)
                            incmp-order  (assoc :incompatible-order incmp-order)
+                           internal     (assoc :internal internal)
                            (seq g1a)    (assoc :G1a g1a)
                            (seq g1b)    (assoc :G1b g1b))]
            (if (empty? anomalies)
@@ -874,3 +928,100 @@
              {:valid?         false
               :anomaly-types  (sort (keys anomalies))
               :anomalies      anomalies})))))))
+
+(defn wr-txns
+  "A lazy sequence of write and read transactions over a pool of n numeric
+  keys; every write is unique per key. Options:
+
+    :key-count            Number of distinct keys at any point
+    :min-txn-length       Minimum number of operations per txn
+    :max-txn-length       Maximum number of operations per txn
+    :max-writes-per-key   Maximum number of operations per key"
+  ([opts]
+   (wr-txns opts {:active-keys (vec (range (:key-count opts 2)))}))
+  ([opts state]
+   (lazy-seq
+     (let [min-length           (:min-txn-length opts 1)
+           max-length           (:max-txn-length opts 2)
+           max-writes-per-key   (:max-writes-per-key opts 32)
+           key-count            (:key-count opts 2)
+           length               (+ min-length (rand-int (- (inc max-length)
+                                                           min-length)))
+           [txn state] (loop [length  length
+                              txn     []
+                              state   state]
+                         (let [active-keys (:active-keys state)]
+                           (if (zero? length)
+                             ; All done!
+                             [txn state]
+                             ; Add an op
+                             (let [f (rand-nth [:r :w])
+                                   k (rand-nth active-keys)
+                                   v (when (= f :w) (get state k 1))]
+                               (if (and (= :w f)
+                                        (< max-writes-per-key v))
+                                 ; We've updated this key too many times!
+                                 (let [i  (.indexOf active-keys k)
+                                       k' (inc (reduce max active-keys))
+                                       state' (update state :active-keys
+                                                      assoc i k')]
+                                   (recur length txn state'))
+                                 ; Key is valid, OK
+                                 (let [state' (if (= f :w)
+                                                (assoc state k (inc v))
+                                                state)]
+                                   (recur (dec length)
+                                          (conj txn [f k v])
+                                          state')))))))]
+       (cons txn (wr-txns opts state))))))
+
+(defn append-txns
+  "Like wr-txns, we just rewrite writes to be appends."
+  [opts]
+  (->> (wr-txns opts)
+       (map (partial mapv (fn [[f k v]] [(case f :w :append f) k v])))))
+
+(defn gen
+	"A generator for operations where values are transactions made up of reads
+  and appends to various integer keys. Takes options:
+
+    :key-count            Number of distinct keys at any point
+    :min-txn-length       Minimum number of operations per txn
+    :max-txn-length       Maximum number of operations per txn
+    :max-writes-per-key   Maximum number of operations per key
+
+ For defaults, see wr-txns."
+  ([]
+   (gen {}))
+  ([opts]
+   (->> (append-txns opts)
+        (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
+        gen/seq)))
+
+(defn test
+  "A partial test, including a generator and checker. You'll need to provide a
+  client which can understand operations of the form:
+
+      {:type :invoke, :f :txn, :value [[:r 3 nil] [:append 3 2] [:r 3]]}
+
+  and return completions like:
+
+      {:type :invoke, :f :txn, :value [[:r 3 [1]] [:append 3 2] [:r 3 [1 2]]]}
+
+  where the key 3 identifies some list, whose value is initially [1], and
+  becomes [1 2].
+
+  Options are:
+
+      :key-count            Number of distinct keys at any point
+      :min-txn-length       Minimum number of operations per txn
+      :max-txn-length       Maximum number of operations per txn
+      :max-writes-per-key   Maximum number of operations per key
+      :anomalies            A list (e.g. [:G-single]) of anomalies to check for
+      :additional-graphs    A list of functions constructing graphs over txns
+                            (e.g. [cycle/realtime-graph])
+
+  For defaults, see wr-txns."
+  [opts]
+  {:generator (gen opts)
+   :checker   (checker opts)})

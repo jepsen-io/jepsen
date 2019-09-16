@@ -7,14 +7,21 @@
   "A default test map."
   {})
 
+(defn n+nemesis-context
+  "A context with n numeric worker threads and one nemesis."
+  [n]
+  {:time 0
+   :free-threads (into #{:nemesis} (range n))
+   :workers (->> (range n)
+                 (cons :nemesis)
+                 (map (partial repeat 2))
+                 (map vec)
+                 (into {}))})
+
 (def default-context
   "A default initial context for running these tests. Two worker threads, one
   nemesis."
-  {:time 0
-   :free-threads #{0 1 :nemesis}
-   :workers {0 0
-             1 1
-             :nemesis :nemesis}})
+  (n+nemesis-context 2))
 
 (defn invocations
   "Only invokes, not returns"
@@ -25,87 +32,93 @@
   "Simulates the series of ops obtained from a generator where the
   system executes every operation perfectly, immediately, and with zero
   latency."
-  [gen]
-  (loop [ops []
-         gen (gen/validate gen)
-         ctx default-context]
-    (let [[invocation gen] (gen/op gen default-test ctx)]
-      (condp = invocation
-        nil ops ; Done!
+  ([gen]
+   (quick-ops default-context gen))
+  ([ctx gen]
+   (loop [ops []
+          gen (gen/validate gen)
+          ctx ctx]
+     (let [[invocation gen] (gen/op gen default-test ctx)]
+       (condp = invocation
+         nil ops ; Done!
 
-        :pending (assert false "Uh, we're not supposed to be here")
+         :pending (assert false "Uh, we're not supposed to be here")
 
-        (let [; Advance clock
-              ctx'       (update ctx :time max (:time invocation))
-              ; Update generator
-              gen'       (gen/update gen default-test ctx' invocation)
-              ; Pretend to do operation
-              completion (assoc invocation :type :ok)
-              ; Advance clock to completion
-              ctx''      (update ctx' :time max (:time completion))
-              ; And update generator
-              gen''      (gen/update gen' default-test ctx'' completion)]
-          (recur (conj ops invocation completion)
-                 gen''
-                 ctx''))))))
+         (let [; Advance clock
+               ctx'       (update ctx :time max (:time invocation))
+               ; Update generator
+               gen'       (gen/update gen default-test ctx' invocation)
+               ; Pretend to do operation
+               completion (assoc invocation :type :ok)
+               ; Advance clock to completion
+               ctx''      (update ctx' :time max (:time completion))
+               ; And update generator
+               gen''      (gen/update gen' default-test ctx'' completion)]
+           (recur (conj ops invocation completion)
+                  gen''
+                  ctx'')))))))
 
 (defn quick
   "Like quick-ops, but returns just invocations."
-  [gen]
-  (invocations (quick-ops gen)))
+  ([gen]
+   (quick default-context gen))
+  ([ctx gen]
+   (invocations (quick-ops ctx gen))))
 
 (defn simulate
   "Simulates the series of operations obtained from a generator, given a
   function that takes ops and returns their completions."
-  [gen complete-fn]
-  (loop [ops        []
-         in-flight  [] ; Kept sorted by time
-         gen        (gen/validate gen)
-         ctx        default-context]
-    (let [[invoke gen'] (gen/op gen default-test ctx)]
-      ;(prn :invoke invoke :in-flight in-flight)
-      (if (nil? invoke)
-        ; We're done
-        (into ops in-flight)
+  ([gen complete-fn]
+   (simulate default-context gen complete-fn))
+  ([ctx gen complete-fn]
+   (loop [ops        []
+          in-flight  [] ; Kept sorted by time
+          gen        (gen/validate gen)
+          ctx        ctx]
+     (let [[invoke gen'] (gen/op gen default-test ctx)]
+       ;(prn :invoke invoke :in-flight in-flight)
+       (if (nil? invoke)
+         ; We're done
+         (into ops in-flight)
 
-        ; TODO: the order of updates for worker maps here isn't correct; fix
-        ; it.
-        (if (and (not= :pending invoke)
-                 (or (empty? in-flight)
-                     (<= (:time invoke) (:time (first in-flight)))))
+         ; TODO: the order of updates for worker maps here isn't correct; fix
+         ; it.
+         (if (and (not= :pending invoke)
+                  (or (empty? in-flight)
+                      (<= (:time invoke) (:time (first in-flight)))))
 
-          ; We have an invocation that's not pending, and that invocation is
-          ; before every in-flight completion
-          (let [thread    (gen/process->thread ctx (:process invoke))
-                ; Advance clock, mark thread as free
-                ctx       (-> ctx
-                              (update :time max (:time invoke))
-                              (update :free-threads disj thread))
-                ; Update the generator with this invocation
-                gen'      (gen/update gen' default-test ctx invoke)
-                ; Add the completion to the in-flight set
-                ;_         (prn :invoke invoke)
-                complete  (complete-fn invoke)
-                in-flight (sort-by :time (conj in-flight complete))]
-            (recur (conj ops invoke) in-flight gen' ctx))
+           ; We have an invocation that's not pending, and that invocation is
+           ; before every in-flight completion
+           (let [thread    (gen/process->thread ctx (:process invoke))
+                 ; Advance clock, mark thread as free
+                 ctx       (-> ctx
+                               (update :time max (:time invoke))
+                               (update :free-threads disj thread))
+                 ; Update the generator with this invocation
+                 gen'      (gen/update gen' default-test ctx invoke)
+                 ; Add the completion to the in-flight set
+                 ;_         (prn :invoke invoke)
+                 complete  (complete-fn invoke)
+                 in-flight (sort-by :time (conj in-flight complete))]
+             (recur (conj ops invoke) in-flight gen' ctx))
 
-          ; We need to complete something before we can apply the next
-          ; invocation.
-          (let [op     (first in-flight)
-                _      (assert op "generator pending and nothing in flight???")
-                thread (gen/process->thread ctx (:process op))
-                ; Advance clock, mark thread as free
-                ctx    (-> ctx
-                           (update :time max (:time op))
-                           (update :free-threads conj thread))
-                ; Update generator with completion
-                gen'   (gen/update gen default-test ctx op)
-                ; Update worker mapping if this op crashed
-                ctx    (if (or (= :nemesis thread) (not= :info (:type op)))
-                         ctx
-                         (update ctx :workers
-                                 assoc thread (gen/next-process ctx thread)))]
-            (recur (conj ops op) (rest in-flight) gen' ctx)))))))
+           ; We need to complete something before we can apply the next
+           ; invocation.
+           (let [op     (first in-flight)
+                 _      (assert op "generator pending and nothing in flight???")
+                 thread (gen/process->thread ctx (:process op))
+                 ; Advance clock, mark thread as free
+                 ctx    (-> ctx
+                            (update :time max (:time op))
+                            (update :free-threads conj thread))
+                 ; Update generator with completion
+                 gen'   (gen/update gen default-test ctx op)
+                 ; Update worker mapping if this op crashed
+                 ctx    (if (or (= :nemesis thread) (not= :info (:type op)))
+                          ctx
+                          (update ctx :workers
+                                  assoc thread (gen/next-process ctx thread)))]
+             (recur (conj ops op) (rest in-flight) gen' ctx))))))))
 
 (def perfect-latency
   "How long perfect operations take"
@@ -115,24 +128,28 @@
   "Simulates the series of ops obtained from a generator where the system
   executes every operation successfully in 10 nanoseconds. Returns only
   invocations."
-  [gen]
-  (invocations
-    (simulate gen
-              (fn [invoke]
-                (-> invoke
-                    (assoc :type :ok)
-                    (update :time + perfect-latency))))))
+  ([gen]
+   (perfect default-context gen))
+  ([ctx gen]
+   (invocations
+     (simulate ctx gen
+               (fn [invoke]
+                 (-> invoke
+                     (assoc :type :ok)
+                     (update :time + perfect-latency)))))))
 
 (defn perfect-info
   "Simulates the series of ops obtained from a generator where every operation
   crashes with :info in 10 nanoseconds. Returns only invocations."
-  [gen]
-  (invocations
-    (simulate gen
-              (fn [invoke]
-                (-> invoke
-                    (assoc :type :info)
-                    (update :time + perfect-latency))))))
+  ([gen]
+   (perfect-info default-context gen))
+  ([ctx gen]
+   (invocations
+     (simulate ctx gen
+               (fn [invoke]
+                 (-> invoke
+                     (assoc :type :info)
+                     (update :time + perfect-latency)))))))
 
 (deftest nil-test
   (is (= [] (perfect nil))))
@@ -376,4 +393,43 @@
               perfect-info
               (map (juxt :process :value))))))
 
+(defn integers
+  "A sequence of maps with :value 0, 1, 2, ..., and any other kv pairs."
+  [& kv-pairs]
+  (->> (range)
+       (map (fn [x] (apply hash-map :value x kv-pairs)))
+       (map gen/once)))
 
+(deftest reserve-test
+  (let [as (integers :f :a)
+        bs (integers :f :b)
+        cs (integers :f :c)]
+    (testing "only a default"
+      (is (= [{:f :a, :process 0, :time 0, :type :invoke, :value 0}
+              {:f :a, :process 1, :time 0, :type :invoke, :value 1}
+              {:f :a, :process :nemesis, :time 0, :type :invoke, :value 2}]
+             (->> (gen/reserve as)
+                  (gen/limit 3)
+                  perfect))))
+
+    (testing "three ranges"
+      (is (= [{:f :c, :process :nemesis, :time 0, :type :invoke, :value 0}
+              {:f :c, :process 5, :time 0, :type :invoke, :value 1}
+              {:f :a, :process 0, :time 0, :type :invoke, :value 0}
+              {:f :a, :process 1, :time 0, :type :invoke, :value 1}
+              {:f :b, :process 4, :time 0, :type :invoke, :value 0}
+              {:f :b, :process 3, :time 0, :type :invoke, :value 1}
+              {:f :b, :process 2, :time 0, :type :invoke, :value 2}
+              {:f :b, :process 2, :time 10, :type :invoke, :value 3}
+              {:f :b, :process 3, :time 10, :type :invoke, :value 4}
+              {:f :b, :process 4, :time 10, :type :invoke, :value 5}
+              {:f :a, :process 1, :time 10, :type :invoke, :value 2}
+              {:f :a, :process 0, :time 10, :type :invoke, :value 3}
+              {:f :c, :process 5, :time 10, :type :invoke, :value 2}
+              {:f :c, :process :nemesis, :time 10, :type :invoke, :value 3}
+              {:f :c, :process :nemesis, :time 20, :type :invoke, :value 4}]
+             (->> (gen/reserve 2 as
+                               3 bs
+                               cs)
+                  (gen/limit 15)
+                  (perfect (n+nemesis-context 6))))))))

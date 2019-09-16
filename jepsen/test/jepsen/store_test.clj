@@ -5,11 +5,14 @@
         jepsen.store)
   (:require [clojure.data.fressian :as fress]
             [clojure.string :as str]
+            [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.core-test :as core-test]
             [jepsen.core :as core]
             [multiset.core :as multiset]
             [jepsen.tests :refer [noop-test]])
   (:import (org.fressian.handlers WriteHandler ReadHandler)))
+
+(use-fixtures :once quiet-logging)
 
 (defrecord Kitten [fuzz mew])
 

@@ -222,7 +222,12 @@
                | :awk "{print $2}"
                | :xargs :--no-run-if-empty :kill (str "-" signal))
          (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
-           nil))))
+           nil)
+         (catch [:type :jepsen.control/nonzero-exit, :exit 123] e
+           (if (re-find #"No such process" (:err e))
+             ; Ah, process already exited
+             nil
+             (throw+ e))))))
 
 (defn start-daemon!
   "Starts a daemon process, logging stdout and stderr to the given file.

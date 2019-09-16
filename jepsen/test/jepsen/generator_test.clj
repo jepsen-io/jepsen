@@ -2,9 +2,12 @@
   (:use clojure.test
         clojure.pprint
         clojure.tools.logging)
-  (:require [jepsen.generator :as gen]
+  (:require [jepsen [common-test :refer [quiet-logging]]
+                    [generator :as gen]]
             [tea-time [core :as tt]]
             [clojure.set :as set]))
+
+(use-fixtures :once quiet-logging)
 
 (def nodes [:a :b :c :d :e])
 (def a-test {:nodes nodes})

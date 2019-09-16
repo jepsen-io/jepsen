@@ -17,7 +17,6 @@
                       DgraphClient
                       DgraphAsyncClient
                       Transaction
-                      DgraphProto$Assigned
                       DgraphProto$Mutation
                       DgraphProto$Response
                       DgraphProto$Operation
@@ -188,9 +187,8 @@
               (retry (dec i)))
             (throw e)))))))
 
-(defn ^DgraphProto$Assigned mutate!*
-  "Takes a mutation object and applies it to a transaction. Returns an
-  Assigned."
+(defn ^DgraphProto$Response mutate!*
+  "Takes a mutation object and applies it to a transaction. Returns a Response."
   [^Transaction txn mut]
   ;(info "Mutate:" mut)
   (.mutate txn (.. (DgraphProto$Mutation/newBuilder)
@@ -203,7 +201,7 @@
   (t/with-trace "client.mutate"
     (.getUidsMap (mutate!* txn mut))))
 
-(defn ^DgraphProto$Assigned set-nquads!*
+(defn ^DgraphProto$Response set-nquads!*
   "Takes a transaction and an n-quads string, and adds those set mutations to
   the transaction."
   [^Transaction txn nquads]
