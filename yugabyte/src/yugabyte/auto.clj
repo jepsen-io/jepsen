@@ -12,8 +12,9 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
-            [yugabyte.ycql.client]
-            [yugabyte.ysql.client])
+            [yugabyte.ycql.client :as ycql.client]
+            [yugabyte.ysql.client :as ysql.client]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import jepsen.os.debian.Debian
            jepsen.os.centos.CentOS))
 
@@ -46,6 +47,7 @@
 
 (defprotocol Auto
   (install!       [db test])
+  (configure!     [db test node])
   (start-master!  [db test node])
   (start-tserver! [db test node])
   (stop-master!   [db])
@@ -138,8 +140,8 @@
 (defn await-tservers
   "Waits until all tservers for a test are online, according to this node."
   [test]
-  (dt/with-retry [tries 20]
-    (when (< 0 tries 20)
+  (dt/with-retry [tries 60]
+    (when (< 0 tries)
       (info "Waiting for tservers to come online")
       (Thread/sleep 1000))
 
@@ -174,9 +176,12 @@
   (start-tserver! db test node)
   (await-tservers test)
 
-  (if (= (:api test) :ycql)
-    (yugabyte.ycql.client/await-setup node)
-    ()) ; So far it looks like we don't need that for YSQL?
+  (case (:api test)
+    :ycql
+    (ycql.client/await-setup node)
+
+    :ysql
+    (ysql.client/check-setup-successful node))
   :started)
 
 (defn stop! [db test node]
@@ -189,7 +194,7 @@
 (defn signal!
   "Sends a signal to a named process by signal number or name."
   [process-name signal]
-  (meh (c/exec :pkill :--signal signal process-name))
+  (meh (c/su (c/exec :pkill :--signal signal process-name)))
   :signaled)
 
 (defn kill!
@@ -266,27 +271,22 @@
 (def ce-tserver-logfile (str ce-tserver-log-dir "/stdout"))
 (def ce-tserver-pidfile (str dir "/tserver.pid"))
 
-(def postgres-bin       (str dir "/postgres/bin/postgres"))
-
 (defn ce-shared-opts
   "Shared options for both master and tserver"
   [node]
   [; Data files!
    :--fs_data_dirs         ce-data-dir
-
    ; Limit memory to 2GB
    :--memory_limit_hard_bytes 2147483648
-
    ; Fewer shards to improve perf
    :--yb_num_shards_per_tserver 4
-
    ; YB can do weird things with loopback interfaces, so... bind explicitly
    :--rpc_bind_addresses (cn/ip node)
-
    ; Seconds before declaring an unavailable node dead and initiating a raft
    ; membership change
-   ;:--follower_unavailable_considered_failed_sec 10)
-
+   ;:--follower_unavailable_considered_failed_sec 10
+   ; Clock skew threshold
+   ; :--max_clock_skew_usec 1
    ; Disable YugaByte call-home analytics
    :--callhome_enabled=false
    ])
@@ -316,6 +316,12 @@
    :--rpc_connection_timeout_ms                   1500
    ])
 
+(def limits-conf
+  "Ulimits, in the format for /etc/security/limits.conf."
+  "
+* hard nofile 1048576
+* soft nofile 1048576")
+
 (defrecord YugaByteDB
   []
   Auto
@@ -340,6 +346,15 @@
                       (c/exec :echo url :>> installed-url-file)
                       (info "Done with setup")))))))
 
+  (configure! [db test node]
+    ; YB will explode after creating just a handful of tables if we don't raise
+    ; ulimits. This is sort of a hack; it won't take effect for the current
+    ; session, but will on the second and subsequent runs. We can't run
+    ; `ulimit` directly because the shell context doesn't carry over to
+    ; subsequent commands. Should write a subshell exec thing to handle this at
+    ; some point.
+    (c/su (c/exec :echo limits-conf :> "/etc/security/limits.d/jepsen.conf")))
+
   (start-master! [db test node]
     (c/su (c/exec :mkdir :-p ce-master-log-dir)
           (cu/start-daemon!
@@ -356,7 +371,8 @@
             )))
 
   (start-tserver! [db test node]
-    (c/su (c/exec :mkdir :-p ce-tserver-log-dir)
+    (c/su (info "ulimit\n" (c/exec :ulimit :-a))
+          (c/exec :mkdir :-p ce-tserver-log-dir)
           (cu/start-daemon!
             {:logfile ce-tserver-logfile
              :pidfile ce-tserver-pidfile
@@ -388,7 +404,7 @@
 
   (stop-tserver! [db]
     (c/su (cu/stop-daemon! ce-tserver-bin ce-tserver-pidfile))
-    (c/su (cu/grepkill! postgres-bin)))
+    (c/su (cu/grepkill! "postgres")))
 
   (wipe! [db]
     (c/su (c/exec :rm :-rf ce-data-dir)))
@@ -396,6 +412,7 @@
   db/DB
   (setup! [db test node]
     (install! db test)
+    (configure! db test node)
     (start! db test node))
 
   (teardown! [db test node]

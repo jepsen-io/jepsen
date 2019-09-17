@@ -2,13 +2,65 @@
   (:refer-clojure :exclude [set])
   (:use jepsen.checker
         clojure.test)
-  (:require [knossos [history :as history]
+  (:require [clojure.datafy :refer [datafy]]
+            [knossos [history :as history]
              [model :as model]
              [core :refer [ok-op invoke-op fail-op]]
              [op :as op]]
             [multiset.core :as multiset]
             [jepsen.checker.perf :as cp]
             [jepsen.util :as util]))
+
+(deftest unhandled-exceptions-test
+  (let [e1 (datafy (IllegalArgumentException. "bad args"))
+        e2 (datafy (IllegalArgumentException. "bad args 2"))
+        e3 (datafy (IllegalStateException. "bad state"))]
+  (is (= {:valid? true
+          :exceptions
+          [{:class 'java.lang.IllegalArgumentException
+            :count 2
+            :example {:process 0, :type :info, :f :foo, :value 1,
+                      :exception e1
+                      :error ["Whoops!"]}}
+           {:class 'java.lang.IllegalStateException
+            :example {:process 0, :type :info, :f :foo, :value 1,
+                      :exception e3, :error :oh-no}
+            :count 1}]}
+         (check (unhandled-exceptions) nil
+                [{:process 0, :type :invoke, :f :foo, :value 1}
+                 {:process 0, :type :info,   :f :foo, :value 1,
+                  :exception e1, :error ["Whoops!"]}
+                 {:process 0, :type :invoke, :f :foo, :value 1}
+                 {:process 0, :type :info,   :f :foo, :value 1,
+                  :exception e2, :error ["Whoops!" 2]}
+                 {:process 0, :type :invoke, :f :foo, :value 1}
+                 {:process 0, :type :info,   :f :foo, :value 1,
+                  :exception e3, :error :oh-no}]
+                {})))))
+
+(deftest stats-test
+  (is (= {:valid? false
+          :count      5
+          :fail-count 3
+          :info-count 1
+          :ok-count   1
+          :by-f {:foo {:valid?      true
+                       :count       2
+                       :ok-count    1
+                       :fail-count  1
+                       :info-count  0}
+                 :bar {:valid?      false
+                       :count       3
+                       :ok-count    0
+                       :fail-count  2
+                       :info-count  1}}}
+         (check (stats) nil
+                [{:f :foo, :type :ok}
+                 {:f :foo, :type :fail}
+                 {:f :bar, :type :info}
+                 {:f :bar, :type :fail}
+                 {:f :bar, :type :fail}]
+                {}))))
 
 (deftest queue-test
   (testing "empty"

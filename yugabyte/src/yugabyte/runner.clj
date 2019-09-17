@@ -96,6 +96,9 @@
    [nil "--version VERSION" "What version of Yugabyte to install"
     :default "1.3.1.0"]
 
+   [nil "--table-count INT" "Number of tables to spread rows across."
+    :default 5]
+
    [nil "--url URL" "URL to Yugabyte tarball to install, has precedence over --version"
     :default nil]
 

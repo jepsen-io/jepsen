@@ -144,6 +144,7 @@
     ; TODO: we should do internal consistency checks here as well--see G1a and
     ; G1b.
 
+
     (testing "G1c: circular information flow"
       ; G0 is a special case of G1c, so for G1c we'll construct a cycle with a
       ; ww dependency on x and a wr dependency on y. The second transaction
@@ -233,10 +234,74 @@
     (let [t1 (op "ax1rx1ax2")]
       (is (= [] (g1b-cases [t1]))))))
 
+(deftest internal-cases-test
+  (testing "empty"
+    (is (= nil (internal-cases []))))
+
+  (testing "good"
+    (is (= nil (internal-cases [{:type :ok, :value [[:r :y [5 6]]
+                                                   [:append :x 3]
+                                                   [:r :x [1 2 3]]
+                                                   [:append :x 4]
+                                                   [:r :x [1 2 3 4]]]}]))))
+
+  (testing "read-append-read"
+    (let [stale      {:type :ok, :value [[:r :x [1 2]]
+                                         [:append :x 3]
+                                         [:r :x [1 2]]]}
+          bad-prefix {:type :ok, :value [[:r :x [1 2]]
+                                         [:append :x 3]
+                                         [:r :x [0 2 3]]]}
+          extension  {:type :ok, :value [[:r :x [1 2]]
+                                         [:append :x 3]
+                                         [:r :x [1 2 3 4]]]}
+          short-read {:type :ok, :value [[:r :x [1 2]]
+                                         [:append :x 3]
+                                         [:r :x [1]]]}]
+    (is (= [{:op stale
+             :mop [:r :x [1 2]]
+             :expected [1 2 3]}
+            {:op bad-prefix
+             :mop [:r :x [0 2 3]]
+             :expected [1 2 3]}
+            {:op extension
+             :mop [:r :x [1 2 3 4]]
+             :expected [1 2 3]}
+            {:op short-read
+             :mop [:r :x [1]]
+             :expected [1 2 3]}]
+           (internal-cases [stale bad-prefix extension short-read])))))
+
+  (testing "append-read"
+    (let [disagreement {:type :ok, :value [[:append :x 3]
+                                         [:r :x [1 2 3 4]]]}
+          short-read {:type :ok, :value [[:append :x 3]
+                                         [:r :x []]]}]
+    (is (= [{:op disagreement
+             :mop [:r :x [1 2 3 4]]
+             :expected ['... 3]}
+            {:op short-read
+             :mop [:r :x []]
+             :expected ['... 3]}]
+           (internal-cases [disagreement short-read])))))
+
+  (testing "FaunaDB example"
+    (let [h [{:type :invoke, :f :txn, :value [[:append 0 6] [:r 0 nil]]
+              :process 1, :index 20}
+             {:type :ok, :f :txn, :value [[:append 0 6] [:r 0 nil]]
+              :process 1, :index 21}]]
+      (is (= [{:expected '[... 6],
+               :mop [:r 0 nil],
+               :op {:f :txn,
+                    :index 21,
+                    :process 1,
+                    :type :ok,
+                    :value [[:append 0 6] [:r 0 nil]]}}]
+              (internal-cases h))))))
+
 (deftest checker-test
   (let [c (fn [checker-opts history]
             (checker/check (checker checker-opts) nil history nil))]
-
     (testing "G0"
       (let [; A pure write cycle: x => t1, t2; but y => t2, t1
             t1 (op "ax1ay1")
@@ -398,6 +463,16 @@
                                                   :mop [:r :x [1 2 1]]
                                                   :duplicates {1 2}}]
                             :G1c ["Let:\n  T1 = {:type :ok, :value [[:append :x 2] [:append :y 1]]}\n  T2 = {:type :ok, :value [[:append :x 1] [:r :y [1]]]}\n\nThen:\n  - T1 < T2, because T2 observed T1's append of 1 to key :y.\n  - However, T2 < T1, because T1 appended 2 after T2 appended 1 to :x: a contradiction!"]}}
+               (c {:anomalies [:G1]} h)))))
+
+    (testing "internal consistency violation"
+      (let [t1 (op "ax3rx1234")
+            h  [t1]]
+        (is (= {:valid? false
+                :anomaly-types [:internal]
+                :anomalies {:internal [{:op t1
+                                        :mop [:r :x [1 2 3 4]]
+                                        :expected '[... 3]}]}}
                (c {:anomalies [:G1]} h)))))))
 
 (deftest merge-order-test

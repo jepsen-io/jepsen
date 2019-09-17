@@ -1,7 +1,10 @@
 (ns jepsen.control
-  "Provides SSH control over a remote node. There's a lot of dynamically bound
+  "Provides control over a remote node. There's a lot of dynamically bound
   state in this namespace because we want to make it as simple as possible for
-  scripts to open connections to various nodes."
+  scripts to open connections to various nodes.
+
+  Note that a whole bunch of this namespace refers to things as 'ssh',
+  although they really can apply to any remote, not just SSH."
   (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap with-thread-name]]
@@ -11,10 +14,30 @@
             [clojure.tools.logging :refer [warn info debug error]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
+
+(defprotocol Remote
+  (connect [this host]
+    "Set up the remote to work with a particular node. Returns a Remote which
+    is ready to accept actions via `execute!` and `upload!` and `download!`.")
+  (disconnect! [this]
+    "Disconnect a remote that has been connected to a host.")
+  (execute! [this action]
+    "Execute the specified action in a remote connected a host.")
+  (upload! [this local-paths remote-path rest]
+    "Copy the specified local-path to the remote-path on the connected host.
+    The `rest` argument is a sequence of additional arguments to be
+    interpreted by the underlying implementation; for example, with a clj-ssh
+    remote, these args are the remainder args to `scp-to`.")
+  (download! [this remote-paths local-path rest]
+    "Copy the specified remote-paths to the local-path on the connected host.
+    The `rest` argument is a sequence of additional arguments to be
+    interpreted by the underlying implementation; for example, with a clj-ssh
+    remote, these args are the remainder args to `scp-from`."))
+
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
 (def ^:dynamic *host*     "Current hostname"                nil)
-(def ^:dynamic *session*  "Current clj-ssh session wrapper" nil)
+(def ^:dynamic *session*  "Current control session wrapper" nil)
 (def ^:dynamic *trace*    "Shall we trace commands?"        false)
 (def ^:dynamic *dir*      "Working directory"               "/")
 (def ^:dynamic *sudo*     "User to sudo to"                 nil)
@@ -24,6 +47,7 @@
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
 (def ^:dynamic *retries*  "How many times to retry conns"   5)
+
 
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
@@ -148,11 +172,11 @@
   (with-retry [tries *retries*]
     (when (nil? *session*)
       (throw+ (merge {:type ::no-session-available
-                      :message "Unable to perform an SSH action because no SSH session for this host is available."}
+                      :message "Unable to perform a control action because no session for this host is available."}
                      (debug-data))))
 
     (rc/with-conn [s *session*]
-      (assoc (ssh/ssh s action)
+      (assoc (execute! s action)
              :host   *host*
              :action action))
     (catch com.jcraft.jsch.JSchException e
@@ -190,7 +214,7 @@
   [current-path node-path]
   (warn "scp* is deprecated: use (upload current-path node-path) instead.")
   (rc/with-conn [s *session*]
-    (ssh/scp-to *session* current-path node-path)))
+    (upload! s current-path node-path [])))
 
 (defn file->path
   "Takes an object, if it's an instance of java.io.File, gets the path, otherwise
@@ -209,7 +233,7 @@
       (let [local-paths (if (sequential? local-paths)
                           (map file->path local-paths)
                           (file->path local-paths))]
-        (apply ssh/scp-to s local-paths remote-path remaining)
+        (upload! s local-paths remote-path remaining)
         remote-path))
     (catch com.jcraft.jsch.JSchException e
       (if (and (pos? tries)
@@ -223,10 +247,10 @@
 (defn download
   "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from.
   Retres failures."
-  [& args]
+  [& [remote-paths local-path & remaining]]
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
-      (apply ssh/scp-from s args))
+      (download! s remote-paths local-path remaining))
     (catch clojure.lang.ExceptionInfo e
       (if (and (pos? tries)
                (re-find #"disconnect error" (.getMessage e)))
@@ -306,29 +330,57 @@
                         :strict-host-key-checking *strict-host-key-checking*})
       (ssh/connect))))
 
+
+(defrecord SSHRemote [session]
+  Remote
+  (connect [this host]
+    (assoc this :session (if *dummy*
+                           {:dummy true}
+                           (try+
+                            (clj-ssh-session host)
+                            (catch com.jcraft.jsch.JSchException _
+                              (throw+ (merge {:type ::session-error
+                                              :message "Error opening SSH session. Verify username, password, and node hostnames are correct."
+                                              :host host}
+                                             (debug-data))))))))
+
+  (disconnect! [_]
+    (when-not (:dummy session) (ssh/disconnect session)))
+
+  (execute! [_ action]
+    (when-not (:dummy session) (ssh/ssh session action)))
+
+  (upload! [_ local-paths remote-path rest]
+    (when-not (:dummy session)
+      (apply ssh/scp-to session local-paths remote-path rest)))
+
+  (download! [_ remote-paths local-path rest]
+    (when-not (:dummy session)
+      (apply ssh/scp-from session remote-paths local-path rest))))
+
+(def ssh "A remote that does things via clj-ssh." (SSHRemote. nil))
+
+(def ^:dynamic *remote* "The remote to use for remote control actions." ssh)
+
 (defn session
-  "Wraps clj-ssh-session in a wrapper for reconnection."
+  "Wraps control session in a wrapper for reconnection."
   [host]
-  (rc/open!
-   (rc/wrapper {:open  (if *dummy*
-                         (fn [] [:dummy host])
-                         (fn [] (try+
-                                  (clj-ssh-session host)
-                                  (catch com.jcraft.jsch.JSchException _
-                                    (throw+ (merge {:type ::session-error
-                                                    :message "Error opening SSH session. Verify username, password, and node hostnames are correct."
-                                                    :host host}
-                                                   (debug-data)))))))
-                :name  [:control host]
-                :close (if *dummy*
-                         identity
-                         ssh/disconnect)
-                :log?  true})))
+  (let [remote *remote*]
+    (rc/open!
+     (rc/wrapper {:open  (fn [] (connect remote host))
+                  :name  [:control host]
+                  :close disconnect!
+                  :log?  true}))))
 
 (defn disconnect
   "Close a session"
   [session]
   (rc/close! session))
+
+(defmacro with-remote
+  "Takes a remote and evaluates body with that remote in that scope."
+  [remote & body]
+  `(binding [*remote* ~remote] ~@body))
 
 (defmacro with-ssh
   "Takes a map of SSH configuration and evaluates body in that scope. Catches
