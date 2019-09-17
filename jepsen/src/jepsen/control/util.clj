@@ -78,15 +78,27 @@
 
 (defn wget!
   "Downloads a string URL and returns the filename as a string. Skips if the
-  file already exists."
+  file already exists.
+
+  Options:
+
+    :force?      Even if we have this cached, download the tarball again anyway.
+    :user?       User for wget authentication. If provided, valid pw must also be provided.
+    :pw?         Password for wget authentication."
   ([url]
-   (wget! url false))
-  ([url force?]
-   (let [filename (.getName (file url))]
-     (when force?
-       (exec :rm :-f filename))
+   (wget! url {:force? false}))
+  ([url opts]
+   (let [filename (.getName (file url))
+         wget-opts std-wget-opts
+         ; second parameter was changed from a boolean flag (force?) to an options map
+         ; this check is here for backwards compatibility
+         opts (if (map? opts) opts {:force? opts})]
+     (when (:force? opts)
+      (exec :rm :-f filename))
+     (when-not (empty? (:user? opts))
+      (concat wget-opts [:--user (:user? opts) :--password (:pw? opts)])) 
      (when (not (exists? filename))
-       (wget-helper! std-wget-opts url))
+      (wget-helper! wget-opts url))
      filename)))
 
 (def wget-cache-dir
@@ -104,12 +116,17 @@
 
   Options:
 
-    :force?     Even if we have this cached, download the tarball again anyway."
+    :force?      Even if we have this cached, download the tarball again anyway.
+    :user?       User for wget authentication. If provided, valid pw must also be provided.
+    :pw?         Password for wget authentication."
   ([url]
-   (wget! url {:force? false}))
+   (cached-wget! url {:force? false}))
   ([url opts]
    (let [encoded-url (String. (b64/encode (.getBytes url)) "UTF-8")
-         dest-file   (str wget-cache-dir "/" encoded-url)]
+         dest-file   (str wget-cache-dir "/" encoded-url)
+         wget-opts   (if (empty? (:user? opts)) 
+                       (concat std-wget-opts [:-O dest-file])
+                       (concat std-wget-opts [:-O dest-file :--user (:user? opts) :--password (:pw? opts)]))]
      (when (:force? opts)
        (info "Clearing cached copy of" url)
        (exec :rm :-rf dest-file))
@@ -117,7 +134,7 @@
        (info "Downloading" url)
        (do (exec :mkdir :-p wget-cache-dir)
            (cd wget-cache-dir
-               (wget-helper! std-wget-opts :-O dest-file url))))
+               (wget-helper! wget-opts url))))
      dest-file)))
 
 (defn install-archive!
@@ -131,12 +148,18 @@
   a single directory is present, its *contents* will be moved to dest, so
   foolib-1.2.3-amd64/my.file becomes dest/my.file. If the tarball includes
   multiple files, those files are moved to dest, so my.file becomes
-  dest/my.file."
+  dest/my.file.
+  
+  Options:
+
+    :force?      Even if we have this cached, download the tarball again anyway.
+    :user?       User for wget authentication. If provided, valid pw must also be provided.
+    :pw?         Password for wget authentication."
   ([url dest]
-   (install-archive! url dest false))
-  ([url dest force?]
+   (install-archive! url dest {:force? false}))
+  ([url dest opts]
    (let [local-file (nth (re-find #"file://(.+)" url) 1)
-         file       (or local-file (cached-wget! url {:force? force?}))
+         file       (or local-file (cached-wget! url opts))
          tmpdir     (tmp-dir!)
          dest       (expand-path dest)]
 
@@ -181,7 +204,7 @@
                ; Retry download once; maybe it was abnormally terminated
                (do (info "Retrying corrupt archive download")
                    (exec :rm :-rf file)
-                   (install-archive! url dest force?)))
+                   (install-archive! url dest opts)))
 
              ; Throw by default
              (throw+ e))))
