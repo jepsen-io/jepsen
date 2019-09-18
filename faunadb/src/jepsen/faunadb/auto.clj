@@ -128,7 +128,8 @@
     (info node (str/join ["creating " (:replicas test) " replicas"]))
     (when (< 1 (:replica-count @(:topology test)))
       (c/exec :faunadb-admin
-              :update-replication
+              :update-replica
+              :data+log
               (topo/replicas @(:topology test))))
     (when (:wait-for-convergence test)
       (wait-for-replication node)
@@ -434,12 +435,8 @@
                    :network_broadcast_address      node
                    :network_host_id                node
                    :network_listen_address         ip}
-                  (when (topo/manual-log-config? test)
-                    {:storage_transaction_log_nodes (topo/log-configuration
-                                                       topo)})
                   (when (:accelerate-indexes test)
                     {:accelerate_indexes true})
-
                   (when (:datadog-api-key test)
                     {:stats_host "localhost"
                      :stats_port 8125})))
