@@ -460,17 +460,8 @@
     (setup! [_ test node]
       (install! test)
       (configure! test @(:topology test) node)
-      (when (:clear-cache test)
-        (clear-cache!))
-      (if (cache-valid? test)
-        (unpack-cache!)
-        ; We have to go through the whole setup process, then we'll build a
-        ; cache for next time
-        (do (start! test node)
-            (init! test (topo/replica @(:topology test) node) node)
-            (stop! test node)
-            (build-cache! test)))
-      (start! test node))
+      (start! test node)
+      (init! test (topo/replica @(:topology test) node) node))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")
