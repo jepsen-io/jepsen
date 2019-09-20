@@ -24,10 +24,11 @@
 (defn script
   "A sh script which invokes cmd with a faketime wrapper. Takes an initial
   offset in seconds, and a clock rate to run at."
-  [cmd init-offset rate]
+  [cmd init-offset rate & setup]
   (let [init-offset (long init-offset)
         rate        (float rate)]
     (str "#!/bin/bash\n"
+         (clojure.string/join "\n" setup)
          "faketime -m -f \""
          (if (neg? init-offset) "-" "+") init-offset "s x" rate "\" "
          (c/expand-path cmd)
@@ -36,9 +37,9 @@
 (defn wrap!
   "Replaces an executable with a faketime wrapper, moving the original to
   x.no-faketime. Idempotent."
-  [cmd init-offset rate]
+  [cmd init-offset rate & opts]
   (let [cmd'    (str cmd ".no-faketime")
-        wrapper (script cmd' init-offset rate)]
+        wrapper (apply script cmd' init-offset rate opts)]
     (if (cu/exists? cmd')
       (do (info "Installing faketime wrapper.")
           (c/exec :echo wrapper :> cmd))
