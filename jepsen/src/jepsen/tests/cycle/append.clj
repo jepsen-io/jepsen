@@ -854,10 +854,14 @@
          ; Good, analyze the history
          {:keys [graph explainer sccs]} (cycle/check analyzer history)
 
+         ; TODO: we should probably abort here if the graph is empty and tell
+         ; the user something's wrong
+         ;_ (pprint (cycle/->clj graph))
+
          ; Find specific anomaly cases
          g0         (when (:G0 as)        (g0-cases graph explainer sccs))
          g1c        (when (:G1c as)       (g1c-cases graph explainer sccs))
-         g-single  (when (:G-single as) (g-single-cases
+         g-single   (when (:G-single as)  (g-single-cases
                                             graph explainer sccs))
          g2         (when (:G2 as)        (g2-cases graph explainer sccs))
 
@@ -912,8 +916,11 @@
                g1a           (when (:G1a anomalies) (g1a-cases history))
                g1b           (when (:G1b anomalies) (g1b-cases history))
                internal      (internal-cases history)
-               dups          (duplicates history)
-               sorted-values (sorted-values history)
+               ; We don't want to detect duplicates or incompatible orders for
+               ; aborted txns.
+               history+      (filter (comp #{:ok :info} :type) history)
+               dups          (duplicates history+)
+               sorted-values (sorted-values history+)
                incmp-order   (incompatible-orders sorted-values)
                cycles        (cycles opts test history checker-opts)
                ; Categorize anomalies and build up a map of types to examples
