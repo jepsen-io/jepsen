@@ -22,8 +22,7 @@
                                      Fn$UnescapedArray)
            (com.fasterxml.jackson.databind.node NullNode)
            (java.io IOException)
-           (java.time Instant)
-           (org.asynchttpclient Dsl))
+           (java.time Instant))
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [clojure.tools.logging :refer [warn info]]
@@ -51,13 +50,6 @@
   ([node path]
    (.build
      (doto (FaunaClient/builder)
-       (.withHttpClient
-         (Dsl/asyncHttpClient
-           (.. (Dsl/config)
-               ; By default this chooses cores * 2 and blows out process limits
-               (setIoThreadsCount 1)
-               (setMaxRequestRetry 0)
-               (build))))
        (.withEndpoint (str "http://" node ":8443" path))
        (.withSecret root-key)))))
 

@@ -4,12 +4,6 @@
   (:require [clojure.set :as set]
             [jepsen.util :refer [rand-nth-empty]]))
 
-(defn manual-log-config?
-  "Does the version being tested require manual log configuration?"
-  [test]
-  (let [v (:version test)]
-    (boolean (re-find #"2\.5\.\d+" v))))
-
 (defn replica-name
   "Constructs a replica name for a given replica number."
   [n]
@@ -31,16 +25,6 @@
                  (fn [i node]
                    {:node    node
                     :state   :active
-                    ; We assign initial log partitions to the first r nodes,
-                    ; and stripe nodes mod r over replicas:
-                    ; => (map #(quot % 3) (range 10))
-                    ; (0 0 0 1 1 1 2 2 2 3)
-                    ; => (map #(mod % 3) (range 10))
-                    ; (0 1 2 0 1 2 0 1 2 0)
-                    ; Log parts are now optional as of 2.6.0, but we generate
-                    ; them for testing 2.5.4 and 2.5.5.
-                    :log-part (when (manual-log-config? test)
-                                (quot i (:replicas test)))
                     :replica (replica-name (mod i (:replicas test)))})))})
 
 ; Node accessors
