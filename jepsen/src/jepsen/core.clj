@@ -272,7 +272,7 @@
                                                (.getMessage e))))))]
     ; Validate completion
     (assert (= (:type completion) :info)
-            (str "Expected nemesis/invoke! to return a map with :type :ok, :fail, or :info, but received "
+            (str "Expected nemesis/invoke! to return a map with :type :info, but received "
                  (pr-str completion) " instead"))
     (assert (= (:process op) (:process completion)))
     (assert (= (:f op)       (:f completion)))
