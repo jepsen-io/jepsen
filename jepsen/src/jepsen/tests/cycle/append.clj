@@ -163,7 +163,7 @@
        (reduce (fn [[state error] [f k v :as mop]]
                  (case f
                    :append [(assoc! state k
-                                    (conj (get state k [unknown-prefix]) v))
+                                    (conj (or (get state k [unknown-prefix]) []) v))
                             error]
                    :r      (let [s (get state k)]
                              (if (and s ; We have an expected state
