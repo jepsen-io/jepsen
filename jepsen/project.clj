@@ -22,7 +22,7 @@
                  [dom-top "1.0.5"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.1.1"]
-                 [fipp "0.6.13"]
+                 [fipp "0.6.14"]
                  [io.lacuna/bifurcan "0.1.0"]]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
