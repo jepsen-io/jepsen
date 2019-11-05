@@ -105,6 +105,11 @@
   "Directory for caching files from the web."
   (str tmp-dir-base "/wget-cache"))
 
+(defn encode
+  "base64 encode a given string and return the encoded string in utf8"
+  [s]
+  (String. (b64/encode (.getBytes s)) "UTF-8"))
+
 (defn cached-wget!
   "Downloads a string URL to the Jepsen wget cache directory, and returns the
   full local filename as a string. Skips if the file already exists. Local
@@ -122,7 +127,7 @@
   ([url]
    (cached-wget! url {:force? false}))
   ([url opts]
-   (let [encoded-url (String. (b64/encode (.getBytes url)) "UTF-8")
+   (let [encoded-url (encode url)
          dest-file   (str wget-cache-dir "/" encoded-url)
          wget-opts   (if (empty? (:user? opts)) 
                        (concat std-wget-opts [:-O dest-file])
