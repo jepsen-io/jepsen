@@ -116,12 +116,12 @@
   []
   (info "Installing start-stop-daemon")
   (c/su
-    (c/exec :wget "http://ftp.de.debian.org/debian/pool/main/d/dpkg/dpkg_1.17.25.tar.xz")
-    (c/exec :tar :-xf :dpkg_1.17.25.tar.xz)
-    (c/exec "bash" "-c" "cd dpkg-1.17.25 && ./configure")
-    (c/exec "bash" "-c" "cd dpkg-1.17.25 && make")
-    (c/exec "bash" "-c" "cp /dpkg-1.17.25/utils/start-stop-daemon /usr/bin/start-stop-daemon")
-    (c/exec "bash" "-c" "rm -f dpkg_1.17.25.tar.xz")))
+    (c/exec :wget "http://ftp.de.debian.org/debian/pool/main/d/dpkg/dpkg_1.17.27.tar.xz")
+    (c/exec :tar :-xf :dpkg_1.17.27.tar.xz)
+    (c/exec "bash" "-c" "cd dpkg-1.17.27 && ./configure")
+    (c/exec "bash" "-c" "cd dpkg-1.17.27 && make")
+    (c/exec "bash" "-c" "cp /dpkg-1.17.27/utils/start-stop-daemon /usr/bin/start-stop-daemon")
+    (c/exec "bash" "-c" "rm -f dpkg_1.17.27.tar.xz")))
 
 (defn installed-start-stop-daemon?
   "Is start-stop-daemon Installed?"
