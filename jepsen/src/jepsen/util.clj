@@ -820,3 +820,8 @@
   present. Ex. (contains-many? {:a 1 :b 2 :c 3} :a :b :c) => true"
   [m & ks]
   (every? #(contains? m %) ks))
+
+(defn parse-long
+  "Parses a string to a Long. Look, we use this a lot, okay?"
+  [s]
+  (Long/parseLong s))
