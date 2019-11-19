@@ -9,6 +9,17 @@
   (setup!     [db test node] "Set up the database on this particular node.")
   (teardown!  [db test node] "Tear down the database on this particular node."))
 
+(ns-unmap 'jepsen.db 'Process) ; Process is imported by default from java.lang
+(defprotocol Process
+  "This optional protocol supports starting and killing a DB's processes."
+  (start! [db test node] "Starts the process")
+  (kill!  [db test node] "Forcibly kills the process"))
+
+(defprotocol Pause
+  "This optional protocol supports pausing and resuming a DB's processes."
+  (pause!   [db test node] "Pauses the process")
+  (resume!  [db test node] "Resumes the process"))
+
 (defprotocol Primary
   (setup-primary! [db test node] "Performs one-time setup on a single node."))
 
