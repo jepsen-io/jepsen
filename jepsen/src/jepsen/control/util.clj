@@ -1,7 +1,7 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
-            [jepsen.util :refer [meh]]
+            [jepsen.util :refer [meh name+]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
@@ -236,7 +236,9 @@
   username)
 
 (defn grepkill!
-  "Kills processes by grepping for the given string."
+  "Kills processes by grepping for the given string. If a signal is given,
+  sends that signal instead. Signals may be either numbers or names, e.g.
+  :term, :hup, ..."
   ([pattern]
    (grepkill! 9 pattern))
   ([signal pattern]
@@ -248,7 +250,7 @@
                | :grep pattern
                | :grep :-v "grep"
                | :awk "{print $2}"
-               | :xargs :--no-run-if-empty :kill (str "-" signal))
+               | :xargs :--no-run-if-empty :kill (str "-" (name+ signal)))
          (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
            nil)
          (catch [:type :jepsen.control/nonzero-exit, :exit 123] e
