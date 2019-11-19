@@ -751,3 +751,8 @@
   "When the given generator completes, synchronizes, then yields nil."
   [gen]
   (->> gen (then void)))
+
+(defn flip-flop
+  "Alternates between operations from two generators: a, b, a, b, ..."
+  [a b]
+  (seq (cycle [a b])))
