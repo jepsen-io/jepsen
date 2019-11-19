@@ -47,8 +47,8 @@
   "Tries name, falls back to pr-str."
   [x]
   (if (instance? clojure.lang.Named x)
-    (name x))
-    (pr-str x))
+    (name x)
+    (pr-str x)))
 
 (def uninteresting-exceptions
   "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
