@@ -13,6 +13,11 @@
                           cluster.")
   (teardown! [this test] "Tear down the nemesis when work is complete"))
 
+(defprotocol Reflection
+  "Optional protocol for reflecting on nemeses."
+  (fs [this] "What :f functions does this nemesis support? Helpful for
+             composition."))
+
 (def noop
   "Does nothing."
   (reify Nemesis
@@ -122,7 +127,12 @@
 
      (invoke! [this test op]
        (case (:f op)
-         :start (let [grudge (or (:value op) (grudge (:nodes test)))]
+         :start (let [grudge (or (:value op)
+                                 (if grudge
+                                   (grudge (:nodes test))
+                                   (throw (IllegalArgumentException.
+                                            (str "Expected op " (pr-str op)
+                                                 " to have a grudge for a :value, but none given.")))))]
                   (net/drop-all! test grudge)
                   (assoc op :value [:isolated grudge]))
          :stop  (do (net/heal! (:net test) test)
@@ -172,7 +182,11 @@
   (partitioner majorities-ring))
 
 (defn compose
-  "Takes a map of fs to nemeses and returns a single nemesis which, depending
+  "Combines multiple Nemesis objects into one. If all, or all but one, nemesis
+  support Reflection, compose can simply take a collection of nemeses, and use
+  (fs nem) to figure out what ops to send to which nemesis. Otherwise...
+
+  Takes a map of fs to nemeses and returns a single nemesis which, depending
   on (:f op), routes to the appropriate child nemesis. `fs` should be a
   function which takes (:f op) and returns either nil, if that nemesis should
   not handle that :f, or a new :f, which replaces the op's :f, and the
@@ -192,24 +206,54 @@
   We turn :split-start into :start, and pass that op to
   partition-random-halves."
   [nemeses]
-  (assert (map? nemeses))
-  (reify Nemesis
-    (setup! [this test]
-      (compose (util/map-vals #(setup-compat! % test nil) nemeses)))
+  (if (map? nemeses)
+    (reify Nemesis
+      (setup! [this test]
+        (compose (util/map-vals #(setup-compat! % test nil) nemeses)))
 
-    (invoke! [this test op]
-      (let [f (:f op)]
-        (loop [nemeses nemeses]
-          (if-not (seq nemeses)
+      (invoke! [this test op]
+        (let [f (:f op)]
+          (loop [nemeses nemeses]
+            (if-not (seq nemeses)
+              (throw (IllegalArgumentException.
+                       (str "no nemesis can handle " (:f op))))
+              (let [[fs nemesis] (first nemeses)]
+                (if-let [f' (fs f)]
+                  (assoc (invoke-compat! nemesis test (assoc op :f f')) :f f)
+                  (recur (next nemeses))))))))
+
+      (teardown! [this test]
+        (util/map-vals #(teardown-compat! % test) nemeses)))
+
+    ; A collection; use reflection to compute a map of :fs to nemeses.
+    (let [fm (reduce (fn [fm n]
+                       (reduce (fn [fm f]
+                                 (assert (not (get fm f))
+                                         (str "Nemeses " (pr-str n) " and "
+                                              (pr-str (get fm f))
+                                              " are mutually incompatible; both"
+                                              " use :f " (pr-str f)))
+                                 (assoc fm f n))
+                               fm
+                               (fs n)))
+                     {}
+                     nemeses)]
+      (reify Nemesis
+        (setup! [this test]
+          (compose (map #(setup-compat! % test nil) nemeses)))
+
+        (invoke! [this test op]
+          (if-let [n (get fm (:f op))]
+            (invoke-compat! n test op)
             (throw (IllegalArgumentException.
-                     (str "no nemesis can handle " (:f op))))
-            (let [[fs nemesis] (first nemeses)]
-              (if-let [f' (fs f)]
-                (assoc (invoke-compat! nemesis test (assoc op :f f')) :f f)
-                (recur (next nemeses))))))))
+                     (str "No nemesis can handle " (pr-str (:f op)))))))
 
-    (teardown! [this test]
-      (util/map-vals #(teardown-compat! % test) nemeses))))
+        (teardown! [this test]
+          (map #(teardown-compat! % test) nemeses))
+
+        Reflection
+        (fs [this]
+          (reduce into #{} (map fs nemeses)))))))
 
 (defn set-time!
   "Set the local node time in POSIX seconds."

@@ -62,7 +62,11 @@
 
   In all cases, the :value is a node spec, as interpreted by db-nodes."
   [db]
-  (reify n/Nemesis
+  (reify
+    n/Reflection
+    (fs [this] #{:start :kill :pause :resume})
+
+    n/Nemesis
     (setup! [this test] this)
 
     (invoke! [this test op]
@@ -102,7 +106,7 @@
     {:generator       (gen/mix modes)
      :final-generator (gen/seq final)}))
 
-(defn db-nemesis+generators
+(defn db-package
   "A nemesis and generator package for acting on a single DB. Options:
 
     :db         The database to act on.
@@ -113,20 +117,92 @@
         nemesis   (db-nemesis (:db opts))]
     {:generator       generator
      :final-generator final-generator
-     :nemesis         nemesis}))
+     :nemesis         nemesis
+     :perf #{{:name        "kill"
+              :start       #{:kill}
+              :stop        #{:start}
+              :fill-color  "#E9A4A0"}
+             {:name        "pause"
+              :start       #{:pause}
+              :stop        #{:resume}
+              :fill-color  "#A0B1E9"}}}))
 
-(defn perf
-  "Generates a map m which can be passed to `(checker/perf {:nemeses m})`,
-  which enables nice colorized plots of failures."
+(defn grudge
+  "Computes a grudge from a partition spec. Spec may be one of:
+
+    :one              Isolates a single node
+    :majority         A clean majority/minority split
+    :majorities-ring  Overlapping majorities in a ring"
+  [test part-spec]
+  (let [nodes (:nodes test)]
+    (case part-spec
+      :one              (n/complete-grudge (n/split-one nodes))
+      :majority         (n/complete-grudge (n/bisect (shuffle nodes)))
+      :majorities-ring  (n/majorities-ring nodes)
+      part-spec)))
+
+(defn rand-partition-spec
+  "Returns a random partition spec"
+  []
+  (rand-nth [:one :majority :majorities-ring]))
+
+(defn partition-nemesis
+  "Wraps a partitioner nemesis with support for partition specs."
+  ([]
+   (partition-nemesis (n/partitioner)))
+  ([p]
+   (reify
+     n/Reflection
+     (fs [this]
+       [:start-partition :stop-partition])
+
+     n/Nemesis
+     (setup! [this test]
+       (partition-nemesis (n/setup! p test)))
+
+     (invoke! [this test op]
+       (-> (case (:f op)
+             ; Have the partitioner apply the calculated grudge.
+             :start-partition (let [grudge (grudge test (:value op))]
+                                (n/invoke! p test (assoc op
+                                                         :f     :start
+                                                         :value grudge)))
+             ; Have the partitioner heal
+             :stop-partition (n/invoke! p test (assoc op :f :stop)))
+           ; Remap the :f to what the caller expects on the way back out
+           (assoc :f (:f op))))
+
+     (teardown! [this test]
+       (n/teardown! p test)))))
+
+(defn partition-package
+  "A nemesis and generator package for network partitions. Options:
+
+    :interval   The interval between nemesis operations, in seconds."
   [opts]
-  #{{:name        "kill"
-     :start       #{:kill}
-     :stop        #{:start}
-     :fill-color  "#E9A4A0"}
-    {:name        "pause"
-     :start       #{:pause}
-     :stop        #{:resume}
-     :fill-color  "#A0B1E9"}})
+  (let [start (fn [_ _] {:type  :info
+                         :f     :start-partition
+                         :value (rand-partition-spec)})
+        stop  {:type :info, :f :stop-partition, :value nil}
+        gen   (->> (gen/flip-flop start stop)
+                   (gen/delay (:interval opts default-interval)))]
+    {:generator       gen
+     :final-generator (gen/once stop)
+     :nemesis         (partition-nemesis)
+     :perf            #{{:name        "partition"
+                         :start       #{:start-partition}
+                         :stop        #{:stop-partition}
+                         :fill-color  "#E9DCA0"}}}))
+
+(defn compose-packages
+  "Takes a collection of nemesis+generators packages and combines them into
+  one. Generators are mixed together randomly; final generators proceed
+  sequentially."
+  [packages]
+  {:generator       (gen/mix    (map  :generator packages))
+   :final-generator (apply gen/concat (keep :final-generator packages))
+   :nemesis         (n/compose  (map  :nemesis packages))
+   :perf            (reduce into #{} (map :perf packages))})
 
 (defn nemesis+generators
   "Takes an option map, and returns a map with a :nemesis, a :generator for
@@ -145,5 +221,5 @@
     :kill       Controls process kills
     :pause      Controls process pauses and restarts"
   [opts]
-  (assoc (db-nemesis+generators opts)
-         :perf (perf opts)))
+  (compose-packages [(partition-package opts)
+                     (db-package opts)]))
