@@ -33,23 +33,26 @@
      :one           - Chooses a single random node
      :minority      - Chooses a random minority of nodes
      :majority      - Chooses a random majority of nodes
+     :primaries     - All nodes which we think are primaries
      :all           - All nodes
      [\"a\", ...]   - The specified nodes"
   [test db node-spec]
   (let [nodes (:nodes test)]
     (case node-spec
-      nil       (random-nonempty-subset nodes)
-      :one      (list (rand-nth nodes))
-      :minority (take (dec (majority (count nodes))) (shuffle nodes))
-      :majority (take      (majority (count nodes))  (shuffle nodes))
-      :all      nodes
+      nil         (random-nonempty-subset nodes)
+      :one        (list (rand-nth nodes))
+      :minority   (take (dec (majority (count nodes))) (shuffle nodes))
+      :majority   (take      (majority (count nodes))  (shuffle nodes))
+      :primaries  (db/primaries db test)
+      :all        nodes
       node-spec)))
 
-(defn rand-node-spec
-  "Returns a random node specification. Helpful when you don't know WHAT you
-  want to test."
-  []
-  (rand-nth [nil :one :minority :majority :all]))
+(defn node-specs
+  "Returns all possible node specification for the given DB. Helpful when you
+  don't know WHAT you want to test."
+  [db]
+  (cond-> [nil :one :minority :majority :all]
+    (satisfies? db/Primary db) (conj :primaries)))
 
 (defn db-nemesis
   "A nemesis which can perform various DB-specific operations on nodes. Takes a
@@ -83,14 +86,30 @@
 
 (defn db-generators
   "A map with a :generator and a :final-generator for DB-related operations.
-  Options:
-
-    :db   The database we act on."
+  Options are from nemesis-package."
   [opts]
-  (let [start  {:type :info, :f :start, :value :all}
-        kill   (fn [_ _] {:type :info, :f :kill, :value (rand-node-spec)})
+  (let [db     (:db opts)
+        faults (:faults opts)
+        kill?  (and (satisfies? db/Process db) (contains? faults :kill))
+        pause? (and (satisfies? db/Pause   db) (contains? faults :pause))
+
+        ; Lists of possible specifications for nodes to kill/pause
+        kill-targets  (:targets (:kill opts)  (node-specs db))
+        pause-targets (:targets (:pause opts) (node-specs db))
+
+        ; Starts and kills
+        start  {:type :info, :f :start, :value :all}
+        kill   (fn [_ _] {:type   :info
+                          :f      :kill
+                          :value  (rand-nth kill-targets)})
+
+        ; Pauses and resumes
         resume {:type :info, :f :resume, :value :all}
-        pause  (fn [_ _] {:type :info, :f :pause, :value (rand-node-spec)})
+        pause  (fn [_ _] {:type   :info
+                          :f      :pause
+                          :value  (rand-nth pause-targets)})
+
+        ; Flip-flop generators
         kill-start   (gen/flip-flop kill start)
         pause-resume (gen/flip-flop pause resume)
 
@@ -98,19 +117,17 @@
         ; supports.
         db     (:db opts)
         modes  (cond-> []
-                 (satisfies? db/Process db) (conj kill-start)
-                 (satisfies? db/Pause db)   (conj pause-resume))
+                 pause? (conj pause-resume)
+                 kill?  (conj kill-start))
         final  (cond-> []
-                      (satisfies? db/Pause db)   (conj resume)
-                      (satisfies? db/Process db) (conj start))]
+                 pause? (conj resume)
+                 kill?  (conj start))]
     {:generator       (gen/mix modes)
      :final-generator (gen/seq final)}))
 
 (defn db-package
-  "A nemesis and generator package for acting on a single DB. Options:
-
-    :db         The database to act on.
-    :interval   The interval between nemesis operations, in seconds."
+  "A nemesis and generator package for acting on a single DB. Options are from
+  nemesis-package."
   [opts]
   (let [{:keys [generator final-generator]} (db-generators opts)
         generator (gen/delay (:interval opts default-interval) generator)
@@ -141,10 +158,11 @@
       :majorities-ring  (n/majorities-ring nodes)
       part-spec)))
 
-(defn rand-partition-spec
-  "Returns a random partition spec"
-  []
-  (rand-nth [:one :majority :majorities-ring]))
+(defn partition-specs
+  "All possible partition specs for a DB."
+  [db]
+  (cond-> [nil :one :majority :majorities-ring]
+    (satisfies? db/Primary db) (conj :primaries)))
 
 (defn partition-nemesis
   "Wraps a partitioner nemesis with support for partition specs."
@@ -176,13 +194,13 @@
        (n/teardown! p test)))))
 
 (defn partition-package
-  "A nemesis and generator package for network partitions. Options:
-
-    :interval   The interval between nemesis operations, in seconds."
+  "A nemesis and generator package for network partitions. Options as for
+  nemesis-package."
   [opts]
-  (let [start (fn [_ _] {:type  :info
+  (let [targets (:targets (:partition opts) (partition-specs (:db opts)))
+        start (fn [_ _] {:type  :info
                          :f     :start-partition
-                         :value (rand-partition-spec)})
+                         :value (rand-nth targets)})
         stop  {:type :info, :f :stop-partition, :value nil}
         gen   (->> (gen/flip-flop start stop)
                    (gen/delay (:interval opts default-interval)))]
@@ -204,7 +222,7 @@
    :nemesis         (n/compose  (map  :nemesis packages))
    :perf            (reduce into #{} (map :perf packages))})
 
-(defn nemesis+generators
+(defn nemesis-package
   "Takes an option map, and returns a map with a :nemesis, a :generator for
   its operations, a :final-generator to clean up any failure modes at the end
   of a test, and a :perf map that can be passed to checker/perf to render nice
@@ -217,9 +235,22 @@
   Optional options:
 
     :interval   The interval between operations, in seconds.
+    :faults     A collection of enabled faults, e.g. [:partition, :kill, ...]
     :partition  Controls network partitions
     :kill       Controls process kills
-    :pause      Controls process pauses and restarts"
+    :pause      Controls process pauses and restarts
+
+  Partition options:
+
+    :targets    A collection of partition specs, e.g. [:majorities-ring, ...]
+
+  Kill and Pause options:
+
+    :targets    A collection of node specs, e.g. [:one, :all]"
   [opts]
-  (compose-packages [(partition-package opts)
-                     (db-package opts)]))
+  (let [faults   (set (:faults opts [:partition :kill :pause]))
+        opts     (assoc opts :faults faults)
+        packages (cond-> []
+                   (faults :partition)          (conj (partition-package opts))
+                   (some faults [:kill :pause]) (conj (db-package opts)))]
+    (compose-packages packages)))

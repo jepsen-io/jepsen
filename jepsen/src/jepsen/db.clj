@@ -23,11 +23,10 @@
 (defprotocol Primary
   "This optional protocol supports databases which have a notion of one (or
   more) primary nodes."
-  (primaries [db test node]
-             "Returns a collection of nodes which are currently primaries from
-             the perspective of this node. Best-effort is OK; in practice, this
-             usually devolves to 'nodes that think they're currently
-             primaries'.")
+  (primaries [db test]
+             "Returns a collection of nodes which are currently primaries.
+             Best-effort is OK; in practice, this usually devolves to 'nodes
+             that think they're currently primaries'.")
   (setup-primary! [db test node] "Performs one-time setup on a single node."))
 
 (defprotocol LogFiles
