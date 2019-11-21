@@ -149,13 +149,20 @@
 
     :one              Isolates a single node
     :majority         A clean majority/minority split
-    :majorities-ring  Overlapping majorities in a ring"
-  [test part-spec]
+    :majorities-ring  Overlapping majorities in a ring
+    :primaries        Isolates all primaries into single-node components"
+  [test db part-spec]
   (let [nodes (:nodes test)]
     (case part-spec
       :one              (n/complete-grudge (n/split-one nodes))
       :majority         (n/complete-grudge (n/bisect (shuffle nodes)))
       :majorities-ring  (n/majorities-ring nodes)
+      :primaries        (let [primaries (db/primaries db test)]
+                          (->> primaries
+                               (map list) ; Put each in its own singleton list
+                               (cons (remove (set primaries) nodes)) ; others
+                               n/complete-grudge)) ; And make it a grudge
+
       part-spec)))
 
 (defn partition-specs
@@ -165,10 +172,11 @@
     (satisfies? db/Primary db) (conj :primaries)))
 
 (defn partition-nemesis
-  "Wraps a partitioner nemesis with support for partition specs."
-  ([]
-   (partition-nemesis (n/partitioner)))
-  ([p]
+  "Wraps a partitioner nemesis with support for partition specs. Uses db to
+  determine primaries."
+  ([db]
+   (partition-nemesis db (n/partitioner)))
+  ([db p]
    (reify
      n/Reflection
      (fs [this]
@@ -176,12 +184,12 @@
 
      n/Nemesis
      (setup! [this test]
-       (partition-nemesis (n/setup! p test)))
+       (partition-nemesis db (n/setup! p test)))
 
      (invoke! [this test op]
        (-> (case (:f op)
              ; Have the partitioner apply the calculated grudge.
-             :start-partition (let [grudge (grudge test (:value op))]
+             :start-partition (let [grudge (grudge test db (:value op))]
                                 (n/invoke! p test (assoc op
                                                          :f     :start
                                                          :value grudge)))
@@ -197,7 +205,8 @@
   "A nemesis and generator package for network partitions. Options as for
   nemesis-package."
   [opts]
-  (let [targets (:targets (:partition opts) (partition-specs (:db opts)))
+  (let [db      (:db opts)
+        targets (:targets (:partition opts) (partition-specs db))
         start (fn [_ _] {:type  :info
                          :f     :start-partition
                          :value (rand-nth targets)})
@@ -206,7 +215,7 @@
                    (gen/delay (:interval opts default-interval)))]
     {:generator       gen
      :final-generator (gen/once stop)
-     :nemesis         (partition-nemesis)
+     :nemesis         (partition-nemesis db)
      :perf            #{{:name        "partition"
                          :start       #{:start-partition}
                          :stop        #{:stop-partition}
@@ -227,6 +236,19 @@
   its operations, a :final-generator to clean up any failure modes at the end
   of a test, and a :perf map that can be passed to checker/perf to render nice
   graphs.
+
+  This nemesis is intended for throwing a broad array of simple failures at the
+  wall, and seeing \"what sticks\". Once you've found a fault, you can restrict
+  the failure modes to specific types of faults, and specific targets for those
+  faults, to try and reproduce it faster.
+
+  This nemesis is *not* intended for complex sequences of faults, like
+  partitionining away a leader, flipping some switch, adjusting the clock on an
+  unrelated node, then crashing someone else. I don't think I can devise a good
+  declarative langauge for that in a way which is simpler than \"generators\"
+  themselves. For those types of faults, you'll write your own generator
+  instead, but you may be able to use this *nemesis* to execute some or all of
+  those operations.
 
   Mandatory options:
 
