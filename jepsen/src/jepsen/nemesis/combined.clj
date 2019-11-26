@@ -135,14 +135,14 @@
     {:generator       generator
      :final-generator final-generator
      :nemesis         nemesis
-     :perf #{{:name        "kill"
-              :start       #{:kill}
-              :stop        #{:start}
-              :fill-color  "#E9A4A0"}
-             {:name        "pause"
-              :start       #{:pause}
-              :stop        #{:resume}
-              :fill-color  "#A0B1E9"}}}))
+     :perf #{{:name   "kill"
+              :start  #{:kill}
+              :stop   #{:start}
+              :color  "#E9A4A0"}
+             {:name   "pause"
+              :start  #{:pause}
+              :stop   #{:resume}
+              :color  "#A0B1E9"}}}))
 
 (defn grudge
   "Computes a grudge from a partition spec. Spec may be one of:
@@ -216,10 +216,10 @@
     {:generator       gen
      :final-generator (gen/once stop)
      :nemesis         (partition-nemesis db)
-     :perf            #{{:name        "partition"
-                         :start       #{:start-partition}
-                         :stop        #{:stop-partition}
-                         :fill-color  "#E9DCA0"}}}))
+     :perf            #{{:name  "partition"
+                         :start #{:start-partition}
+                         :stop  #{:stop-partition}
+                         :fill  "#E9DCA0"}}}))
 
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
