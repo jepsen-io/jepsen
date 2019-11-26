@@ -598,8 +598,9 @@
                   s))))))
 
 (defn coll
-  "Wraps non-coll things into singleton lists, and leaves colls as themselves.
-  Useful when you can take either a single thing or a sequence of things."
+  "Wraps non-collection things into singleton lists, and leaves colls as
+  themselves. Useful when you can take either a single thing or a sequence of
+  things."
   [thing-or-things]
   (cond (nil? thing-or-things)  nil
         (coll? thing-or-things) thing-or-things
