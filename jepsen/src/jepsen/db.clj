@@ -9,12 +9,16 @@
   (setup!     [db test node] "Set up the database on this particular node.")
   (teardown!  [db test node] "Tear down the database on this particular node."))
 
-(do
-  (ns-unmap 'jepsen.db 'Process) ; Process is imported by default from java.lang
-  (defprotocol Process
-    "This optional protocol supports starting and killing a DB's processes."
-    (start! [db test node] "Starts the process")
-    (kill!  [db test node] "Forcibly kills the process")))
+; Process is imported by default from java.lang. The eval here is an attempt to
+; keep lein install from generating broken... cached... something or other. I
+; can't figure out why this breaks.
+(eval
+  '(do
+     (ns-unmap 'jepsen.db 'Process)
+     (defprotocol Process
+       "This optional protocol supports starting and killing a DB's processes."
+       (start! [db test node] "Starts the process")
+       (kill!  [db test node] "Forcibly kills the process"))))
 
 (defprotocol Pause
   "This optional protocol supports pausing and resuming a DB's processes."
