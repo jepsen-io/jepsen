@@ -219,7 +219,7 @@
      :perf            #{{:name  "partition"
                          :start #{:start-partition}
                          :stop  #{:stop-partition}
-                         :fill  "#E9DCA0"}}}))
+                         :color "#E9DCA0"}}}))
 
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
