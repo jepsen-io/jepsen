@@ -6,6 +6,8 @@ x-node:
   privileged: true
   networks:
     - jepsen
+  ports:
+    - ${JEPSEN_PORT:-22}
 
 services:
   control:
