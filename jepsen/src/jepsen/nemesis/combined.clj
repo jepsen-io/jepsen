@@ -19,7 +19,8 @@
                     [generator :as gen]
                     [nemesis :as n]
                     [util :as util :refer [majority
-                                           random-nonempty-subset]]]))
+                                           random-nonempty-subset]]]
+            [jepsen.nemesis.time :as nt]))
 
 (def default-interval
   "The default interval, in seconds, between nemesis operations."
@@ -129,20 +130,21 @@
   "A nemesis and generator package for acting on a single DB. Options are from
   nemesis-package."
   [opts]
-  (let [{:keys [generator final-generator]} (db-generators opts)
-        generator (gen/delay (:interval opts default-interval) generator)
-        nemesis   (db-nemesis (:db opts))]
-    {:generator       generator
-     :final-generator final-generator
-     :nemesis         nemesis
-     :perf #{{:name   "kill"
-              :start  #{:kill}
-              :stop   #{:start}
-              :color  "#E9A4A0"}
-             {:name   "pause"
-              :start  #{:pause}
-              :stop   #{:resume}
-              :color  "#A0B1E9"}}}))
+  (when (some #{:kill :pause} (:faults opts))
+    (let [{:keys [generator final-generator]} (db-generators opts)
+          generator (gen/delay (:interval opts default-interval) generator)
+          nemesis   (db-nemesis (:db opts))]
+      {:generator       generator
+       :final-generator final-generator
+       :nemesis         nemesis
+       :perf #{{:name   "kill"
+                :start  #{:kill}
+                :stop   #{:start}
+                :color  "#E9A4A0"}
+               {:name   "pause"
+                :start  #{:pause}
+                :stop   #{:resume}
+                :color  "#A0B1E9"}}})))
 
 (defn grudge
   "Computes a grudge from a partition spec. Spec may be one of:
@@ -205,21 +207,45 @@
   "A nemesis and generator package for network partitions. Options as for
   nemesis-package."
   [opts]
-  (let [db      (:db opts)
-        targets (:targets (:partition opts) (partition-specs db))
-        start (fn [_ _] {:type  :info
-                         :f     :start-partition
-                         :value (rand-nth targets)})
-        stop  {:type :info, :f :stop-partition, :value nil}
-        gen   (->> (gen/flip-flop start stop)
-                   (gen/delay (:interval opts default-interval)))]
-    {:generator       gen
-     :final-generator (gen/once stop)
-     :nemesis         (partition-nemesis db)
-     :perf            #{{:name  "partition"
-                         :start #{:start-partition}
-                         :stop  #{:stop-partition}
-                         :color "#E9DCA0"}}}))
+  (when ((:faults opts) :partition)
+    (let [db      (:db opts)
+          targets (:targets (:partition opts) (partition-specs db))
+          start (fn [_ _] {:type  :info
+                           :f     :start-partition
+                           :value (rand-nth targets)})
+          stop  {:type :info, :f :stop-partition, :value nil}
+          gen   (->> (gen/flip-flop start stop)
+                     (gen/delay (:interval opts default-interval)))]
+      {:generator       gen
+       :final-generator (gen/once stop)
+       :nemesis         (partition-nemesis db)
+       :perf            #{{:name  "partition"
+                           :start #{:start-partition}
+                           :stop  #{:stop-partition}
+                           :color "#E9DCA0"}}})))
+
+(defn clock-package
+  "A nemesis and generator package for modifying clocks. Options as for
+  nemesis-package."
+  [opts]
+  (when ((:faults opts) :clock)
+    (let [nemesis (n/compose {{:reset-clock           :reset
+                               :check-clock-offsets   :check-offsets
+                               :strobe-clock          :strobe
+                               :bump-clock            :bump}
+                              (nt/clock-nemesis)})
+          gen     (gen/f-map {:reset          :reset-clock
+                              :check-offsets  :check-clock-offsets
+                              :strobe         :strobe-clock
+                              :bump           :bump-clock}
+                             (nt/clock-gen))]
+      {:generator         gen
+       :final-generator   (gen/once nt/reset-gen)
+       :nemesis           nemesis
+       :perf              #{{:name  "clock"
+                             :start #{:bump-clock}
+                             :stop  #{:reset-clock}
+                             :fs    #{:strobe-clock}}}})))
 
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
@@ -230,6 +256,16 @@
    :final-generator (apply gen/concat (keep :final-generator packages))
    :nemesis         (n/compose  (map  :nemesis packages))
    :perf            (reduce into #{} (map :perf packages))})
+
+(defn nemesis-packages
+  "Just like nemesis-package, but returns a collection of packages, rather than
+  the combined package, so you can manipulate it further before composition."
+  [opts]
+  (let [faults   (set (:faults opts [:partition :kill :pause :clock]))
+        opts     (assoc opts :faults faults)]
+    (remove nil? [(partition-package opts)
+                  (clock-package opts)
+                  (db-package opts)])))
 
 (defn nemesis-package
   "Takes an option map, and returns a map with a :nemesis, a :generator for
@@ -262,6 +298,13 @@
     :kill       Controls process kills
     :pause      Controls process pauses and restarts
 
+  Possible faults:
+
+    :partition
+    :kill
+    :pause
+    :clock
+
   Partition options:
 
     :targets    A collection of partition specs, e.g. [:majorities-ring, ...]
@@ -270,9 +313,4 @@
 
     :targets    A collection of node specs, e.g. [:one, :all]"
   [opts]
-  (let [faults   (set (:faults opts [:partition :kill :pause]))
-        opts     (assoc opts :faults faults)
-        packages (cond-> []
-                   (faults :partition)          (conj (partition-package opts))
-                   (some faults [:kill :pause]) (conj (db-package opts)))]
-    (compose-packages packages)))
+  (compose-packages (nemesis-packages opts)))

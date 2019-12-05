@@ -1,10 +1,11 @@
 (ns jepsen.nemesis
   (:use clojure.tools.logging)
-  (:require [clojure.set        :as set]
-            [jepsen.util        :as util]
-            [jepsen.client      :as client]
-            [jepsen.control     :as c]
-            [jepsen.net         :as net]))
+  (:require [clojure.set :as set]
+            [jepsen [client   :as client]
+                    [control  :as c]
+                    [net      :as net]
+                    [util     :as util]]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol Nemesis
   (setup! [this test] "Set up the nemesis to work with the cluster. Returns the
@@ -223,7 +224,18 @@
                   (recur (next nemeses))))))))
 
       (teardown! [this test]
-        (util/map-vals #(teardown-compat! % test) nemeses)))
+        (util/map-vals #(teardown-compat! % test) nemeses))
+
+      Reflection
+      (fs [this]
+        (->> (keys nemeses)
+             (mapcat (fn [f-map]
+                       (cond (map? f-map) (keys f-map)
+                             (set? f-map) f-map
+                             true
+                             (throw+ {:type    ::can't-infer-fs
+                                      :message "We can only infer fs from compose nemeses built with maps or sets as their f mapping objects."}))))
+             (into #{}))))
 
     ; A collection; use reflection to compute a map of :fs to nemeses.
     (let [fm (reduce (fn [fm n]
