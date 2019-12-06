@@ -234,18 +234,20 @@
                                :strobe-clock          :strobe
                                :bump-clock            :bump}
                               (nt/clock-nemesis)})
-          gen     (gen/f-map {:reset          :reset-clock
-                              :check-offsets  :check-clock-offsets
-                              :strobe         :strobe-clock
-                              :bump           :bump-clock}
-                             (nt/clock-gen))]
+          gen     (->> (nt/clock-gen)
+                       (gen/f-map {:reset          :reset-clock
+                                   :check-offsets  :check-clock-offsets
+                                   :strobe         :strobe-clock
+                                   :bump           :bump-clock})
+                       (gen/delay (:interval opts default-interval)))]
       {:generator         gen
-       :final-generator   (gen/once nt/reset-gen)
+       :final-generator   (gen/once {:type :info, :f :reset-clock})
        :nemesis           nemesis
        :perf              #{{:name  "clock"
                              :start #{:bump-clock}
                              :stop  #{:reset-clock}
-                             :fs    #{:strobe-clock}}}})))
+                             :fs    #{:strobe-clock}
+                             :color "#A0E9E3"}}})))
 
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
