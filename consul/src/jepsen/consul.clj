@@ -1,10 +1,14 @@
 (ns jepsen.consul
+  (:gen-class)
+  (:use jepsen.core
+        jepsen.tests
+        clojure.test
+        clojure.pprint)
   (:require [clojure.tools.logging    :refer [debug info warn]]
             [clojure.java.io          :as io]
             [clojure.string           :as str]
             [jepsen.core              :as core]
-            [jepsen.util              :refer [meh timeout]]
-            [jepsen.core              :as core]
+            [jepsen.util              :as util :refer [meh timeout]]
             [jepsen.control           :as c]
             [jepsen.control.net       :as net]
             [jepsen.control.util      :as cu]
@@ -12,7 +16,15 @@
             [jepsen.db                :as db]
             [cheshire.core            :as json]
             [clj-http.client          :as http]
-            [base64-clj.core          :as base64]))
+            [base64-clj.core          :as base64]
+            [jepsen.os.debian :as debian]
+            [jepsen.checker   :as checker]
+            [jepsen.checker.timeline :as timeline]
+            [jepsen.model     :as model]
+            [jepsen.generator :as gen]
+            [jepsen.nemesis   :as nemesis]
+            [jepsen.store     :as store]
+            [jepsen.report    :as report]))
 
 (def binary "/usr/bin/consul")
 (def pidfile "/var/run/consul.pid")
@@ -144,3 +156,46 @@
   "A compare and set register built around a single consul node."
   []
   (CASClient. "jepsen" nil))
+
+(defn register-test
+  [opts]
+  (info :opts opts)
+  ;; FIXME Merge this with noop test
+(assoc
+                 noop-test
+                 :name      "consul"
+                 :os        debian/os
+                 :db        (db)
+                 :client    (cas-client)
+                 :model     (model/cas-register)
+                 :checker   (checker/compose {:html   timeline/html
+                                              :linear checker/linearizable})
+                 :nemesis   (nemesis/partition-random-halves)
+                 :generator (gen/phases
+                              (->> gen/cas
+                                   (gen/delay 1/2)
+                                   (gen/nemesis
+                                     (gen/seq
+                                       (cycle [(gen/sleep 10)
+                                               {:type :info :f :start}
+                                               (gen/sleep 10)
+                                               {:type :info :f :stop}])))
+                                   (gen/time-limit 120))
+                              (gen/nemesis
+                                (gen/once {:type :info :f :stop}))
+                                        ; (gen/sleep 10)
+                              (gen/clients
+                                (gen/once {:type :invoke :f :read}))))
+  (let 
+    ;; TODO Excise -- make it consistent with etcd test
+    (is (:valid? (:results test)))
+    (report/linearizability (:linear (:results test)))))
+
+(defn -main
+  "Handles command line arguments. Can either run a test, or a web server for
+  browsing results."
+  [& args]
+  (cli/run! (merge (cli/single-test-cmd {:test-fn register-test})
+                   (cli/serve-cmd))
+            args))
+
