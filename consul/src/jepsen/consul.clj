@@ -28,19 +28,40 @@
             [clj-http.client :as http]
             [base64-clj.core :as base64]))
 
-(def binary "/usr/bin/consul")
+(def dir "/opt/consul")
+(def binary "consul")
 (def pidfile "/var/run/consul.pid")
 (def data-dir "/var/lib/consul")
-(def log-file "/var/log/consul.log")
+(def logfile "/var/log/consul.log")
 
 (defn start-consul!
   [test node]
   (info node "starting consul")
+
+  ;; TODO Port this over to start-daemon, or whatever Kyle is using in latest jepsen
+  #_(cu/start-daemon!
+   {:logfile logfile
+    :pidfile pidfile
+    :chdir   dir}
+   binary
+   :agent
+   :-server
+   :-log-level       "debug"
+   :-client          "0.0.0.0"
+   :-bind            (net/ip (name node))
+   :-data-dir        data-dir
+   :-node            (name node)
+   (when (= node (core/primary test)) :-bootstrap)
+   (when-not (= node (core/primary test))
+     [:-join        (net/ip (name (core/primary test)))])
+   :>>               logfile
+   (c/lit "2>&1"))
+
   (c/exec :start-stop-daemon :--start
           :--background
           :--make-pidfile
           :--pidfile        pidfile
-          :--chdir          "/opt/consul"
+          :--chdir          "/opt"
           :--exec           binary
           :--no-close
           :--
@@ -54,12 +75,20 @@
           (when (= node (core/primary test)) :-bootstrap)
           (when-not (= node (core/primary test))
             [:-join        (net/ip (name (core/primary test)))])
-          :>>               log-file
-          (c/lit "2>&1")))
+          :>>               logfile
+          (c/lit "2>&1"))
+  )
 
-(defn db []
+(defn db
+  "Install consul specific version"
+  [version]
   (reify db/DB
     (setup! [this test node]
+      (info node "installing consul" version)
+      (c/su
+       (let [url (str "https://releases.hashicorp.com/consul/"
+                      version "/consul_" version "_linux_amd64.zip")]
+         (cu/install-archive! url dir)))
       (start-consul! test node)
 
       (Thread/sleep 1000)
@@ -67,8 +96,15 @@
 
     (teardown! [_ test node]
       (c/su
-        (meh (c/exec :killall :-9 :consul))
-        (c/exec :rm :-rf pidfile data-dir))
+       (info node "consul killed")
+       (cu/stop-daemon! binary pidfile)
+
+       (info node "consul data cleared")
+       (c/exec :rm :-rf pidfile data-dir)
+
+       (info node "consul bin removed")
+       (c/su
+        (c/exec :rm :-rf dir)))
       (info node "consul nuked"))))
 
 (defn maybe-int [value]
@@ -127,10 +163,11 @@
 (defrecord CASClient [k client]
   client/Client
   (setup! [this test node]
-    (let [client (str "http://" (name node) ":8500/v1/kv/" k)]
+    (let [client (str "http://" (net/ip (name node)) ":8500/v1/kv/" k)]
       (consul-put! client (json/generate-string nil))
       (assoc this :client client)))
 
+  ;; TODO catch the status 500 process crashes
   (invoke! [this test op]
     (case (:f op)
       :read  (try (let [resp  (parse (consul-get client))]
@@ -167,7 +204,7 @@
   (merge tests/noop-test
          {:name      "consul"
           :os        debian/os
-          :db        (db)
+          :db        (db "1.6.1")
           :client    (cas-client)
           ;; TODO Lift this to an independent key checker
           :checker   (checker/compose
