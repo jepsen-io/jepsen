@@ -28,56 +28,39 @@
             [clj-http.client :as http]
             [base64-clj.core :as base64]))
 
-(def dir "/opt/consul")
+(def dir "/opt")
 (def binary "consul")
 (def pidfile "/var/run/consul.pid")
-(def data-dir "/var/lib/consul")
 (def logfile "/var/log/consul.log")
+(def data-dir "/var/lib/consul")
 
 (defn start-consul!
   [test node]
   (info node "starting consul")
 
-  ;; TODO Port this over to start-daemon, or whatever Kyle is using in latest jepsen
-  #_(cu/start-daemon!
+  (cu/start-daemon!
    {:logfile logfile
     :pidfile pidfile
     :chdir   dir}
    binary
    :agent
    :-server
-   :-log-level       "debug"
-   :-client          "0.0.0.0"
-   :-bind            (net/ip (name node))
-   :-data-dir        data-dir
-   :-node            (name node)
+   :-log-level "debug"
+   :-client    "0.0.0.0"
+   :-bind      (net/ip (name node))
+   :-data-dir  data-dir
+   :-node      (name node)
+
+   ;; Setup node in bootstrap mode if it resolves to primary
    (when (= node (core/primary test)) :-bootstrap)
+
+   ;; Join if not primary
    (when-not (= node (core/primary test))
      [:-join        (net/ip (name (core/primary test)))])
-   :>>               logfile
-   (c/lit "2>&1"))
 
-  (c/exec :start-stop-daemon :--start
-          :--background
-          :--make-pidfile
-          :--pidfile        pidfile
-          :--chdir          "/opt"
-          :--exec           binary
-          :--no-close
-          :--
-          :agent
-          :-server
-          :-log-level       "debug"
-          :-client          "0.0.0.0"
-          :-bind            (net/ip (name node))
-          :-data-dir        data-dir
-          :-node            (name node)
-          (when (= node (core/primary test)) :-bootstrap)
-          (when-not (= node (core/primary test))
-            [:-join        (net/ip (name (core/primary test)))])
-          :>>               logfile
-          (c/lit "2>&1"))
-  )
+   ;; Shovel stdout to logfile
+   :>> logfile
+   (c/lit "2>&1")))
 
 (defn db
   "Install consul specific version"
@@ -88,7 +71,8 @@
       (c/su
        (let [url (str "https://releases.hashicorp.com/consul/"
                       version "/consul_" version "_linux_amd64.zip")]
-         (cu/install-archive! url dir)))
+         (cu/install-archive! url (str dir "/consul") )))
+
       (start-consul! test node)
 
       (Thread/sleep 1000)
@@ -96,16 +80,17 @@
 
     (teardown! [_ test node]
       (c/su
-       (info node "consul killed")
        (cu/stop-daemon! binary pidfile)
+       (info node "consul killed")
 
-       (info node "consul data cleared")
-       (c/exec :rm :-rf pidfile data-dir)
-
-       (info node "consul bin removed")
+       (c/exec :rm :-rf pidfile logfile data-dir)
        (c/su
-        (c/exec :rm :-rf dir)))
-      (info node "consul nuked"))))
+        (c/exec :rm :-rf (str dir "/" binary))))
+      (info node "consul nuked"))
+
+    db/LogFiles
+    (log-files [_ test node]
+      [logfile])))
 
 (defn maybe-int [value]
   (if (= value "null")
@@ -148,9 +133,10 @@
 (defn consul-put! [key-url value]
   (http/put key-url {:body value}))
 
-(defn consul-cas! [key-url value new-value]
+(defn consul-cas!
   "Consul uses an index based CAS so we must first get the existing value for
    this key and then use the index for a CAS!"
+  [key-url value new-value]
   (let [resp (parse (consul-get key-url))
         index (:index resp)
         existing-value (:value resp)]
@@ -160,23 +146,21 @@
           (= (body "true")))
         false)))
 
+;; TODO Catch loud 500s
 (defrecord CASClient [k client]
   client/Client
-  (setup! [this test node]
+  (open! [this test node]
     (let [client (str "http://" (net/ip (name node)) ":8500/v1/kv/" k)]
+      ;; TODO Get a retry here? Maybe, it seems to fail occassionally on setup
       (consul-put! client (json/generate-string nil))
       (assoc this :client client)))
 
-  ;; TODO catch the status 500 process crashes
   (invoke! [this test op]
     (case (:f op)
       :read  (try (let [resp  (parse (consul-get client))]
                     (assoc op :type :ok :value (:value resp)))
                   (catch Exception e
-                    (warn e "Read failed")
-                    ; Since reads don't have side effects, we can always
-                    ; pretend they didn't happen.
-                    (assoc op :type :fail)))
+                    (assoc op :type :fail :error :read-failed)))
 
       :write (do (->> (:value op)
                       json/generate-string
@@ -189,29 +173,33 @@
                                                (json/generate-string value'))]
                (assoc op :type (if ok? :ok :fail)))))
 
-  (teardown! [_ test]))
+  (close! [this _]
+    (assoc this :client nil))
+
+  (setup! [_ _])
+  (teardown! [_ _]))
 
 (defn cas-client
   "A compare and set register built around a single consul node."
   []
   (CASClient. "jepsen" nil))
 
-
-;; Port this to jepsen.tests.linearizable_register
+;; TODO Port to pluggable workloads for multiple tests
+;; TODO Port this to jepsen.tests.linearizable_register
 (defn register-test
   [opts]
   (info :opts opts)
   (merge tests/noop-test
-         {:name      "consul"
-          :os        debian/os
-          :db        (db "1.6.1")
-          :client    (cas-client)
+         {:name "consul" ;; TODO Add db version and test name
+          :os debian/os
+          :db (db "1.6.1")
+          :client (cas-client)
           ;; TODO Lift this to an independent key checker
-          :checker   (checker/compose
-                      {:perf     (checker/perf)
-                       :timeline (timeline/html)
-                       :linear (checker/linearizable
-                                {:model (model/cas-register)})})
+          :checker (checker/compose
+                    {:perf     (checker/perf)
+                     :timeline (timeline/html)
+                     :linear (checker/linearizable
+                              {:model (model/cas-register)})})
           :nemesis   (nemesis/partition-random-halves)
           :generator (gen/phases
                       (->> gen/cas
@@ -230,6 +218,7 @@
                        (gen/once {:type :invoke :f :read})))}
          opts))
 
+;; TODO Migrate to a runner.clj and cli-opts
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
