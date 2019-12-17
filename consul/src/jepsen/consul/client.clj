@@ -1,17 +1,12 @@
 (ns jepsen.consul.client
-  (:require [jepsen.client :as client]
+  (:require [clojure.tools.logging :refer [debug info warn]]
+            [jepsen.client :as client]
             [jepsen.control.net :as net]
             [base64-clj.core :as base64]
             [cheshire.core :as json]
             [clj-http.client :as http]
-            [dom-top.core :refer [with-retry]]))
-
-;; TODO Come up with a way to block until the node responds
-#_(defn await-node-ready
-  "Blocks until this node is responding to queries."
-  [client]
-  (-> client cluster-client .listMember (.get))
-  true)
+            [dom-top.core :refer [with-retry]]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn maybe-int [value]
   (if (= value "null")
@@ -67,13 +62,13 @@
           (= (body "true")))
         false)))
 
-;; TODO Catch loud 500s
+;; TODO Add with-errors classification
+;; TODO Make compatible with jepsen.independent
 (defrecord CASClient [k client]
   client/Client
   (open! [this test node]
     (let [client (str "http://" (net/ip (name node)) ":8500/v1/kv/" k)]
-      (with-retry [attempts 10]
-        (consul-put! client (json/generate-string nil)))
+      (consul-put! client (json/generate-string nil))
       (assoc this :client client)))
 
   (invoke! [this test op]
@@ -104,3 +99,32 @@
   "A compare and set register built around a single consul node."
   []
   (CASClient. "jepsen" nil))
+
+(defn await-cluster-ready
+  "Blocks until cluster index matches count of nodes on test"
+  [node count]
+
+  ;; FIXME Maybe we use the index count here?
+  (let [url (str "http://" (net/ip (name node)) ":8500/v1/catalog/nodes?index=1")
+        #_(str "http://" (net/ip (name node)) ":8500/v1/catalog/nodes?index=" count)
+        ]
+    (with-retry [attempts 50]
+      (try+
+       ;; FIXME Take out this log
+       (info (consul-get url))
+
+       ;; This tells us that the server is responding and is ready
+       (catch [:message "clj-http: status 500"] e
+         ;; FIXME Probably don't need this log
+         (warn e))
+
+       ;; Cluster not converged yet, let's keep waiting
+       (catch java.net.ConnectException e
+         (if (< 0 attempts)
+           (do
+             ;; TODO It would be nice to remove this log warning if we don't have connection issues anymore
+             (warn "Connection refused from node:" node ", retrying. Attempts remaining:" attempts)
+             (Thread/sleep (rand 1000))
+             (retry (dec attempts)))
+           (throw e))))))
+  true)

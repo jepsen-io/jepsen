@@ -1,6 +1,7 @@
 (ns jepsen.consul.db
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
+            [jepsen.consul.client :as client]
             [jepsen.core :as jepsen]
             [jepsen.db :as db]
             [jepsen.control :as c]
@@ -15,8 +16,6 @@
 (def logfile "/var/log/consul.log")
 (def data-dir "/var/lib/consul")
 
-;; FIXME Why aren't my nodes converging anymore T.T
-;;       ... seems to only happen from time to time.
 (defn start-consul!
   [test node]
   (info node "starting consul")
@@ -60,12 +59,8 @@
 
       (start-consul! test node)
 
-      ;; TODO Implement await-node-ready instead of this silly sleep
-      (Thread/sleep 10000)
-      #_(let [c (client/client node)]
-          (try
-            (client/await-node-ready c)
-            (finally (client/close! c))))
+      (info "Waiting for cluster to converge")
+      (client/await-cluster-ready node (count (:nodes test)))
 
       (jepsen/synchronize test)
       (reset! (:initialized? test) true))

@@ -1,9 +1,5 @@
 (ns jepsen.consul
   (:gen-class)
-  (:use jepsen.core
-        jepsen.tests
-        clojure.test
-        clojure.pprint)
   (:require [clojure.tools.logging :refer [debug info warn]]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -23,7 +19,6 @@
             [jepsen.consul.client :as cc]
             [jepsen.consul.db :as db]))
 
-;; TODO Port this to jepsen.tests.linearizable_register
 (defn register-test
   [opts]
   (info :opts opts)
@@ -79,7 +74,6 @@
     :parse-fn parse-long
     :validate [pos? "Must be a positive integer."]]])
 
-;; TODO Migrate to a runner.clj and cli-opts
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
