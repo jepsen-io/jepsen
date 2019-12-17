@@ -1,146 +1,86 @@
 (ns jepsen.consul
-  (:require [clojure.tools.logging    :refer [debug info warn]]
-            [clojure.java.io          :as io]
-            [clojure.string           :as str]
-            [jepsen.core              :as core]
-            [jepsen.util              :refer [meh timeout]]
-            [jepsen.core              :as core]
-            [jepsen.control           :as c]
-            [jepsen.control.net       :as net]
-            [jepsen.control.util      :as cu]
-            [jepsen.client            :as client]
-            [jepsen.db                :as db]
-            [cheshire.core            :as json]
-            [clj-http.client          :as http]
-            [base64-clj.core          :as base64]))
+  (:gen-class)
+  (:require [clojure.tools.logging :refer [debug info warn]]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [jepsen.core :as core]
+            [jepsen.util :as util :refer [meh timeout]]
+            [jepsen.control :as c]
+            [jepsen.cli :as cli]
+            [jepsen.os.debian :as debian]
+            [jepsen.checker   :as checker]
+            [jepsen.checker.timeline :as timeline]
+            [jepsen.generator :as gen]
+            [jepsen.nemesis :as nemesis]
+            [jepsen.store :as store]
+            [jepsen.report :as report]
+            [jepsen.tests :as tests]
+            [knossos.model :as model]
+            [jepsen.consul.client :as cc]
+            [jepsen.consul.db :as db]))
 
-(def binary "/usr/bin/consul")
-(def pidfile "/var/run/consul.pid")
-(def data-dir "/var/lib/consul")
-(def log-file "/var/log/consul.log")
+(defn register-test
+  [opts]
+  (info :opts opts)
+  (merge tests/noop-test
+         opts
+         ;; TODO Add test name once workloads are implemented
+         {:name (str "consul " (:version opts))
+          :os debian/os
+          :initialized? (atom false)
+          :db (db/db)
+          :client (cc/cas-client)
+          ;; TODO Lift this to an independent key checker
+          :checker (checker/compose
+                    {:perf     (checker/perf)
+                     :timeline (timeline/html)
+                     :linear (checker/linearizable
+                              {:model (model/cas-register)})})
+          :nemesis   (nemesis/partition-random-halves)
+          :generator (gen/phases
+                      (->> gen/cas
+                           (gen/delay 1/2)
+                           (gen/nemesis
+                            (gen/seq
+                             (cycle [(gen/sleep 10)
+                                     {:type :info :f :start}
+                                     (gen/sleep 10)
+                                     {:type :info :f :stop}])))
+                           (gen/time-limit (or (:time-limit opts) 120)))
+                      (gen/nemesis
+                       (gen/once {:type :info :f :stop}))
+                      ;; (gen/sleep 10)
+                      (gen/clients
+                       (gen/once {:type :invoke :f :read})))}))
 
-(defn start-consul!
-  [test node]
-  (info node "starting consul")
-  (c/exec :start-stop-daemon :--start
-          :--background
-          :--make-pidfile
-          :--pidfile        pidfile
-          :--chdir          "/opt/consul"
-          :--exec           binary
-          :--no-close
-          :--
-          :agent
-          :-server
-          :-log-level       "debug"
-          :-client          "0.0.0.0"
-          :-bind            (net/ip (name node))
-          :-data-dir        data-dir
-          :-node            (name node)
-          (when (= node (core/primary test)) :-bootstrap)
-          (when-not (= node (core/primary test))
-            [:-join        (net/ip (name (core/primary test)))])
-          :>>               log-file
-          (c/lit "2>&1")))
+;; TODO Port reusable components from register-test over to consul-test and implement worklaods
+(defn consul-test
+  [opts])
 
-(defn db []
-  (reify db/DB
-    (setup! [this test node]
-      (start-consul! test node)
+(def cli-opts
+  "Additional command line options."
+  [["-v" "--version STRING" "What version of etcd should we install?"
+    :default "1.6.1"]
+   #_["-w" "--workload NAME" "What workload should we run?"
+    :missing  (str "--workload " (cli/one-of workloads))
+    :validate [workloads (cli/one-of workloads)]]
+   #_["-s" "--serializable" "Use serializable reads, instead of going through consensus."]
+   #_["-r" "--rate HZ" "Approximate number of requests per second, per thread."
+    :default  10
+    :parse-fn read-string
+    :validate [#(and (number? %) (pos? %)) "Must be a positive number"]]
+   #_[nil "--ops-per-key NUM" "Maximum number of operations on any given key."
+    :default  200
+    :parse-fn parse-long
+    :validate [pos? "Must be a positive integer."]]])
 
-      (Thread/sleep 1000)
-      (info node "consul ready"))
+(defn -main
+  "Handles command line arguments. Can either run a test, or a web server for
+  browsing results."
+  [& args]
+  (cli/run! (merge (cli/single-test-cmd
+                    {:test-fn register-test
+                     :opt-spec cli-opts})
+                   (cli/serve-cmd))
+            args))
 
-    (teardown! [_ test node]
-      (c/su
-        (meh (c/exec :killall :-9 :consul))
-        (c/exec :rm :-rf pidfile data-dir))
-      (info node "consul nuked"))))
-
-(defn maybe-int [value]
-  (if (= value "null")
-      nil
-      (Integer. value)))
-
-(defn parse-index [resp]
-  (-> resp
-      :headers
-      (get "x-consul-index")
-      Integer.))
-
-(defn parse-body
-  "Parse the base64 encoded value.
-   The response JSON looks like:
-    [
-     {
-       \"CreateIndex\": 100,
-       \"ModifyIndex\": 200,
-       \"Key\": \"foo\",
-       \"Flags\": 0,
-       \"Value\": \"YmFy\"
-     }
-    ]
-  "
-  [resp]
-  (let [body  (-> resp
-                  :body
-                  (json/parse-string #(keyword (.toLowerCase %)))
-                  first)
-        value (-> body :value base64/decode maybe-int)]
-    (assoc body :value value)))
-
-(defn parse [response]
-  (assoc (parse-body response) :index (parse-index response)))
-
-(defn consul-get [key-url]
-  (http/get key-url))
-
-(defn consul-put! [key-url value]
-  (http/put key-url {:body value}))
-
-(defn consul-cas! [key-url value new-value]
-  "Consul uses an index based CAS so we must first get the existing value for
-   this key and then use the index for a CAS!"
-  (let [resp (parse (consul-get key-url))
-        index (:index resp)
-        existing-value (:value resp)]
-    (if (= existing-value value)
-        (let [params {:body new-value :query-params {:cas index}}
-              body (:body (http/put key-url params))]
-          (= (body "true")))
-        false)))
-
-(defrecord CASClient [k client]
-  client/Client
-  (setup! [this test node]
-    (let [client (str "http://" (name node) ":8500/v1/kv/" k)]
-      (consul-put! client (json/generate-string nil))
-      (assoc this :client client)))
-
-  (invoke! [this test op]
-    (case (:f op)
-      :read  (try (let [resp  (parse (consul-get client))]
-                    (assoc op :type :ok :value (:value resp)))
-                  (catch Exception e
-                    (warn e "Read failed")
-                    ; Since reads don't have side effects, we can always
-                    ; pretend they didn't happen.
-                    (assoc op :type :fail)))
-
-      :write (do (->> (:value op)
-                      json/generate-string
-                      (consul-put! client))
-                 (assoc op :type :ok))
-
-      :cas   (let [[value value'] (:value op)
-                   ok?            (consul-cas! client
-                                               (json/generate-string value)
-                                               (json/generate-string value'))]
-               (assoc op :type (if ok? :ok :fail)))))
-
-  (teardown! [_ test]))
-
-(defn cas-client
-  "A compare and set register built around a single consul node."
-  []
-  (CASClient. "jepsen" nil))
