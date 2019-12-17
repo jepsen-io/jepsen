@@ -3,10 +3,10 @@
   :url "https://github.com/aphyr/jepsen"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :main jepsen.consul
   :dependencies [[org.clojure/clojure "1.10.0"]
                  [jepsen "0.1.15"]
-                 [knossos "0.3.6-SNAPSHOT" :exclusions [org.slf4j/slf4j-log4j12]]
                  [base64-clj "0.1.1"]
                  [clj-http "3.10.0"]
-                 [cheshire "5.9.0"]])
+                 [cheshire "5.9.0"]]
+  :repl-options {:init-ns jepsen.consul}
+  :main jepsen.consul)
