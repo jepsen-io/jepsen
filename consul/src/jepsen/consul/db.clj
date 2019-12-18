@@ -15,6 +15,7 @@
 (def pidfile "/var/run/consul.pid")
 (def logfile "/var/log/consul.log")
 (def data-dir "/var/lib/consul")
+(def retry-interval "5s")
 
 (defn start-consul!
   [test node]
@@ -32,13 +33,14 @@
    :-bind      (net/ip (name node))
    :-data-dir  data-dir
    :-node      (name node)
+   :-retry-interval retry-interval
 
    ;; Setup node in bootstrap mode if it resolves to primary
    (when (= node (jepsen/primary test)) :-bootstrap)
 
    ;; Join if not primary
    (when-not (= node (jepsen/primary test))
-     [:-join (net/ip (name (jepsen/primary test)))])
+     [:-retry-join (net/ip (name (jepsen/primary test)))])
 
    ;; Shovel stdout to logfile
    :>> logfile

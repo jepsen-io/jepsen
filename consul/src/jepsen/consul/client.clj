@@ -1,5 +1,6 @@
 (ns jepsen.consul.client
   (:require [clojure.tools.logging :refer [debug info warn]]
+            [clojure.string :as str]
             [jepsen.client :as client]
             [jepsen.control.net :as net]
             [base64-clj.core :as base64]
@@ -16,7 +17,7 @@
 (defn parse-index [resp]
   (-> resp
       :headers
-      (get "x-consul-index")
+      (get "X-Consul-Index")
       Integer.))
 
 (defn parse-body
@@ -41,82 +42,63 @@
     (assoc body :value value)))
 
 (defn parse [response]
-  (assoc (parse-body response) :index (parse-index response)))
+  (assoc (parse-body response)
+         :index (parse-index response)))
 
-(defn consul-get [key-url]
-  (http/get key-url))
+(defn get
+  ([url]
+   (http/get url))
+  ([url key]
+   (http/get (str url key))))
 
-(defn consul-put! [key-url value]
-  (http/put key-url {:body value}))
+(defn put! [url key value]
+  (http/put (str url key) {:body value}))
 
-(defn consul-cas!
+(defn cas!
   "Consul uses an index based CAS so we must first get the existing value for
    this key and then use the index for a CAS!"
-  [key-url value new-value]
-  (let [resp (parse (consul-get key-url))
-        index (:index resp)
-        existing-value (:value resp)]
+  [url key value new-value]
+  (let [res (parse (get url key))
+        existing-value (str (:value res))
+        index (:index res)]
     (if (= existing-value value)
-        (let [params {:body new-value :query-params {:cas index}}
-              body (:body (http/put key-url params))]
-          (= (body "true")))
-        false)))
+      (let [params {:body new-value :query-params {:cas index}}
+            body (:body (http/put (str url key) params))]
+        (= body "true"))
+      false)))
 
-;; TODO Add with-errors classification
-;; TODO Make compatible with jepsen.independent
-(defrecord CASClient [k client]
-  client/Client
-  (open! [this test node]
-    (let [client (str "http://" (net/ip (name node)) ":8500/v1/kv/" k)]
-      (consul-put! client (json/generate-string nil))
-      (assoc this :client client)))
+(defn txn
+  "TODO"
+  [])
 
-  (invoke! [this test op]
-    (case (:f op)
-      :read  (try (let [resp  (parse (consul-get client))]
-                    (assoc op :type :ok :value (:value resp)))
-                  (catch Exception e
-                    (assoc op :type :fail :error :read-failed)))
+(defmacro with-errors
+  [op idempotent & body]
+  `(try ~@body
+        (catch Exception e#
+            (let [type# (if (~idempotent (:f ~op))
+                         :fail
+                         :info)]
+              (condp re-find (.getMessage e#)
+                #"404" (assoc ~op :type type# :error :key-not-found)
+                #"500" (assoc ~op :type type# :error :server-unavailable)
+                (throw e#))))))
 
-      :write (do (->> (:value op)
-                      json/generate-string
-                      (consul-put! client))
-                 (assoc op :type :ok))
-
-      :cas   (let [[value value'] (:value op)
-                   ok?            (consul-cas! client
-                                               (json/generate-string value)
-                                               (json/generate-string value'))]
-               (assoc op :type (if ok? :ok :fail)))))
-
-  (close! [this _]
-    (assoc this :client nil))
-
-  (setup! [_ _])
-  (teardown! [_ _]))
-
-(defn cas-client
-  "A compare and set register built around a single consul node."
-  []
-  (CASClient. "jepsen" nil))
-
+;; FIXME simplify this whole thing, it's repetitive
 (defn await-cluster-ready
   "Blocks until cluster index matches count of nodes on test"
   [node count]
 
   ;; FIXME Maybe we use the index count here?
-  (let [url (str "http://" (net/ip (name node)) ":8500/v1/catalog/nodes?index=1")
-        #_(str "http://" (net/ip (name node)) ":8500/v1/catalog/nodes?index=" count)
-        ]
-    (with-retry [attempts 50]
-      (try+
-       ;; FIXME Take out this log
-       (info (consul-get url))
+  (let [url (str "http://" (net/ip (name node)) ":8500/v1/catalog/nodes?index=1")]
+     (with-retry [attempts 5]
+       (get url)
 
-       ;; This tells us that the server is responding and is ready
-       (catch [:message "clj-http: status 500"] e
-         ;; FIXME Probably don't need this log
-         (warn e))
+       ;; We got an application-level response, let's proceed!
+       (catch clojure.lang.ExceptionInfo e
+         (if (and (= (.getMessage e) "clj-http: status 500")
+                  (< 0 attempts))
+           (retry (dec attempts))
+           (throw+ {:error :retry-attempts-exceeded :exception e})))
 
        ;; Cluster not converged yet, let's keep waiting
        (catch java.net.ConnectException e
@@ -124,7 +106,7 @@
            (do
              ;; TODO It would be nice to remove this log warning if we don't have connection issues anymore
              (warn "Connection refused from node:" node ", retrying. Attempts remaining:" attempts)
-             (Thread/sleep (rand 1000))
+             (Thread/sleep 1000)
              (retry (dec attempts)))
-           (throw e))))))
+           (throw+ {:error :retry-attempts-exceeded :exception e})))))
   true)
