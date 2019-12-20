@@ -476,8 +476,8 @@
       ;        (pprint commands)
       ;        (pprint (map (partial take 2) data))))
       (try (g/raw-plot! commands data)
-           (catch java.io.IOException _
-             (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable")))))))
+           (catch java.io.IOException e
+             (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable" e)))))))
 
 (defn point-graph!
   "Writes a plot of raw latency data points."
