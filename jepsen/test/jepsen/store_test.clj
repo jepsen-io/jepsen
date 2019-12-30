@@ -68,7 +68,7 @@
       (is (string? k))
       (testing "test.fressian"
         (is (= (dissoc t :db :os :net :client :checker
-                       :nemesis :generator :model)
+                       :nemesis :generator :model :remote)
                @t')))
       (testing "results.edn"
         (is (= (:results t) (load-results "store-test" k)))))))
