@@ -12,6 +12,7 @@
             [dom-top.core :refer [assert+]]
             [jepsen [core :as jepsen]
                     [store :as store]
+                    [util :as util :refer [map-vals]]
                     [web :as web]]))
 
 (def default-nodes ["n1" "n2" "n3" "n4" "n5"])
@@ -113,6 +114,7 @@ Runs a Jepsen test and exits with a status code:
 
   0     All tests passed
   1     Some test failed
+  2     Some test had an :unknown validity
   254   Invalid arguments
   255   Internal Jepsen error
 
@@ -360,8 +362,10 @@ Options:\n")
                              (with-out-str (pprint options)))
                        (doseq [i (range (:test-count options))]
                          (let [test (jepsen/run! (test-fn options))]
-                           (when-not (:valid? (:results test))
-                             (System/exit 1)))))}
+                           (case (:valid? (:results test))
+                             false    (System/exit 1)
+                             :unknown (System/exit 2)
+                             nil))))}
 
    "analyze" {:opt-spec opt-spec
               :opt-fn   opt-fn
@@ -395,6 +399,86 @@ Options:\n")
                                       with-out-str))
 
                             (jepsen/analyze! test)))}}))
+
+(defn test-all-run-tests!
+  "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,
+  :crashed, false) to collections of test folders with that outcome."
+  [tests]
+  (->> tests
+       (map-indexed
+         (fn [i test]
+           (try
+             (let [test' (jepsen/run! test)]
+               [(:valid? (:results test'))
+                (.getPath (store/path test'))])
+             (catch Exception e
+               (warn e "Test crashed")
+               [:crashed (:name test)]))))
+       (group-by first)
+       (map-vals (partial map second))))
+
+(defn test-all-print-summary!
+  "Prints a summary of test outcomes. Takes a map of statuses (e.g. :crashed,
+  true, false, :unknown), to test files. Returns results."
+  [results]
+  (println "\n")
+
+  (when (seq (results true))
+    (println "\n# Successful tests\n")
+    (dorun (map println (results true))))
+
+  (when (seq (results :unknown))
+    (println "\n# Indeterminate tests\n")
+    (dorun (map println (results :unknown))))
+
+  (when (seq (results :crashed))
+    (println "\n# Crashed tests\n")
+    (dorun (map println (results :crashed))))
+
+  (when (seq (results false))
+    (println "\n# Failed tests\n")
+    (dorun (map println (results false))))
+
+  (println)
+  (println (count (results true)) "successes")
+  (println (count (results :unknown)) "unknown")
+  (println (count (results :crashed)) "crashed")
+  (println (count (results false)) "failures")
+
+  results)
+
+(defn test-all-exit!
+  "Takes a map of statuses and exits with an appropriate error code: 255 if any
+  crashed, 2 if any were unknown, 1 if any were invalid, 0 if all passed."
+  [results]
+  (System/exit (cond
+                 (:crashed results)   255
+                 (:unknown results)   2
+                 (get results false)  1
+                 true                 0)))
+
+(defn test-all-cmd
+  "A command that runs a whole suite of tests in one go. Options:
+
+    :opt-spec     A vector of additional options for tools.cli. Appended to
+                  test-opt-spec. Optional.
+    :opt-fn       A function which transforms parsed options. Composed after
+                  test-opt-fn. Optional.
+    :usage        Defaults to `test-usage`. Optional.
+    :tests-fn     A function that receives the transformed option map and
+                  constructs a sequence of tests to run."
+  [opts]
+  {"test-all"
+   {:opt-spec (into test-opt-spec (:opt-spec opts))
+    :opt-fn   test-opt-fn
+    :usage    "Runs all tests"
+    :run      (fn run [{:keys [options]}]
+                (info "CLI options:\n" (with-out-str (pprint options)))
+                (->> options
+                     ((:tests-fn opts))
+                     test-all-run-tests!
+                     test-all-print-summary!
+                     test-all-exit!))}})
 
 (defn -main
   [& args]
