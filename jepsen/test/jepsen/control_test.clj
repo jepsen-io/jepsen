@@ -1,8 +1,11 @@
 (ns jepsen.control-test
-  (:require [jepsen.control :as c]
+  (:require [jepsen [control :as c]
+                    [common-test :refer [quiet-logging]]
+                    [util :refer [contains-many?]]]
             [slingshot.slingshot :refer [try+ throw+]]
-            [clojure.test :refer :all]
-            [jepsen.util :refer [contains-many?]]))
+            [clojure.test :refer :all]))
+
+(use-fixtures :once quiet-logging)
 
 (deftest ^:integration session-test
   (testing "on failure, session throws debug data"

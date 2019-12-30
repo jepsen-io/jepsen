@@ -12,8 +12,10 @@
      :console   false
      :appenders [store/console-appender]
      :overrides (merge store/default-logging-overrides
-                       {"jepsen.db"           :error
+                       {"clj-ssh.ssh"         :error
+                        "jepsen.db"           :error
                         "jepsen.core"         :error
+                        "jepsen.control.util" :error
                         "jepsen.generator"    :error
                         "jepsen.independent"  :error})})
   (f)
