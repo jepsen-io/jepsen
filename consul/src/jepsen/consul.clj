@@ -13,7 +13,8 @@
             [jepsen.consul.db :as db]))
 
 (def workloads
-  {"register" register/workload})
+  {"none"     (fn [_] tests/noop-test)
+   "register" register/workload})
 
 (defn consul-test
   "Given an options map from the command line runner constructs a test map. Special options:

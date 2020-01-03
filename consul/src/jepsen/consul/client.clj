@@ -80,6 +80,7 @@
                          :info)]
               (condp re-find (.getMessage e#)
                 #"404" (assoc ~op :type type# :error :key-not-found)
+                #"403" (assoc ~op :type type# :error :not-authorized)
                 #"500" (assoc ~op :type type# :error :server-unavailable)
                 (throw e#))))))
 
