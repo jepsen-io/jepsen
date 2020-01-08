@@ -116,7 +116,7 @@
 (def cli-opts
   "Options for single and multiple tests"
   [["-v" "--version VERSION" "What version number of dgraph should we test?"
-    :default "1.0.3"]
+    :default "1.1.1"]
    [nil "--package-url URL" "Ignore version; install this tarball instead"
     :validate [(partial re-find #"\A(file)|(https?)://")
                "Should be an HTTP url"]]
