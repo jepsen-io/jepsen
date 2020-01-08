@@ -1,10 +1,10 @@
-(defproject jepsen.dgraph "1.0.0"
+(defproject jepsen.dgraph "1.0.1-SNAPSHOT"
   :description "Jepsen tests for Dgraph"
   :url "https://github.io/jepsen-io/jepsen"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.10.0"]
-                 [jepsen "0.1.16-SNAPSHOT"]
+                 [jepsen "0.1.16"]
                  [clj-http "3.7.0"]
                  [cheshire "5.8.0"]
                  [clj-wallhack "1.0.1"]
