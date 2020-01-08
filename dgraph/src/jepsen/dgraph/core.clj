@@ -2,6 +2,7 @@
   (:gen-class)
   (:require [clojure.string :as str]
             [clojure.tools.logging :refer [info warn error]]
+            [clojure.java.io :as io]
             [clojure.java.shell :refer [sh]]
             [clojure.pprint :refer [pprint]]
             [jepsen [cli :as cli]
@@ -56,8 +57,11 @@
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
   [opts]
-  (let [version  (if (:local-binary opts)
-                   (let [v (:out (sh (:local-binary opts) "version"))]
+  (let [version  (if-let [bin (:local-binary opts)]
+                   ; We can't pass local filenames directly to sh, or it'll
+                   ; look for them in $PATH, not the working directory
+                   (let [bin (.getCanonicalPath (io/file bin))
+                         v   (:out (sh bin "version"))]
                      (if-let [m (re-find #"Dgraph version   : (v[0-9a-z\.-]+)" v)]
                        (m 1)
                        "unknown"))
