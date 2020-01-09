@@ -132,21 +132,16 @@
       (info "Schema altered")
 
       ;; Insert initial value
-      (try
-        (c/with-txn [t conn]
-          (let [k (first (:accounts test))
-                tp (keyword (c/gen-pred "type"    pred-count k))
-                kp (keyword (c/gen-pred "key"     pred-count k))
-                ap (keyword (c/gen-pred "amount"  pred-count k))
-                r  {kp k
-                    tp "account",
-                    ap (:total-amount test)}]
-            (info "Upserting" r)
-            (c/upsert! t kp r)))
-        ; aphyr: why are these swallowed silently? Are these even in play, now
-        ; that the client uses more wrappers?
-        (catch io.grpc.StatusRuntimeException e)
-        (catch TxnConflictException e))))
+      (c/with-txn [t conn]
+        (let [k (first (:accounts test))
+              tp (keyword (c/gen-pred "type"    pred-count k))
+              kp (keyword (c/gen-pred "key"     pred-count k))
+              ap (keyword (c/gen-pred "amount"  pred-count k))
+              r  {kp k
+                  tp "account",
+                  ap (:total-amount test)}]
+          (info "Upserting" r)
+          (c/upsert! t kp r)))))
 
   (invoke! [this test op]
     (t/with-trace "bank.invoke"
