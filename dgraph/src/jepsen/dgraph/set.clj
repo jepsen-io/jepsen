@@ -66,15 +66,9 @@
 
   (setup! [this test]
     (c/alter-schema! conn (str "value: [int] .\n"))
-    (with-retry [attempts 5]
-      (c/unwrap-exceptions
-        (c/with-txn [t conn]
-          (deliver uid (first (vals (c/mutate! t {:value -1}))))))
-
-      (catch io.grpc.StatusRuntimeException e
-        (if (re-find #"ABORTED" (.getMessage e))
-          (retry (dec attempts))
-          (throw e))))
+    (c/retry-conflicts
+      (c/with-txn [t conn]
+        (deliver uid (first (vals (c/mutate! t {:value -1}))))))
     (info "UID is" @uid))
 
   (invoke! [this test op]

@@ -176,6 +176,18 @@
             (catch TxnConflictException e#
               (assoc ~op :type :fail, :error :conflict)))))
 
+(defmacro retry-conflicts
+  "Retries body with a short delay on transaction conflicts."
+  [& body]
+  `(with-retry [attempts# 10]
+     (unwrap-exceptions ~@body)
+     (catch TxnConflictException e#
+       (if (pos? attempts#)
+         (do (info "Retrying transaction conflict...")
+             (Thread/sleep (rand-int 100))
+             (~'retry (dec attempts#)))
+         (throw e#)))))
+
 (defn str->byte-string
   "Converts a string to a protobuf bytestring."
   [s]

@@ -131,17 +131,18 @@
            (c/alter-schema! conn))
       (info "Schema altered")
 
-      ;; Insert initial value
-      (c/with-txn [t conn]
-        (let [k (first (:accounts test))
-              tp (keyword (c/gen-pred "type"    pred-count k))
-              kp (keyword (c/gen-pred "key"     pred-count k))
-              ap (keyword (c/gen-pred "amount"  pred-count k))
-              r  {kp k
-                  tp "account",
-                  ap (:total-amount test)}]
-          (info "Upserting" r)
-          (c/upsert! t kp r)))))
+      ;; Insert initial value. This tends to fail a lot.
+      (c/retry-conflicts
+        (c/with-txn [t conn]
+          (let [k (first (:accounts test))
+                tp (keyword (c/gen-pred "type"    pred-count k))
+                kp (keyword (c/gen-pred "key"     pred-count k))
+                ap (keyword (c/gen-pred "amount"  pred-count k))
+                r  {kp k
+                    tp "account",
+                    ap (:total-amount test)}]
+            (info "Upserting" r)
+            (c/upsert! t kp r))))))
 
   (invoke! [this test op]
     (t/with-trace "bank.invoke"
