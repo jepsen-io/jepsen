@@ -284,9 +284,9 @@
             (try
               (dc/unwrap-exceptions
                 (let [conn (dc/open node alpha-public-grpc-port)]
-                  (try (dc/await-ready conn))
-                  (finally
-                    (dc/close! conn))))
+                  (try (dc/await-ready conn)
+                       (finally
+                         (dc/close! conn)))))
 
               (catch io.grpc.StatusRuntimeException e
                 (if (re-find #"error while fetching schema" (.getMessage e))
