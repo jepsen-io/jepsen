@@ -6,7 +6,8 @@
             [dom-top.core :refer [with-retry]]
             [wall.hack]
             [cheshire.core :as json]
-            [jepsen.client :as jc]
+            [jepsen [client :as jc]
+                    [util :as util :refer [ex-root-cause]]]
             [jepsen.dgraph.trace :as t])
   (:import (java.util.concurrent TimeUnit)
            (com.google.protobuf ByteString)
@@ -26,6 +27,22 @@
 
 ;; milliseconds given to the grpc blockingstub as a deadline
 (def deadline 30000)
+
+(defmacro unwrap-exceptions
+  "The Dgraph client now throws deeply nested exception hierarchies; you'll
+  get, for instance, a RuntimeException wrapping a
+  java.util.concurrent.ExecutionException wrapping a
+  io.grpc.StatusRuntimeException, where it used to just throw a
+  StatusRuntimeException. This macro catches RuntimeExceptions, unwraps them to
+  inspect their root causes, and, if they're io.grpc.StatusRuntimeExceptions,
+  throws those directly."
+  [& body]
+  `(try ~@body
+        (catch RuntimeException e#
+          (let [cause# (ex-root-cause e#)]
+            (if (instance? io.grpc.StatusRuntimeException cause#)
+              (throw cause#)
+              (throw e#))))))
 
 (defn open
   "Creates a new DgraphClient for the given node."
@@ -51,11 +68,12 @@
       (doseq [c (wall.hack/field DgraphAsyncClient :stubs async-client)]
         (.. c getChannel shutdown)))))
 
+
 (defn abort-txn!
   "Aborts a transaction object."
   [^Transaction t]
   (t/with-trace "client.abort-txn!"
-    (try (.discard t)
+    (try (unwrap-exceptions (.discard t))
        (catch io.grpc.StatusRuntimeException e
          (if (re-find #"ABORTED: Transaction has been aborted\. Please retry\."
                       (.getMessage e))
@@ -100,7 +118,7 @@
   thrown, returns `op` with :type :fail, :error :conflict."
   [op & body]
   `(with-unavailable-backoff
-     (try ~@body
+     (try (unwrap-exceptions ~@body)
           (catch io.grpc.StatusRuntimeException e#
             (condp re-find (.getMessage e#)
               #"DEADLINE_EXCEEDED:"
@@ -133,8 +151,8 @@
               #"No connection exists"
               (assoc ~op :type :fail, :error :no-connection)
 
-              ; Guessssing this means it couldn't even open a conn but not sure
-              ; This might be a fail???
+              ; Guessssing this means it couldn't even open a conn but not
+              ; sure. This might be a fail???
               #"Unavailable desc = all SubConns are in TransientFailure"
               (assoc ~op :type :info, :error :unavailable-all-subconns-down)
 
@@ -155,8 +173,8 @@
 
               (throw e#)))
 
-          (catch TxnConflictException e#
-            (assoc ~op :type :fail, :error :conflict)))))
+            (catch TxnConflictException e#
+              (assoc ~op :type :fail, :error :conflict)))))
 
 (defn str->byte-string
   "Converts a string to a protobuf bytestring."
@@ -165,17 +183,18 @@
 
 (defn alter-schema!
   "Takes a schema string (or any number of strings) and applies that alteration
-  to dgraph. Retries if DEADLINE_EXCEEDED, since dgraph likes to throw this for
-  ??? reasons at the start of the test. Should be idempotent, so... hopefully
-  we can retry, at least in this context?"
+  to dgraph. Retries if DEADLINE_EXCEEDED, or Dgraph complains about pending
+  transactions, or just tells us the alter ABORTED, since Dgraph likes to throw
+  these for ??? reasons at the start of the test. Should be idempotent, so...
+  hopefully we can retry, at least in this context?"
   [^DgraphClient client & schemata]
   (t/with-trace "client.alter-schema!"
     (with-retry [i 10]
-      (.alter client (.. (DgraphProto$Operation/newBuilder)
-                         (setSchema (str/join "\n" schemata))
-                         build))
-
-      (catch java.util.concurrent.CompletionException e
+      (unwrap-exceptions
+        (.alter client (.. (DgraphProto$Operation/newBuilder)
+                           (setSchema (str/join "\n" schemata))
+                           build)))
+      (catch io.grpc.StatusRuntimeException e
         (let [message (.getMessage e)]
           (if (and (< 0 i)
                    (or (re-find #"DEADLINE_EXCEEDED" message)
@@ -304,8 +323,9 @@
   client."
   [client]
   (with-retry [attempts 16]
-    (with-txn [t client]
-      (schema t))
+    (unwrap-exceptions
+      (with-txn [t client]
+        (schema t)))
     (catch io.grpc.StatusRuntimeException e
       (cond (<= attempts 1)
             (throw e)

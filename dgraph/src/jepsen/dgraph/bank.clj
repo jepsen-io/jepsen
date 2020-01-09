@@ -143,6 +143,8 @@
                     ap (:total-amount test)}]
             (info "Upserting" r)
             (c/upsert! t kp r)))
+        ; aphyr: why are these swallowed silently? Are these even in play, now
+        ; that the client uses more wrappers?
         (catch io.grpc.StatusRuntimeException e)
         (catch TxnConflictException e))))
 

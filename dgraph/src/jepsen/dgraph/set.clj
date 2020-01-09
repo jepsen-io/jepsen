@@ -1,7 +1,7 @@
 (ns jepsen.dgraph.set
   "Does a bunch of inserts; verifies that all inserted triples are present in a
   final read."
-  (:require [clojure.tools.logging :refer [info]]
+  (:require [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [with-retry]]
             [knossos.op :as op]
             [jepsen.dgraph [client :as c]
@@ -16,10 +16,14 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "jepsen-type: string @index(exact)"
-                               (when (:upsert-schema test) " @upsert")
-                               " .\n"
-                               "value: int .\n")))
+    (try
+      (c/alter-schema! conn (str "jepsen-type: string @index(exact)"
+                                 (when (:upsert-schema test) " @upsert")
+                                 " .\n"
+                                 "value: int .\n"))
+      (catch Throwable t
+        (warn t "caught during alter-schema")
+        (throw t))))
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
@@ -63,8 +67,9 @@
   (setup! [this test]
     (c/alter-schema! conn (str "value: [int] .\n"))
     (with-retry [attempts 5]
-      (c/with-txn [t conn]
-        (deliver uid (first (vals (c/mutate! t {:value -1})))))
+      (c/unwrap-exceptions
+        (c/with-txn [t conn]
+          (deliver uid (first (vals (c/mutate! t {:value -1}))))))
 
       (catch io.grpc.StatusRuntimeException e
         (if (re-find #"ABORTED" (.getMessage e))
