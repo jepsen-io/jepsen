@@ -101,8 +101,10 @@
             :client     (:client workload)
             :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
-                          {:perf     (checker/perf)
-                           :workload (:checker workload)})
+                          {:perf        (checker/perf)
+                           :exceptions  (checker/unhandled-exceptions)
+                           :stats       (checker/stats)
+                           :workload    (:checker workload)})
             :tracing tracing})))
 
 (defn parse-long [x] (Long/parseLong x))
