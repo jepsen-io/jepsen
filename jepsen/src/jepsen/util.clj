@@ -826,3 +826,10 @@
   "Parses a string to a Long. Look, we use this a lot, okay?"
   [s]
   (Long/parseLong s))
+
+(defn ex-root-cause
+  "Unwraps throwables to return their original cause."
+  [^Throwable t]
+  (if-let [cause (.getCause t)]
+    (recur cause)
+    t))
