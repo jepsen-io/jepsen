@@ -191,12 +191,13 @@
   [opts]
   {:nemesis   (full-nemesis opts)
    :generator (full-generator opts)
-   :final-generator (->> [(when (:partition-halves opts) :stop-partition-halves)
-                          (when (:partition-ring opts)   :stop-partition-ring)
-                          (when (:skew-clock? opts)      :stop-skew)
-                          (when (:kill-zero?  opts)      :restart-zero)
-                          (when (:kill-alpha? opts)      :restart-alpha)]
-                         (remove nil?)
-                         (map op)
-                         gen/seq
-                         (gen/delay 5))})
+   :final-generator
+   (->> [(when (:partition-halves? opts) :stop-partition-halves)
+         (when (:partition-ring? opts)   :stop-partition-ring)
+         (when (:skew-clock? opts)      :stop-skew)
+         (when (:kill-zero?  opts)      :restart-zero)
+         (when (:kill-alpha? opts)      :restart-alpha)]
+        (remove nil?)
+        (map op)
+        gen/seq
+        (gen/delay 5))})
