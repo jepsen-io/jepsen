@@ -38,6 +38,10 @@
    :sequential                sequential/workload
    :types                     types/workload})
 
+(def standard-workloads
+  "The workloads we run for test-all"
+  (remove #{:types} (keys workloads)))
+
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform"
   #{:kill-alpha?
@@ -47,6 +51,27 @@
     :partition-ring?
     :move-tablet?
     :skew-clock?})
+
+(def all-nemeses
+  "A set of prepackaged nemeses"
+  [; Nothing
+   {:interval         1}
+   ; Predicate migrations
+   {:interval         15
+    :move-tablet?     true}
+   ; Partitions
+   {:interval         30
+    :partition-ring?  true}
+   ; Process kills
+   {:interval         30
+    :kill-alpha?      true
+    :kill-zero?       true}
+   ; Everything
+   {:interval         30
+    :move-tablet?     true
+    :partition-ring?  true
+    :kill-alpha?      true
+    :kill-zero?       true}])
 
 (def skew-specs
   #{:tiny
@@ -142,13 +167,11 @@
     :default false]
    [nil "--tracing URL" "Enables tracing by providing an endpoint to export traces. Jaeger example: http://host.docker.internal:14268/api/traces"]
    [nil "--dgraph-jaeger-collector COLLECTOR" "Jaeger collector URL to pass to dgraph on startup."]
-   [nil "--dgraph-jaeger-agent AGENT" "Jaeger agent URL to pass to dgraph on startup."]])
-
-(def single-test-opts
-  "Additional command line options for single tests"
-  [["-w" "--workload NAME" "Test workload to run"
+   [nil "--dgraph-jaeger-agent AGENT" "Jaeger agent URL to pass to dgraph on startup."]
+   ["-f" "--force-download" "Ignore the package cache; download again."
+    :default false]
+  ["-w" "--workload NAME" "Test workload to run"
     :parse-fn keyword
-    :missing (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
    [nil "--nemesis-interval SECONDS"
     "Roughly how long to wait between nemesis operations."
@@ -172,8 +195,6 @@
     :default :small
     :assoc-fn (fn [m k v] (update m :nemesis assoc :skew v))
     :validate [skew-specs (.toLowerCase (cli/one-of skew-specs))]]
-   ["-f" "--force-download" "Ignore the package cache; download again."
-    :default false]
    [nil "--upsert-schema"
     "If present, tests will use @upsert schema directives. To disable, provide false"
     :parse-fn (complement #{"false"})
@@ -182,65 +203,27 @@
    [nil "--defer-db-teardown" "Wait until user input to tear down DB nodes"
     :default false]])
 
-(defn test-all-cmd
-  "A command to run a whole suite of tests in one go."
-  []
-  (let [opt-spec (into cli/test-opt-spec cli-opts)]
-    {"test-all"
-     {:opt-spec opt-spec
-      :opt-fn   cli/test-opt-fn
-      :usage    "TODO"
-      :run       (fn [{:keys [options]}]
-                   (info "CLI options:\n" (with-out-str (pprint options)))
-                   (let [force-download? (atom true)
-                         tests (for [i          (range (:test-count options))
-                                     workload   (remove #{:types :uid-set}
-                                                        (keys workloads))
-                                     upsert     [true]
-                                     nemesis    [; Nothing
-                                                 {:interval         1}
-                                                 ; Predicate migrations
-                                                 {:interval         15
-                                                  :move-tablet?     true}
-                                                 ; Partitions
-                                                 {:interval         30
-                                                  :partition-ring?  true}
-                                                 ; Process kills
-                                                 {:interval         30
-                                                  :kill-alpha?      true
-                                                  :kill-zero?       true}
-                                                 ; Everything
-                                                 {:interval         30
-                                                  :move-tablet?     true
-                                                  :partition-ring?  true
-                                                  :kill-alpha?      true
-                                                  :kill-zero?       true}]]
-                                 (assoc options
-                                        :workload       workload
-                                        :upsert-schema  upsert
-                                        :nemesis        nemesis
-                                        :force-download @force-download?))]
-                     (->> tests
-                          (map-indexed
-                            (fn [i test-opts]
-                              (try
-                                (info "\n\n\nTest" (inc i) "/" (count tests))
-                                ; Run test
-                                (jepsen/run! (dgraph-test test-opts))
-                                ; We've run once, no need to download
-                                ; again
-                                (reset! force-download? false)
-                                (catch Exception e
-                                  (warn e "Test crashed; moving on...")))))
-                          dorun)))}}))
-
+(defn all-tests
+  "Takes base CLI options and constructs a sequence of test options."
+  [opts]
+  (let [nemeses   (if-let [n (:nemesis opts)]  [n] all-nemeses)
+        workloads (if-let [w (:workload opts)] [w] standard-workloads)
+        counts    (range (:test-count opts))
+        test-opts (for [i counts, n nemeses, w workloads]
+                    (assoc opts
+                           :nemesis n
+                           :workload w))
+        ; Only the first test should force a re-download.
+        test-opts (cons (first test-opts)
+                        (map #(assoc % :force-download false) (rest test-opts)))]
+    (map dgraph-test test-opts)))
 
 (defn -main
   "Handles command line arguments; running tests or the web server."
   [& args]
-  (cli/run! (merge (test-all-cmd)
+  (cli/run! (merge (cli/test-all-cmd {:tests-fn all-tests
+                                       :opt-spec cli-opts})
                    (cli/single-test-cmd {:test-fn   dgraph-test
-                                         :opt-spec  (concat cli-opts
-                                                            single-test-opts)})
+                                         :opt-spec  cli-opts})
                    (cli/serve-cmd))
             args))
