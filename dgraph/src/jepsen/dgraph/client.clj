@@ -441,9 +441,9 @@
                                                      (pr-str k) ": "
                                                      (pr-str reads)))))]))
 
-                                        ; TODO: we should be able to optimize this to do pure
-                                        ; inserts and UID-direct writes without the upsert
-                                        ; read-write cycle, at least when we know the state
+                    ; TODO: we should be able to optimize this to do pure
+                    ; inserts and UID-direct writes without the upsert
+                    ; read-write cycle, at least when we know the state
                     :w (do (if (:blind-insert-on-write? opts)
                              (mutate! t {(keyword kp) k, (keyword vp) v})
                              (upsert! t (keyword kp)

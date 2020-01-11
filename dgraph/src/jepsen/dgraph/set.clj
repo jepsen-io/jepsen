@@ -57,9 +57,8 @@
    :final-generator (gen/each (gen/once {:type :invoke, :f :read}))})
 
 
-; This variant uses a single UID to store all values, and keeps a set of
-; successfully written elements which we use to force a strong read.
-(defrecord UidClient [conn uid written successfully-read?]
+; This variant uses a single UID to store all values.
+(defrecord UidClient [conn uid successfully-read?]
   client/Client
   (open! [this test node]
     (assoc this :conn (c/open node)))
@@ -79,7 +78,6 @@
                               (t/attribute! "value" (str (:value op)))
                               (c/mutate! t {:uid @uid
                                             :value (:value op)}))]
-                (swap! written conj (:value op))
                 (assoc op :type :ok, :uid @uid)))
 
         :read (let [r (c/with-txn [t conn]
