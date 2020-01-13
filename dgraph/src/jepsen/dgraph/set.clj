@@ -104,7 +104,7 @@
   [opts]
   (let [successfully-read? (promise)]
     (assoc (workload opts)
-           :client (UidClient. nil (promise) (atom #{}) successfully-read?)
+           :client (UidClient. nil (promise) successfully-read?)
            :final-generator (->> (fn [_ _]
                                    (when-not (realized? successfully-read?)
                                      {:type :invoke, :f :read}))
