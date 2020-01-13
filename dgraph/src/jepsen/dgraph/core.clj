@@ -52,7 +52,12 @@
     :move-tablet?
     :skew-clock?})
 
-(def all-nemeses
+(defn default-nemesis?
+  "Is this nemesis option map, as produced by the CLI, the default?"
+  [nemesis-opts]
+  (= {} (dissoc nemesis-opts :interval)))
+
+(def standard-nemeses
   "A set of prepackaged nemeses"
   [; Nothing
    {:interval         1}
@@ -173,6 +178,8 @@
   ["-w" "--workload NAME" "Test workload to run"
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
+  ; TODO: rewrite nemesis-interval and nemesis so that we can detect the
+  ; absence of these options at the CLI during test-all
    [nil "--nemesis-interval SECONDS"
     "Roughly how long to wait between nemesis operations."
     :default  10
@@ -206,7 +213,9 @@
 (defn all-tests
   "Takes base CLI options and constructs a sequence of test options."
   [opts]
-  (let [nemeses   (if-let [n (:nemesis opts)]  [n] all-nemeses)
+  (let [nemeses   (if-let [n (:nemesis opts)]
+                    (if (default-nemesis? n) standard-nemeses [n])
+                    standard-nemeses)
         workloads (if-let [w (:workload opts)] [w] standard-workloads)
         counts    (range (:test-count opts))
         test-opts (for [i counts, n nemeses, w workloads]
@@ -216,6 +225,7 @@
         ; Only the first test should force a re-download.
         test-opts (cons (first test-opts)
                         (map #(assoc % :force-download false) (rest test-opts)))]
+    ; (pprint test-opts)
     (map dgraph-test test-opts)))
 
 (defn -main
