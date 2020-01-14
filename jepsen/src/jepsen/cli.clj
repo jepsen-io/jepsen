@@ -80,6 +80,9 @@
     :validate [(partial re-find #"^\d+n?$")
                "Must be an integer, optionally followed by n."]]
 
+   [nil "--leave-db-running" "Leave the database running at the end of the test., so you can inspect it."
+    :default false]
+
    [nil "--test-count NUMBER"
     "How many times should we repeat a test?"
     :default  1
@@ -217,12 +220,14 @@ Options:\n")
                        :strict-host-key-checking
                        :private-key-path)))))
 
+
 (defn test-opt-fn
   "An opt fn for running simple tests. Remaps ssh keys, remaps :node to :nodes,
   reads :nodes-file into :nodes, and parses :concurrency."
   [parsed]
   (-> parsed
       rename-ssh-options
+      (rename-options {:leave-db-running :leave-db-running?})
       parse-nodes
       parse-concurrency))
 
