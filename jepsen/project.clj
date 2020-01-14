@@ -1,4 +1,4 @@
-(defproject jepsen "0.1.16-SNAPSHOT"
+(defproject jepsen "0.1.17-SNAPSHOT"
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
@@ -10,10 +10,10 @@
                  [org.clojure/tools.cli "0.4.1"]
                  [clj-time "0.11.0"]
                  [jepsen.txn "0.1.1"]
-                 [knossos "0.3.4" :exclusions [org.slf4j/slf4j-log4j12]]
+                 [knossos "0.3.6" :exclusions [org.slf4j/slf4j-log4j12]]
                  [tea-time "1.0.1"]
                  [clj-ssh "0.5.14"]
-                 [gnuplot "0.1.1"]
+                 [gnuplot "0.1.2"]
                  [http-kit "2.3.0"]
                  [ring "1.6.0-beta5"]
                  [hiccup "1.0.5"]
@@ -22,11 +22,11 @@
                  [dom-top "1.0.5"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.1.1"]
-                 [fipp "0.6.13"]
+                 [fipp "0.6.14"]
                  [io.lacuna/bifurcan "0.1.0"]]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
-            [lein-codox "0.10.3"]]
+            [lein-codox "0.10.7"]]
   :jvm-opts ["-Xmx32g"
              "-server"]
   :test-selectors {:default (fn [m]

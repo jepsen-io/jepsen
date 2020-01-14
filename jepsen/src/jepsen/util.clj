@@ -47,8 +47,8 @@
   "Tries name, falls back to pr-str."
   [x]
   (if (instance? clojure.lang.Named x)
-    (name x))
-    (pr-str x))
+    (name x)
+    (pr-str x)))
 
 (def uninteresting-exceptions
   "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
@@ -598,8 +598,9 @@
                   s))))))
 
 (defn coll
-  "Wraps non-coll things into singleton lists, and leaves colls as themselves.
-  Useful when you can take either a single thing or a sequence of things."
+  "Wraps non-collection things into singleton lists, and leaves colls as
+  themselves. Useful when you can take either a single thing or a sequence of
+  things."
   [thing-or-things]
   (cond (nil? thing-or-things)  nil
         (coll? thing-or-things) thing-or-things
@@ -820,3 +821,15 @@
   present. Ex. (contains-many? {:a 1 :b 2 :c 3} :a :b :c) => true"
   [m & ks]
   (every? #(contains? m %) ks))
+
+(defn parse-long
+  "Parses a string to a Long. Look, we use this a lot, okay?"
+  [s]
+  (Long/parseLong s))
+
+(defn ex-root-cause
+  "Unwraps throwables to return their original cause."
+  [^Throwable t]
+  (if-let [cause (.getCause t)]
+    (recur cause)
+    t))

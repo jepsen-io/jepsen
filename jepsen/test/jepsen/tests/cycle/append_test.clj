@@ -1,4 +1,5 @@
 (ns jepsen.tests.cycle.append-test
+  (:refer-clojure :exclude [test])
   (:require [jepsen.tests.cycle :as cycle]
             [jepsen.tests.cycle.append :refer :all]
             [jepsen.checker :as checker]

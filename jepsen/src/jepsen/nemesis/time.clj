@@ -87,14 +87,16 @@
   (c/su (c/exec "/opt/jepsen/strobe-time" delta period duration)))
 
 (defn clock-nemesis
-  "Generates a nemesis which manipulates clocks. Accepts three types of
+  "Generates a nemesis which manipulates clocks. Accepts four types of
   operations:
 
       {:f :reset, :value [node1 ...]}
 
       {:f :strobe, :value {node1 {:delta ms, :period ms, :duration s} ...}}
 
-      {:f :bump, :value {node1 delta-ms ...}}"
+      {:f :bump, :value {node1 delta-ms ...}}
+
+      {:f :check-offsets}"
   []
   (reify nemesis/Nemesis
     (setup! [nem test]

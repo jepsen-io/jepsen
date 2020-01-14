@@ -50,13 +50,14 @@ SSH auth too.
 sudo apt-get install openjdk-8-jre openjdk-8-jre-headless libjna-java
 ```
 
-For your db nodes, you'll need some (I use five) debian boxes. I run debian
-jessie, but some DBs don't need the latest packages so you might get away with
-an older distribution, or possibly ubuntu. Each one should be accessible from
-the control node via SSH. By default they're named n1, n2, n3, n4, and n5, but
-that (along with SSH username, password, identity files, etc) is all definable
-in your test. The account you use on those boxes needs sudo access to set up
-DBs, control firewalls, etc.
+For your db nodes, you'll need some (I use five) debian boxes. Most of these
+tests are designed for Debian; either Jessie, for older versions of Jepsen, or
+Stretch, for more recent versions. Some DBs don't need the latest packages so
+you might get away with an older distribution, or possibly ubuntu. Each one
+should be accessible from the control node via SSH. By default they're named
+n1, n2, n3, n4, and n5, but that (along with SSH username, password, identity
+files, etc) is all definable in your test. The account you use on those boxes
+needs sudo access to set up DBs, control firewalls, etc.
 
 Be advised that tests may mess with clocks, add apt repos, run killall -9 on
 processes, and generally break things, so you shouldn't, you know, point jepsen

@@ -172,7 +172,8 @@
        (db/cycle! ~test)
        ~@body)
      (finally
-       (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
+       (when-not (:leave-db-running? ~test)
+         (control/on-nodes ~test (partial db/teardown! (:db ~test)))))))
 
 (defprotocol Worker
   "Polymorphic lifecycle for worker threads; synchronized setup, run, and
@@ -272,7 +273,7 @@
                                                (.getMessage e))))))]
     ; Validate completion
     (assert (= (:type completion) :info)
-            (str "Expected nemesis/invoke! to return a map with :type :ok, :fail, or :info, but received "
+            (str "Expected nemesis/invoke! to return a map with :type :info, but received "
                  (pr-str completion) " instead"))
     (assert (= (:process op) (:process completion)))
     (assert (= (:f op)       (:f completion)))
@@ -505,6 +506,7 @@
               the end of the test.
   :nonserializable-keys   A collection of top-level keys in the test which
                           shouldn't be serialized to disk.
+  :leave-db-running? Whether to leave the DB running at the end of the test.
 
   Tests proceed like so:
 
