@@ -11,7 +11,9 @@
             [jepsen.dgraph.trace :as t])
   (:import (java.util.concurrent TimeUnit)
            (com.google.protobuf ByteString)
-           (io.grpc ManagedChannel
+           (io.grpc ClientInterceptor
+                    ClientInterceptors$InterceptorChannel
+                    ManagedChannel
                     ManagedChannelBuilder)
            (io.dgraph DgraphGrpc
                       DgraphGrpc$DgraphStub
@@ -55,19 +57,38 @@
                        (usePlaintext true)
                        (build))
            stub  (DgraphGrpc/newStub channel)
-           stub  (.withDeadlineAfter stub deadline TimeUnit/MILLISECONDS)
+
+           interceptors
+           ; Apply the same deadline to every call
+           [(reify ClientInterceptor
+             (interceptCall [this method call-opts next]
+               (.newCall next method
+                         (.withDeadlineAfter call-opts deadline
+                                             TimeUnit/MILLISECONDS))))]
+           interceptors (into-array ClientInterceptor interceptors)
+           stub (.withInterceptors stub interceptors)
+
+           ; Apparently this way of setting deadlines only applies to the first
+           ; call the client makes, not subsequent calls? See
+           ; https://github.com/dgraph-io/dgraph4j#setting-deadlines
+           ; stub  (.withDeadlineAfter stub deadline TimeUnit/MILLISECONDS)
            stubs (into-array DgraphGrpc$DgraphStub [stub])]
        (DgraphClient. stubs)))))
 
 (defn close!
   "Closes a client. Close is asynchronous; resources may be freed some time
-  after calling (close! client)."
+  after calling (close! client).
+
+  So much reflection to get at private fields. Hopefully DgraphClient will
+  add a shutdown function and we can use that instead."
   [client]
   (t/with-trace "client.close!"
     (let [async-client (wall.hack/field DgraphClient :asyncClient client)]
-      (doseq [c (wall.hack/field DgraphAsyncClient :stubs async-client)]
-        (.. c getChannel shutdown)))))
-
+      (doseq [client (wall.hack/field DgraphAsyncClient :stubs async-client)]
+        (let [c1 (.getChannel client)]
+          (let [c2 (wall.hack/field ClientInterceptors$InterceptorChannel
+                                    :channel c1)]
+            (.shutdown c2)))))))
 
 (defn abort-txn!
   "Aborts a transaction object."
