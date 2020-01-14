@@ -122,10 +122,10 @@
           (catch io.grpc.StatusRuntimeException e#
             (condp re-find (.getMessage e#)
               #"DEADLINE_EXCEEDED:"
-              (assoc ~op, :type :info, :error :timeout)
+              (assoc ~op, :type :info, :error :timeout-deadline-exceeded)
 
               #"context deadline exceeded"
-              (assoc ~op, :type :info, :error :timeout)
+              (assoc ~op, :type :info, :error :timeout-context-deadline-exceeded)
 
               #"Conflicts with pending transaction. Please abort."
               (assoc ~op :type :fail, :error :conflict)
