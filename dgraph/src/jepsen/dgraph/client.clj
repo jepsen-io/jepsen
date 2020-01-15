@@ -154,6 +154,9 @@
               #"readTs: \d+ less than minTs: \d+ for key:"
               (assoc ~op :type :fail, :error :old-timestamp)
 
+              #"StartTs: (\d+) is from before MoveTs: (\d+) for pred: (.+)"
+              (assoc ~op :type :fail, :error :start-ts-before-move-ts)
+
               #"Predicate is being moved, please retry later"
               (assoc ~op :type :fail, :error :predicate-moving)
 
@@ -180,7 +183,7 @@
               #"rpc error: code = Unavailable desc = transport is closing"
               (assoc ~op :type :info, :error :unavailable-transport-closing)
 
-              #"dispatchTaskOverNetwork: while retrieving connection. error: Unhealthy connection"
+              #"Unhealthy connection"
               (assoc ~op :type :info, :error :unhealthy-connection)
 
               #"Only leader can decide to commit or abort"
