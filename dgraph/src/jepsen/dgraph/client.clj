@@ -42,7 +42,9 @@
   `(try ~@body
         (catch RuntimeException e#
           (let [cause# (ex-root-cause e#)]
-            (if (instance? io.grpc.StatusRuntimeException cause#)
+            (if (or (instance? io.grpc.StatusRuntimeException cause#)
+                    (instance? java.net.ConnectException cause#)
+                    (instance? java.io.IOException cause#))
               (throw cause#)
               (throw e#))))))
 
@@ -140,6 +142,24 @@
   [op & body]
   `(with-unavailable-backoff
      (try (unwrap-exceptions ~@body)
+          ; This one's special!
+          (catch java.net.ConnectException e#
+            ; Give it a sec to come back
+            (Thread/sleep 1000)
+            (condp re-find (.getMessage e#)
+              #"Connection refused"
+              (assoc ~op :type :fail, :error :connection-refused)
+
+              (throw e#)))
+
+          ; This one too
+          (catch java.io.IOException e#
+            (condp re-find (.getMessage e#)
+              #"Connection reset by peer"
+              (assoc ~op :type :info, :error :connection-reset)
+
+              (throw e#)))
+
           (catch io.grpc.StatusRuntimeException e#
             (condp re-find (.getMessage e#)
               #"DEADLINE_EXCEEDED:"
