@@ -218,10 +218,6 @@
               #"UNAVAILABLE: transport is closing"
               (assoc ~op :type :info, :error :unavailable-transport-closing)
 
-              #"UNAVAILABLE"
-              (assoc ~op, :type :fail, :error [:unavailable (.getMessage e#)])
-
-
               #"Unhealthy connection"
               (assoc ~op :type :info, :error :unhealthy-connection)
 
