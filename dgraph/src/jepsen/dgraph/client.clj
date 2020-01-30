@@ -166,7 +166,8 @@
               (assoc ~op, :type :info, :error :timeout-deadline-exceeded)
 
               #"context deadline exceeded"
-              (assoc ~op, :type :info, :error :timeout-context-deadline-exceeded)
+              (assoc ~op, :type :info, :error
+                     :timeout-context-deadline-exceeded)
 
               #"Conflicts with pending transaction. Please abort."
               (assoc ~op :type :fail, :error :conflict)
@@ -189,19 +190,37 @@
               #"Please retry again, server is not ready to accept requests"
               (assoc ~op :type :fail, :error :not-ready-for-requests)
 
-              #"UNAVAILABLE"
-              (assoc ~op, :type :fail, :error :unavailable)
-
               #"No connection exists"
               (assoc ~op :type :fail, :error :no-connection)
 
               ; Guessssing this means it couldn't even open a conn but not
               ; sure. This might be a fail???
               #"Unavailable desc = all SubConns are in TransientFailure"
-              (assoc ~op :type :info, :error :unavailable-all-subconns-down)
+              (assoc ~op :type :info, :error
+                     :unavailable-all-subconns-transient-failure)
+
+              ; Maybe a new way of phrasing the previous error?
+              #"UNAVAILABLE: all SubConns are in TransientFailure"
+              (assoc ~op :type :info, :error
+                     :unavailable-all-subconns-transient-failure)
 
               #"rpc error: code = Unavailable desc = transport is closing"
               (assoc ~op :type :info, :error :unavailable-transport-closing)
+
+              ; You might THINK this is definite but I suspect it might
+              ; actually be a success sometimes
+              #"UNAVAILABLE: Network closed for unknown reason"
+              (assoc ~op :type :info, :error
+                     :unavailable-network-closed-unknown-reason)
+
+              ; You might THINK this is definite but I suspect it might
+              ; actually be a success sometimes
+              #"UNAVAILABLE: transport is closing"
+              (assoc ~op :type :info, :error :unavailable-transport-closing)
+
+              #"UNAVAILABLE"
+              (assoc ~op, :type :fail, :error [:unavailable (.getMessage e#)])
+
 
               #"Unhealthy connection"
               (assoc ~op :type :info, :error :unhealthy-connection)
