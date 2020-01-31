@@ -12,6 +12,10 @@
             [jepsen.consul.client :as cc]
             [jepsen.consul.db :as db]))
 
+;; Default is nil
+(def consistency-levels
+  #{"stale" "consistent"})
+
 (def workloads
   {"none"     (fn [_] tests/noop-test)
    "register" register/workload})
@@ -55,6 +59,11 @@
                         (gen/sleep 10)
                         (gen/clients (:final-generator workload)))})))
 
+(defn all-tests
+  "TODO This doesn't do anything now, but will be important when we have
+  multiple workloads and want to run comprehensive CI"
+  [])
+
 (def cli-opts
   "Additional command line options."
   [["-v" "--version STRING" "What version of etcd should we install?"
@@ -62,8 +71,9 @@
    ["-w" "--workload NAME" "What workload should we run?"
     :missing  (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
-   ;; TODO Double check the config on cosistency levels here.
-   #_["-s" "--consistency" "Which consistency level to use."]
+   [nil "--consistency LEVEL" "What consistency level to set on kv store requests. Leave empty for default"
+    :default nil
+    :validate [consistency-levels (cli/one-of consistency-levels)]]
    ["-r" "--rate HZ" "Approximate number of requests per second, per thread."
     :default  10
     :parse-fn read-string
@@ -80,6 +90,8 @@
   (cli/run! (merge (cli/single-test-cmd
                     {:test-fn consul-test
                      :opt-spec cli-opts})
+                   (cli/test-all-cmd {:tests-fn (partial all-tests consul-test)
+                                      :opt-spec cli-opts})
                    (cli/serve-cmd))
             args))
 

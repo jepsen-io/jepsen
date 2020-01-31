@@ -36,6 +36,7 @@
    :-data-dir  data-dir
    :-node      (name node)
    :-retry-interval retry-interval
+   ;; TODO Enable this when we're giving the system on-disk config
    #_(when (= node (jepsen/primary test))
      [:-config-file config-file])
 
