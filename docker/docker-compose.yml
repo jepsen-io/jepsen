@@ -20,6 +20,10 @@ services:
       - "8080"
     networks:
       - jepsen
+    user: $USER
+    volumes:
+      - ~/.m2/repository/:/home/kyle/.m2/repository/
+      - ~/.lein/:/home/kyle/.lein/
   n1:
     << : *default-node
     container_name: jepsen-n1

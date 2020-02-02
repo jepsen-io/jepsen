@@ -137,17 +137,18 @@ exists docker-compose ||
 
 INFO "Running \`docker-compose build\`"
 # shellcheck disable=SC2086
-docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} build
+docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} build \
+               --build-arg uid="$(id -u)" --build-arg gid="$(id -g)"
 
 INFO "Running \`docker-compose up\`"
-if [ "${RUN_AS_DAEMON}" -eq 1 ]; then
+if [ "${RUN_AS_DAEMON}" ]; then
     # shellcheck disable=SC2086
-    docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} up -d
+    USER=$(id -u) docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} up -d
     INFO "All containers started, run \`docker ps\` to view"
 else
     INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
     # shellcheck disable=SC2086
-    docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} up
+    USER=$(id -u) docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} up
 fi
 
 popd

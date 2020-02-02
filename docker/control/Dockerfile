@@ -11,7 +11,6 @@ RUN apt-get -y -q update && \
     add-apt-repository ppa:openjdk-r/ppa && \
     apt-get -y -q update && \
     apt-get install -qqy \
-        dos2unix \
         openjdk-8-jdk \
         libjna-java \
         git \
@@ -24,15 +23,21 @@ RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein
     chmod +x /usr/bin/lein && \
     lein self-install
 
+ARG uid
+ARG gid
+
+RUN groupadd -g $gid kyle \
+	&& useradd -m -u $uid -g kyle kyle
+USER kyle
+
 # without --dev flag up.sh copies jepsen to these subfolders
 # with --dev flag they are empty until mounted
 COPY jepsen/jepsen /jepsen/jepsen/
 RUN if [ -f /jepsen/jepsen/project.clj ]; then cd /jepsen/jepsen && lein install; fi
 COPY jepsen /jepsen/
 
-ADD ./bashrc /root/.bashrc
-ADD ./init.sh /init.sh
-RUN dos2unix /init.sh /root/.bashrc \
-    && chmod +x /init.sh
+ADD --chown=kyle:kyle ./bashrc /home/kyle/.bashrc
+ADD --chown=kyle:kyle ./init.sh /home/kyle/init.sh
+RUN chmod +x /home/kyle/init.sh
 
-CMD /init.sh
+CMD /home/kyle/init.sh
