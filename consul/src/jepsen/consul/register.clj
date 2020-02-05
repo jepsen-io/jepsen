@@ -24,24 +24,33 @@
           crash (if (= :read (:f op)) :fail :info)]
       (c/with-errors op #{:read}
         (case (:f op)
-          :read (let [v (-> client
-                            (c/get k)
-                            c/parse
-                            :value)]
+          :read (let [consistency (:consistency test)
+                      res (if consistency
+                            (c/get client k consistency)
+                            (c/get client k))
+                      v (-> res c/parse :value)]
                   (assoc op :type :ok :value (independent/tuple k v)))
 
-          :write (let [v (->> value
-                              json/generate-string
-                              (c/put! client k))]
+          :write (let [consistency (:consistency test)
+                       body (json/generate-string value)
+                       _ (if consistency
+                           (c/put! client k body consistency)
+                           (c/put! client k body))]
                    (assoc op :type :ok))
 
-          :cas   (let [[value value'] value]
-                   (assoc op :type (if (c/cas! client
-                                               k
-                                               (json/generate-string value)
-                                               (json/generate-string value'))
-                                     :ok
-                                     :fail)))))))
+          :cas   (let [consistency (:consistency test)
+                       [value value'] value
+                       res (if consistency
+                             (c/cas! client
+                                     k
+                                     (json/generate-string value)
+                                     (json/generate-string value')
+                                     consistency)
+                             (c/cas! client
+                                     k
+                                     (json/generate-string value)
+                                     (json/generate-string value')))]
+                   (assoc op :type (if res :ok :fail)))))))
 
   ;; HTTP clients are stateless
   (close! [_ _])

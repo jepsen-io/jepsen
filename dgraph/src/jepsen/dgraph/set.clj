@@ -84,7 +84,9 @@
                         (let [found (->> (c/query t
                                                   (str "{ q(func: uid($u)) { "
                                                        "uid, value } }")
-                                                  {:u @uid})
+                                                  {:u @uid}))
+                              _     (info :found found)
+                              found (->> found
                                          :q
                                          (mapcat :value)
                                          (remove #{-1}) ; Our sentinel

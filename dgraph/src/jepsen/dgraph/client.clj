@@ -42,7 +42,9 @@
   `(try ~@body
         (catch RuntimeException e#
           (let [cause# (ex-root-cause e#)]
-            (if (instance? io.grpc.StatusRuntimeException cause#)
+            (if (or (instance? io.grpc.StatusRuntimeException cause#)
+                    (instance? java.net.ConnectException cause#)
+                    (instance? java.io.IOException cause#))
               (throw cause#)
               (throw e#))))))
 
@@ -140,19 +142,41 @@
   [op & body]
   `(with-unavailable-backoff
      (try (unwrap-exceptions ~@body)
+          ; This one's special!
+          (catch java.net.ConnectException e#
+            ; Give it a sec to come back
+            (Thread/sleep 1000)
+            (condp re-find (.getMessage e#)
+              #"Connection refused"
+              (assoc ~op :type :fail, :error :connection-refused)
+
+              (throw e#)))
+
+          ; This one too
+          (catch java.io.IOException e#
+            (condp re-find (.getMessage e#)
+              #"Connection reset by peer"
+              (assoc ~op :type :info, :error :connection-reset)
+
+              (throw e#)))
+
           (catch io.grpc.StatusRuntimeException e#
             (condp re-find (.getMessage e#)
               #"DEADLINE_EXCEEDED:"
               (assoc ~op, :type :info, :error :timeout-deadline-exceeded)
 
               #"context deadline exceeded"
-              (assoc ~op, :type :info, :error :timeout-context-deadline-exceeded)
+              (assoc ~op, :type :info, :error
+                     :timeout-context-deadline-exceeded)
 
               #"Conflicts with pending transaction. Please abort."
               (assoc ~op :type :fail, :error :conflict)
 
               #"readTs: \d+ less than minTs: \d+ for key:"
               (assoc ~op :type :fail, :error :old-timestamp)
+
+              #"StartTs: (\d+) is from before MoveTs: (\d+) for pred: (.+)"
+              (assoc ~op :type :fail, :error :start-ts-before-move-ts)
 
               #"Predicate is being moved, please retry later"
               (assoc ~op :type :fail, :error :predicate-moving)
@@ -166,21 +190,35 @@
               #"Please retry again, server is not ready to accept requests"
               (assoc ~op :type :fail, :error :not-ready-for-requests)
 
-              #"UNAVAILABLE"
-              (assoc ~op, :type :fail, :error :unavailable)
-
               #"No connection exists"
               (assoc ~op :type :fail, :error :no-connection)
 
               ; Guessssing this means it couldn't even open a conn but not
               ; sure. This might be a fail???
               #"Unavailable desc = all SubConns are in TransientFailure"
-              (assoc ~op :type :info, :error :unavailable-all-subconns-down)
+              (assoc ~op :type :info, :error
+                     :unavailable-all-subconns-transient-failure)
+
+              ; Maybe a new way of phrasing the previous error?
+              #"UNAVAILABLE: all SubConns are in TransientFailure"
+              (assoc ~op :type :info, :error
+                     :unavailable-all-subconns-transient-failure)
 
               #"rpc error: code = Unavailable desc = transport is closing"
               (assoc ~op :type :info, :error :unavailable-transport-closing)
 
-              #"dispatchTaskOverNetwork: while retrieving connection. error: Unhealthy connection"
+              ; You might THINK this is definite but I suspect it might
+              ; actually be a success sometimes
+              #"UNAVAILABLE: Network closed for unknown reason"
+              (assoc ~op :type :info, :error
+                     :unavailable-network-closed-unknown-reason)
+
+              ; You might THINK this is definite but I suspect it might
+              ; actually be a success sometimes
+              #"UNAVAILABLE: transport is closing"
+              (assoc ~op :type :info, :error :unavailable-transport-closing)
+
+              #"Unhealthy connection"
               (assoc ~op :type :info, :error :unhealthy-connection)
 
               #"Only leader can decide to commit or abort"

@@ -49,26 +49,46 @@
   ([url]
    (http/get url))
   ([url key]
-   (http/get (str url key))))
+   (http/get (str url key)))
+  ([url key consistency]
+   (http/get (str url key)
+             {:query-params {(keyword consistency) nil}})))
 
-(defn put! [url key value]
-  (http/put (str url key) {:body value}))
+(defn put!
+  ([url key value]
+   (http/put (str url key) {:body value}))
+  ([url key value consistency]
+   (http/put (str url key)
+             {:body value
+              :query-params {(keyword consistency) nil}})))
 
 (defn cas!
-  "Consul uses an index based CAS so we must first get the existing value for
-   this key and then use the index for a CAS!"
-  [url key value new-value]
-  (let [res (parse (get url key))
-        existing-value (str (:value res))
-        index (:index res)]
-    (if (= existing-value value)
-      (let [params {:body new-value :query-params {:cas index}}
-            body (:body (http/put (str url key) params))]
-        (= body "true"))
-      false)))
+  "Consul uses an index based CAS, not a value-based CAS, so we must first get
+  the existing index for this the current key and then use the index to issue a
+  CAS request."
+  ([url key value new-value]
+   (let [res (parse (get url key))
+         existing-value (str (:value res))
+         index (:index res)]
+     (if (= existing-value value)
+       (let [params {:body new-value :query-params {:cas index}}
+             body (:body (http/put (str url key) params))]
+         (= body "true"))
+       false)))
+
+  ([url key value new-value consistency]
+   (let [res (parse (get url key consistency))
+         existing-value (str (:value res))
+         index (:index res)]
+     (if (= existing-value value)
+       (let [params {:body new-value :query-params {:cas index
+                                                    :query-params {(keyword consistency) nil}}}
+             body (:body (http/put (str url key) params))]
+         (= body "true"))
+       false))))
 
 (defn txn
-  "TODO"
+  "TODO Model txn requests when we get to testing that part of Consul"
   [])
 
 (defmacro with-errors
@@ -84,13 +104,10 @@
                 #"500" (assoc ~op :type type# :error :server-unavailable)
                 (throw e#))))))
 
-;; FIXME simplify this whole thing, it's repetitive
 (defn await-cluster-ready
-  "Blocks until cluster index matches count of nodes on test"
+  "Blocks until cluster index matches count of nodes on test."
   [node count]
-
-  ;; FIXME Maybe we use the index count here?
-  (let [url (str "http://" (net/ip (name node)) ":8500/v1/catalog/nodes?index=1")]
+  (let [url (str "http://" (net/ip (name node)) ":8500/v1/catalog/nodes?index=" count)]
      (with-retry [attempts 5]
        (get url)
 

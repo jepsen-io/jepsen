@@ -12,7 +12,7 @@
   (:import (io.dgraph TxnConflictException)))
 
 (def pred-count "Number of predicates to stripe keys and values across."
-  3)
+  7)
 
 (defn multi-pred-acct->key+amount
   "Takes a query result like {:key_0 1 :amount_2 5} and returns [1 5], by
@@ -70,8 +70,8 @@
                   :q
                   first)]
         (if r
-          ;; Note that we need :type for new accounts, but don't want to update it
-          ;; normally.
+          ;; Note that we need :type for new accounts, but don't want to update
+          ;; it normally.
           {:uid    (:uid r)
            :key    (get r (keyword kp))
            :amount (get r (keyword ap))}
