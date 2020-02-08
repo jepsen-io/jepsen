@@ -8,6 +8,7 @@
                     [txn :as txn :refer [reduce-mops]]
                     [util :as util]]
             [jepsen.tests.cycle :as cycle]
+            [jepsen.tests.cycle.txn :as ct :refer [op-mops]]
             [jepsen.txn.micro-op :as mop]
             [knossos [op :as op]
                      [history :refer [pair-index]]]
@@ -25,11 +26,6 @@
                                IGraph
                                Set
                                SortedMap)))
-
-(defn op-mops
-  "A lazy sequence of all [op mop] pairs from a history."
-  [history]
-  (mapcat (fn [op] (map (fn [mop] [op mop]) (:value op))) history))
 
 (defn verify-mop-types
   "Takes a history where operation values are transactions. Verifies that the
@@ -77,13 +73,7 @@
   [history]
   ; Build a map of keys to maps of failed elements to the ops that appended
   ; them.
-  (let [failed (reduce-mops (fn index [failed op [f k v :as mop]]
-                              (if (and (op/fail? op)
-                                       (= :append f))
-                                (assoc-in failed [k v] op)
-                                failed))
-                            {}
-                            history)]
+  (let [failed (ct/failed-writes #{:append} history)]
     ; Look for ok ops with a read mop of a failed append
     (->> history
          (filter op/ok?)
@@ -109,26 +99,7 @@
   [history]
   ; Build a map of keys to maps of intermediate elements to the ops that wrote
   ; them
-  (let [im (reduce (fn [im op]
-                     ; Find intermediate appends for this particular txn by
-                     ; producing two maps: intermediate keys to elements, and
-                     ; final keys to elements in this txn. We shift elements
-                     ; from final to intermediate when they're overwritten.
-                     (first
-                       (reduce (fn [[im final :as state] [f k v]]
-                                 (if (= :append f)
-                                   (if-let [e (final k)]
-                                     ; We have a previous write of k
-                                     [(assoc-in im [k e] op)
-                                      (assoc final k v)]
-                                     ; No previous write
-                                     [im (assoc final k v)])
-                                   ; Something other than an append
-                                   state))
-                               [im {}]
-                               (:value op))))
-                   {}
-                   history)]
+  (let [im (ct/intermediate-writes #{:append} history)]
     ; Look for ok ops with a read mop of an intermediate append
     (->> history
          (filter op/ok?)
@@ -191,10 +162,7 @@
   consistent with that transaction's previous append operations, including
   whatever (initially unknown) state k began with."
   [history]
-  (->> history
-       (filter op/ok?)
-       (keep op-internal-case)
-       seq))
+  (ct/ok-keep op-internal-case history))
 
 (defn prefix?
   "Given two sequences, returns true iff A is a prefix of B."
@@ -699,46 +667,6 @@
   [history]
   ((cycle/combine ww-graph wr-graph rw-graph) history))
 
-(def cycle-explainer
-  ; We categorize cycles based on their dependency edges
-  (reify cycle/CycleExplainer
-    (explain-cycle [_ pair-explainer cycle]
-      (let [ex (cycle/explain-cycle cycle/cycle-explainer pair-explainer cycle)
-
-            ; What types of relationships are involved here?
-            type-freqs (frequencies (map :type (:steps ex)))
-            ww (:ww type-freqs 0)
-            wr (:wr type-freqs 0)
-            rw (:rw type-freqs 0)]
-        ; Tag the cycle with a type based on the edges involved. Note that we
-        ; might have edges from, say, real-time or process orders, so we try to
-        ; be permissive.
-        (assoc ex :type (cond (< 1 rw) :G2
-                              (= 1 rw) :G-single
-                              (< 0 wr) :G1c
-                              (< 0 ww) :G0
-                              true (throw (IllegalStateException.
-                                            (str "Don't know how to classify"
-                                                 (pr-str ex))))))))
-
-    (render-cycle-explanation [_ pair-explainer
-                               {:keys [type cycle steps] :as ex}]
-      (cycle/render-cycle-explanation
-        cycle/cycle-explainer pair-explainer ex))))
-
-(defn cycle-explanations
-  "Takes a pair explainer, a function taking an scc and possible yielding a
-  cycle, and a series of strongly connected components. Produces a seq (nil if
-  empty) of explanations of cycles."
-  [pair-explainer cycle-fn sccs]
-  (seq (keep (fn [scc]
-               (when-let [cycle (cycle-fn scc)]
-                 (->> cycle
-                      (cycle/explain-cycle cycle-explainer pair-explainer)
-                      (cycle/render-cycle-explanation cycle-explainer
-                                                      pair-explainer))))
-             sccs)))
-
 (defn g0-cases
   "Given a graph, a pair explainer, and a collection of strongly connected
   components, searches for instances of G0 anomalies within it. Returns nil if
@@ -748,25 +676,9 @@
   (let [g0-graph (-> graph
                      (cycle/remove-relationship :rw)
                      (cycle/remove-relationship :wr))]
-    (cycle-explanations pair-explainer
-                        (partial cycle/find-cycle g0-graph)
-                        sccs)))
-
-(defn g1c-cases
-  "Given a graph, an explainer, and a collection of strongly connected
-  components, searches for instances of G1c anomalies within them. Returns nil
-  if none are present."
-  [graph pair-explainer sccs]
-  ; For g1c, we want to restrict the graph to write-write edges or write-read
-  ; edges. We also need *just* the write-read graph, so that we can
-  ; differentiate from G0--this differs from Adya, but we'd like to say
-  ; specifically that an anomaly is G1c and NOT G0.
-  (let [ww+wr-graph (cycle/remove-relationship graph        :rw)
-        wr-graph    (cycle/remove-relationship ww+wr-graph  :ww)]
-    (cycle-explanations pair-explainer
-                        (partial cycle/find-cycle-starting-with
-                                 wr-graph ww+wr-graph)
-                        sccs)))
+    (ct/cycle-explanations pair-explainer
+                           (partial cycle/find-cycle g0-graph)
+                           sccs)))
 
 (defn g-single-cases
   "Given a graph, an explainer, and a collection of strongly connected
@@ -780,10 +692,10 @@
                           (cycle/remove-relationship :wr))
         ww+wr-graph   (-> graph
                           (cycle/remove-relationship :rw))]
-    (cycle-explanations pair-explainer
-                        (partial cycle/find-cycle-starting-with
-                                 rw-graph ww+wr-graph)
-                        sccs)))
+    (ct/cycle-explanations pair-explainer
+                           (partial cycle/find-cycle-starting-with
+                                    rw-graph ww+wr-graph)
+                           sccs)))
 
 (defn g2-cases
   "Given a graph, an explainer, and a collection of strongly connected
@@ -807,26 +719,16 @@
                    ; return more candidates, but I don't think it's the end of
                    ; the world; G-single is worse, and if we see it, G2 is
                    ; just icing on the cake
-                   (let [cx (cycle/explain-cycle cycle-explainer
+                   (let [cx (cycle/explain-cycle ct/cycle-explainer
                                                  pair-explainer
                                                  cycle)]
                      (when (= :G2 (:type cx))
-                       (cycle/render-cycle-explanation cycle-explainer
+                       (cycle/render-cycle-explanation ct/cycle-explainer
                                                        pair-explainer cx)))))
                sccs))))
 
-(defn expand-anomalies
-  "Takes a collection of anomalies, and returns the fully expanded version of
-  those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
-  [as]
-  (let [as (set as)
-        as (if (:G2 as)  (conj as :G-single :G1c) as)
-        as (if (:G1 as)  (conj as :G1a :G1b :G1c) as)
-        as (if (:G1c as) (conj as :G0) as)]
-    as))
-
-(defn cycles
-  "Performs dependency graph analysis and returns a sequence of anomalies.
+(defn cycles!
+  "Performs dependency graph analysis and returns a map of anomalies.
 
   Options:
 
@@ -838,7 +740,7 @@
   Supported anomalies are :G0, :G1c, :G-single, and :G2. G2 implies G-single
   and G1c, and G1c implies G0."
   ([opts test history checker-opts]
-   (let [as       (expand-anomalies (:anomalies opts))
+   (let [as       (ct/expand-anomalies (:anomalies opts))
          ; What graph do we need to detect these anomalies?
          analyzer (cond (:G2  as)       graph     ; Need full deps
                         (:G-single as) graph     ; Need full deps
@@ -860,7 +762,7 @@
 
          ; Find specific anomaly cases
          g0         (when (:G0 as)        (g0-cases graph explainer sccs))
-         g1c        (when (:G1c as)       (g1c-cases graph explainer sccs))
+         g1c        (when (:G1c as)       (ct/g1c-cases graph explainer sccs))
          g-single   (when (:G-single as)  (g-single-cases
                                             graph explainer sccs))
          g2         (when (:G2 as)        (g2-cases graph explainer sccs))
@@ -898,9 +800,9 @@
     :G1   G1a, G1b, and G1c.
     :G2   A dependency cycle with at least one anti-dependency edge.
 
-  :G2 implies :G1c, and :G1c implies :G0, because if we construct the graph for
-  G2, it'll include all the edges for G1c, and so on. See
-  http://pmg.csail.mit.edu/papers/icde00.pdf for context.
+  :G1 implies :G1a, :G1b, and :G1c. :G2 implies :G1c, and :G1c implies :G0,
+  because if we construct the graph for G2, it'll include all the edges for
+  G1c, and so on. See http://pmg.csail.mit.edu/papers/icde00.pdf for context.
 
   Note that while we can *find* instances of G0, G1c and G2, we can't (yet)
   categorize them automatically. These anomalies are grouped under :G0+G1c+G2
@@ -908,7 +810,7 @@
   ([]
    (checker {:anomalies [:G1 :G2]}))
   ([opts]
-   (let [opts       (update opts :anomalies expand-anomalies)
+   (let [opts       (update opts :anomalies ct/expand-anomalies)
          anomalies  (:anomalies opts)]
      (reify checker/Checker
        (check [this test history checker-opts]
@@ -922,7 +824,7 @@
                dups          (duplicates history+)
                sorted-values (sorted-values history+)
                incmp-order   (incompatible-orders sorted-values)
-               cycles        (cycles opts test history checker-opts)
+               cycles        (cycles! opts test history checker-opts)
                ; Categorize anomalies and build up a map of types to examples
                anomalies (cond-> cycles
                            dups         (assoc :duplicate-elements dups)

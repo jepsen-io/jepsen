@@ -22,7 +22,8 @@
                            [support :as s]
                            [types :as types]
                            [upsert :as upsert]
-                           [trace  :as t]]))
+                           [trace  :as t]
+                           [wr :as wr]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
@@ -36,7 +37,8 @@
    :set                       set/workload
    :uid-set                   set/uid-workload
    :sequential                sequential/workload
-   :types                     types/workload})
+   :types                     types/workload
+   :wr                        wr/workload})
 
 (def standard-workloads
   "The workloads we run for test-all"

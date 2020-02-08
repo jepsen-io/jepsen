@@ -229,42 +229,6 @@
          (time (let [r (checker/check checker nil history nil)]
                  (is (:valid? r)))))))))
 
-(deftest ext-index-test
-  (testing "empty"
-    (is (= {} (ext-index txn/ext-writes []))))
-  (testing "writes"
-    (let [w1 {:type :ok, :value [[:w :x 1] [:w :y 3] [:w :x 2]]}
-          w2 {:type :ok, :value [[:w :y 3] [:w :x 4]]}]
-      (is (= {:x {2 [w1], 4 [w2]}
-              :y {3 [w2 w1]}}
-             (ext-index txn/ext-writes [w1 w2]))))))
-
-(deftest wr-graph-test
-  ; helper fns for constructing histories
-  (let [op (fn [txn] [{:type :invoke, :f :txn, :value txn}
-                      {:type :ok,     :f :txn, :value txn}])
-        check (fn [& txns]
-                (let [h (mapcat op txns)]
-                  (checker/check (checker wr-graph) nil h nil)))]
-    (testing "empty history"
-      (is (= {:valid? true, :scc-count 0, :cycles []}
-             (check []))))
-    (testing "write and read"
-      (is (= {:valid? true, :scc-count 0, :cycles []}
-             (check [[:w :x 0]]
-                    [[:w :x 0]]))))
-    (testing "chain on one register"
-      (is (false? (:valid? (check [[:r :x 0] [:w :x 1]]
-                                  [[:r :x 1] [:w :x 0]])))))
-    (testing "chain across two registers"
-      (is (false? (:valid? (check [[:r :x 0] [:w :y 1]]
-                                  [[:r :y 1] [:w :x 0]])))))
-    (testing "write skew"
-      ; this violates si, but doesn't introduce a w-r conflict, so it's legal
-      ; as far as this order is concerned.
-      (is (true? (:valid? (check [[:r :x 0] [:r :y 0] [:w :x 1]]
-                                 [[:r :x 0] [:r :y 0] [:w :y 1]])))))))
-
 (defn graph
   "Takes a history, indexes it, uses the given analyzer function to construct a
   graph+explainer, extracts just the graph, converts it to Clojure, and removes

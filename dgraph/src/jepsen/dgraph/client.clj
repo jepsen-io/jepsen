@@ -495,10 +495,13 @@
                                         1 (get (first reads)
                                                (keyword vp))
                                         ; Ummm
-                                        (throw (RuntimeException.
-                                                (str "Unexpected multiple results for key "
-                                                     (pr-str k) ": "
-                                                     (pr-str reads)))))]))
+                                        (do (info "Unexpected multiple results for key" k "-" (pr-str reads))
+                                            (get (rand-nth reads)
+                                                 (keyword vp))))]))
+                                        ;(throw (RuntimeException.
+                                        ;        (str "Unexpected multiple results for key "
+                                        ;             (pr-str k) ": "
+                                        ;             (pr-str reads)))))]))
 
                     ; TODO: we should be able to optimize this to do pure
                     ; inserts and UID-direct writes without the upsert
@@ -517,8 +520,13 @@
     (close! conn)))
 
 (defn txn-client
-  "A client which can execute generic transcational workloads over arbitrary
-  integer keys and values.
+  "A client which can execute generic transactional workloads over arbitrary
+  integer keys and values. Entities are automatically created; each entity has
+  a key and value attribute. Entities use *different* key and value attributes,
+  e.g. key_1, value_3, to avoid contending on the same attributes.
+
+  Reads are performed by querying for the value associated with the entity
+  which has the given key. Writes use upsert! normally, or mutate! otherwise.
 
   Options:
 
