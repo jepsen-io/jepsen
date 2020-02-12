@@ -524,19 +524,19 @@
   [history]
   (let [{:keys [history append-index write-index read-index]} (preprocess
                                                                 history)]
-    [(cycle/forked
-       (reduce-mops (fn [g op [f :as mop]]
-                      ; Only appends have dependencies, cuz we're interested in
-                      ; ww cycles.
-                      (if (not= f :append)
-                        g
-                        (if-let [dep (ww-mop-dep
-                                       append-index write-index op mop)]
-                          (cycle/link g dep op :ww)
-                          g)))
-                    (.linear (DirectedGraph.))
-                    history))
-     (WWExplainer. append-index write-index read-index)]))
+    {:graph (cycle/forked
+              (reduce-mops (fn [g op [f :as mop]]
+                             ; Only appends have dependencies, cuz we're
+                             ; interested in ww cycles.
+                             (if (not= f :append)
+                               g
+                               (if-let [dep (ww-mop-dep
+                                              append-index write-index op mop)]
+                                 (cycle/link g dep op :ww)
+                                 g)))
+                           (.linear (DirectedGraph.))
+                           history))
+     :explainer (WWExplainer. append-index write-index read-index)}))
 
 (defrecord WRExplainer [append-index write-index read-index]
   cycle/DataExplainer
@@ -561,18 +561,18 @@
   [history]
   (let [{:keys [history append-index write-index read-index]} (preprocess
                                                                 history)]
-    [(cycle/forked
-       (reduce-mops (fn [g op [f :as mop]]
-                      (if (not= f :r)
-                        g
-                        ; Figure out what write we overwrote
-                        (if-let [dep (wr-mop-dep write-index op mop)]
-                          (cycle/link g dep op :wr)
-                          ; No dep
-                          g)))
-                    (.linear (DirectedGraph.))
-                    history))
-     (WRExplainer. append-index write-index read-index)]))
+    {:graph (cycle/forked
+              (reduce-mops (fn [g op [f :as mop]]
+                             (if (not= f :r)
+                               g
+                               ; Figure out what write we overwrote
+                               (if-let [dep (wr-mop-dep write-index op mop)]
+                                 (cycle/link g dep op :wr)
+                                 ; No dep
+                                 g)))
+                           (.linear (DirectedGraph.))
+                           history))
+     :explainer (WRExplainer. append-index write-index read-index)}))
 
 (defrecord RWExplainer [append-index write-index read-index]
   cycle/DataExplainer
@@ -606,18 +606,19 @@
   [history]
   (let [{:keys [history append-index write-index read-index]} (preprocess
                                                                 history)]
-    [(cycle/forked
-       (reduce-mops (fn [g op [f :as mop]]
-                      (if (= f :append)
-                        ; Who read the state just before we wrote?
-                        (if-let [deps (rw-mop-deps append-index write-index
-                                                   read-index op mop)]
-                          (cycle/link-all-to g deps op :rw)
-                          g)
-                        g))
-                    (cycle/linear (cycle/directed-graph))
-                    history))
-     (RWExplainer. append-index write-index read-index)]))
+    {:graph (cycle/forked
+              (reduce-mops (fn [g op [f :as mop]]
+                             (if (= f :append)
+                               ; Who read the state just before we wrote?
+                               (if-let [deps (rw-mop-deps append-index
+                                                          write-index
+                                                          read-index op mop)]
+                                 (cycle/link-all-to g deps op :rw)
+                                 g)
+                               g))
+                           (cycle/linear (cycle/digraph))
+                           history))
+     :explainer (RWExplainer. append-index write-index read-index)}))
 
 (defn g1c-graph
   "Per Adya, Liskov, & O'Neil, phenomenon G1C encompasses any cycle made up of
@@ -667,66 +668,6 @@
   [history]
   ((cycle/combine ww-graph wr-graph rw-graph) history))
 
-(defn g0-cases
-  "Given a graph, a pair explainer, and a collection of strongly connected
-  components, searches for instances of G0 anomalies within it. Returns nil if
-  none are present."
-  [graph pair-explainer sccs]
-  ; For g0, we want to restrict the graph purely to write-write edges.
-  (let [g0-graph (-> graph
-                     (cycle/remove-relationship :rw)
-                     (cycle/remove-relationship :wr))]
-    (ct/cycle-explanations pair-explainer
-                           (partial cycle/find-cycle g0-graph)
-                           sccs)))
-
-(defn g-single-cases
-  "Given a graph, an explainer, and a collection of strongly connected
-  components, searches for instances of G-single anomalies within them.
-  Returns nil if none are present."
-  [graph pair-explainer sccs]
-  ; For G-single, we want exactly one rw edge in a cycle, and the remaining
-  ; edges from ww or wr.
-  (let [rw-graph      (-> graph
-                          (cycle/remove-relationship :ww)
-                          (cycle/remove-relationship :wr))
-        ww+wr-graph   (-> graph
-                          (cycle/remove-relationship :rw))]
-    (ct/cycle-explanations pair-explainer
-                           (partial cycle/find-cycle-starting-with
-                                    rw-graph ww+wr-graph)
-                           sccs)))
-
-(defn g2-cases
-  "Given a graph, an explainer, and a collection of strongly connected
-  components, searches for instances of G2 anomalies within them. Returns nil
-  if none are present."
-  [graph pair-explainer sccs]
-  ; For G2, we want at least one rw edge in a cycle; the other edges can be
-  ; anything.
-  (let [rw-graph (-> graph
-                     (cycle/remove-relationship :ww)
-                     (cycle/remove-relationship :wr))]
-    ; Sort of a hack; we reject cycles that don't have at least two rw edges,
-    ; because single rw edges fall under g-single.
-    (seq (keep (fn [scc]
-                 (when-let [cycle (cycle/find-cycle-starting-with
-                                    rw-graph graph scc)]
-                   ; Good, we've got a cycle. We're going to reject any cycles
-                   ; that are actually G-single, because the G-single checker
-                   ; will pick up on those. This could mean we might miss some
-                   ; G2 cycles that we COULD find by modifying find-cycle to
-                   ; return more candidates, but I don't think it's the end of
-                   ; the world; G-single is worse, and if we see it, G2 is
-                   ; just icing on the cake
-                   (let [cx (cycle/explain-cycle ct/cycle-explainer
-                                                 pair-explainer
-                                                 cycle)]
-                     (when (= :G2 (:type cx))
-                       (cycle/render-cycle-explanation ct/cycle-explainer
-                                                       pair-explainer cx)))))
-               sccs))))
-
 (defn cycles!
   "Performs dependency graph analysis and returns a map of anomalies.
 
@@ -761,11 +702,11 @@
          ;_ (pprint (cycle/->clj graph))
 
          ; Find specific anomaly cases
-         g0         (when (:G0 as)        (g0-cases graph explainer sccs))
+         g0         (when (:G0 as)        (ct/g0-cases graph explainer sccs))
          g1c        (when (:G1c as)       (ct/g1c-cases graph explainer sccs))
-         g-single   (when (:G-single as)  (g-single-cases
+         g-single   (when (:G-single as)  (ct/g-single-cases
                                             graph explainer sccs))
-         g2         (when (:G2 as)        (g2-cases graph explainer sccs))
+         g2         (when (:G2 as)        (ct/g2-cases graph explainer sccs))
 
          ; Results
          anomalies (cond-> {}

@@ -19,7 +19,7 @@
   (->> history
        history/index
        analyzer
-       first
+       :graph
        cycle/->clj
        (map (fn [[k vs]]
               [(dissoc k :index)

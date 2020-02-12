@@ -16,11 +16,6 @@
   than a did. For instance, {:x 1 :y 2} -> {:x 2 :y 2}, because :x is higher in
   the second op.
 
-  `wr-graph` assumes op :values are transactions like [[f k v] ...], and
-  relates operations based on transactional reads and writes: a->b if b
-  observes a value that a wrote. This order requires that keys only have a
-  given value written once.
-
   You can also *combine* graphs using `combine`, which takes the union of
   multiple graphs. `(combine realtime monotonic-key)`, for instance, verifies
   that not only must the values of each key monotonically increase, but that
@@ -34,7 +29,7 @@
                     [generator :as gen]
                     [store :as store]
                     [txn :as txn]
-                    [util :as util]]
+                    [util :as util :refer [spy]]]
             [jepsen.txn.micro-op :as mop]
             [knossos [op :as op]
                      [history :refer [pair-index+]]]
@@ -97,25 +92,31 @@
   nil
   (->clj [x] x))
 
-(defn directed-graph
+(defn digraph
   "Constructs a fresh directed graph."
   []
   (DirectedGraph.))
 
 (defn linear
-  "Bifurcan's analogue to (transient g)"
-  [^DirectedGraph graph]
-  (.linear graph))
+  "Bifurcan's analogue to (transient x)"
+  [^ICollection x]
+  (.linear x))
 
 (defn forked
-  "Bifurcan's analogue to (persistent! g)"
-  [^DirectedGraph graph]
-  (.forked graph))
+  "Bifurcan's analogue to (persistent! x)"
+  [^ICollection x]
+  (.forked x))
 
 (defn in
-  "Inbound edges to a graph."
+  "Inbound edges to v in graph g."
   [^IGraph g v]
   (try (.in g v)
+       (catch IllegalArgumentException e)))
+
+(defn out
+  "Outbound edges from v in graph g."
+  [^IGraph g v]
+  (try (.out g v)
        (catch IllegalArgumentException e)))
 
 (def union-edge
@@ -138,21 +139,24 @@
        (.edges g)))
 
 (defn link
-  "Helper for linking Bifurcan graphs. Optionally takes a relationship,
-  which is added to the value set of the edge."
-  ([graph node succ]
-   (assert (not (nil? node)))
-   (assert (not (nil? succ)))
+  "Helper for linking Bifurcan graphs. Optionally takes a relationship, which
+  is added to the value set of the edge. Nil relationships are treated as if no
+  relationship were passed."
+  ([^DirectedGraph graph node succ]
+   ;(assert (not (nil? node)))
+   ;(assert (not (nil? succ)))
    (.link graph node succ))
   ([^DirectedGraph graph node succ relationship]
-   (assert (not (nil? node)))
-   (assert (not (nil? succ)))
-   (.link graph node succ #{relationship} union-edge)))
+   (do ;(assert (not (nil? node)))
+       ;(assert (not (nil? succ)))
+       (.link graph node succ #{relationship} union-edge))))
 
 (defn link-to-all
   "Given a graph g, links x to all ys."
   ([g x ys]
-   (link-to-all g x ys nil))
+   (if (seq ys)
+     (recur (link g x (first ys)) x (next ys))
+     g))
   ([g x ys rel]
    (if (seq ys)
      (recur (link g x (first ys) rel) x (next ys) rel)
@@ -172,7 +176,9 @@
 (defn link-all-to-all
   "Given a graph g, links all xs to all ys."
   ([g xs ys]
-   (link-all-to-all g xs ys nil))
+   (if (seq xs)
+     (recur (link-to-all g (first xs) ys) (next xs) ys)
+     g))
   ([g xs ys rel]
    (if (seq xs)
      (recur (link-to-all g (first xs) ys rel) (next xs) ys rel)
@@ -183,12 +189,26 @@
   [^IGraph g a b]
   (.unlink g a b))
 
+(defn unlink-to-all
+  "Given a graph g, removes the link from x to all ys."
+  [g x ys]
+  (if (seq ys)
+    (recur (unlink g x (first ys)) x (next ys))
+    g))
+
+(defn unlink-all-to
+  "Given a graph g, removes the link from all xs to y."
+  [g xs y]
+  (if (seq xs)
+    (recur (unlink g (first xs) y) (next xs) y)
+    g))
+
 (defn keep-edge-values
   "Transforms a graph by applying a function (f edge-value) to each edge in the
   graph. Where the function returns `nil`, removes that edge altogether."
   [f ^DirectedGraph g]
   (forked
-    (reduce (fn [^IGraph g, ^IEdge edge]
+     (reduce (fn [^IGraph g, ^IEdge edge]
               (let [v' (f (.value edge))]
                 (if (nil? v')
                   ; Remove edge
@@ -218,6 +238,40 @@
     (keep-edge-values (fn [rs] (when (contains? rs rel) rs'))
                       g)))
 
+(defn ^DirectedGraph remove-self-edges
+  "There are times when it's just way simpler to use link-all-to-all between
+  sets that might intersect, and instead of writing all-new versions of link-*
+  that suppress self-edges, we'll just remove self-edges after."
+  [^DirectedGraph g nodes-of-interest]
+  (loop [g      (linear g)
+         nodes  nodes-of-interest]
+    (if (seq nodes)
+      (let [node (first nodes)]
+        (recur (unlink g node node) (next nodes)))
+      (forked g))))
+
+(defn ^DirectedGraph collapse-graph
+  "Given a predicate function pred of a vertex, and a graph g, collapses g to
+  just those vertices which satisfy (pred vertex), preserving transitive
+  connections through removed vertices. If a -> b -> c, and we remove b, then a
+  -> c.
+
+  This method destroys relationship edges. I'm not sure what the semantics of
+  preserving them might be, and we won't be using them for the application I'm
+  thinking of anyway."
+  [pred ^DirectedGraph g]
+  (forked
+    (reduce (fn [g' v]
+              (if (pred v)
+                ; Preserve vertex
+                g'
+                ; Stitch inbound to outbound nodes and remove vertex.
+                ; Note that we remove self-edges here.
+                (let [in  (.remove (in g' v) v)
+                      out (.remove (out g' v) v)]
+                  (-> g' (.remove v) (link-all-to-all in out)))))
+            (linear g)
+            (.vertices g))))
 
 (defn map->bdigraph
   "Turns a sequence of [node, successors] pairs (e.g. a map) into a bifurcan
@@ -290,6 +344,56 @@
 ; We write our Analyzers as a function (f history) => [graph explainer]. Graphs
 ; are Bifurcan DirectedGraphs. Explainers have a protocol, because we're going
 ; to pack some cached state into them.
+
+(defprotocol Anomalies
+  "There are several points in an analysis where we want to construct some
+  intermediate data, like a version graph, for later. However, it might be that
+  *during* the construction of that version graph, we discover the graph itself
+  contains anomalies. This doesn't *invalidate* the graph--perhaps we can still
+  use it to discover anomalies later, but it *is* information we need to pass
+  upstream to the user. The Anomalies protocol lets the version graph signal
+  that additional anomalies were encountered, so whatever uses the version
+  graph can merge those into its upstream anomaly set.
+
+  This is kind of like an error monad, but it felt weird and less composable to
+  use exceptions for this."
+  (anomalies [this] "Returns a map of anomaly types to anomalies."))
+
+(extend-protocol Anomalies
+  ; nil means no anomalies
+  nil (anomalies [_] nil)
+
+  ; This lets us return plain old objects transparently when there's no
+  ; anomalies.
+  Object (anomalies [_] nil)
+
+  ; It's convenient to just pass around a map when you do have anomalies, and
+  ; don't need to encode extra information.
+  clojure.lang.IPersistentMap
+  (anomalies [m] m))
+
+(defn merge-anomalies
+  "Merges n Anomaly objects together."
+  [coll-of-anomalies]
+  (reify Anomalies
+    (anomalies [_] (merge-with concat (map anomalies coll-of-anomalies)))))
+
+(defprotocol TransactionGrapher
+  "The TransactionGrapher takes a history and produces a TransactionGraph,
+  optionally augmented with Anomalies discovered during the graph inference
+  process."
+  (build-transaction-graph [this history]
+                           "Analyzes the history and returns a TransactionGraph,
+                           optionally with Anomalies."))
+
+(defprotocol TransactionGraph
+  "A TransactionGraph represents a graph of dependencies between transactions
+  (really, operations), where edges are sets of tagged relationships, like :ww
+  or :realtime."
+  (transaction-graph [this]
+                     "Returns a Bifurcan IDirectedGraph of dependencies between
+                     transactions (represented as completion operations)"))
+
 (defprotocol DataExplainer
   (explain-pair-data
     [_ a b]
@@ -344,14 +448,28 @@
 
   (checker (combine monotonic-keys real-time))"
   [& analyzers]
-  (fn [history]
-    (let [[graph explainers]
-          (reduce (fn [[graph explainers] analyzer]
-                    (let [[g e] (analyzer history)]
-                      [(digraph-union graph g) (conj explainers e)]))
-                  [(.linear (DirectedGraph.)) []]
-                  analyzers)]
-      [(.forked graph) (CombinedExplainer. explainers)])))
+  (fn analyze [history]
+    (loop [analyzers  analyzers
+           anomalies  nil
+           graph      (linear (digraph))
+           explainers []]
+      (if (seq analyzers)
+        ; Use this analyzer on the history and merge its result map into our
+        ; state.
+        (let [analyzer (first analyzers)
+              analysis (analyzer history)]
+          (assert (and (:graph analysis) (:explainer analysis))
+                  (str "Analyzer " (pr-str analyzer)
+                       " did not return a map with a :graph and :analysis."
+                       " Instead, we got " (pr-str analysis)))
+          (recur (next analyzers)
+                 (merge anomalies (:anomalies analysis))
+                 (digraph-union graph (:graph analysis))
+                 (conj explainers (:explainer analysis))))
+        ; Done!
+      {:anomalies anomalies
+       :graph     (.forked graph)
+       :explainer (CombinedExplainer. explainers)}))))
 
 ;; Monotonic keys!
 
@@ -408,7 +526,8 @@
                    distinct
                    (map (fn [k] (monotonic-key-order k history)))
                    (reduce digraph-union))]
-    [graph (MonotonicKeyExplainer.)]))
+    {:graph graph
+     :explainer (MonotonicKeyExplainer.)}))
 
 ;; Processes
 
@@ -439,13 +558,14 @@
   process, such that every operation a process performs is ordered (but
   operations across different processes are not related)."
   [history]
-  (let [oks (filter op/ok? history)
-       graph (->> oks
-                  (map :process)
-                  distinct
-                  (map (fn [p] (process-order oks p)))
-                  (reduce digraph-union))]
-    [graph (ProcessExplainer.)]))
+  (let [oks (filter op/ok? history) ; TODO: order infos?
+        graph (->> oks
+                   (map :process)
+                   distinct
+                   (map (fn [p] (process-order oks p)))
+                   (reduce digraph-union))]
+    {:graph     graph
+     :explainer (ProcessExplainer.)}))
 
 ; Realtime order
 
@@ -473,9 +593,8 @@
          ", at index " (:index b))))
 
 (defn realtime-graph
-  "Given a history, produces an singleton order graph `{:realtime graph}` which
-  encodes the real-time dependencies of transactions: a < b if a ends before b
-  begins.
+  "Given a history, produces {:graph g :explainer e}, which encodes the
+  real-time dependencies of transactions: a < b if a ends before b begins.
 
   In general, txn a precedes EVERY txn which begins later in the history, but
   that's n^2 territory, and for purposes of cycle detection, we only need a
@@ -517,7 +636,8 @@
           ; failures, but I don't think they'll hurt. We *do* need edges to
           ; crashed ops, because they may complete later on.
           :invoke (let [op' (get pairs op)
-                        g   (reduce (fn [g ok] (link g ok op' :realtime))
+                        g   (reduce (fn [g ok]
+                                      (link g ok op' :realtime))
                                     g
                                     oks)]
                     (recur (next history) oks g))
@@ -536,7 +656,8 @@
           ; we don't need to add them to the ok set.
           :info (recur (next history) oks g))
         ; All done!
-        [g (RealtimeExplainer. pairs)]))))
+        {:graph     g
+         :explainer (RealtimeExplainer. pairs)}))))
 
 ;; Graph search
 
@@ -765,26 +886,33 @@
        (render-cycle-explanation cycle-explainer pair-explainer)))
 
 (defn check
-  "Meat of the checker. Takes an analysis function and a history; returns a map
+  "Meat of the checker. Takes an analysis function and a history; returns an map
   of:
 
       {:graph     The computed graph
        :explainer The explainer for that graph
        :cycles    A list of cycles we found
-       :sccs      A set of strongly connected components}"
+       :sccs      A set of strongly connected components
+       :anomalies Any anomalies we found during this analysis.}"
   [analyze-fn history]
   (let [history           (remove (comp #{:nemesis} :process) history)
-        [graph explainer] (analyze-fn history)
+        {:keys [anomalies explainer graph]} (analyze-fn history)
         sccs              (strongly-connected-components graph)
         cycles            (->> sccs
                                (sort-by (comp :index first))
                                (mapv (partial explain-scc graph
                                               cycle-explainer
-                                              explainer)))]
+                                              explainer)))
+        ; It's almost certainly the case that something went wrong if we didn't
+        ; infer *any* dependencies.
+        anomalies (if (= 0 (.size graph))
+                    (assoc anomalies :empty-transaction-graph true)
+                    anomalies)]
     {:graph     graph
      :explainer explainer
      :sccs      sccs
-     :cycles    cycles}))
+     :cycles    cycles
+     :anomalies anomalies}))
 
 (defn write-cycles!
   "Writes cycles to a file. Opts:

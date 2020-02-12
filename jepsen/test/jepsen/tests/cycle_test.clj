@@ -105,7 +105,7 @@
         o4 {:index 3 :process 1 :type :ok}
         history [o1 o2 o3 o4]]
     (is (= {o1 #{o4}, o2 #{o3}, o3 #{}, o4 #{}}
-           (->clj (first (process-graph history)))))))
+           (->clj (:graph (process-graph history)))))))
 
 (deftest monotonic-key-graph-test
   (testing "basics"
@@ -118,7 +118,7 @@
               r2 #{r3 r4}
               r3 #{}
               r4 #{r2 r3}}
-             (->clj (first (monotonic-key-graph history)))))))
+             (->clj (:graph (monotonic-key-graph history)))))))
 
   (testing "Can bridge missing values"
     (let [r1 {:index 0 :type :ok, :f :read, :value {:x 0, :y 0}}
@@ -130,7 +130,7 @@
               r2 #{r3}
               r3 #{}
               r4 #{r2}}
-             (->clj (first (monotonic-key-graph history))))))))
+             (->clj (:graph (monotonic-key-graph history))))))))
 
 (defn big-history-gen
   [v]
@@ -189,8 +189,8 @@
         (history/index [{:type :ok, :process 0, :f :read, :value {:x 1}}
                         {:type :ok, :process 0, :f :read, :value {:x 0}}])]
     (testing "combined order"
-      (let [[graph explainer] ((combine monotonic-key-graph process-graph)
-                               history)]
+      (let [{:keys [graph explainer]}
+            ((combine monotonic-key-graph process-graph) history)]
         (is (= {r1 #{r2} r2 #{r1}}
                (->clj graph)))))
     (testing "independently valid"
@@ -237,7 +237,7 @@
   (->> history
        history/index
        analyzer
-       first
+       :graph
        ->clj
        (map (fn [[k vs]]
               [(dissoc k :index)
@@ -341,13 +341,13 @@
                  0 ->clj))))
 
 (deftest link-test
-  (let [g (-> (directed-graph)
+  (let [g (-> (digraph)
               (link 1 2 :foo)
               (link 1 2 :bar))]
     (is (= #{:foo :bar} (edge g 1 2)))))
 
 (deftest project+remove-relationship-test
-  (let [g (-> (directed-graph)
+  (let [g (-> (digraph)
               (link 1 2 :foo)
               (link 1 3 :foo)
               (link 2 3 :bar)
@@ -360,3 +360,19 @@
       (is (= #{{:from 1, :to 2, :value #{:foo}}
                {:from 1, :to 3, :value #{:foo}}}
              (set (map ->clj (edges (project-relationship g :foo)))))))))
+
+(deftest collapse-graph-test
+  (testing "simple"
+    (is (= (map->bdigraph {1 [3]})
+           (->> (map->bdigraph {1 [2]
+                                2 [3]})
+                (collapse-graph odd?)))))
+
+  (testing "complex"
+    (is (= (map->bdigraph {1 [1 5 7]
+                           3 [1 5 7 9]})
+           (->> (map->bdigraph {1 [4]
+                                3 [4 9]
+                                4 [5 6 7]
+                                6 [1]})
+                (collapse-graph odd?))))))
