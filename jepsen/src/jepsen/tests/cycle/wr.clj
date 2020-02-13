@@ -261,12 +261,18 @@
        (pmap (fn per-key [k]
                ; Restrict the general graph to just those which externally
                ; interact with k.
-               (let [touches-k? (fn touches-k? [txn]
-                                  (let [txn    (:value txn)
-                                        reads  (txn/ext-reads txn)
-                                        writes (txn/ext-writes txn)]
+               (let [touches-k? (fn touches-k? [op]
+                                  ; We can't infer anything from
+                                  ; invocations/fails.
+                                  (when (or (op/ok? op) (op/info? op))
+                                    (let [txn    (:value op)
+                                          ; Can't infer crashed reads!
+                                          reads  (when (op/ok? op)
+                                                   (txn/ext-reads txn))
+                                          ; We can infer crashed writes though!
+                                          writes (txn/ext-writes txn)]
                                     (or (contains? reads k)
-                                        (contains? writes k))))
+                                        (contains? writes k)))))
                      ; Our graph-collapsing algorithm is gonna HAMMER our
                      ; predicate for whether a txn touches k, so we precompute
                      ; the fuck out of it
@@ -292,7 +298,9 @@
                           ; the first read.
                           (let [txn (:value op)
                                 v1 (or (get (txn/ext-writes txn) k)
-                                       (get (txn/ext-reads txn) k))
+                                       ; Reads only fix a value when ok!
+                                       (and (op/ok? op)
+                                            (get (txn/ext-reads txn) k)))
                                 ; Now, we want to relate this to the first
                                 ; external value of k for every subsequent
                                 ; transaction in the graph, which will be
@@ -305,7 +313,11 @@
                                 v2s (->> (cycle/out key-graph op)
                                          (map (fn descendent-value [op]
                                                 (let [txn (:value op)]
-                                                  (or (get (txn/ext-reads txn) k)
+                                                  ; Likewise, reads only fix a
+                                                  ; value when ok
+                                                  (or (and (op/ok? op)
+                                                           (get (txn/ext-reads
+                                                                  txn) k))
                                                       (get (txn/ext-writes txn) k)))))
                                          set)
                                 ; Don't generate self-edges, of course!

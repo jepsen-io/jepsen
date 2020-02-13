@@ -179,7 +179,32 @@
 
     (testing "don't infer v1 -> v1 deps"
       (is (= {:x {}}
-             (vg {(op "wx1") [(op "rx1")]}))))))
+             (vg {(op "wx1") [(op "rx1")]}))))
+
+    (testing "don't infer deps on failed or crashed reads"
+      (is (= {:x {}}
+             (vg {(op "wx1") [(op 0 :fail "rx2")
+                              (op 0 :info "rx3")]
+                  (op 0 :fail "rx4") [(op "rx5")]
+                  (op 0 :info "rx6") [(op "rx7")]}))))
+
+    (testing "don't infer deps on failed writes, but do infer crashed"
+      (is (= {:x {1 #{4}, 4 #{}
+                  8 #{9}, 9 #{}}}
+              (vg {(op "wx1") [(op 0 :fail "wx2")
+                               ; Note that we ignore this read, but use write
+                               (op 0 :info "rx3wx4")]
+                   (op 0 :fail "wx5") [(op "rx6")]
+                   ; I don't know why you'd be able to get this graph, but if
+                   ; you DID, it'd be legal to infer
+                   (op 0 :info "wx8") [(op "rx9")]}))))
+
+    (testing "see through failed/crashed ops"
+      (is (= {:x {1 #{3}, 3 #{}}
+              :y {1 #{3}, 3 #{}}}
+             (vg {(op "wx1") [(op 0 :info "rx_") (op "rx3")]
+                  (op "wy1") [(op 0 :fail "wy2") (op "ry3")]}))))))
+
 
 (deftest version-graphs->transaction-graphs-test
   (testing "empty"
