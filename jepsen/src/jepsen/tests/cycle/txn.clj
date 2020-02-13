@@ -190,9 +190,10 @@
   those anomalies as a set: e.g. [:G1] -> #{:G0 :G1a :G1b :G1c}"
   [as]
   (let [as (set as)
-        as (if (:G2 as)  (conj as :G-single :G1c) as)
-        as (if (:G1 as)  (conj as :G1a :G1b :G1c) as)
-        as (if (:G1c as) (conj as :G0) as)]
+        as (if (:G2 as)       (conj as :G-single :G1c) as)
+        as (if (:G-single as) (conj as :G1c) as)
+        as (if (:G1 as)       (conj as :G1a :G1b :G1c) as)
+        as (if (:G1c as)      (conj as :G0) as)]
     as))
 
 (defn cycles

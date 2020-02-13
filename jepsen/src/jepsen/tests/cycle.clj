@@ -250,6 +250,20 @@
         (recur (unlink g node node) (next nodes)))
       (forked g))))
 
+(defn downstream-matches
+  "Returns the set of all nodes matching pred including or downstream of
+  vertices."
+  [pred g vertices]
+  (->> (reify Function
+         (apply [_ node]
+           (if (pred node)
+             ; We're done!
+             []
+             (out g node))))
+       (Graphs/bfsVertices ^Iterable vertices)
+       (filter pred)
+       set))
+
 (defn ^DirectedGraph collapse-graph
   "Given a predicate function pred of a vertex, and a graph g, collapses g to
   just those vertices which satisfy (pred vertex), preserving transitive
@@ -260,17 +274,32 @@
   preserving them might be, and we won't be using them for the application I'm
   thinking of anyway."
   [pred ^DirectedGraph g]
+  ; (info "collapsing graph of " (.size g) "nodes," (count (filter pred (.vertices g))) "of which match pred")
+  (comment
+    ; This was a terrible idea for realtime graphs, but the alternative is ALSO
+    ; bad
+    (forked
+      (reduce (fn [g' v]
+                (if (pred v)
+                  ; Preserve vertex
+                  g'
+                  ; Stitch inbound to outbound nodes and remove vertex.
+                  ; Note that we remove self-edges here.
+                  (let [in  (.remove (in g' v) v)
+                        out (.remove (out g' v) v)]
+                    (-> g' (.remove v) (link-all-to-all in out)))))
+              (linear g)
+              (.vertices g))))
+  ; We proceed through the graph linearly, taking every node n which matches
+  ; pred. We explore its downstream neighborhood up to and including, but not
+  ; past, nodes matching pred. We add an edge from n to each downstream node to
+  ; our result graph.
   (forked
     (reduce (fn [g' v]
               (if (pred v)
-                ; Preserve vertex
-                g'
-                ; Stitch inbound to outbound nodes and remove vertex.
-                ; Note that we remove self-edges here.
-                (let [in  (.remove (in g' v) v)
-                      out (.remove (out g' v) v)]
-                  (-> g' (.remove v) (link-all-to-all in out)))))
-            (linear g)
+                (link-to-all g' v (downstream-matches pred g (out g v)))
+                g'))
+            (linear (digraph))
             (.vertices g))))
 
 (defn map->bdigraph
@@ -429,7 +458,8 @@
     ; Lord help me, I think this is the first time I've actually wanted to
     ; think about metadata outside of a macro or compiler context.
     (when-let [[i ex] (->> explainers
-                           (map-indexed (fn [i e] [i (explain-pair-data e a b)]))
+                           (map-indexed (fn [i e]
+                                          [i (explain-pair-data e a b)]))
                            ; Find the first [i explanation] pair where ex is
                            ; present
                            (filter second)

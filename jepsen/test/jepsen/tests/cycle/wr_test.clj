@@ -363,15 +363,67 @@
                (c {:sequential-keys? true}
                   [t1 t1' t2 t2' t3 t3'])))))))
 
-(def dgraph-history
-[
-])
-
-(deftest dgraph-example
-;  (is (= {:valid? true}
-;         (checker/check (checker {:additional-graphs [cycle/realtime-graph]
-;                                  :linearizable-keys? true})
-;                        nil
-;                        (history/index dgraph-history)
-;                        nil)))
-)
+(comment
+  (deftest g-single-misattribution-test
+    ; This captures a problem with the current design: it's not necessarily clear
+    ; what anomalies mean when there are extra edges in the dependency graph. For
+    ; instance, this history contains a G-single anomaly if you consider that it
+    ; only requires one rw edge (the other edge is a process edge) for the cycle.
+    ; However, the explainer prefers to use wr, ww, rw, and *then* additional
+    ; graphs, so it explains this "g-single" anomaly as if it were G2--using both
+    ; anti-dependency cycles, rather than process order.
+    ;
+    ; TODO: I don't know how to fix this yet, but I'm leaving it here for an
+    ; enterprising individual (hi future Kyle!?) to address if it ever comes up
+    ; again. I have a vague feeling that we could augment Cycle DataExplainer so
+    ; that it has some concept of, like, what *kind* of anomaly it's being asked
+    ; to explain? Or maybe we should just order rw-edges last and be done with
+    ; it? That doesn't feel right, because IMO a pure rw cycle is *more*
+    ; interesting than, say, an rw+realtime cycle.
+    ;
+    ; Also this suggests that we should stop faffing about calling cycles with
+    ; realtime edges "G0" etc, and define *additional* anomaly classes. Maybe
+    ; call them G0+, when we use additional graphs?
+    (let [h [{:type :invoke,
+              :f :txn,
+              :value [[:w 499 14] [:w 503 1]],
+              :process 4}
+             {:type :ok,
+              :f :txn,
+              :value [[:w 499 14] [:w 503 1]],
+              :process 4}
+             {:type :invoke,
+              :f :txn,
+              :value [[:r 503 nil] [:w 503 11]],
+              :process 4}
+             {:type :ok,
+              :f :txn,
+              :value [[:r 503 1] [:w 503 11]],
+              :process 4}
+             {:type :invoke,
+              :f :txn,
+              :value [[:r 503 nil] [:w 503 13]],
+              :process 4}
+             {:type :ok,
+              :f :txn,
+              :value [[:r 503 1] [:w 503 13]],
+              :process 4}]]
+      (is (= {:valid? false,
+              :anomaly-types [:G-single :G2],
+              :anomalies
+              ; This G-single is currently misreported. TODO: uncomment this
+              ; test and fix, when we feel like it's important.
+              {:G-single
+               ["Let:\n  T1 = {:type :ok, :f :txn, :value [[:r 503 1] [:w 503 13]], :process 4, :index 5}\n  T2 = {:type :ok, :f :txn, :value [[:r 503 1] [:w 503 11]], :process 4, :index 3}\n\nThen:\n  - T1 < T2, because T1 read key 503 = 1, and T2 set it to 11, which came later in the version order.\n  - However, T2 < T1, because process whatever executed T1 before T2: a contradiction!"],
+               ; This G2 is real
+               :G2
+               ["Let:\n  T1 = {:type :ok, :f :txn, :value [[:r 503 1] [:w 503 11]], :process 4, :index 3}\n  T2 = {:type :ok, :f :txn, :value [[:r 503 1] [:w 503 13]], :process 4, :index 5}\n\nThen:\n  - T1 < T2, because T1 read key 503 = 1, and T2 set it to 13, which came later in the version order.\n  - However, T2 < T1, because T2 read key 503 = 1, and T1 set it to 11, which came later in the version order: a contradiction!"]}}
+             (checker/check (checker {:additional-graphs [cycle/process-graph]
+                                      ; As an aside, if you were to use sequential keys
+                                      ; here, you'd see key 503 go from 1 -> 11
+                                      ; -> 1, which would imply a version cycle.
+                                      ; :sequential-keys? true
+                                      :wfr-keys? true})
+                            nil
+                            (history/index h)
+                            nil))))))

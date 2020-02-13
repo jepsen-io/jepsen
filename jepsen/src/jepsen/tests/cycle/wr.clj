@@ -267,6 +267,12 @@
                                        writes (txn/ext-writes txn)]
                                    (or (contains? reads k)
                                        (contains? writes k))))
+                    ; Our graph-collapsing algorithm is gonna HAMMER our
+                    ; predicate for whether a txn touches k, so we precompute
+                    ; the fuck out of it
+                    touches-k? (->> (.vertices txn-graph)
+                                    (filter touches-k?)
+                                    set)
                     key-graph (->> txn-graph
                                    (cycle/collapse-graph touches-k?))]
                 ; Now, take every op in the key-restricted graph...
@@ -612,11 +618,12 @@
               state consistent with its own prior reads or writes.
 
   :G2 implies :G-single and :G1c. :G1 implies :G1a, :G1b, and :G1c. G1c implies
-  G0. The default is [:G2 :internal], which catches everything."
+  G0. The default is [:G2 :G1a :G1b :internal], which catches everything."
   ([]
    (checker {}))
   ([opts]
-   (let [anomalies  (ct/expand-anomalies (get opts :anomalies [:G2 :internal]))
+   (let [anomalies  (ct/expand-anomalies
+                      (get opts :anomalies [:G2 :G1a :G1b :internal]))
          opts       (assoc opts :anomalies anomalies)]
      (reify checker/Checker
        (check [this test history checker-opts]
