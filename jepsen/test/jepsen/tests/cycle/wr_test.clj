@@ -249,11 +249,10 @@
                                                     (op "rx2rx3")])
                 cycle/->clj)))))
 
-(deftest checker-test
-  (let [c (fn [checker-opts history]
-            (checker/check (checker checker-opts) nil
-                           (history/index history) nil))]
-
+(let [c (fn [checker-opts history]
+					(checker/check (checker checker-opts) nil
+												 (history/index history) nil))]
+	(deftest checker-test
     (testing "G0"
       ; What (could be) a pure write cycle: T1 < T2 on x, T2 < T1 on y.
       (let [[t1 t1'] (pair (op 0 :ok "wx1wy2"))
@@ -386,7 +385,30 @@
                                  [{:key :x, :scc #{1 2} :sources [:initial-state
                                                                   :sequential-keys]}]}}
                (c {:sequential-keys? true}
-                  [t1 t1' t2 t2' t3 t3'])))))))
+                  [t1 t1' t2 t2' t3 t3']))))))
+
+  (deftest type-sanity
+    (is (thrown-with-msg? java.lang.AssertionError #"a mix of integer types"
+                          (c {}
+                             [{:value [[:r :x (short 1)]]}
+                              {:value [[:r :x (long 1)]]}]))))
+
+	)
+
+(comment
+(deftest ^:test-refresh/focus foo-test
+  (let [h [
+
+           ]]
+    (is (= {:valid? false}
+           (checker/check (checker {:additional-graphs  [cycle/realtime-graph]
+																		:anomalies [:G-single :G1a :G1b :internal]
+                                    :sequential-keys?   true
+                                    :wfr-keys?          true})
+                          nil
+                          (history/index h)
+                          nil)))))
+)
 
 (comment
   (deftest g-single-misattribution-test
