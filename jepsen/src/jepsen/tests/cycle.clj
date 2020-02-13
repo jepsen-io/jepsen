@@ -280,7 +280,7 @@
   preserving them might be, and we won't be using them for the application I'm
   thinking of anyway."
   [pred ^DirectedGraph g]
-  ; (info "collapsing graph of " (.size g) "nodes," (count (filter pred (.vertices g))) "of which match pred")
+  (info "collapsing graph of " (.size g) "nodes," (count (filter pred (.vertices g))) "of which match pred")
   ; We proceed through the graph linearly, taking every node n which matches
   ; pred. We explore its downstream neighborhood up to and including, but not
   ; past, nodes matching pred. We add an edge from n to each downstream node to
@@ -293,6 +293,7 @@
        (sort-by :index)
        reverse
        (reduce (fn reducer [[g' memo] v]
+                 ;(prn :v v :memo-size (.size (.vertices memo)))
                  (let [downstream (downstream-matches pred g memo (out g v))]
                    (if (pred v)
                      ; Good, build associations in our result graph

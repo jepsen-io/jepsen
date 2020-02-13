@@ -258,64 +258,64 @@
   [txn-graph]
   (->> txn-graph
        ct/all-keys
-       (map (fn per-key [k]
-              ; Restrict the general graph to just those which externally
-              ; interact with k.
-              (let [touches-k? (fn touches-k? [txn]
-                                 (let [txn    (:value txn)
-                                       reads  (txn/ext-reads txn)
-                                       writes (txn/ext-writes txn)]
-                                   (or (contains? reads k)
-                                       (contains? writes k))))
-                    ; Our graph-collapsing algorithm is gonna HAMMER our
-                    ; predicate for whether a txn touches k, so we precompute
-                    ; the fuck out of it
-                    touches-k? (->> (.vertices txn-graph)
-                                    (filter touches-k?)
-                                    set)
-                    key-graph (->> txn-graph
-                                   (cycle/collapse-graph touches-k?))]
-                ; Now, take every op in the key-restricted graph...
-                (->> key-graph
-                     (reduce
-                       (fn map-graph [version-graph op]
-                         ; We're trying to relate *external* values forward.
-                         ; There are two possible external values per key per
-                         ; txn: the first read, and the final write. WFR (which
-                         ; we TODO check separately) lets us infer the
-                         ; relationship between the first read and final write
-                         ; *in* the transaction, so what we want to infer here
-                         ; is the relationship between the *final* external
-                         ; value. If internal consistency holds (which we check
-                         ; separately), then the final external value must be
-                         ; the final write, or if that's not present, the first
-                         ; read.
-                         (let [txn (:value op)
-                               v1 (or (get (txn/ext-writes txn) k)
-                                      (get (txn/ext-reads txn) k))
-                               ; Now, we want to relate this to the first
-                               ; external value of k for every subsequent
-                               ; transaction in the graph, which will be either
-                               ; the external read, or if that's missing, the
-                               ; external write.
-                               ;
-                               ; TODO: as an optimization, we could precompute
-                               ; external reads and writes for each txn and
-                               ; avoid re-traversing the txn every time.
-                               v2s (->> (cycle/out key-graph op)
-                                        (map (fn descendent-value [op]
-                                               (let [txn (:value op)]
-                                                 (or (get (txn/ext-reads txn) k)
-                                                     (get (txn/ext-writes txn) k)))))
-                                        set)
-                               ; Don't generate self-edges, of course!
-                               v2s (disj v2s v1)]
-                           ; Great, link those together.
-                           (cycle/link-to-all version-graph v1 v2s)))
-                       ; Start reduction with an empty graph
-                       (cycle/linear (cycle/digraph)))
-                     ; And make a [k graph] pair
-                     (vector k)))))
+       (pmap (fn per-key [k]
+               ; Restrict the general graph to just those which externally
+               ; interact with k.
+               (let [touches-k? (fn touches-k? [txn]
+                                  (let [txn    (:value txn)
+                                        reads  (txn/ext-reads txn)
+                                        writes (txn/ext-writes txn)]
+                                    (or (contains? reads k)
+                                        (contains? writes k))))
+                     ; Our graph-collapsing algorithm is gonna HAMMER our
+                     ; predicate for whether a txn touches k, so we precompute
+                     ; the fuck out of it
+                     touches-k? (->> (.vertices txn-graph)
+                                     (filter touches-k?)
+                                     set)
+                     key-graph (->> txn-graph
+                                    (cycle/collapse-graph touches-k?))]
+                 ; Now, take every op in the key-restricted graph...
+                 (->> key-graph
+                      (reduce
+                        (fn map-graph [version-graph op]
+                          ; We're trying to relate *external* values forward.
+                          ; There are two possible external values per key per
+                          ; txn: the first read, and the final write. WFR
+                          ; (which we TODO check separately) lets us infer the
+                          ; relationship between the first read and final write
+                          ; *in* the transaction, so what we want to infer here
+                          ; is the relationship between the *final* external
+                          ; value. If internal consistency holds (which we
+                          ; check separately), then the final external value
+                          ; must be the final write, or if that's not present,
+                          ; the first read.
+                          (let [txn (:value op)
+                                v1 (or (get (txn/ext-writes txn) k)
+                                       (get (txn/ext-reads txn) k))
+                                ; Now, we want to relate this to the first
+                                ; external value of k for every subsequent
+                                ; transaction in the graph, which will be
+                                ; either the external read, or if that's
+                                ; missing, the external write.
+                                ;
+                                ; TODO: as an optimization, we could precompute
+                                ; external reads and writes for each txn and
+                                ; avoid re-traversing the txn every time.
+                                v2s (->> (cycle/out key-graph op)
+                                         (map (fn descendent-value [op]
+                                                (let [txn (:value op)]
+                                                  (or (get (txn/ext-reads txn) k)
+                                                      (get (txn/ext-writes txn) k)))))
+                                         set)
+                                ; Don't generate self-edges, of course!
+                                v2s (disj v2s v1)]
+                            ; Great, link those together.
+                            (cycle/link-to-all version-graph v1 v2s)))
+                        ; Start reduction with an empty graph
+                        (cycle/linear (cycle/digraph)))
+                      ; And make a [k graph] pair
+                      (vector k)))))
        (into {})
        (util/map-vals cycle/forked)))
 
