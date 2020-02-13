@@ -490,9 +490,9 @@
       (alter-schema! conn (str keys vals))))
 
   (invoke! [this test op]
-    (with-conflict-as-fail op
-      (with-txn [t conn]
-        (try+
+    (try+
+      (with-conflict-as-fail op
+        (with-txn [t conn]
           (->> (:value op)
                (reduce
                  (fn [txn' [f k v :as micro-op]]
@@ -533,9 +533,9 @@
                                           (keyword vp) v}))
                               (conj txn' micro-op)))))
                  [])
-               (assoc op :type :ok, :value))
-          (catch [:type :unexpected-multiple-results] e
-            (assoc op :type :fail, :error :unexpected-multiple-results))))))
+               (assoc op :type :ok, :value))))
+      (catch [:type :unexpected-multiple-results] e
+        (assoc op :type :fail, :error e))))
 
 
   (teardown! [this test])
