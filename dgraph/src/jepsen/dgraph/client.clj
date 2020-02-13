@@ -420,13 +420,14 @@
 
 (defn upsert!
   "Takes a transaction, a predicate, and a record map. If only one map is
-  provided, it is used as the predicate. If no record exists for the given
-  predicate, inserts the record map.
+  provided, it is used as the predicate. If no UID exists for the given
+  predicate, inserts the record map. If a matching UID exists, mutates it
+  in-place.
 
   Predicate can be a keyword, which is used as the primary key of the record.
   TODO: add more complex predicates.
 
-  Returns nil if upsert did not take place. Returns mutation results otherwise."
+  Returns mutation results."
   [t pred record]
   (t/with-trace "client.upsert!"
     (if-let [pred-value (get record pred)]
@@ -436,10 +437,16 @@
                                   "  }\n"
                                   "}")
                            {:a pred-value}))]
-        ;;(info "Query results:" res)
-        (when (empty? (:all res))
-          ;;(info "Inserting...")
-          (mutate! t record)))
+        ; (info "Query results:" res)
+        (condp = (count (:all res))
+          ; No matches, insert
+          0 (mutate! t record)
+          ; Found a UID, update that
+          1 (mutate! t (assoc record :uid (:uid (first (:all res)))))
+          ; Um
+          (throw (RuntimeException.
+                   (str "Found multiple UIDs matching upsert predicate"
+                        (pr-str pred) "in" (pr-str record) "-" (pr-str res))))))
 
       (throw (IllegalArgumentException.
               (str "Record " (pr-str record) " has no value for "
@@ -511,7 +518,8 @@
                     :w (do (if (:blind-insert-on-write? opts)
                              (mutate! t {(keyword kp) k, (keyword vp) v})
                              (upsert! t (keyword kp)
-                                      {(keyword kp) k, (keyword vp) v}))
+                                      {(keyword kp) k
+                                       (keyword vp) v}))
                            (conj txn' micro-op)))))
               [])
              (assoc op :type :ok, :value)))))

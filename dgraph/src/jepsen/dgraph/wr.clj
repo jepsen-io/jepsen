@@ -20,10 +20,13 @@
   "Stuff you need to build a test!"
   [opts]
   {:client    (c/txn-client {})
-   :checker   (wr/checker {:wfr-keys?           true
-                           :linearizable-keys?  true
-                           :anomalies           [:G-single :G1a :G1b :internal]
-                           :additional-graphs   [cycle/realtime-graph]})
+   :checker   (checker/compose
+                {:wr (wr/checker {:wfr-keys?           true
+                                  :sequential-keys?    true
+                                  :anomalies           [:G-single :G1a :G1b
+                                                        :internal]
+                                  :additional-graphs   [cycle/realtime-graph]})
+                 :timeline (timeline/html)})
    :generator (->> (append/wr-txns {:key-count  5
                                     :min-length 1
                                     :max-length 4

@@ -25,6 +25,8 @@
       (c/with-conflict-as-fail op
         (c/with-txn [t conn]
           (case (:f op)
+            ; TODO: I broke this by changing client/upsert to an actual upsert,
+            ; rather than insert-unless-exists. We should replace this.
             :upsert (let [inserted (c/upsert! t
                                               :email
                                               {:email (str k)})]
