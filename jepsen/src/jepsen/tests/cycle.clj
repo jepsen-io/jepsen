@@ -280,7 +280,7 @@
   preserving them might be, and we won't be using them for the application I'm
   thinking of anyway."
   [pred ^DirectedGraph g]
-  (info "collapsing graph of " (.size g) "nodes," (count (filter pred (.vertices g))) "of which match pred")
+  ;(info "collapsing graph of " (.size g) "nodes," (count (filter pred (.vertices g))) "of which match pred")
   ; We proceed through the graph linearly, taking every node n which matches
   ; pred. We explore its downstream neighborhood up to and including, but not
   ; past, nodes matching pred. We add an edge from n to each downstream node to
@@ -855,8 +855,9 @@
   [pair-explainer [a b]]
   (or (explain-pair-data pair-explainer a b)
       (throw (IllegalStateException.
-               (str "Explainer " (pr-str pair-explainer)
-                    " was unable to explain the relationship"
+               (str "Explainer\n"
+                    (with-out-str (pprint pair-explainer))
+                    "\nwas unable to explain the relationship"
                     " between " (pr-str a)
                     " and " (pr-str b))))))
 

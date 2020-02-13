@@ -1,6 +1,7 @@
 (ns jepsen.tests.cycle.txn
   "Functions for cycle analysis over transactional workloads."
-  (:require [fipp.edn :refer [pprint]]
+  (:require [clojure.tools.logging :refer [info warn]]
+            [fipp.edn :refer [pprint]]
             [jepsen.txn :as txn :refer [reduce-mops]]
             [jepsen.tests.cycle :as cycle]
 						[knossos.op :as op]))
@@ -20,9 +21,32 @@
        seq))
 
 (defn all-keys
-  "A sequence of all keys in the given history."
+  "A sequence of all unique keys in the given history."
   [history]
   (->> history op-mops (map (comp second second)) distinct))
+
+(def integer-types
+  #{Byte Short Integer Long})
+
+(defn assert-type-sanity
+  "I cannot begin to convey the confluence of despair and laughter which I
+  encountered over the course of three hours attempting to debug this issue.
+
+  We assert that all keys have the same type, and that at most one integer type
+  exists. If you put a mix of, say, Ints and Longs into this checker, you WILL
+  question your fundamental beliefs about computers"
+  [history]
+  (let [int-val-types (->> (op-mops history)
+                           (map (comp class last second))
+                           (filter integer-types)
+                           distinct)]
+    (assert (<= (count int-val-types) 1)
+            (str "History includes a mix of integer types for transaction values: " (pr-str int-val-types) ". You almost certainly don't want to do this.")))
+  (let [key-types (->> (op-mops history)
+                       (map (comp class second second))
+                       distinct)]
+    (assert (<= (count key-types) 1)
+            (str "History includes a mix of different types for transaction keys: " (pr-str key-types) ". You almost certainly don't want to do this."))))
 
 (defn failed-writes
   "Returns a map of keys to maps of failed write values to the operations which

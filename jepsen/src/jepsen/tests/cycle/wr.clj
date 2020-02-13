@@ -640,6 +640,7 @@
      (reify checker/Checker
        (check [this test history checker-opts]
          (let [history  (remove (comp #{:nemesis} :process) history)
+               _        (ct/assert-type-sanity history)
                g1a      (when (:G1a anomalies) (g1a-cases history))
                g1b      (when (:G1b anomalies) (g1b-cases history))
                internal (when (:internal anomalies) (internal-cases history))
