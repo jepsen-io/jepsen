@@ -8,7 +8,8 @@
             [cheshire.core :as json]
             [jepsen [client :as jc]
                     [util :as util :refer [ex-root-cause]]]
-            [jepsen.dgraph.trace :as t])
+            [jepsen.dgraph.trace :as t]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent TimeUnit)
            (com.google.protobuf ByteString)
            (io.grpc ClientInterceptor
@@ -230,6 +231,12 @@
               #"ABORTED"
               (assoc ~op :type :fail, :error :transaction-aborted)
 
+              #"Attribute .+ not indexed"
+              (assoc ~op :type :fail, :error (.getMessage e#))
+
+              #"Schema not defined for predicate"
+              (assoc ~op :type :fail, :error :schema-not-defined)
+
               (throw e#)))
 
             (catch TxnConflictException e#
@@ -444,9 +451,11 @@
           ; Found a UID, update that
           1 (mutate! t (assoc record :uid (:uid (first (:all res)))))
           ; Um
-          (throw (RuntimeException.
-                   (str "Found multiple UIDs matching upsert predicate"
-                        (pr-str pred) "in" (pr-str record) "-" (pr-str res))))))
+          (throw+ {:type :unexpected-multiple-results
+                   :in   :upsert
+                   :key  pred-value
+                   :record record
+                   :results res})))
 
       (throw (IllegalArgumentException.
               (str "Record " (pr-str record) " has no value for "
@@ -483,46 +492,51 @@
   (invoke! [this test op]
     (with-conflict-as-fail op
       (with-txn [t conn]
-        (->> (:value op)
-             (reduce
-              (fn [txn' [f k v :as micro-op]]
-                (let [kp (gen-pred "key" (:key-predicate-count opts) k)
-                      vp (gen-pred "val" (:value-predicate-count opts) k)]
-                  (case f
-                    :r
-                    (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
-                                            "  " vp "\n"
-                                            "}}")
-                                     {:key k})
-                          reads (:q res)]
-                      (conj txn' [f k (condp = (count reads)
-                                        ; Not found
-                                        0 nil
-                                        ; Found
-                                        1 (get (first reads)
-                                               (keyword vp))
-                                        ; Ummm
-                                        (do
-                                          (throw (RuntimeException.
-                                                   (str "Unexpected multiple results for key "
-                                                        (pr-str k) ": "
-                                                        (pr-str reads))))
-                                          ; Alternate behavior: just go for it?
-                                          (info "Unexpected multiple results for key" k "-" (pr-str reads))
-                                            (get (rand-nth reads)
-                                                 (keyword vp))))]))
+        (try+
+          (->> (:value op)
+               (reduce
+                 (fn [txn' [f k v :as micro-op]]
+                   (let [kp (gen-pred "key" (:key-predicate-count opts) k)
+                         vp (gen-pred "val" (:value-predicate-count opts) k)]
+                     (case f
+                       :r
+                       (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
+                                               "  " vp "\n"
+                                               "}}")
+                                        {:key k})
+                             reads (:q res)]
+                         (conj txn' [f k (condp = (count reads)
+                                           ; Not found
+                                           0 nil
+                                           ; Found. COERCE TO LONG, OMFG
+                                           1 (long (get (first reads)
+                                                        (keyword vp)))
+                                           ; Ummm
+                                           (do
+                                             (throw+ {:type :unexpected-multiple-results
+                                                      :in      :read
+                                                      :key     k
+                                                      :results reads})
+                                             ; Alternate behavior: just go for
+                                             ; it?
+                                             (info "Unexpected multiple results for key" k "-" (pr-str reads))
+                                             (get (rand-nth reads)
+                                                  (keyword vp))))]))
 
-                    ; TODO: we should be able to optimize this to do pure
-                    ; inserts and UID-direct writes without the upsert
-                    ; read-write cycle, at least when we know the state
-                    :w (do (if (:blind-insert-on-write? opts)
-                             (mutate! t {(keyword kp) k, (keyword vp) v})
-                             (upsert! t (keyword kp)
-                                      {(keyword kp) k
-                                       (keyword vp) v}))
-                           (conj txn' micro-op)))))
-              [])
-             (assoc op :type :ok, :value)))))
+                       ; TODO: we should be able to optimize this to do pure
+                       ; inserts and UID-direct writes without the upsert
+                       ; read-write cycle, at least when we know the state
+                       :w (do (if (:blind-insert-on-write? opts)
+                                (mutate! t {(keyword kp) k, (keyword vp) v})
+                                (upsert! t (keyword kp)
+                                         {(keyword kp) k
+                                          (keyword vp) v}))
+                              (conj txn' micro-op)))))
+                 [])
+               (assoc op :type :ok, :value))
+          (catch [:type :unexpected-multiple-results] e
+            (assoc op :type :fail, :error :unexpected-multiple-results))))))
+
 
   (teardown! [this test])
 

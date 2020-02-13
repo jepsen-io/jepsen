@@ -23,12 +23,12 @@
    :checker   (checker/compose
                 {:wr (wr/checker {:wfr-keys?           true
                                   :sequential-keys?    true
-                                  :anomalies           [:G-single :G1a :G1b
-                                                        :internal]
+                                  :anomalies           [:G0 :G1c :G-single :G1a
+                                                        :G1b :internal]
                                   :additional-graphs   [cycle/realtime-graph]})
                  :timeline (timeline/html)})
-   :generator (->> (append/wr-txns {:key-count  5
-                                    :min-length 1
+   :generator (->> (append/wr-txns {:key-count  4
+                                    :min-length 2
                                     :max-length 4
                                     :max-writes-per-key 16})
                    (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
