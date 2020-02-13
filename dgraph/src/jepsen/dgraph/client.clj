@@ -495,13 +495,15 @@
                                         1 (get (first reads)
                                                (keyword vp))
                                         ; Ummm
-                                        (do (info "Unexpected multiple results for key" k "-" (pr-str reads))
+                                        (do
+                                          (throw (RuntimeException.
+                                                   (str "Unexpected multiple results for key "
+                                                        (pr-str k) ": "
+                                                        (pr-str reads))))
+                                          ; Alternate behavior: just go for it?
+                                          (info "Unexpected multiple results for key" k "-" (pr-str reads))
                                             (get (rand-nth reads)
                                                  (keyword vp))))]))
-                                        ;(throw (RuntimeException.
-                                        ;        (str "Unexpected multiple results for key "
-                                        ;             (pr-str k) ": "
-                                        ;             (pr-str reads)))))]))
 
                     ; TODO: we should be able to optimize this to do pure
                     ; inserts and UID-direct writes without the upsert

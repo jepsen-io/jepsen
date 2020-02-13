@@ -30,8 +30,10 @@
   :jvm-opts ["-Xmx32g"
              "-server"]
   :test-selectors {:default (fn [m]
-                              (not (or (:integration m)
+                              (not (or (:perf m)
+                                       (:integration m)
                                        (:logging m))))
+                   :perf        :perf
                    :logging     :logging
                    :integration :integration}
   :codox {:output-path "doc/"

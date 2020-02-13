@@ -279,7 +279,7 @@
         (is (= {:valid? false
                 :anomaly-types [:G1b :empty-transaction-graph]
                 :anomalies {:empty-transaction-graph true
-                            :G1b [{:op      (assoc t2 :index 1)
+                              :G1b [{:op      (assoc t2 :index 1)
                                    :writer  (assoc t1 :index 0)
                                    :mop     [:r :x 1]}]}}
                (c {:anomalies [:G1]} h)))))

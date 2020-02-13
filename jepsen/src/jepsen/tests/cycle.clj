@@ -252,17 +252,23 @@
 
 (defn downstream-matches
   "Returns the set of all nodes matching pred including or downstream of
-  vertices."
-  [pred g vertices]
+  vertices. Takes a raw graph, and a memoized, which memoizes our previous
+  findings. We use memo where possible, and fall back to raw graph searches
+  otherwise."
+  [pred g ^DirectedGraph memo vertices]
   (->> (reify Function
          (apply [_ node]
            (if (pred node)
              ; We're done!
              []
-             (out g node))))
+             (if (.contains (.vertices memo) node)
+               ; Ah, good, we can jump right to memoized values
+               (out memo node)
+
+               ; Fall back to slow exploration via the raw graph
+               (out g node)))))
        (Graphs/bfsVertices ^Iterable vertices)
-       (filter pred)
-       set))
+       (filter pred)))
 
 (defn ^DirectedGraph collapse-graph
   "Given a predicate function pred of a vertex, and a graph g, collapses g to
@@ -275,32 +281,31 @@
   thinking of anyway."
   [pred ^DirectedGraph g]
   ; (info "collapsing graph of " (.size g) "nodes," (count (filter pred (.vertices g))) "of which match pred")
-  (comment
-    ; This was a terrible idea for realtime graphs, but the alternative is ALSO
-    ; bad
-    (forked
-      (reduce (fn [g' v]
-                (if (pred v)
-                  ; Preserve vertex
-                  g'
-                  ; Stitch inbound to outbound nodes and remove vertex.
-                  ; Note that we remove self-edges here.
-                  (let [in  (.remove (in g' v) v)
-                        out (.remove (out g' v) v)]
-                    (-> g' (.remove v) (link-all-to-all in out)))))
-              (linear g)
-              (.vertices g))))
   ; We proceed through the graph linearly, taking every node n which matches
   ; pred. We explore its downstream neighborhood up to and including, but not
   ; past, nodes matching pred. We add an edge from n to each downstream node to
   ; our result graph.
-  (forked
-    (reduce (fn [g' v]
-              (if (pred v)
-                (link-to-all g' v (downstream-matches pred g (out g v)))
-                g'))
-            (linear (digraph))
-            (.vertices g))))
+  ;
+  ; We're going to take advantage of the fact that our graphs are probably
+  ; roughly temporally ordered transactions by :index, and proceed in *reverse*
+  ; index order to maximize the chances of hitting memoization.
+  (->> (.vertices g)
+       (sort-by :index)
+       reverse
+       (reduce (fn reducer [[g' memo] v]
+                 (let [downstream (downstream-matches pred g memo (out g v))]
+                   (if (pred v)
+                     ; Good, build associations in our result graph
+                     [(link-to-all g' v downstream) memo]
+                     ; Well, this *wasn't* a node we were looking for... but we
+                     ; can memoize it to speed up future searches.
+                     [g' (-> memo
+                             (.add v) ; Memoize even negative result!
+                             (link-to-all v downstream))])))
+               [(linear (digraph))
+                (linear (digraph))])
+       first
+       forked))
 
 (defn map->bdigraph
   "Turns a sequence of [node, successors] pairs (e.g. a map) into a bifurcan

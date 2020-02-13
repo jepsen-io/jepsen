@@ -1,7 +1,7 @@
 (ns jepsen.tests.cycle-test
   (:require [jepsen.tests.cycle :refer :all]
             [jepsen.checker :as checker]
-            [jepsen.util :refer [map-vals spy]]
+            [jepsen.util :refer [map-vals spy real-pmap]]
             [jepsen.txn :as txn]
             [knossos [history :as history]
                      [op :as op]]
@@ -376,3 +376,19 @@
                                 4 [5 6 7]
                                 6 [1]})
                 (collapse-graph odd?))))))
+
+(deftest ^:perf collapse-graph-test-perf
+  ; Generate a random history
+  (let [history (atom [])
+        threads (real-pmap
+                  (fn [p]
+                    (dotimes [i 500]
+                      ; Simulate a generation and random key
+                      (let [k [(mod i 32) (rand-int 5)]]
+                        (swap! history conj {:type :invoke, :process p, :key k })
+                        (swap! history conj {:type :ok, :process p, :key k}))))
+                    (range 5))
+        history (history/index @history)
+        graph   (:graph (realtime-graph history))]
+    (time
+      (collapse-graph (comp #{[3 0]} :key) graph))))

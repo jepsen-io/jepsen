@@ -21,7 +21,7 @@
   [opts]
   {:client    (c/txn-client {})
    :checker   (wr/checker {:wfr-keys?           true
-                           :sequential-keys?    true
+                           :linearizable-keys?  true
                            :anomalies           [:G-single :G1a :G1b :internal]
                            :additional-graphs   [cycle/realtime-graph]})
    :generator (->> (append/wr-txns {:key-count  5
