@@ -398,14 +398,17 @@
   symlink. Test may include a :logging key, which should be a map with the
   following optional options:
 
-      {:overrides   A map of packages to log level keywords}"
+      {:overrides   A map of packages to log level keywords}
+
+  Test may also include a :logging-json? flag, which produces JSON structured
+  Jepsen logs."
   [test]
   (unilog/start-logging!
     {:level   "info"
      :console   false
      :appenders [console-appender
                  {:appender :file
-                  :encoder :pattern
+                  :encoder  (if (:logging-json? test) :json :pattern)
                   :pattern "%d{ISO8601}{GMT}\t%p\t[%t] %c: %m%n"
                   :file (.getCanonicalPath (path! test "jepsen.log"))}]
      :overrides (merge default-logging-overrides
