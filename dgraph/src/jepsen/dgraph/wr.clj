@@ -4,6 +4,7 @@
   via write-read edges, and looks for cycles in that graph."
   (:require [clojure.tools.logging :refer [info]]
             [clojure.core.reducers :as r]
+            [elle.core :as elle]
             [fipp.edn :refer [pprint]]
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
@@ -12,9 +13,7 @@
                     [util :as util]
                     [store :as store]]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.tests.cycle :as cycle]
-            [jepsen.tests.cycle.wr :as wr]
-            [jepsen.tests.cycle.append :as append]))
+            [jepsen.tests.cycle.wr :as wr]))
 
 (defn workload
   "Stuff you need to build a test!"
@@ -25,11 +24,10 @@
                                   :sequential-keys?    true
                                   :anomalies           [:G0 :G1c :G-single :G1a
                                                         :G1b :internal]
-                                  :additional-graphs   [cycle/realtime-graph]})
-                 :timeline (timeline/html)})
-   :generator (->> (append/wr-txns {:key-count  4
-                                    :min-length 2
-                                    :max-length 4
-                                    :max-writes-per-key 16})
-                   (map (fn [txn] {:type :invoke, :f :txn, :value txn}))
-                   gen/seq)})
+                                  :additional-graphs   [elle/realtime-graph]})
+                 ;:timeline (timeline/html)})
+                 })
+   :generator (wr/gen {:key-count  4
+                       :min-length 2
+                       :max-length 4
+                       :max-writes-per-key 16})})
