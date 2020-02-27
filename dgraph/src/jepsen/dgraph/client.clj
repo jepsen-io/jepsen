@@ -509,8 +509,14 @@
                                            ; Not found
                                            0 nil
                                            ; Found. COERCE TO LONG, OMFG
-                                           1 (long (get (first reads)
+                                           1 (try (long (get (first reads)
                                                         (keyword vp)))
+                                                  (catch ClassCastException c
+                                                    (throw+ {:type :unexpected-read-class
+                                                             :key-pred kp
+                                                             :val-pred vp
+                                                             :key      k
+                                                             :res      res})))
                                            ; Ummm
                                            (do
                                              (throw+ {:type :unexpected-multiple-results
