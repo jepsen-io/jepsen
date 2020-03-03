@@ -33,6 +33,7 @@
             [jepsen.client :as client]
             [jepsen.nemesis :as nemesis]
             [jepsen.store :as store]
+            [jepsen.control.util :as cu]
             [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
@@ -114,22 +115,23 @@
                                 (map (partial str/join "/"))
                                 (zipmap full-paths))]
             (doseq [[remote local] paths]
-              (info "downloading" remote "to" local)
-              (try
-                (control/download
-                  remote
-                  (.getCanonicalPath
-                    (store/path! test (name node)
-                                 ; strip leading /
-                                 (str/replace local #"^/" ""))))
-                (catch java.io.IOException e
-                  (if (= "Pipe closed" (.getMessage e))
-                    (info remote "pipe closed")
-                    (throw e)))
-                (catch java.lang.IllegalArgumentException e
-                  ; This is a jsch bug where the file is just being
-                  ; created
-                  (info remote "doesn't exist"))))))))
+              (when (cu/exists? remote)
+                (info "downloading" remote "to" local)
+                (try
+                  (control/download
+                    remote
+                    (.getCanonicalPath
+                      (store/path! test (name node)
+                                   ; strip leading /
+                                   (str/replace local #"^/" ""))))
+                  (catch java.io.IOException e
+                    (if (= "Pipe closed" (.getMessage e))
+                      (info remote "pipe closed")
+                      (throw e)))
+                  (catch java.lang.IllegalArgumentException e
+                    ; This is a jsch bug where the file is just being
+                    ; created
+                    (info remote "doesn't exist")))))))))
     (store/update-symlinks! test)))
 
 (defn maybe-snarf-logs!
