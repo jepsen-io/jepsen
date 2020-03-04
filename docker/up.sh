@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+
 # "To provide additional docker-compose args, set the COMPOSE var. Ex:
 # COMPOSE="-f FILE_PATH_HERE"
 
-set -e # exit on an error
+set -o errexit
+set -o pipefail
+set -o nounset
+# set -o xtrace
 
 ERROR(){
     /bin/echo -e "\e[101m\e[97m[ERROR]\e[49m\e[39m $@"
@@ -19,6 +23,10 @@ INFO(){
 exists() {
     type $1 > /dev/null 2>&1
 }
+
+# Change directory to the source directory of this script. Taken from:
+# https://stackoverflow.com/a/246128/3858681
+pushd "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 POSITIONAL=()
 while [[ $# -gt 0 ]]
@@ -122,8 +130,9 @@ INFO "Running \`docker-compose up\`"
 if [ "$RUN_AS_DAEMON" ]; then
     docker-compose -f docker-compose.yml $COMPOSE $DEV up -d
     INFO "All containers started, run \`docker ps\` to view"
-    exit 0
 else
     INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
     docker-compose -f docker-compose.yml $COMPOSE $DEV up
 fi
+
+popd
