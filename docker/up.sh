@@ -79,6 +79,7 @@ exists perl || { ERROR "Please install perl (apt-get install perl)"; exit 1; }
 # Generate SSH keys for the control node
 if [ ! -f ./secret/node.env ]; then
     INFO "Generating key pair"
+    mkdir -p secret
     ssh-keygen -t rsa -N "" -f ./secret/id_rsa
 
     INFO "Generating ./secret/control.env"
