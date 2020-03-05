@@ -141,7 +141,7 @@ docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} build \
                --build-arg uid="$(id -u)" --build-arg gid="$(id -g)"
 
 INFO "Running \`docker-compose up\`"
-if [ "${RUN_AS_DAEMON}" ]; then
+if [ "${RUN_AS_DAEMON}" -eq 1 ]; then
     # shellcheck disable=SC2086
     USER=$(id -u) docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} up -d
     INFO "All containers started, run \`docker ps\` to view"
