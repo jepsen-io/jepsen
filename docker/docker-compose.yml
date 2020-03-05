@@ -22,8 +22,8 @@ services:
       - jepsen
     user: $USER
     volumes:
-      - ~/.m2/repository/:/home/kyle/.m2/repository/
-      - ~/.lein/:/home/kyle/.lein/
+      - ~/.m2/repository/:/home/jepsen/.m2/repository/
+      - ~/.lein/:/home/jepsen/.lein/
   n1:
     << : *default-node
     container_name: jepsen-n1

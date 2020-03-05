@@ -26,9 +26,9 @@ RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein
 ARG uid
 ARG gid
 
-RUN groupadd -g $gid kyle \
-	&& useradd -m -u $uid -g kyle kyle
-USER kyle
+RUN groupadd -g $gid jepsen \
+	&& useradd -m -u $uid -g jepsen jepsen
+USER jepsen
 
 # without --dev flag up.sh copies jepsen to these subfolders
 # with --dev flag they are empty until mounted
@@ -36,8 +36,8 @@ COPY jepsen/jepsen /jepsen/jepsen/
 RUN if [ -f /jepsen/jepsen/project.clj ]; then cd /jepsen/jepsen && lein install; fi
 COPY jepsen /jepsen/
 
-ADD --chown=kyle:kyle ./bashrc /home/kyle/.bashrc
-ADD --chown=kyle:kyle ./init.sh /home/kyle/init.sh
-RUN chmod +x /home/kyle/init.sh
+ADD --chown=jepsen:jepsen ./bashrc /home/jepsen/.bashrc
+ADD --chown=jepsen:jepsen ./init.sh /home/jepsen/init.sh
+RUN chmod +x /home/jepsen/init.sh
 
-CMD /home/kyle/init.sh
+CMD /home/jepsen/init.sh
