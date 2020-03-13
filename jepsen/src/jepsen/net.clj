@@ -8,7 +8,8 @@
             [clojure.tools.logging :refer [info warn]]
             [jepsen.control :refer :all]
             [jepsen.control.net :as control.net]
-            [jepsen.net.proto :as p]))
+            [jepsen.net.proto :as p]
+            [clojure.slingshot :refer [throw+]]))
 
 ; TODO: move this into jepsen.net.proto
 (defprotocol Net
@@ -102,6 +103,10 @@
       (on-nodes test
                 (keys grudge)
                 (fn snub [_ node]
+                  (or (seq (get grudge node))
+                      (throw+ {:type    :empty-grudge
+                               :grudge  grudge
+                               :node    node}))
                   (su (exec :iptables :-A :INPUT :-s
                             (->> (get grudge node)
                                  (map control.net/ip)

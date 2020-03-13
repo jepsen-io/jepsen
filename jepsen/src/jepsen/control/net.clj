@@ -2,7 +2,8 @@
   "Network control functions."
   (:refer-clojure :exclude [partition])
   (:use jepsen.control)
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [slingshot.slingshot :refer [throw+]]))
 
 (defn reachable?
   "Can the current node ping the given node?"
@@ -24,10 +25,17 @@
   ; 74.125.239.39   STREAM host.com
   ; 74.125.239.39   DGRAM
   ; ...
-  (first (str/split (->> (exec :getent :ahosts host)
-                         (str/split-lines)
-                         (first))
-                    #"\s+")))
+  (let [res (exec :getent :ahosts host)
+        ip (first (str/split (->> res
+                                  (str/split-lines)
+                                  (first))
+                             #"\s+"))]
+    (when (str/blank? ip)
+      ; We get this occasionally for reasons I don't understand
+      (throw+ {:type    :blank-getent-ip
+               :output  res
+               :host    host}))
+    ip))
 
 (def ip
   "Look up an ip for a hostname. Memoized."
