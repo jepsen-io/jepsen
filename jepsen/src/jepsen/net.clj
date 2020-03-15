@@ -9,7 +9,7 @@
             [jepsen.control :refer :all]
             [jepsen.control.net :as control.net]
             [jepsen.net.proto :as p]
-            [clojure.slingshot :refer [throw+]]))
+            [slingshot.slingshot :refer [throw+]]))
 
 ; TODO: move this into jepsen.net.proto
 (defprotocol Net
