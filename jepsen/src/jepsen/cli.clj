@@ -83,6 +83,9 @@
    [nil "--leave-db-running" "Leave the database running at the end of the test., so you can inspect it."
     :default false]
 
+   [nil "--logging-json" "Use JSON structured output in the Jepsen log."
+    :default false]
+
    [nil "--test-count NUMBER"
     "How many times should we repeat a test?"
     :default  1
@@ -228,6 +231,7 @@ Options:\n")
   (-> parsed
       rename-ssh-options
       (rename-options {:leave-db-running :leave-db-running?})
+      (rename-options {:logging-json :logging-json?})
       parse-nodes
       parse-concurrency))
 

@@ -170,7 +170,7 @@
                 :tar
                 :bzip2
                 :iputils-ping
-                :iproute
+                :iproute2
                 :rsyslog
                 :logrotate
                 :dirmngr])
