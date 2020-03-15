@@ -1,9 +1,11 @@
 (ns jepsen.db
   "Allows Jepsen to set up and tear down databases."
-  (:require [clojure.tools.logging :refer [info warn]]
-            [slingshot.slingshot :refer [try+ throw+]]
+  (:require [clojure [string :as str]]
+            [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as control]
-                    [util :refer [fcatch]]]))
+                    [util :refer [fcatch]]]
+            [jepsen.control.util :as cu]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol DB
   (setup!     [db test node] "Set up the database on this particular node.")
@@ -42,6 +44,40 @@
   (reify DB
     (setup!    [db test node])
     (teardown! [db test node])))
+
+(defn tcpdump
+  "A database which runs a tcpdump capture from setup! to teardown!, and yields
+  a `tcpdump` logfile. Options:
+
+    :ports  A collection of ports to grab traffic from."
+  [opts]
+  (let [dir      "/tmp/jepsen/tcpdump"
+        log-file (str dir "/log")
+        cap-file (str dir "/tcpdump")
+        pid-file (str dir "/pid")]
+    (reify
+      DB
+      (setup! [this test node]
+        (control/su
+          (control/exec :mkdir :-p dir)
+          (cu/start-daemon!
+            {:logfile log-file
+             :pidfile pid-file
+             :chdir   dir}
+            "/usr/sbin/tcpdump"
+            :-w  cap-file
+            :-s  65535
+            (->> (:ports opts)
+                 (map (partial str "port "))
+                 (str/join " and ")))))
+
+      (teardown! [this test node]
+        (control/su
+          (cu/stop-daemon! :tcpdump pid-file)
+          (control/exec :rm :-rf dir)))
+
+      LogFiles
+      (log-files [db test node] [cap-file]))))
 
 (def cycle-tries
   "How many tries do we get to set up a database?"

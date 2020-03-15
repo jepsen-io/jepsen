@@ -2,7 +2,7 @@
   "Kitchen sink"
   (:require [clojure.tools.logging :refer [info]]
             [clojure.core.reducers :as r]
-            [clojure.string :as str]
+            [clojure [string :as str]]
             [clojure.pprint :refer [pprint]]
             [clojure.walk :as walk]
             [clojure.java.io :as io]
