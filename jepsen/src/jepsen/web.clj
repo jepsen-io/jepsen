@@ -217,7 +217,11 @@
                                     (.getFileName component)]))
                       (cons [:a {:href "/"} "jepsen"])
                       (interpose " / "))
-                 [:h1 (.getName dir)]
+                 [:h1 (.getName dir)
+                  [:a {:style "font-size: 60%;
+                              margin-left: 0.3em;"
+                       :href (file-url (str dir ".zip"))}
+                   ".zip"]]
                  [:div
                   (->> dir
                        .listFiles
