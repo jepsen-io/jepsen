@@ -3,7 +3,7 @@
   (:require [clojure [string :as str]]
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as control]
-                    [util :refer [fcatch]]]
+                    [util :refer [fcatch meh]]]
             [jepsen.control.util :as cu]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -49,6 +49,7 @@
   "A database which runs a tcpdump capture from setup! to teardown!, and yields
   a `tcpdump` logfile. Options:
 
+    :filter A filter string to apply (in addition to ports)
     :ports  A collection of ports to grab traffic from."
   [opts]
   (let [dir      "/tmp/jepsen/tcpdump"
@@ -67,17 +68,23 @@
             "/usr/sbin/tcpdump"
             :-w  cap-file
             :-s  65535
+            :-B  16384 ; buffer in KB
             (->> (:ports opts)
                  (map (partial str "port "))
+                 (cons (:filter opts))
+                 (remove nil?)
                  (str/join " and ")))))
 
       (teardown! [this test node]
         (control/su
+          ; We want to get a nice clean exit here, if possible
+          (meh (control/exec :kill :-term (control/exec :cat pid-file)))
+          ; Okay, nuke it and clean up pidfile, etc
           (cu/stop-daemon! :tcpdump pid-file)
           (control/exec :rm :-rf dir)))
 
       LogFiles
-      (log-files [db test node] [cap-file]))))
+      (log-files [db test node] [log-file cap-file]))))
 
 (def cycle-tries
   "How many tries do we get to set up a database?"
