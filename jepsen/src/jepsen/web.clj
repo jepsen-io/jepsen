@@ -197,11 +197,19 @@
     (sort-by #(Long/parseLong (.getName %)) files)
     (sort files)))
 
+(defn js-escape
+  "Escape a javascript string."
+  [s]
+  (-> s
+      (str/replace "'" "\\x27")
+      (str/replace "\"" "\\x22")))
+
 (defn dir
   "Serves a directory."
   [^File dir]
   {:status 200
    :headers {"Content-Type" "text/html"}
+   ; Breadcrumbs
    :body (h/html (->> dir
                       (.toPath)
                       (iterate #(.getParent %))
@@ -213,15 +221,24 @@
                       (drop 1)
                       reverse
                       (map (fn [^Path component]
-                             [:a {:href (file-url component)}
-                                    (.getFileName component)]))
-                      (cons [:a {:href "/"} "jepsen"])
-                      (interpose " / "))
-                 [:h1 (.getName dir)
-                  [:a {:style "font-size: 60%;
-                              margin-left: 0.3em;"
-                       :href (file-url (str dir ".zip"))}
-                   ".zip"]]
+                             [:a {:style "margin: 0 0.3em"
+                                  :href (file-url component)}
+                              (.getFileName component)]))
+                      (cons [:a {:style "margin-right: 0.3em"
+                                 :href  "/"}
+                             "jepsen"])
+                      (interpose "/"))
+                 ; Title
+                 (let [path (js-escape (str \' (.getCanonicalPath dir) \'))]
+                   ; You can click to copy the full local path
+                   [:h1 {:onclick (str "navigator.clipboard.writeText('"
+                                       path "')")}
+                    (.getName dir)
+                    ; Or download a zip file
+                    [:a {:style "font-size: 60%;
+                                margin-left: 0.3em;"
+                         :href (file-url (str dir ".zip"))}
+                     ".zip"]])
                  [:div
                   (->> dir
                        .listFiles
