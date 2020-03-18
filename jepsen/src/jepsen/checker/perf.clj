@@ -12,7 +12,8 @@
             [gnuplot.core :as g]
             [knossos.core :as knossos]
             [knossos.op :as op]
-            [knossos.history :as history]))
+            [knossos.history :as history]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (def default-nemesis-color "#cccccc")
 (def nemesis-alpha 0.6)
@@ -372,7 +373,9 @@
   by iterating over each series :data."
   [plot]
   (let [data    (mapcat :data (:series plot))
-        _       (assert (seq data))
+        _       (when-not (seq data)
+                  (throw+ {:type ::no-points
+                           :plot plot}))
         [x0 y0] (first data)
         [xmin xmax ymin ymax] (reduce (fn [[xmin xmax ymin ymax] [x y :as pair]]
                                              [(min xmin x)
@@ -505,8 +508,8 @@
          :series             series}
         (with-range)
         (with-nemeses history nemeses)
-        plot!)
-    output-path))
+        plot!
+        (try+ (catch [:type ::no-points] _ :no-points)))))
 
 (defn quantiles-graph!
   "Writes a plot of latency quantiles, by f, over time."
@@ -544,7 +547,8 @@
          :logscale :y}
         (with-range)
         (with-nemeses history nemeses)
-        plot!)))
+        plot!
+        (try+ (catch [:type ::no-points] _ :no-points)))))
 
 (defn rate-preamble
   "Gnuplot commands for setting up a rate plot."
@@ -592,4 +596,5 @@
          :series    series}
         (with-range)
         (with-nemeses history nemeses)
-        plot!)))
+        plot!
+        (try+ (catch [:type ::no-points] _ :no-points)))))
