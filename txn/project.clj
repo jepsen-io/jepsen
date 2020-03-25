@@ -1,4 +1,4 @@
-(defproject jepsen.txn "0.1.2"
+(defproject jepsen.txn "0.1.3-SNAPSHOT"
   :description "Library for generating and analyzing multi-object transactional histories"
   :url "https://github.com/jepsen-io/jepsen"
   :license {:name "Eclipse Public License"
