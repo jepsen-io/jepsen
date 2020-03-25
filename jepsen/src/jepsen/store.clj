@@ -3,7 +3,8 @@
   (:refer-clojure :exclude [load])
   (:require [clojure.data.fressian :as fress]
             [clojure.java.io :as io]
-            [clojure.string :as str]
+            [clojure [string :as str]
+                     [walk :as walk]]
             [clojure.tools.logging :refer :all]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
@@ -13,7 +14,8 @@
             [unilog.config :as unilog]
             [multiset.core :as multiset]
             [jepsen.util :as util])
-  (:import (java.io File)
+  (:import (java.util AbstractList)
+           (java.io File)
            (java.nio.file Files
                           FileSystems
                           Path)
@@ -164,13 +166,25 @@
   [test]
   (into default-nonserializable-keys (:nonserializable-keys test)))
 
+(defn postprocess-fressian
+  "Fressian likes to give us ArrayLists, which are kind of a PITA when you're
+  used to working with vectors. We map those back to vectors again."
+  [obj]
+  (walk/prewalk (fn transform [x]
+                  ; (prn :x (class x) (instance? AbstractList x))
+                  (if (instance? AbstractList x)
+                    (vec x)
+                    x))
+                obj))
+
 (defn load
   "Loads a specific test by name and time."
   [test-name test-time]
   (with-open [file (io/input-stream (fressian-file {:name       test-name
                                                     :start-time test-time}))]
     (let [in (fress/create-reader file :handlers read-handlers)]
-      (fress/read-object in))))
+      (-> (fress/read-object in)
+          postprocess-fressian))))
 
 (defn class-name->ns-str
   "Turns a class string into a namespace string (by translating _ to -)"
