@@ -254,28 +254,23 @@
 
 (defn alter-schema!
   "Takes a schema string (or any number of strings) and applies that alteration
-  to dgraph. Retries if DEADLINE_EXCEEDED, or Dgraph complains about pending
-  transactions, or just tells us the alter ABORTED, since Dgraph likes to throw
-  these for ??? reasons at the start of the test. Should be idempotent, so...
-  hopefully we can retry, at least in this context?"
+  to dgraph. Retries if the alter fails. There are too many different types of
+  failures so we retry all to avoid missing any. Alters are idempotent so retrying
+  should not be an issue."
   [^DgraphClient client & schemata]
   (t/with-trace "client.alter-schema!"
     (with-retry [i 10]
       (unwrap-exceptions
-        (.alter client (.. (DgraphProto$Operation/newBuilder)
-                           (setSchema (str/join "\n" schemata))
-                           build)))
+       (.alter client (.. (DgraphProto$Operation/newBuilder)
+                          (setSchema (str/join "\n" schemata))
+                          build)))
       (catch io.grpc.StatusRuntimeException e
-        (let [message (.getMessage e)]
-          (if (and (< 0 i)
-                   (or (re-find #"DEADLINE_EXCEEDED" message)
-                       (re-find #"Pending transactions" message)
-                       (re-find #"ABORTED" message)))
-            (do
-              (warn "alter-schema! failed due to retriable error, retrying...")
-              (Thread/sleep (rand-int 5000))
-              (retry (dec i)))
-            (throw e)))))))
+        (if (< 0 i)
+          (do
+            (warn "alter-schema! failed, retrying...")
+            (Thread/sleep (rand-int 5000))
+            (retry (dec i)))
+          (throw e))))))
 
 (defn ^DgraphProto$Response mutate!*
   "Takes a mutation object and applies it to a transaction. Returns a Response."
