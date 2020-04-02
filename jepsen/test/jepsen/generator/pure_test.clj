@@ -68,7 +68,7 @@
 
 (defn simulate
   "Simulates the series of operations obtained from a generator, given a
-  function that takes ops and returns their completions."
+  function that takes a context and op and returns the completion for that op."
   ([gen complete-fn]
    (simulate default-context gen complete-fn))
   ([ctx gen complete-fn]
@@ -100,7 +100,7 @@
                  gen'      (gen/update gen' default-test ctx invoke)
                  ; Add the completion to the in-flight set
                  ;_         (prn :invoke invoke)
-                 complete  (complete-fn invoke)
+                 complete  (complete-fn ctx invoke)
                  in-flight (sort-by :time (conj in-flight complete))]
              (recur (conj ops invoke) in-flight gen' ctx))
 
@@ -135,7 +135,7 @@
   ([ctx gen]
    (invocations
      (simulate ctx gen
-               (fn [invoke]
+               (fn [ctx invoke]
                  (-> invoke
                      (assoc :type :ok)
                      (update :time + perfect-latency)))))))
@@ -148,10 +148,29 @@
   ([ctx gen]
    (invocations
      (simulate ctx gen
-               (fn [invoke]
+               (fn [ctx invoke]
                  (-> invoke
                      (assoc :type :info)
                      (update :time + perfect-latency)))))))
+
+(defn imperfect
+  "Simulates the series of ops obtained from a generator where threads
+  alternately fail, info, then ok, and repeat, taking 10 ns each. Returns
+  invocations and completions."
+  ([gen]
+   (imperfect default-context gen))
+  ([ctx gen]
+   (let [state (atom {})]
+     (simulate ctx gen
+               (fn [ctx invoke]
+                 (let [t (gen/process->thread ctx (:process invoke))]
+                   (-> invoke
+                       (assoc :type (get (swap! state update t {nil   :fail
+                                                                :fail :info
+                                                                :info :ok
+                                                                :ok   :fail})
+                                         t))
+                       (update :time + perfect-latency))))))))
 
 (deftest nil-test
   (is (= [] (perfect nil))))
@@ -467,7 +486,7 @@
               perfect
               (map (juxt :time :process :value))))))
 
-(deftest ^:test-refresh/focus independent-concurrent-test
+(deftest independent-concurrent-test
   ; All 3 groups can concurrently execute the first 2 values from k0, k1, k2
   (is (= [[0 0 [:k0 :v0]]
           [0 1 [:k0 :v1]]
@@ -500,3 +519,24 @@
                        (map gen/once))))
               (perfect (n+nemesis-context 6)) ; 3 groups of 2 threads each
               (map (juxt :time :process :value))))))
+
+(deftest at-least-one-ok-test
+  ; Our goal here is to ensure that at least one OK operation happens.
+  (is (= [0   0 :invoke
+          0   1 :invoke
+          10  1 :fail
+          10  1 :invoke
+          10  0 :fail
+          10  0 :invoke
+          20  0 :info
+          20  2 :invoke
+          20  1 :info
+          20  3 :invoke
+          30  3 :ok
+          30  2 :ok] ; They complete concurrently, so we get two oks
+         (->> {:f :read}
+              gen/until-ok
+              (gen/limit 10)
+              gen/clients
+              imperfect
+              (mapcat (juxt :time :process :type))))))

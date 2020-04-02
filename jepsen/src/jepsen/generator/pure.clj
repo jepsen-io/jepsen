@@ -154,9 +154,10 @@
 
 (defprotocol Generator
   (update [gen test context event]
-          "Updates the generator to reflect an event having taken place")
+          "Updates the generator to reflect an event having taken place.")
 
-  (op [gen test context]))
+  (op [gen test context]
+      "Obtains the next operation from this generator."))
 
 ;; Helpers
 
@@ -305,6 +306,30 @@
   [gen]
   (Validate. gen))
 
+(defrecord Trace [k gen]
+  Generator
+  (op [_ test ctx]
+    (try (let [[op gen'] (op gen test ctx)]
+           (info k :op test ctx op gen')
+           [op (when gen' (Trace. k gen'))])
+         (catch Throwable t
+           (info k :op test ctx :threw)
+           (throw t))))
+
+  (update [_ test ctx event]
+    (try (let [gen' (update gen test ctx event)]
+           (info k :update test ctx event gen')
+           (when gen' (Trace. k gen')))
+         (catch Throwable t
+           (info k :update test ctx event :threw)
+           (throw t)))))
+
+(defn trace
+  "Wraps a generator, logging calls to op and update before passing them on to
+  the underlying generator. Takes a key k, which is included in every log
+  line."
+  [k gen]
+  (Trace. k gen))
 
 (defrecord Map [f gen]
   Generator
@@ -353,7 +378,6 @@
   bypass the filter."
   [f gen]
   (Filter. f gen))
-
 
 (defrecord IgnoreUpdates [gen]
   Generator
@@ -874,3 +898,23 @@
            (then (once {:f :read})))"
   [a b]
   [b (synchronize a)])
+
+(defrecord UntilOk [gen done?]
+  Generator
+  (op [this test ctx]
+    (when-not done?
+      (when-let [[op gen'] (op gen test ctx)]
+        [op (UntilOk. gen' done?)])))
+
+  (update [this test ctx event]
+    (if (= :ok (:type event))
+      ; We're finished; no need to update any more!
+      (assoc this :done? true)
+      ; Propagate update down
+      (c/update this :gen update test ctx event))))
+
+(defn until-ok
+  "Wraps a generator, yielding operations from it until one of those operations
+  completes with :type :ok."
+  [gen]
+  (UntilOk. gen false))
