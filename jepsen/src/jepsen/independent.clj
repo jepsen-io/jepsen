@@ -9,6 +9,7 @@
             [jepsen.store :as store]
             [jepsen.checker :refer [merge-valid check-safe Checker]]
             [jepsen.generator :as gen :refer [Generator]]
+            [jepsen.generator.pure :as pgen]
             [clojure.tools.logging :refer :all]
             [clojure.core.reducers :as r]
             [clojure.pprint :refer [pprint]]
@@ -62,6 +63,178 @@
                                    ; Someone else updated the key list; recur
                                    s)))
                   (recur test process)))))))))
+
+(defn pure-sequential-generator
+  "Like sequential-generator, but for pure generators. Takes a sequence of keys
+  [k1 k2 ...], and a function (fgen k) which, when called with a key, yields a
+  generator. Returns a generator which starts with the first key k1 and
+  constructs a generator gen1 via (fgen k1), returns elements from gen1 until
+  it is exhausted, then moves to k2.
+
+  The generator wraps each :value in the operations it generates in a [k1
+  value] tuple.
+
+  fgen must be pure."
+  [keys fgen]
+  ; AHHHH LOOK HOW MUCH SIMPLER THIS IS
+  (map (fn [k]
+         (pgen/map (fn wrap-pair [op]
+                     (assoc op :value (tuple k (:value op))))
+                   (fgen k)))
+       keys))
+
+(defn group-threads
+  "Given a group size and pure generator context, returns a collection of
+  collection of threads, each per group."
+  [n ctx]
+  (->> (pgen/all-threads ctx)
+       sort
+       (partition n)))
+
+(defn make-group->threads
+  "Given a group size and pure generator context, returns a vector where each
+  element is the set of threads in the group corresponding to that index."
+  [n ctx]
+  (->> (group-threads n ctx)
+       (mapv set)))
+
+(defn make-thread->group
+  "Given a group size and pure generator context, returns a map of threads to
+  groups."
+  [n ctx]
+  (into {}
+        (for [[group threads] (map-indexed vector (group-threads n ctx))
+              thread threads]
+          [thread group])))
+
+(defn tuple-gen
+  "Wraps a generator so that it returns :value [k v] tuples."
+  [k gen]
+  (pgen/map (fn [op] (assoc op :value (tuple k (:value op))))
+            gen))
+
+(defrecord PureConcurrentGenerator [n
+                                    fgen
+                                    group->threads
+                                    thread->group
+                                    keys
+                                    gens]
+  ; n is the size of each group
+  ; fgen turns a key into a generator
+  ; group->threads is a vector mapping groups to sets of threads; lazily init.
+  ; thread->group is a map which takes threads to groups. Lazily initialized.
+  ; keys is our collection of remaining keys
+  ; gens is a vector of generators, one for each thread group.
+  pgen/Generator
+  (op [this test ctx]
+    ; (prn)
+    ; (prn :op :=======================================)
+    (let [; Figure out our thread<->group mappings
+          group->threads (or group->threads (make-group->threads n ctx))
+          thread->group  (or thread->group  (make-thread->group  n ctx))
+          ; Lazily initialize our generators
+          gens2 (or gens
+                    (let [group-count (inc (reduce max 0 (vals thread->group)))
+                          gens      (->> (take group-count keys)
+                                         (map fgen)
+                                         (mapv tuple-gen keys))]
+                      ; Extend with nils if necessary
+                      (into gens (repeat (- group-count (count gens)) nil))))
+          ; If we consumed keys, update them.
+          keys (if gens keys
+                 (let [group-count (inc (reduce max 0 (vals thread->group)))]
+                   (drop group-count keys)))
+          ; What threads are open?
+          free-threads (pgen/free-threads ctx)
+          ; What groups do they belong to?
+          free-groups  (set (map thread->group free-threads))]
+
+      ; (prn :free-threads free-threads)
+      ; (prn :free-groups free-groups)
+
+      ; We go through each free group, and find the soonest operation any of
+      ; those groups can offer us.
+      (loop [groups free-groups
+             keys   keys
+             gens   gens2
+             [soonest-op soonest-group soonest-gen' :as soonest] nil]
+        ;(prn :----------)
+        ;(prn :group (first groups))
+        ;(prn :keys keys)
+        ;(prn :gens gens)
+        ;(prn :soonest-op soonest-op)
+        (if-not (seq groups)
+          ; We're done
+          (if soonest-op
+            ; We have an operation to yield
+            [soonest-op
+             (PureConcurrentGenerator. n fgen group->threads thread->group
+                                       keys (assoc gens soonest-group
+                                                   soonest-gen'))]
+            ; We don't have an operation to yield given the current context,
+            ; but some groups which weren't currently free might have ops to
+            ; yield still. If there's a generator left... we're still pending.
+            (when (some identity gens)
+              [:pending (PureConcurrentGenerator. n fgen group->threads
+                                                  thread->group keys gens)]))
+
+          ; OK, let's consider this group
+          (let [group (first groups)
+                ; What's the generator for this group?
+                gen   (nth gens group)
+                ; We'll need a context for this group specifically
+                ctx   (pgen/on-threads-context (group->threads group) ctx)
+                ; OK, ask this gen for an op.
+                [op gen'] (pgen/op gen test ctx)
+                ; If this generator is exhausted, we replace it.
+                gens  (if op
+                        gens
+                        (assoc gens group
+                               (when (seq keys)
+                                 (let [k (first keys)]
+                                   (tuple-gen k (fgen k))))))
+                ; If we had to build a new generator, advance keys.
+                keys (if op keys (next keys))]
+            (recur (next groups)
+                   keys
+                   gens
+                   (pgen/soonest-op-vec soonest
+                                        (when op [op group gen']))))))))
+
+  (update [this test ctx event]
+    (let [process (:process event)
+          thread  (pgen/process->thread ctx process)
+          group   (thread->group thread)]
+      (PureConcurrentGenerator.
+        n fgen group->threads thread->group keys
+        (update gens group pgen/update test ctx event)))))
+
+(defn pure-concurrent-generator
+  "Takes a positive integer n, a sequence of keys (k1 k2 ...) and a function
+  (fgen k) which, when called with a key, yields a generator. Returns a
+  generator which splits up threads into groups of n threads per key, and has
+  each group work on a key for some time. Once a key's generator is exhausted,
+  it obtains a new key, constructs a new generator from key, and moves on.
+
+  Threads working with this generator are assumed to have contiguous IDs,
+  starting at 0. Violating this assumption results in uneven allocation of
+  threads to groups.
+
+  Excludes the nemesis by design; only worker threads run here.
+
+  Updates are routed to the generator which that thread is currently
+  executing."
+  [n keys fgen]
+  (assert (pos? n))
+  (assert (integer? n))
+  ; There's a straightforward way to write this, which is to use pgen/reserve
+  ; to break things up into separate groups of threads, and have each group go
+  ; through pure-sequential-generator with e.g. modulo keys. The problem is
+  ; that this leaves gaps in the key sequence, which can be annoying for users.
+  ; Instead, we fold this into a custom generator.
+  []
+  (pgen/clients
+    (PureConcurrentGenerator. n fgen nil nil keys nil)))
 
 (defn concurrent-generator
   "Takes a positive integer n, a sequence of keys (k1 k2 ...) and a function

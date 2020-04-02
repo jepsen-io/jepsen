@@ -1,5 +1,6 @@
 (ns jepsen.generator.pure-test
   (:require [jepsen.generator.pure :as gen]
+            [jepsen.independent :as independent]
             [jepsen [util :as util]]
             [clojure.test :refer :all]))
 
@@ -75,6 +76,7 @@
           in-flight  [] ; Kept sorted by time
           gen        (gen/validate gen)
           ctx        ctx]
+     ;(binding [*print-length* 3] (prn :invoking :gen gen))
      (let [[invoke gen'] (gen/op gen default-test ctx)]
        ;(prn :invoke invoke :in-flight in-flight)
        (if (nil? invoke)
@@ -393,6 +395,17 @@
               perfect-info
               (map (juxt :process :value))))))
 
+(deftest time-limit-test
+  (is (= [[0  :a] [0  :a] [0 :a]
+          [10 :a] [10 :a] [10 :a]
+          [20 :b] [20 :b] [20 :b]]
+         ; We use two time limits in succession to make sure they initialize
+         ; their limits appropriately.
+         (->> [(gen/time-limit (util/nanos->secs 20) {:value :a})
+               (gen/time-limit (util/nanos->secs 10) {:value :b})]
+              perfect
+              (map (juxt :time :value))))))
+
 (defn integers
   "A sequence of maps with :value 0, 1, 2, ..., and any other kv pairs."
   [& kv-pairs]
@@ -401,6 +414,8 @@
        (map gen/once)))
 
 (deftest reserve-test
+  ; TODO: can you nest reserves properly? I suspect no.
+
   (let [as (integers :f :a)
         bs (integers :f :b)
         cs (integers :f :c)]
@@ -433,3 +448,55 @@
                                cs)
                   (gen/limit 15)
                   (perfect (n+nemesis-context 6))))))))
+
+(deftest independent-sequential-test
+  (is (= [[0 0 [:x 0]]
+          [0 1 [:x 1]]
+          [10 1 [:x 2]]
+          [10 0 [:y 0]]
+          [20 0 [:y 1]]
+          [20 1 [:y 2]]]
+         (->> (independent/pure-sequential-generator
+                [:x :y]
+                (fn [k]
+                  (->> (range)
+                       (map (partial hash-map :type :invoke, :value))
+                       (map gen/once)
+                       (gen/limit 3))))
+              gen/clients
+              perfect
+              (map (juxt :time :process :value))))))
+
+(deftest ^:test-refresh/focus independent-concurrent-test
+  ; All 3 groups can concurrently execute the first 2 values from k0, k1, k2
+  (is (= [[0 0 [:k0 :v0]]
+          [0 1 [:k0 :v1]]
+          [0 3 [:k1 :v0]]
+          [0 2 [:k1 :v1]]
+          [0 4 [:k2 :v0]]
+          [0 5 [:k2 :v1]]
+          ; We finish off k2 and k1
+          [10 5 [:k2 :v2]]
+          [10 2 [:k1 :v2]]
+          ; Worker 4 in group 3 moves on to k3
+          [10 4 [:k3 :v0]]
+          ; Finish k0
+          [10 1 [:k0 :v2]]
+          ; And worker 3 in group 2 moves on to k4
+          [10 3 [:k4 :v0]]
+          ; Worker 0 has no options left; there are no keys remaining, and other
+          ; groups still have generators, so it holds at :pending.
+          ; Workers 4 & 5 finish k3, and 2 & 3 finish k4
+          [20 3 [:k4 :v1]]
+          [20 4 [:k3 :v1]]
+          [20 2 [:k4 :v2]]
+          [20 5 [:k3 :v2]]]
+         (->> (independent/pure-concurrent-generator
+                2
+                [:k0 :k1 :k2 :k3 :k4] ; 5 keys
+                (fn [k]
+                  (->> [:v0 :v1 :v2] ; Three values per key
+                       (map (partial hash-map :type :invoke, :value))
+                       (map gen/once))))
+              (perfect (n+nemesis-context 6)) ; 3 groups of 2 threads each
+              (map (juxt :time :process :value))))))

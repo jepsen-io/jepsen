@@ -24,18 +24,19 @@
   time has passed.
 
   This graph has some invocations which are *ready* to perform. When we have a
-  ready invocation, we apply the invocation as an input to the graph, obtaining
-  a new graph, and hand the operation to the relevant client.
+  ready invocation, we apply the invocation using the client, obtain a
+  completion, and apply the completion back to the graph, obtaining a new
+  graph.
 
   ## Contexts
 
-  A *context* is a map which provides context for generators. For instance, a
-  generator might need to know the number of threads which will ask it for
-  operations. It can get that number from the *context*. Users can add their
-  own values to the context map, which allows two generators to share state.
-  When one generator calls another, it can pass a modified version of the
-  context, which allows us to write generators that, say, run two independent
-  workloads, each with their own concurrency and thread mappings.
+  A *context* is a map which provides extra information for generators. For
+  instance, a generator might need to know the number of threads which will ask
+  it for operations. It can get that number from the *context*. Users can add
+  their own values to the context map, which allows two generators to share
+  state. When one generator calls another, it can pass a modified version of
+  the context, which allows us to write generators that, say, run two
+  independent workloads, each with their own concurrency and thread mappings.
 
   The standard context mappings, which are provided by Jepsen when invoking the
   top-level generator, and can be expected by every generator, are:
@@ -64,7 +65,7 @@
 
   But (op gen test context) returns more than just an operation; it also
   returns the *subsequent state* of the generator, if that operation were to be
-  emitted. The two are bundled into a tuple.
+  performed. The two are bundled into a tuple.
 
   (op gen test context) => [op gen']      ; known op
                            [:pending gen] ; unsure
@@ -143,7 +144,7 @@
   - Returning any other generator: the function could be *replaced* by that
   generator, allowing us to compute generators lazily?
   "
-  (:refer-clojure :exclude [concat delay filter map update])
+  (:refer-clojure :exclude [await concat delay filter map update])
   (:require [clojure.core :as c]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
@@ -234,11 +235,12 @@
   ; not sure whether that's going to be predictable, so for now let's try not
   ; propagating any updates.
   (update [this test ctx event] this)
+
   (op [this test ctx]
     (when (seq this) ; Once we're out of generators, we're done
       (let [gen (first this)]
         (if-let [[op gen'] (op gen test ctx)]
-          ; OK, our first gen has an op for us
+          ; OK, our first gen has an op for us.
           [op (cons gen' (next this))]
           ; This generator is exhausted; move on
           (recur (next this) test ctx)))))
@@ -261,33 +263,38 @@
 (defrecord Validate [gen]
   Generator
   (op [_ test ctx]
-    (when-let [[op gen'] (op gen test ctx)]
-      (let [problems (if (= :pending op)
-                       []
-                       (cond-> []
-                         (not (map? op))
-                         (conj "should be either :pending or a map")
+    (when-let [res (op gen test ctx)]
+      (let [problems
+            (if-not (and (vector? res) (= 2 (count res)))
+              [(str "should return a vector of two elements.")]
+              (let [[op gen'] res]
+                  (if (= :pending op)
+                               []
+                               (cond-> []
+                                 (not (map? op))
+                                 (conj "should be either :pending or a map")
 
-                         (not= :invoke (:type op))
-                         (conj ":type should be :invoke")
+                                 (not= :invoke (:type op))
+                                 (conj ":type should be :invoke")
 
-                         (not (number? (:time op)))
-                         (conj ":time is not a number")
+                                 (not (number? (:time op)))
+                                 (conj ":time is not a number")
 
-                         (not (:process op))
-                         (conj "no :process")
+                                 (not (:process op))
+                                 (conj "no :process")
 
-                         (not-any? #{(:process op)} (free-processes ctx))
-                         (conj (str "process " (pr-str (:process op))
-                                    " is not free"))))]
+                                 (not-any? #{(:process op)}
+                                           (free-processes ctx))
+                                 (conj (str "process " (pr-str (:process op))
+                                            " is not free"))))))]
         (when (seq problems)
           (binding [*print-length* 10]
             (throw+ {:type      :invalid-op
                      :generator gen
                      :context   ctx
-                     :op        op
+                     :res       res
                      :problems  problems}))))
-      [op (Validate. gen')]))
+      [(first res) (Validate. (second res))]))
 
   (update [this test ctx event]
     (Validate. (update gen test ctx event))))
@@ -311,9 +318,9 @@
 
 (defn map
   "A generator which wraps another generator g, transforming operations it
-  generates with (f op test process), of if that fails, (f op). When the
-  underlying generator yields :pending or nil, this generator does too, without
-  calling `f`. Passes updates to underlying generator."
+  generates with (f op). When the underlying generator yields :pending or nil,
+  this generator does too, without calling `f`. Passes updates to underlying
+  generator."
   [f gen]
   (Map. f gen))
 
@@ -360,7 +367,9 @@
   "Wraps a generator. Any call to `update` is ignored, returning this
   generator with no changes.
 
-  It's not clear if this actually confers any performance advantage right now."
+  It's not clear if this actually confers any performance advantage right now,
+  but I'm putting it here so that if someone later discovers a performance cost
+  they'd rather avoid, it'll be ready for them. :)"
   [gen]
   (IgnoreUpdates. gen))
 
@@ -375,7 +384,7 @@
 
 (defn log
   "A generator which, when asked for an operation, logs a message and yields
-  nil."
+  nil. TODO: replace this with a dedicated :type."
   [msg]
   (Log. msg))
 
@@ -411,7 +420,7 @@
   [f gen]
   (OnThreads. f gen))
 
-(def on on-threads)
+(def on "For backwards compatibility" on-threads)
 
 (defn soonest-op-vec
   "Takes two [op, ...] vectors, and returns the vector whose op occurs first.
@@ -696,10 +705,17 @@
 (defrecord TimeLimit [limit cutoff gen]
   Generator
   (op [_ test ctx]
-    (let [[op gen'] (op gen test ctx)
-          cutoff    (or cutoff (+ (:time op) limit))]
-      (when (< (:time op) cutoff)
-        [op (TimeLimit. limit cutoff gen')])))
+    (let [[op gen'] (op gen test ctx)]
+      (case op
+        ; We're exhausted
+        nil       nil
+        ; We're pending!
+        :pending  [:pending (TimeLimit. limit cutoff gen')]
+        ; We have an op; lazily initialize our cutoff and check to see if it's
+        ; past.
+        (let [cutoff (or cutoff (+ (:time op) limit))]
+          (when (< (:time op) cutoff)
+            [op (TimeLimit. limit cutoff gen')])))))
 
   (update [this test ctx event]
     (TimeLimit. limit cutoff (update gen test ctx event))))
@@ -810,7 +826,12 @@
   delays the scheduler and is *not* passed to clients. Or just refuse to
   implement this at all. It's nicely readable, but it's semantically kind of
   weird (Who sleeps? When?) compared to delaying a subsequent operation, which
-  has a well defined behavior."
+  has a well defined behavior.
+
+  TODO: Ah, okay, so here's what we do. Sleep modifies internal state in the
+  *interpreter: when you evaluate a sleep statement, you mark the worker as
+  busy for the next n seconds, even though it doesn't do anything.
+  "
   []
   (assert false "Not implemented!"))
 
@@ -853,4 +874,3 @@
            (then (once {:f :read})))"
   [a b]
   [b (synchronize a)])
-
