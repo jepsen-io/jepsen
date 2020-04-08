@@ -27,15 +27,6 @@
   "The default interval, in seconds, between nemesis operations."
   10)
 
-(defn- followers
-  "Get all nodes which are followers, i.e. not primaries."
-  [db test]
-  (let [primaries (db/primaries db test)
-        nodes (:nodes test)]
-    (filter
-     (fn [node] (not (some (fn [x] (= node x)) primaries)))
-     nodes)))
-
 (defn db-nodes
   "Takes a test, a DB, and a node specification. Returns a collection of
   nodes taken from that test. node-spec may be one of:
@@ -45,21 +36,21 @@
      :minority      - Chooses a random minority of nodes
      :majority      - Chooses a random majority of nodes
      :primaries     - All nodes which we think are primaries
-     :follower      - Chooses a single random node that we don't think is primary
-     :followers     - Chooses a random, non-empty subset of nodes we don't think are primaries
+     :secondary     - Chooses a single random node that we don't think is primary
+     :secondaries   - Chooses a random, non-empty subset of nodes we don't think are primaries
      :all           - All nodes
      [\"a\", ...]   - The specified nodes"
   [test db node-spec]
   (let [nodes (:nodes test)]
     (case node-spec
-      nil         (random-nonempty-subset nodes)
-      :one        (list (rand-nth nodes))
-      :minority   (take (dec (majority (count nodes))) (shuffle nodes))
-      :majority   (take      (majority (count nodes))  (shuffle nodes))
-      :primaries  (db/primaries db test)
-      :follower   (list (rand-nth (followers db test)))
-      :followers  (util/random-nonempty-subset (followers db test))
-      :all        nodes
+      nil          (random-nonempty-subset nodes)
+      :one         (list (rand-nth nodes))
+      :minority    (take (dec (majority (count nodes))) (shuffle nodes))
+      :majority    (take      (majority (count nodes))  (shuffle nodes))
+      :primaries   (db/primaries db test)
+      :secondary   (list (rand-nth (db/secondaries db test)))
+      :secondaries (util/random-nonempty-subset (db/secondaries db test))
+      :all         nodes
       node-spec)))
 
 (defn node-specs

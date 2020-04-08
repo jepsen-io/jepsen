@@ -36,6 +36,15 @@
              that think they're currently primaries'.")
   (setup-primary! [db test node] "Performs one-time setup on a single node."))
 
+(defn secondaries
+  "Get all nodes which are secondaries, i.e. not primaries."
+  [db test]
+  (let [primaries (primaries db test)
+        nodes (:nodes test)]
+    (filter
+     (fn [node] (not (some (fn [x] (= node x)) primaries)))
+     nodes)))
+
 (defprotocol LogFiles
   (log-files [db test node] "Returns a sequence of log files for this node."))
 
