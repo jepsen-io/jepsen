@@ -18,6 +18,7 @@
                     [db :as db]
                     [generator :as gen]
                     [nemesis :as n]
+                    [net :as net]
                     [util :as util :refer [majority
                                            random-nonempty-subset]]]
             [jepsen.nemesis.time :as nt]))
@@ -25,6 +26,15 @@
 (def default-interval
   "The default interval, in seconds, between nemesis operations."
   10)
+
+(defn- followers
+  "Get all nodes which are followers, i.e. not primaries."
+  [db test]
+  (let [primaries (db/primaries db test)
+        nodes (:nodes test)]
+    (filter
+     (fn [node] (not (some (fn [x] (= node x)) primaries)))
+     nodes)))
 
 (defn db-nodes
   "Takes a test, a DB, and a node specification. Returns a collection of
@@ -35,6 +45,8 @@
      :minority      - Chooses a random minority of nodes
      :majority      - Chooses a random majority of nodes
      :primaries     - All nodes which we think are primaries
+     :follower      - Chooses a single random node that we don't think is primary
+     :followers     - Chooses a random, non-empty subset of nodes we don't think are primaries
      :all           - All nodes
      [\"a\", ...]   - The specified nodes"
   [test db node-spec]
@@ -45,6 +57,8 @@
       :minority   (take (dec (majority (count nodes))) (shuffle nodes))
       :majority   (take      (majority (count nodes))  (shuffle nodes))
       :primaries  (db/primaries db test)
+      :follower   (list (rand-nth (followers db test)))
+      :followers  (util/random-nonempty-subset (followers db test))
       :all        nodes
       node-spec)))
 
@@ -53,7 +67,7 @@
   don't know WHAT you want to test."
   [db]
   (cond-> [nil :one :minority :majority :all]
-    (satisfies? db/Primary db) (conj :primaries)))
+    (satisfies? db/Primary db) (conj :primaries :follower :followers)))
 
 (defn db-nemesis
   "A nemesis which can perform various DB-specific operations on nodes. Takes a
@@ -249,6 +263,133 @@
                              :fs    #{:strobe-clock}
                              :color "#A0E9E3"}}})))
 
+(defn wan-nemesis
+  "A nemesis which simulates running the cluster on a wide-area network, e.g.
+  a cluster of nodes split across multiple different AWS regions, i.e. higher
+  average latency, larger latency variance and spottier connectivity.
+
+  This nemesis responds to the following f's:
+
+      :drop     (Drop traffic between two nodes.)
+      :slow     (Delays network packets.)
+      :flaky    (Introduces randomzied packet loss.)
+      :heal     (End all traffic drops and restore network to fast operation.)
+      :fast     (Removes packet loss and delays.)"
+  [_opts]
+  (reify
+    n/Reflection
+    (fs [_this] #{:drop :slow :flaky :heal :fast})
+
+    n/Nemesis
+    (setup! [this test]
+      (net/heal! (:net test) test)
+      (net/fast! (:net test) test)
+      this)
+
+    (invoke! [this test op]
+      (let [res (case (:f op)
+                  :drop  (net/drop! (:net test) test (-> op :value :src) (-> op :value :dest))
+                  :slow  (net/slow! (:net test) (assoc test :nodes (-> op :value :targets))
+                                    {:mean         (-> op :value :mean)
+                                     :variance     (-> op :value :variance)
+                                     :distribution (-> op :value :distribution)})
+                  :flaky (net/flaky! (:net test) (assoc test :nodes (-> op :value :targets)))
+                  :heal  (net/heal!  (:net test) test)
+                  :fast  (net/fast!  (:net test) test))]
+        (assoc op :value res)))
+
+    (teardown! [_this _test])))
+
+(defn wan-generators
+  "A map with a :generator and :final-generator for WAN-related operations
+  Options are from nemesis-package."
+  [opts]
+  (let [db      (:db opts)
+        faults  (:faults opts)
+        drop?   (contains? faults :drop)
+        slow?   (contains? faults :slow)
+        flaky?  (contains? faults :flaky)
+
+        ;; List of possible specifications for nodes to make slow or flaky. Note
+        ;; that drop is special and already has a source and target node to target.
+        slow-targets  (:targets (:slow  opts (node-specs db)))
+        flaky-targets (:targets (:flaky opts (node-specs db)))
+
+        ;; Drop and heal.
+        drop' (fn [_ _]
+                (let [nodes (-> opts :test :nodes)
+                      src   (rand-nth nodes)
+                      dest  (rand-nth (remove #{src} nodes))]
+                  {:type :info
+                   :f    :drop
+                   :value {:src  src
+                           :dest dest}}))
+        heal {:type :info, :f :heal}
+        drop-heal (gen/flip-flop drop' heal)
+
+        ;; Slow and fast.
+        slow (fn [test _process]
+               (let [mean         50
+                     variance     (rand-nth #{30 50 100 150 1000})
+                     distribution :normal
+                     target-specs (:targets (:slow opts) (node-specs db))
+                     targets      (db-nodes test db
+                                            (some-> target-specs seq rand-nth))]
+                 {:type :info
+                  :f     :slow
+                  :value {:mean         mean
+                          :variance     variance
+                          :distribution distribution
+                          :targets      targets}}))
+        fast {:type :info, :f :fast}
+        slow-fast (gen/flip-flop slow fast)
+
+        ;; Flaky and fast.
+        flaky (fn [test _process]
+                (let [target-specs (:targets (:flaky opts) (node-specs db))
+                      targets (db-nodes test db
+                                        (some-> target-specs seq rand-nth))]
+                  {:type :info
+                   :f    :flaky
+                   :value {:targets targets}}))
+        flaky-fast (gen/flip-flop flaky fast)
+
+        modes (cond-> []
+                drop?  (conj drop-heal)
+                slow?  (conj slow-fast)
+                flaky? (conj flaky-fast))
+
+        final (cond-> []
+                drop?             (conj heal)
+                (or slow? flaky?) (conj fast))]
+
+    {:generator       (gen/mix modes)
+     :final-generator (gen/seq final)}))
+
+(defn wan-package
+  "A nemesis and generator package for Wide-area network simulation operations.
+  Options are from nemesis-package."
+  [opts]
+  (when (some #{:drop :slow :flaky} (:faults opts))
+    (let [{:keys [generator final-generator]} (wan-generators opts)
+          generator (gen/delay (:interval opts default-interval) generator)
+          nemesis   (wan-nemesis opts)]
+      {:generator       generator
+       :final-generator final-generator
+       :nemesis         nemesis
+       :perf #{{:name   "drop"
+                :start  #{:drop}
+                :stop   #{:heal}
+                :color  "#00FF00"}
+               {:name   "slow"
+                :start  #{:slow}
+                :stop   #{:fast}
+                :color  "#FF00FF"}
+               {:name   "flaky"
+                :start  #{:flaky}
+                :stop   #{:fast}
+                :color  "#FFFF00"}}})))
+
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
   one. Generators are mixed together randomly; final generators proceed
@@ -263,11 +404,12 @@
   "Just like nemesis-package, but returns a collection of packages, rather than
   the combined package, so you can manipulate it further before composition."
   [opts]
-  (let [faults   (set (:faults opts [:partition :kill :pause :clock]))
+  (let [faults   (set (:faults opts [:partition :kill :pause :clock :drop :slow :flaky]))
         opts     (assoc opts :faults faults)]
     (remove nil? [(partition-package opts)
                   (clock-package opts)
-                  (db-package opts)])))
+                  (db-package opts)
+                  (wan-package opts)])))
 
 (defn nemesis-package
   "Takes an option map, and returns a map with a :nemesis, a :generator for
@@ -299,6 +441,8 @@
     :partition  Controls network partitions
     :kill       Controls process kills
     :pause      Controls process pauses and restarts
+    :slow       Controls slowing down of the network
+    :flaky      Controls introduction of packet loss in the network
 
   Possible faults:
 
@@ -306,12 +450,15 @@
     :kill
     :pause
     :clock
+    :drop
+    :slow
+    :flaky
 
   Partition options:
 
     :targets    A collection of partition specs, e.g. [:majorities-ring, ...]
 
-  Kill and Pause options:
+  Kill, Pause, Slow and Flaky options:
 
     :targets    A collection of node specs, e.g. [:one, :all]"
   [opts]
