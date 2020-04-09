@@ -12,7 +12,8 @@
             [dom-top.core :as dt :refer [bounded-future]]
             [fipp.edn :as fipp]
             [knossos.history :as history])
-  (:import (java.util.concurrent.locks LockSupport)
+  (:import (java.lang.reflect Method)
+           (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
            (java.io File
                     RandomAccessFile)))
@@ -833,3 +834,11 @@
   (if-let [cause (.getCause t)]
     (recur cause)
     t))
+
+(defn arities
+  "The arities of a function class."
+  [^Class c]
+  (keep (fn [^Method method]
+          (when (re-find #"invoke" (.getName method))
+            (alength (.getParameterTypes method))))
+        (-> c .getDeclaredMethods)))

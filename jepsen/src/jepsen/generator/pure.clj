@@ -100,11 +100,9 @@
   Updates use a context with a specific relationship to the event:
 
   - The context :time is equal to the event :time
-  - The free processes and worker maps reflect those *prior* to the event
-  taking place. This ensures that generators can examine the worker map to
-  identify which thread performed the given operation.
-
-  TODO: this is not true yet. Fix this.
+  - The free processes and worker maps reflect the state after the event has
+    taken place; e.g. if the event is an invoke, the thread is listed as no
+    longer free; if the event is a completion, the thread is listed as free.
 
   ## Default implementations
 
@@ -144,13 +142,15 @@
   - Returning any other generator: the function could be *replaced* by that
   generator, allowing us to compute generators lazily?
   "
-  (:refer-clojure :exclude [await concat delay filter map update])
+  (:refer-clojure :exclude [await concat delay filter map repeat run! update])
   (:require [clojure.core :as c]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
-            [clojure.tools.logging :refer [info warn]]
+            [clojure.tools.logging :refer [info warn error]]
             [jepsen [util :as util]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import (java.util.concurrent ArrayBlockingQueue
+                                 TimeUnit)))
 
 (defprotocol Generator
   (update [gen test context event]
@@ -174,6 +174,12 @@
   processing invocations."
   [context]
   (c/map (:workers context) (:free-threads context)))
+
+(defn some-free-process
+  "Faster than (first (free-processes ctx)), because we don't map over the
+  whole free-threads collection."
+  [context]
+  (get (:workers context) (first (:free-threads context))))
 
 (defn all-processes
   "Given a context, returns all processes currently being executed by threads."
@@ -209,6 +215,149 @@
        (count (c/filter number? (all-processes context))))
     thread))
 
+;; Interpreter
+
+
+(defn worker
+  "Creates communication channels and spawns a worker thread to evaluate the
+  given worker. Takes a Queue which should emit completion operations, a
+  function to evaluate invocations and produce completions, and a worker name.
+  Returns a map with:
+
+    :worker   The worker ID
+    :future   The future evaluating the worker code
+    :in       A Queue which delivers invocations to the worker"
+  [^ArrayBlockingQueue out invoke! worker]
+  (let [in (ArrayBlockingQueue. 1)]
+    {:worker  worker
+     :in      in
+     :future  (future
+                (util/with-thread-name (str "jepsen worker "
+                                            (util/name+ worker))
+                  (try
+                    (loop []
+                      (let [op (.take in)]
+                        (case (:type op)
+                          ; We're done here
+                          :exit   nil
+
+                          ; Ahhh
+                          :sleep  (do (Thread/sleep (* 1000 (:value op)))
+                                      (.put out op)
+                                      (recur))
+
+                          ; Log a message
+                          :log    (do (.put out op)
+                                      (recur))
+
+                          ; Ask the invoke handler
+                          (let [op' (invoke! op)]
+                            (.put out op')
+                            (recur)))))
+                    (catch Throwable t
+                      (error t "Jepsen worker crashed!")))))}))
+
+(def ^Long/TYPE max-pending-interval
+  "When the generator is :pending, this controls the maximum interval before
+  we'll update the context and check the generator for an operation again.
+  Measured in microseconds."
+  1000)
+
+(defn goes-in-history?
+  "Should this operation be journaled to the history? We exclude :log and
+  :sleep ops right now."
+  [op]
+  (condp identical? (:type op)
+    :sleep false
+    :log   false
+    true))
+
+(defn run!
+  "Takes a function `invoke`, which evaluates an invocation and returns a
+  completion, a test, an initial context `ctx`, and a generator `gen`. Spawns a
+  thread for each worker, and hands those workers operations from gen; each
+  thread applies the operation using `invoke`. Invocations and completions are
+  journaled to a history, which is returned at the end of `run`."
+  [invoke! test ctx gen]
+  (let [worker-ids (all-threads ctx)
+        completions (ArrayBlockingQueue. (count worker-ids))
+        workers     (mapv (partial worker completions invoke!) worker-ids)
+        invocations (into {} (c/map (juxt :worker :in) workers))]
+    (loop [ctx            ctx
+           gen            gen
+           outstanding    0     ; Number of in-flight ops
+           ; How long to poll on the completion queue, in micros.
+           poll-timeout   0
+           history        (transient [])]
+      ; First, can we complete an operation? We want to get to these first
+      ; because they're latency sensitive--if we wait, we introduce false
+      ; concurrency.
+      (if-let [op' (.poll completions poll-timeout TimeUnit/MICROSECONDS)]
+        (let [thread (process->thread ctx (:process op'))
+              time    (util/relative-time-nanos)
+              ; Update context with new time and thread being free
+              ctx     (-> ctx
+                          (assoc :time time)
+                          (c/update :free-threads conj thread))
+              ; Workers that crash (other than the nemesis) should be assigned
+              ; new thread identifiers.
+              ctx     (if (or (= :nemesis thread) (not= :info (:type op')))
+                        ctx
+                        (c/update ctx :workers assoc thread
+                                  (next-process ctx thread)))
+              ; Let generator know about our completion
+              gen     (update gen test ctx op')
+              history (if (goes-in-history? op')
+                        (conj! history op')
+                        history)]
+          ; Log completion in history and move on!
+          (recur ctx gen (dec outstanding) 0 history))
+
+        ; There's nothing to complete; let's see what the generator's up to
+        (let [time        (util/relative-time-nanos)
+              ctx         (assoc ctx :time time)
+              [op gen']   (op gen test ctx)]
+          (condp = op
+            ; We're exhausted, but workers might still be going.
+            nil (if (pos? outstanding)
+                  ; Still waiting on workers
+                  (recur ctx gen outstanding (long max-pending-interval)
+                         history)
+                  ; Good, we're done. Tell workers to exit...
+                  (do (doseq [[thread queue] invocations]
+                        (.put ^ArrayBlockingQueue queue {:type :exit}))
+                      ; Wait for exit
+                      (mapv (comp deref :future) workers)
+                      (persistent! history)))
+
+            ; Nothing we can do right now. Let's try to complete something.
+            :pending (recur ctx gen outstanding (long max-pending-interval)
+                            history)
+
+            ; Good, we've got an invocation.
+            (if (< time (:time op))
+              ; Can't evaluate this op yet!
+              (recur ctx gen outstanding
+                         ; Unless something changes, we don't need to ask the
+                         ; generator for another op until it's time.
+                         (long (/ (- (:time op) time) 1000))
+                         history)
+
+              ; Good, we can run this.
+              (let [thread (process->thread ctx (:process op))
+                    ; Dispatch it to a worker as quick as we can
+                    _ (.put ^ArrayBlockingQueue (get invocations thread) op)
+                    ; Update our context to reflect
+                    ctx (-> ctx
+                            (assoc :time (:time op)) ; Use time instead?
+                            (c/update :free-threads disj thread))
+                    ; Let the generator know about the invocation
+                    gen' (update gen' test ctx op)
+                    history (if (goes-in-history? op)
+                              (conj! history op)
+                              history)]
+                (recur ctx gen' (inc outstanding) 0 history)))))))))
+
 ;; Generators!
 
 (extend-protocol Generator
@@ -219,7 +368,7 @@
   clojure.lang.IPersistentMap
   (update [this test ctx event] this)
   (op [this test ctx]
-    [(if-let [p (first (free-processes ctx))]
+    [(if-let [p (some-free-process ctx)]
        ; Automatically assign type, time, and process from the context, if not
        ; provided.
        (cond-> this
@@ -232,10 +381,9 @@
      this])
 
   clojure.lang.Seqable
-  ; In the future, we might want to pass updates to... the first element? I'm
-  ; not sure whether that's going to be predictable, so for now let's try not
-  ; propagating any updates.
-  (update [this test ctx event] this)
+  (update [this test ctx event]
+    ; Updates are passed to the first generator in the sequence.
+    (cons (update (first this) test ctx event) (next this)))
 
   (op [this test ctx]
     (when (seq this) ; Once we're out of generators, we're done
@@ -244,14 +392,15 @@
           ; OK, our first gen has an op for us.
           [op (cons gen' (next this))]
           ; This generator is exhausted; move on
-          (recur (next this) test ctx)))))
+          (recur (next this) test ctx))))))
 
+(extend-protocol Generator
   clojure.lang.AFunction
   (update [f test ctx event] f)
   (op [f test ctx]
-    (when-let [x (try (f test ctx)
-                      (catch clojure.lang.ArityException e
-                        (f)))]
+    (when-let [x (if (= 2 (first (util/arities (class f))))
+                   (f test ctx)
+                   (f))]
       (condp instance? x
         ; Ask the map to generate an operation for us.
         clojure.lang.IPersistentMap     [(first (op x test ctx)) f]
@@ -397,21 +546,6 @@
   [gen]
   (IgnoreUpdates. gen))
 
-(defrecord Log [msg]
-  Generator
-  (op [_ _ _]
-    (info msg)
-    nil)
-
-  (update [this _ _ _]
-    this))
-
-(defn log
-  "A generator which, when asked for an operation, logs a message and yields
-  nil. TODO: replace this with a dedicated :type."
-  [msg]
-  (Log. msg))
-
 (defn on-threads-context
   "Helper function to transform contexts for OnThreads. Takes a function which
   returns true if a thread should be included in the context."
@@ -469,11 +603,12 @@
 (defrecord Any [gens]
   Generator
   (op [this test ctx]
-    (let [[op gen' i] (->> gens
-                           (map-indexed (fn [i gen]
-                                          (when-let [pair (op gen test ctx)]
-                                            (conj pair i))))
-                           (reduce soonest-op-vec nil))]
+    (when-let [[op gen' i] (->> gens
+                                (map-indexed
+                                  (fn [i gen]
+                                    (when-let [pair (op gen test ctx)]
+                                      (conj pair i))))
+                                (reduce soonest-op-vec nil))]
       [op (Any. (assoc gens i gen'))]))
 
   (update [this test ctx event]
@@ -698,6 +833,40 @@
   [gen]
   (limit 1 gen))
 
+(defn log
+  "A generator which, when asked for an operation, logs a message and yields
+  nil."
+  [msg]
+  (once {:type :log, :value msg}))
+
+(defrecord Repeat [remaining gen]
+  ; Remaining is positive for a limit, or -1 for infinite repeats.
+  Generator
+  (op [_ test ctx]
+    (when-not (zero? remaining)
+      (when-let [[op gen'] (op gen test ctx)]
+        ; If you actually hit MIN_INT doing this... you probably have bigger
+        ; problems on your hands.
+        [op (Repeat. (dec remaining) gen)])))
+
+  (update [this test ctx event]
+    (Repeat. remaining (update gen test ctx event))))
+
+(defn repeat
+  "Wraps a generator so that it emits operations infinitely, or, with an
+  initial limit, up to `limit` times. Think of this as the inverse of `once`:
+  where `once` takes a generator that emits many things and makes it emit one,
+  this takes a generator that emits (presumably) one thing, and makes it emit
+  many.
+
+  The state of the underlying generator is unchanged as `repeat` yields
+  operations, but `repeat` does *not* memoize its results; repeating a
+  nondeterministic generator results in a sequence of *different* operations."
+  ([gen]
+   (Repeat. -1 gen))
+  ([limit gen]
+   (assert (not (neg? limit)))
+   (Repeat. limit gen)))
 
 (defrecord ProcessLimit [n procs gen]
   Generator
@@ -751,28 +920,46 @@
   [dt gen]
   (TimeLimit. (long (util/secs->nanos dt)) nil gen))
 
-(defrecord Stagger [dts gen]
+(defrecord Stagger [dts next-time gen]
   Generator
-  (op [_ test ctx]
+  (op [this test ctx]
     (when-let [[op gen'] (op gen test ctx)]
-      (let [op (if (= :pending op)
-                 op
-                 (c/update op :time + (first dts)))]
-        [op (Stagger. (next dts) gen')])))
+      (cond ; No need to do anything to pending ops
+            (= :pending op)
+            [op this]
+
+            ; We're ready to issue this operation.
+            (<= next-time (:time op))
+            [op (Stagger. (next dts) (+ next-time (first dts)) gen')]
+
+            ; Not ready yet
+            true
+            [(assoc op :time next-time)
+             (Stagger. (next dts) (+ next-time (first dts)) gen')])))
+
 
   (update [_ test ctx event]
-    (Stagger. dts (update gen test ctx event))))
+    (Stagger. dts next-time (update gen test ctx event))))
 
 (defn stagger
-  "Wraps a generator. Operations from that generator are delayed by a uniform
-  random time between 0 to 2 * dt.
+  "Wraps a generator. Operations from that generator are scheduled at uniformly
+  random intervals between 0 to 2 * dt, or, if we can't keep up, as fast as
+  possible. There's... an argument that maybe we should limit the amount of
+  catching-up this generator performs, but I'm not sure if that's a practiacl
+  concern yet.
 
-  Note that unlike jepsen's original version of `stagger`, this delay applies
-  to *all* operations, not to each thread independently. If your old stagger
-  dt is 10, and your concurrency is 5, your new stagger dt should be 2."
+  Unlike Jepsen's original version of `stagger`, this actually *means*
+  'schedule at roughly every dt seconds', rather than 'introduce roughly dt
+  seconds of latency between ops', which makes this less sensitive to request
+  latency variations.
+
+  Also note that unlike Jepsen's original version of `stagger`, this delay
+  applies to *all* operations, not to each thread independently. If your old
+  stagger dt is 10, and your concurrency is 5, your new stagger dt should be
+  2."
   [dt gen]
   (let [dt (util/secs->nanos (* 2 dt))]
-    (Stagger. (repeatedly #(long (rand dt))) gen)))
+    (Stagger. (repeatedly (comp long (partial rand dt))) 0 gen)))
 
 ; This isn't actually DelayTil. It spreads out *all* requests evenly. Feels
 ; like it might be useful later.
@@ -841,23 +1028,10 @@
   (DelayTil. (long (util/secs->nanos dt)) nil gen))
 
 (defn sleep
-  "Informally, pauses for dt seconds before yielding `nil` for an operation.
-  Formally, this is sort of a weird one, because everything here is pure, and
-  there's no notion of blocking. We can delay operations, which have times, but
-  delaying *nil*, which does NOT have a time, isn't straightforward.
-
-  What we'll need to do, later, is invent a special type of operation map which
-  delays the scheduler and is *not* passed to clients. Or just refuse to
-  implement this at all. It's nicely readable, but it's semantically kind of
-  weird (Who sleeps? When?) compared to delaying a subsequent operation, which
-  has a well defined behavior.
-
-  TODO: Ah, okay, so here's what we do. Sleep modifies internal state in the
-  *interpreter: when you evaluate a sleep statement, you mark the worker as
-  busy for the next n seconds, even though it doesn't do anything.
-  "
-  []
-  (assert false "Not implemented!"))
+  "Emits a special operation which causes its receiving process to do nothing
+  for dt seconds."
+  [dt]
+  {:type :sleep, :value dt})
 
 (defrecord Synchronize [gen]
   Generator
@@ -914,7 +1088,7 @@
       (c/update this :gen update test ctx event))))
 
 (defn until-ok
-  "Wraps a generator, yielding operations from it until one of those operations
-  completes with :type :ok."
+  "Wraps a generator, yielding operations from it until one operation completes
+  with :type :ok."
   [gen]
   (UntilOk. gen false))

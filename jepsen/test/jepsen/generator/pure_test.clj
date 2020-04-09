@@ -2,7 +2,8 @@
   (:require [jepsen.generator.pure :as gen]
             [jepsen.independent :as independent]
             [jepsen [util :as util]]
-            [clojure.test :refer :all]))
+            [clojure [pprint :refer [pprint]]
+                     [test :refer :all]]))
 
 (def default-test
   "A default test map."
@@ -172,6 +173,105 @@
                                          t))
                        (update :time + perfect-latency))))))))
 
+(deftest run!-test
+  (let [time-limit 1
+        sleep-duration 1
+        gen (gen/phases
+              (->> (gen/reserve 2 (->> (range)
+                                       (map (fn [x] {:f :write, :value x}))
+                                       (map gen/once))
+                                5 (fn []
+                                    {:f      :cas
+                                     :value  [(rand-int 5) (rand-int 5)]})
+                                {:f :read})
+                   (gen/nemesis (gen/mix [{:type :info, :f :break}
+                                          {:type :info, :f :repair}]))
+                   (gen/time-limit time-limit))
+              (gen/log "Recovering")
+              (gen/nemesis (gen/once {:type :info, :f :recover}))
+              (gen/once (gen/sleep sleep-duration))
+              (gen/log "Done recovering; final read")
+              (gen/clients (gen/until-ok {:f :read})))
+        test default-test
+        ctx  (n+nemesis-context 10)
+        h    (util/with-relative-time
+               (gen/run! (fn invoke [op]
+                           ; We actually have to sleep here, or else it runs so
+                           ; fast that reserve starves some threads.
+                           (Thread/sleep 1)
+                           (assoc op
+                                  :type (rand-nth [:ok :info :fail])
+                                  :value :foo))
+                         test
+                         ctx
+                         gen))
+        nemesis-ops (filter (comp #{:nemesis} :process) h)
+        client-ops  (remove (comp #{:nemesis} :process) h)]
+
+    (testing "general structure"
+      (is (vector? h))
+      (is (= #{:invoke :ok :info :fail} (set (map :type h))))
+      (is (every? integer? (map :time h))))
+
+    (testing "client ops"
+      (is (seq client-ops))
+      (is (every? #{:write :read :cas} (map :f client-ops))))
+
+    (testing "nemesis ops"
+      (is (seq nemesis-ops))
+      (is (every? #{:break :repair :recover} (map :f nemesis-ops))))
+
+    (testing "mixed, recover, final read"
+      (let [recoveries (keep-indexed (fn [index op]
+                                       (when (= :recover (:f op))
+                                         index))
+                                     h)
+            recovery (first recoveries)
+            mixed    (take recovery h)
+            mixed-clients (filter (comp number? :process) mixed)
+            mixed-nemesis (remove (comp number? :process) mixed)
+            final    (drop (+ 2 recovery) h)]
+
+        (testing "mixed"
+          (is (pos? (count mixed)))
+          (is (some #{:nemesis} (map :process mixed)))
+          (is (some number? (map :process mixed)))
+          (is (= #{:invoke :ok :info :fail} (set (map :type mixed))))
+          (is (= #{:write :read :cas} (set (map :f mixed-clients))))
+          (is (= #{:break :repair} (set (map :f mixed-nemesis))))
+
+          (let [by-f (group-by :f mixed-clients)
+                n    (count mixed-clients)]
+            (testing "writes"
+              (is (< 1/10 (/ (count (by-f :write)) n) 3/10))
+              (is (distinct? (map :value (filter (comp #{:invoke} :type)
+                                                (by-f :write))))))
+            (testing "cas"
+              (is (< 4/10 (/ (count (by-f :cas)) n) 6/10))
+              (is (every? vector? (map :value (filter (comp #{:invoke} :type)
+                                                      (by-f :cas))))))
+
+            (testing "read"
+              (is (< 2/10 (/ (count (by-f :read)) n) 4/10)))))
+
+        (testing "recovery"
+          (is (= 2 (count recoveries)))
+          (is (= (inc (first recoveries)) (second recoveries))))
+
+        (testing "final read"
+          (is (pos? (count final)))
+          (is (every? number? (map :process final)))
+          (is (every? (comp #{:read} :f) final))
+          (is (pos? (count (filter (comp #{:ok} :type) final)))))))
+
+    (testing "fast enough"
+      ; On my box, 25-28K ops/sec is typical with a sleep time of 0; with 1ms
+      ; sleeps, 18K.
+      ; (prn (float (/ (count h) time-limit)))
+      (is (< 10000 (/ (count h) time-limit))))
+
+    ))
+
 (deftest nil-test
   (is (= [] (perfect nil))))
 
@@ -204,6 +304,13 @@
               (gen/limit 2)
               quick))))
 
+(deftest repeat-test
+  (is (= [0 0 0]
+         (->> (range)
+              (map (partial hash-map :value))
+              (gen/repeat 3)
+              (perfect)
+              (map :value)))))
 
 (deftest delay-til-test
   (is (= [{:type :invoke, :process 0, :time 0, :f :write}
@@ -215,7 +322,6 @@
               (gen/delay-til 3e-9)
               (gen/limit 5)
               perfect))))
-
 
 (deftest seq-test
   (testing "vectors"
@@ -233,7 +339,31 @@
                  {:value 3}]
                 (map gen/once)
                 quick
-                (map :value))))))
+                (map :value)))))
+
+  (testing "updates propagate to first generator"
+    (let [gen (->> [(gen/until-ok {:f :read})
+                    (gen/once {:f :done})]
+                   (gen/clients))
+          types (atom (concat [nil :fail :fail :ok :ok] (repeat :info)))]
+      (is (= [[0 :read :invoke]
+              [0 :read :invoke]
+              ; Everyone fails and retries
+              [10 :read :fail]
+              [10 :read :invoke]
+              [10 :read :fail]
+              [10 :read :invoke]
+              ; One succeeds and goes on to execute :done
+              [20 :read :ok]
+              [20 :done :invoke]
+              ; The other succeeds and is finished
+              [20 :read :ok]
+              [30 :done :info]]
+             (->> (simulate default-context gen
+                            (fn [ctx op]
+                              (-> op (update :time + 10)
+                                  (assoc :type (first (swap! types next))))))
+                  (map (juxt :time :f :type))))))))
 
 (deftest fn-test
   (testing "returning nil"
@@ -338,31 +468,16 @@
   (let [n           1000
         dt          20
         concurrency (count (:workers default-context))
-        times       (->> (range n)
+        ops         (->> (range n)
                          (map (fn [x] {:f :write, :value x}))
                          (map gen/once)
                          (gen/stagger (util/nanos->secs dt))
-                         perfect
-                         (mapv :time))
+                         perfect)
+        times       (mapv :time ops)
         max-time    (peek times)
-        rate        (/ n max-time)
-
-        ; How long do we spend waiting and working on a single op, on avg?
-        t-wait dt
-        t-work perfect-latency
-
-        ; Work happens concurrently
-        expected-work-time (-> perfect-latency (* n) (/ concurrency))
-
-        ; Waiting happens sequentially
-        expected-wait-time (* dt n)
-
-        ; And this is how long the whole wait process should take. This isn't
-        ; right when wait time is on the order of work time <sigh>.
-        expected-time (long (+ expected-wait-time expected-work-time))]
-
-    ; Sigh, throw away all that work and just hard-code these limits.
-    (is (< 0.035 rate 0.040))))
+        rate        (float (/ n max-time))
+        expected-rate (float (/ dt))]
+    (is (<= 0.9 (/ rate expected-rate) 1.1))))
 
 (deftest f-map-test
   (is (= [{:type :invoke, :process 0, :time 0, :f :b, :value 2}]
