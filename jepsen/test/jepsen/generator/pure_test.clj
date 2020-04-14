@@ -3,7 +3,9 @@
             [jepsen.independent :as independent]
             [jepsen [util :as util]]
             [clojure [pprint :refer [pprint]]
-                     [test :refer :all]]))
+                     [test :refer :all]]
+            [knossos.op :as op]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (def default-test
   "A default test map."
@@ -172,6 +174,81 @@
                                                                 :ok   :fail})
                                          t))
                        (update :time + perfect-latency))))))))
+
+(deftest run!-throw-test
+  (let [ctx (n+nemesis-context 1)]
+    (testing "worker throws"
+      (let [h (util/with-relative-time
+                (gen/run! (fn invoke [op] (assert false))
+                          test
+                          ctx
+                          (->> (gen/limit 2 {:f :read})
+                               (gen/nemesis
+                                 (gen/limit 2 {:type :info, :f :break})))))
+            completions (remove op/invoke? h)
+            err "indeterminate: Assert failed: false"]
+        (is (= [[:nemesis :info :break nil]
+                [:nemesis :info :break err]
+                [:nemesis :info :break nil]
+                [:nemesis :info :break err]
+                [0        :invoke :read nil]
+                [0        :info   :read err]
+                [1        :invoke :read nil]
+                [1        :info   :read err]]
+               (->> h
+                    ; Try to cut past parallel nondeterminism
+                    (sort-by :process util/poly-compare)
+                    (map (juxt :process :type :f :error)))))))
+
+    (testing "generator op throws"
+      (let [call-count (atom 0)
+            gen (->> (fn []
+                       (swap! call-count inc)
+                       (assert false))
+                     (gen/limit 2)
+                     gen/friendly-exceptions)
+            e (try+ (util/with-relative-time
+                      (gen/run! (fn invoke [op] (assoc op :type :ok))
+                                test
+                                ctx
+                                gen))
+                    :nope
+                    (catch [:type :jepsen.generator.pure/op-threw] e e))]
+        (is (= 1 @call-count))
+        (is (= :jepsen.generator.pure/op-threw (:type e)))
+        (is (= gen (:generator e)))
+        (is (= (dissoc ctx :time) (dissoc (:context e) :time)))))
+
+    (testing "generator update throws"
+      (let [gen (->> (reify gen/Generator
+                       (op [this test ctx]
+                         [(first (gen/op {:f :write, :value 2} test ctx))
+                          this])
+
+                       (update [this test ctx event]
+                         (assert false)))
+                     (gen/limit 2)
+                     gen/validate
+                     gen/friendly-exceptions)
+            e (try+ (util/with-relative-time
+                      (gen/run! (fn invoke [op] (assoc op :type :ok))
+                                test
+                                ctx
+                                gen)
+                      :nope)
+                    (catch [:type :jepsen.generator.pure/update-threw] e e))]
+        (is (= (assoc-in gen [:gen :gen :remaining] 1)
+               (:generator e)))
+        (is (= (-> ctx
+                   (assoc :time (:time (:context e)))
+                   (update :free-threads disj 0))
+               (:context e)))
+        (is (= {:f        :write
+                :value    2
+                :time     (:time (:context e))
+                :process  0
+                :type     :invoke}
+               (:event e)))))))
 
 (deftest run!-test
   (let [time-limit 1
