@@ -26,6 +26,49 @@
     (invoke! [this test op] op)
     (teardown! [this test] this)))
 
+(defrecord Validate [nemesis]
+  Nemesis
+  (setup! [this test]
+    (let [res (setup! nemesis test)]
+      (when-not (satisfies? Nemesis res)
+        (throw+ {:type ::setup-returned-non-nemesis
+                 :got  res}
+                nil
+                "expected setup! to return a Nemesis, but got %s instead"
+                (pr-str res)))
+      res))
+
+  (invoke! [this test op]
+    (let [op' (invoke! nemesis test op)
+          problems
+          (cond-> []
+            (not (map? op'))
+            (conj "should be a map")
+
+            (not (#{:info} (:type op')))
+            (conj ":type should be :info")
+
+            (not= (:process op) (:process op'))
+            (conj ":process should be the same")
+
+            (not= (:f op) (:f op'))
+            (conj ":f should be the same"))]
+      (when (seq problems)
+        (throw+ {:type      ::invalid-completion
+                 :op        op
+                 :op'       op'
+                 :problems  problems}))
+      op))
+
+  (teardown! [this test]
+    (teardown! nemesis test)))
+
+(defn validate
+  "Wraps a nemesis, validating that it constructs responses to setup and invoke
+  correctly."
+  [nemesis]
+  (Validate. nemesis))
+
 (defn setup-compat!
   "Calls `jepsen.nemesis/setup!`, if possible, falling back to
   `jepsen.client/setup!`. Warns users that nemeses implementing `jepsen.client`
