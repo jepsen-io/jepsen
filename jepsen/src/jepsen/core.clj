@@ -34,6 +34,8 @@
             [jepsen.nemesis :as nemesis]
             [jepsen.store :as store]
             [jepsen.control.util :as cu]
+            [jepsen.generator [pure :as gen.pure]
+                              [interpreter :as gen.interpreter]]
             [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
@@ -420,9 +422,9 @@
   [test]
   (NemesisWorker. test nil (atom false)))
 
-(defn run-case!
-  "Spawns nemesis and clients, runs a single test case, and
-  returns that case's history."
+(defn run-case-classic-generator!
+  "For a classic generator, spawns nemesis and clients, runs a single test
+  case, and returns that case's history."
   [test]
   (let [history (atom [])
         test    (assoc test :history history)]
@@ -450,6 +452,21 @@
     (swap! (:active-histories test) disj history)
 
     @history))
+
+(defn run-case-pure-generator!
+  "For a pure generator, uses generator/run! to run a test case, and returns
+  that case's history."
+  [test]
+  (gen.interpreter/run! test))
+
+(defn run-case!
+  "Takes a test, spawns nemesis and clients, runs the generator, and returns
+  the history."
+  [test]
+  (let [gen (:generator test)]
+    (if (satisfies? gen.pure/Generator gen)
+      (run-case-pure-generator! test)
+      (run-case-classic-generator! test))))
 
 (defn analyze!
   "After running the test and obtaining a history, we perform some

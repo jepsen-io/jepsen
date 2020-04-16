@@ -149,9 +149,7 @@
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn error]]
             [jepsen [util :as util]]
-            [slingshot.slingshot :refer [try+ throw+]])
-  (:import (java.util.concurrent ArrayBlockingQueue
-                                 TimeUnit)))
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol Generator
   (update [gen test context event]
@@ -161,6 +159,17 @@
       "Obtains the next operation from this generator."))
 
 ;; Helpers
+
+(defn context
+  "Constructs a new context from a test."
+  [test]
+  (let [threads (into #{:nemesis} (range (:concurrency test)))]
+    {:time          0
+     :free-threads  threads
+     :workers       (->> threads
+                         (c/map (partial c/repeat 2))
+                         (c/map vec)
+                         (into {}))}))
 
 (defn random-int-seq
   "Generates a reproducible sequence of random longs, given a random seed. If
@@ -215,179 +224,6 @@
     (+ (get (:workers context) thread)
        (count (c/filter number? (all-processes context))))
     thread))
-
-;; Interpreter
-
-
-(defn worker
-  "Creates communication channels and spawns a worker thread to evaluate the
-  given worker. Takes a Queue which should emit completion operations, a
-  function to evaluate invocations and produce completions, and a worker name.
-  Returns a map with:
-
-    :worker   The worker ID
-    :future   The future evaluating the worker code
-    :in       A Queue which delivers invocations to the worker"
-  [^ArrayBlockingQueue out invoke! worker]
-  (let [in (ArrayBlockingQueue. 1)]
-    {:worker  worker
-     :in      in
-     :future  (future
-                (util/with-thread-name (str "jepsen worker "
-                                            (util/name+ worker))
-                  (loop []
-                    (when
-                      (let [op (.take in)]
-                        (try
-                          (case (:type op)
-                            ; We're done here
-                            :exit  false
-                            ; Ahhh
-                            :sleep (do (Thread/sleep (* 1000 (:value op)))
-                                       (.put out op)
-                                       true)
-                            ; Log a message
-                            :log   (do (.put out op)
-                                       true)
-                            ; Ask the invoke handler
-                            (let [op' (invoke! op)]
-                              (.put out op')
-                              true))
-                          (catch Throwable e
-                            ; Yes, we want to capture throwable here; assertion
-                            ; errors aren't Exceptions. D-:
-                            (warn e "Process" (:process op) "crashed")
-
-                            ; Convert this to an info op.
-                            (.put out
-                                  (assoc op
-                                         :type      :info
-                                         :exception (datafy e)
-                                         :error     (str "indeterminate: "
-                                                         (if (.getCause e)
-                                                           (.. e getCause
-                                                               getMessage)
-                                                           (.getMessage e)))))
-                            true)))
-                      (recur)))))}))
-
-(def ^Long/TYPE max-pending-interval
-  "When the generator is :pending, this controls the maximum interval before
-  we'll update the context and check the generator for an operation again.
-  Measured in microseconds."
-  1000)
-
-(defn goes-in-history?
-  "Should this operation be journaled to the history? We exclude :log and
-  :sleep ops right now."
-  [op]
-  (condp identical? (:type op)
-    :sleep false
-    :log   false
-    true))
-
-(defn run!
-  "Takes a function `invoke`, which evaluates an invocation and returns a
-  completion, a test, an initial context `ctx`, and a generator `gen`. Spawns a
-  thread for each worker, and hands those workers operations from gen; each
-  thread applies the operation using `invoke`. Invocations and completions are
-  journaled to a history, which is returned at the end of `run`."
-  [invoke! test ctx gen]
-  (let [worker-ids (all-threads ctx)
-        completions (ArrayBlockingQueue. (count worker-ids))
-        workers     (mapv (partial worker completions invoke!) worker-ids)
-        invocations (into {} (c/map (juxt :worker :in) workers))]
-    (try+
-      (loop [ctx            ctx
-             gen            gen
-             outstanding    0     ; Number of in-flight ops
-             ; How long to poll on the completion queue, in micros.
-             poll-timeout   0
-             history        (transient [])]
-        ; First, can we complete an operation? We want to get to these first
-        ; because they're latency sensitive--if we wait, we introduce false
-        ; concurrency.
-        (if-let [op' (.poll completions poll-timeout TimeUnit/MICROSECONDS)]
-          (let [thread (process->thread ctx (:process op'))
-                time    (util/relative-time-nanos)
-                ; Update context with new time and thread being free
-                ctx     (-> ctx
-                            (assoc :time time)
-                            (c/update :free-threads conj thread))
-                ; Workers that crash (other than the nemesis) should be assigned
-                ; new thread identifiers.
-                ctx     (if (or (= :nemesis thread) (not= :info (:type op')))
-                          ctx
-                          (c/update ctx :workers assoc thread
-                                    (next-process ctx thread)))
-                ; Let generator know about our completion
-                gen     (update gen test ctx op')
-                history (if (goes-in-history? op')
-                          (conj! history op')
-                          history)]
-            ; Log completion in history and move on!
-            (recur ctx gen (dec outstanding) 0 history))
-
-          ; There's nothing to complete; let's see what the generator's up to
-          (let [time        (util/relative-time-nanos)
-                ctx         (assoc ctx :time time)
-                [op gen']   (op gen test ctx)]
-            (condp = op
-              ; We're exhausted, but workers might still be going.
-              nil (if (pos? outstanding)
-                    ; Still waiting on workers
-                    (recur ctx gen outstanding (long max-pending-interval)
-                           history)
-                    ; Good, we're done. Tell workers to exit...
-                    (do (doseq [[thread queue] invocations]
-                          (.put ^ArrayBlockingQueue queue {:type :exit}))
-                        ; Wait for exit
-                        (mapv (comp deref :future) workers)
-                        (persistent! history)))
-
-              ; Nothing we can do right now. Let's try to complete something.
-              :pending (recur ctx gen outstanding (long max-pending-interval)
-                              history)
-
-              ; Good, we've got an invocation.
-              (if (< time (:time op))
-                ; Can't evaluate this op yet!
-                (recur ctx gen outstanding
-                       ; Unless something changes, we don't need to ask the
-                       ; generator for another op until it's time.
-                       (long (/ (- (:time op) time) 1000))
-                       history)
-
-                ; Good, we can run this.
-                (let [thread (process->thread ctx (:process op))
-                      ; Dispatch it to a worker as quick as we can
-                      _ (.put ^ArrayBlockingQueue (get invocations thread) op)
-                      ; Update our context to reflect
-                      ctx (-> ctx
-                              (assoc :time (:time op)) ; Use time instead?
-                              (c/update :free-threads disj thread))
-                      ; Let the generator know about the invocation
-                      gen' (update gen' test ctx op)
-                      history (if (goes-in-history? op)
-                                (conj! history op)
-                                history)]
-                  (recur ctx gen' (inc outstanding) 0 history)))))))
-      (catch Throwable t
-        ; We've thrown, but we still need to ensure the workers exit.
-        (info "Shutting down workers after abnormal exit")
-        (loop [unfinished workers]
-          (when (seq unfinished)
-            (let [{:keys [in future] :as worker} (first unfinished)]
-              (if (future-done? future)
-                (recur (next unfinished))
-                (do ; Try cancelling this worker.
-                    (future-cancel future)
-                    ; If for some reason we can't cancel (maybe it's
-                    ; uninterruptibly doing something?) try to offer the queue
-                    ; an exit op.
-                    (.offer ^java.util.Queue in {:type :exit})
-                    (recur unfinished))))))
-        (throw t)))))
 
 ;; Generators!
 

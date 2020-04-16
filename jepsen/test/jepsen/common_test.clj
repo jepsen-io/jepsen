@@ -17,6 +17,7 @@
                         "jepsen.core"         :error
                         "jepsen.control.util" :error
                         "jepsen.generator"    :error
+                        "jepsen.util"         :error
                         "jepsen.independent"  :error})})
   (f)
   (store/stop-logging!))
