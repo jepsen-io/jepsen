@@ -100,7 +100,7 @@
                         :nemesis (info-nemesis)
                         :generator gen)
             e (try+ (util/with-relative-time (run! test))
-                      :nope
+                    :nope
                     (catch [:type :jepsen.generator.pure/update-threw] e e))]
         (is (= (assoc-in gen [:gen :gen :remaining] 1)
                (:generator e)))

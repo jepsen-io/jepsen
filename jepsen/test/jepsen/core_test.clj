@@ -15,7 +15,9 @@
             [jepsen.store :as store]
             [jepsen.checker :as checker]
             [jepsen.nemesis :as nemesis]
-            [knossos.model :as model]))
+            [jepsen.generator.pure :as gen.pure]
+            [knossos [model :as model]
+                     [op :as op]]))
 
 (use-fixtures :once quiet-logging)
 
@@ -59,18 +61,57 @@
     (is (thrown-with-msg? RuntimeException #"^hi$" (run! test)))))
 
 (deftest ^:integration basic-cas-test
-  (let [state (atom nil)
-        db    (tst/atom-db state)
-        n     10
-        test  (run! (assoc tst/noop-test
-                           :name       "basic cas"
-                           :db         (tst/atom-db state)
-                           :client     (tst/atom-client state)
-                           :generator  (->> gen/cas
-                                            (gen/limit n)
-                                            (gen/nemesis gen/void))
-                           :model      (model/->CASRegister 0)))]
-    (is (:valid? (:results test)))))
+  (testing "classic generator"
+    (let [state (atom nil)
+          db    (tst/atom-db state)
+          n     10
+          test  (run! (assoc tst/noop-test
+                             :name       "basic cas"
+                             :db         (tst/atom-db state)
+                             :client     (tst/atom-client state)
+                             :generator  (->> gen/cas
+                                              (gen/limit n)
+                                              (gen/nemesis gen/void))
+                             :model      (model/->CASRegister 0)))]
+      (is (:valid? (:results test)))))
+
+  (testing "pure generator"
+    (let [state (atom nil)
+          db    (tst/atom-db state)
+          n     100
+          test  (run!
+                  (assoc tst/noop-test
+                         :name      "basic cas pure-gen"
+                         :db        (tst/atom-db state)
+                         :client    (tst/atom-client state)
+                         :concurrency 10
+                         :generator
+                         (->> (gen.pure/reserve
+                                5 {:f :read}
+                                (gen.pure/mix
+                                  [(fn [] {:f :write, :value (rand-int 5)})
+                                   (fn [] {:f :cas, :value [(rand-int 5)
+                                                            (rand-int 5)]})]))
+                              (gen.pure/limit n)
+                              (gen.pure/nemesis nil))))
+          h (:history test)
+          invokes  (partial filter op/invoke?)
+          oks      (partial filter op/ok?)
+          reads    (partial filter (comp #{:read} :f))
+          writes   (partial filter (comp #{:write} :f))
+          cases    (partial filter (comp #{:cas} :f))
+          values   (partial map :value)
+          smol?    #(<= 0 % 4)
+          smol-vec? #(and (vector? %)
+                          (= 2 (count %))
+                          (every? smol? %))]
+      (is (:valid? (:results test)))
+      (is (= (* 2 n) (count h)))
+      (is (= #{:read :write :cas} (set (map :f h))))
+      (is (every? nil? (values (invokes (reads h)))))
+      (is (every? smol? (values (oks (reads h)))))
+      (is (every? smol? (values (writes h))))
+      (is (every? smol-vec? (values (cases h)))))))
 
 (deftest ^:integration ssh-test
   (let [os-startups  (atom {})

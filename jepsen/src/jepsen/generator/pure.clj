@@ -291,11 +291,11 @@
                                  (not (map? op))
                                  (conj "should be either :pending or a map")
 
-                                 (not= :invoke (:type op))
-                                 (conj ":type should be :invoke")
+                                 (not (#{:invoke :sleep :log} (:type op)))
+                                 (conj ":type should be :invoke, :sleep, or :log")
 
                                  (not (number? (:time op)))
-                                 (conj ":time is not a number")
+                                 (conj ":time should be a number")
 
                                  (not (:process op))
                                  (conj "no :process")
@@ -331,7 +331,8 @@
       (catch Throwable t
         (throw+ {:type ::op-threw
                  :generator this
-                 :context   ctx}))))
+                 :context   ctx}
+                t))))
 
   (update [this test ctx event]
     (try
@@ -341,7 +342,8 @@
         (throw+ {:type ::update-threw
                  :generator this
                  :context   ctx
-                 :event     event})))))
+                 :event     event}
+                t)))))
 
 (defn friendly-exceptions
   "Wraps a generator, so that exceptions thrown from op and update are wrapped

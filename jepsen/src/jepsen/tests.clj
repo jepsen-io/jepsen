@@ -41,6 +41,8 @@
     (teardown! [this test])
     (close!    [this test])
     (invoke!   [this test op]
+      ; We sleep here to make sure we actually have some concurrency.
+      (Thread/sleep 2)
       (case (:f op)
         :write (do (reset! state   (:value op))
                    (assoc op :type :ok))
