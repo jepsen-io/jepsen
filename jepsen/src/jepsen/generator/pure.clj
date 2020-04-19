@@ -1,8 +1,120 @@
 (ns jepsen.generator.pure
-  "A Jepsen history is a list of operations--invocations and completions. A
+  "# In a Nutshell
+
+  Generators tell Jepsen what to do during a test. Generators are purely
+  functional objects which support two functions: `op` and `update`. `op`
+  produces operations for Jepsen to perform: it takes a test and context
+  object, and yields:
+
+  - nil if the generator is exhausted
+  - :pending if the generator doesn't know what to do yet
+  - [op, gen'], where op' is the next operation this generator would like to
+  execute, and `gen'` is the state of the generator that would result if `op`
+  were evaluated.
+
+  `update` allows generators to evolve as events occur--for instance, when an
+  operation is invoked or completed. For instance, `update` allows a generator
+  to emit read operations *until* at least one succeeds.
+
+  Maps, sequences, and functions are all generators, allowing you to write all
+  kinds of generators using existing Clojure tooling. This namespace provides
+  additional transformations and combinators for complex transformations.
+
+  # Migrating From Classic Generators
+
+  The old jepsen.generator namespace used mutable state everywhere, and was
+  plagued by race conditions. jepsen.generator.pure provides a similar API, but
+  its purely functional approach has several advantages:
+
+  - Pure generators shouldn't deadlock or throw weird interrupted exceptions.
+    These issues have plagued classic generators; I've done my best to make
+    incremental improvements, but the problems seem unavoidable.
+
+  - Pure generators can respond to completion operations, which means you can
+    write things like 'keep trying x until y occurs' without sharing complex
+    mutable state with clients.
+
+  - Sequences are pure generators out of the box; no more juggling gen/seq
+    wrappers. Use existing Clojure sequence transformations to build complex
+    behaviors.
+
+  - Pure generators provide an explicit 'I don't know yet' state, which is
+    useful when you know future operations might come, but don't know when or
+    what they are.
+
+  - Pure generators do not rely on dynamic state; their arguments are all
+    explicit. They are deterministically testable.
+
+  - Pure generators allow new combinators like (any gen1 gen2 gen3), which
+    returns the first operation from any of several generators; this approach
+    was impossible in classic generators.
+
+  - Pure generators have an explicit, deterministic model of time, rather than
+    relying on thread scheduler constructs like Thread/sleep.
+
+  - Certain constructs, like gen/sleep and gen/log in classic generators, could
+    not be composed in sequences readily; pure generators provide a regular
+    composition language.
+
+  - Constructs like gen/each, which were fragile in classic generators and
+    relied on macro magic, are now simple functions.
+
+  - Pure generators are significantly simpler to implement and test than
+    classic generators, though they do require careful thought.
+
+  There are some notable tradeoffs, including:
+
+  - Pure generators perform all generator-related computation on a single
+    thread, and create additional garbage due to their pure functional approach.
+    However, realistic generator tests yield rates over 20,000 operations/sec,
+    which seems more than sufficient for Jepsen's purposes.
+
+  - The API is subtly different. In my experience teaching hundreds of
+    engineers to write Jepsen tests, users typically cite the generator API as
+    one of Jepsen's best features. I've tried to preserve as much of its shape
+    as possible, while sanding off rough edges and cleaning up inconsistencies.
+    Some functions have the same shape but different semantics: `stagger`, for
+    instance, now takes a *total* rather than a `*per-thread*` rate. Some
+    infrequently-used generators have not been ported, to keep the API smaller.
+
+  - `update` and contexts are not a full replacement for mutable state. We
+    think they should suffice for most practical uses, and controlled use of
+    mutable shared state is still possible.
+
+  - You can (and we encourage!) the use of impure functions, e.g. randomness,
+    as impure generators. However, it's possible I haven't fully thought
+    through the implications of this choice; the semantics may evolve over
+    time.
+
+  When migrating old to new generators, keep in mind:
+
+  - `gen/seq` and `gen/seq-all` are unnecessary; any Clojure sequence is
+    already a pure generator. `gen/seq` didn't just turn sequences into
+    generators; it also ensured that only one operation was consumed from each.
+    This is now explicit: use `(map gen.pure/once coll)` instead of (gen/seq
+    coll)`, and `coll` instead of `(gen/seq-all coll)`.
+
+  - Functions return generators, not just operations, which makes it easier to
+    express sequences of operations like 'pick the current leader, isolate it,
+    then kill that same node, then restart that node.' Use `#(gen/once {:f
+    :write, :value (rand-int 5))` instead of `(fn [] {:f :write, :value
+    (rand-int 5)})`.
+
+  - `stagger`, `delay-til`, etc. now take total rates, rather than the rate per
+    thread.
+
+  - `delay` is gone; we think, in practice, users generally want either
+    `stagger` (for uncoordinated times) or `delay-til` (for coordinated times).
+
+  - Instead of using *jepsen.generator/threads*, etc, use helper functions like
+    some-free-process.
+
+  # In More Detail
+
+  A Jepsen history is a list of operations--invocations and completions. A
   generator's job is to specify what invocations to perform, and when. In a
   sense, a generator *becomes* a history as Jepsen incrementally applies it to
-  a real system.
+  a database.
 
   Naively, we might define a history as a fixed sequence of invocations to
   perform at certain times, but this is impossible: we have only a fixed set of
@@ -30,13 +142,14 @@
 
   ## Contexts
 
-  A *context* is a map which provides extra information for generators. For
-  instance, a generator might need to know the number of threads which will ask
-  it for operations. It can get that number from the *context*. Users can add
-  their own values to the context map, which allows two generators to share
-  state. When one generator calls another, it can pass a modified version of
-  the context, which allows us to write generators that, say, run two
-  independent workloads, each with their own concurrency and thread mappings.
+  A *context* is a map which provides information about the state of the world
+  to generators. For instance, a generator might need to know the number of
+  threads which will ask it for operations. It can get that number from the
+  *context*. Users can add their own values to the context map, which allows
+  two generators to share state. When one generator calls another, it can pass
+  a modified version of the context, which allows us to write generators that,
+  say, run two independent workloads, each with their own concurrency and
+  thread mappings.
 
   The standard context mappings, which are provided by Jepsen when invoking the
   top-level generator, and can be expected by every generator, are:
@@ -116,32 +229,36 @@
 
   {:f :write, :value 2}
 
-  and it will generate ops like
+  and it will generate (an endless series) of ops like
 
   {:type :invoke, :process 3, :time 1234, :f :write, :value 2}
 
   Sequences are generators which assume the elements of the sequence are
   themselves generators. They ignore updates, and return all operations from
   the first generator in the sequence, then all operations from the second, and
-  so on. They do not synchronize.
+  so on.
 
   Functions are generators which ignore updates and can take either test and
   context as arguments, or no args. Functions should be *mostly* pure, but some
   creative impurity is probably OK. For instance, returning randomized :values
   for maps is probably all right. I don't know the laws! What is this, Haskell?
 
-  Functions can return two things:
+  When a function is used as a generator, its return value is used as a
+  generator; that generator is used until exhausted, and then the function is
+  called again to produce a new generator. For instance:
 
-  - nil: signifies that the function generator is exhausted.
-  - a tuple of [op gen]: passed through directly; the gen replaces the fn
-  - a map: the map is treated as a generator, which lets it fill in a process,
-           time, etc.
+    ; A series of writes with the same (random) value, e.g. 2, 2, 2, ...
+    (fn [] {:f :write, :value (rand-int 5)})
 
-  In the future, we might consider:
+    ; Produces a series of different random writes, e.g. 1, 5, 2, 3...
+    (fn [] (gen/once {:f :write, :value (rand-int 5)}))
 
-  - Returning any other generator: the function could be *replaced* by that
-  generator, allowing us to compute generators lazily?
-  "
+    ; Alternating write/read ops, e.g. write 2, read, write 5, read, ...
+    (fn [] (map gen/once [{:f :write, :value (rand-int 5)}
+                          {:f :read}]))
+
+  Promises, futures, delays (any IPending) are generators which ignore updates,
+  yield :pending until realized, then are replaced by their delivered value."
   (:refer-clojure :exclude [await concat delay filter map repeat run! update])
   (:require [clojure [core :as c]
                      [datafy :refer [datafy]]
@@ -246,6 +363,14 @@
        ; No process free to accept our request
        :pending)
      this])
+  clojure.lang.AFunction
+  (update [f test ctx event] f)
+
+  (op [f test ctx]
+    (when-let [x (if (= 2 (first (util/arities (class f))))
+                   (f test ctx)
+                   (f))]
+      (op [x f] test ctx)))
 
   clojure.lang.Seqable
   (update [this test ctx event]
@@ -261,21 +386,22 @@
           ; This generator is exhausted; move on
           (recur (next this) test ctx))))))
 
-(extend-protocol Generator
-  clojure.lang.AFunction
-  (update [f test ctx event] f)
-  (op [f test ctx]
-    (when-let [x (if (= 2 (first (util/arities (class f))))
-                   (f test ctx)
-                   (f))]
-      (condp instance? x
-        ; Ask the map to generate an operation for us.
-        clojure.lang.IPersistentMap     [(first (op x test ctx)) f]
-        ; Return the (presumably a pair) directly
-        clojure.lang.IPersistentVector  x
-        ; ???
-        (throw+ {:type  ::unexpected-return
-                 :value x})))))
+(defmacro extend-protocol-runtime
+  "Extends a protocol to a runtime-defined class. Helpful because some Clojure
+  constructs, like promises, use reify rather than classes, and have no
+  distinct interface we can extend."
+  [proto klass & specs]
+  (let [cn (symbol (.getName (eval klass)))]
+    `(extend-protocol ~proto ~cn ~@specs)))
+
+(extend-protocol-runtime Generator
+  (class (promise))
+  (update [p test ctx event] p)
+
+  (op [p test ctx]
+    (if (realized? p)
+      (op @p test ctx)
+      [:pending p])))
 
 (defrecord Validate [gen]
   Generator
@@ -433,15 +559,22 @@
   (update [this _ _ _]
     this))
 
-(defn ignore-updates
-  "Wraps a generator. Any call to `update` is ignored, returning this
-  generator with no changes.
+(defrecord OnUpdate [f gen]
+  Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      [op (OnUpdate. f gen')]))
 
-  It's not clear if this actually confers any performance advantage right now,
-  but I'm putting it here so that if someone later discovers a performance cost
-  they'd rather avoid, it'll be ready for them. :)"
-  [gen]
-  (IgnoreUpdates. gen))
+  (update [this test ctx event]
+    (f this test ctx event)))
+
+(defn on-update
+  "Wraps a generator with an update handler function. When an update occurs,
+  calls (f this test ctx event), and returns whatever f does--presumably, a new
+  generator. Can also be helpful for side effects--for instance, to update some
+  shared mutable state when an update occurs."
+  [f gen]
+  (OnUpdate. f gen))
 
 (defn on-threads-context
   "Helper function to transform contexts for OnThreads. Takes a function which
@@ -708,7 +841,6 @@
   [gens]
   (Mix. (rand-int (count gens)) gens))
 
-
 (defrecord Limit [remaining gen]
   Generator
   (op [_ test ctx]
@@ -732,7 +864,7 @@
 
 (defn log
   "A generator which, when asked for an operation, logs a message and yields
-  nil."
+  nil. Occurs only once; use `repeat` to repeat."
   [msg]
   (once {:type :log, :value msg}))
 

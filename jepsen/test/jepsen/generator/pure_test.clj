@@ -266,29 +266,47 @@
   (testing "returning nil"
     (is (= [] (quick (fn [])))))
 
-  (testing "returning pairs of [op gen']"
-    ; This function constructs a map with the given value, and returns a
-    ; successive generator which calls itself with that value, decremented.
-    ; This is a weird thing to do, but I think it tests the core behavior.
-    (letfn [(countdown [x test ctx] (when (pos? x)
-                             [{:type    :invoke
-                               :process (first (gen/free-processes ctx))
-                               :time    (:time ctx)
-                               :value   x}
-                              (partial countdown (dec x))]))]
-      (is (= [5 4 3 2 1]
-             (->> (partial countdown 5)
-                  quick
-                  (map :value))))))
-
-  (testing "returning maps"
+  (testing "returning a literal map"
     (let [ops (->> (fn [] {:f :write, :value (rand-int 10)})
+                   (gen/limit 5)
+                   quick)]
+      (is (= 5 (count ops)))                      ; limit
+      (is (every? #(<= 0 % 10) (map :value ops))) ; random vals
+      (is (= 1 (count (set (map :value ops)))))   ; random vals
+      (is (every? #{0} (map :process ops)))))     ; processes assigned
+
+  (testing "returning once maps"
+    (let [ops (->> #(gen/once {:f :write, :value (rand-int 10)})
                    (gen/limit 5)
                    quick)]
       (is (= 5 (count ops)))                      ; limit
       (is (every? #(<= 0 % 10) (map :value ops))) ; random vals
       (is (< 1 (count (set (map :value ops)))))   ; random vals
       (is (every? #{0} (map :process ops))))))    ; processes assigned
+
+(deftest on-update+promise-test
+  ; We only fulfill p once the write has taken place.
+  (let [p (promise)]
+    (is (= [{:f :read, :time 0, :process 0, :type :invoke}
+            {:f :write, :value :x, :time 0, :process 0, :type :invoke}
+            {:f :confirm, :value :x, :time 0, :process 0, :type :invoke}
+            {:f :hold, :time 0, :process 0, :type :invoke}
+            {:f :hold, :time 0, :process 0, :type :invoke}]
+           (->> (gen/any p
+                         [(gen/once {:f :read})
+                          (gen/once {:f :write, :value :x})
+                          ; We'll do p at this point, then return to hold.
+                          {:f :hold}])
+                ; We don't deliver p until after the write is complete.
+                (gen/on-update (fn [this test ctx event]
+                                 (when (and (op/ok? event)
+                                            (= :write (:f event)))
+                                   (deliver p (gen/once
+                                                {:f      :confirm
+                                                 :value  (:value event)})))
+                                 this))
+                (gen/limit 5)
+                quick)))))
 
 (deftest synchronize-test
   (is (= [{:f :a, :process 0, :time 2, :type :invoke}
@@ -305,7 +323,9 @@
                                     0        2
                                     1        1
                                     :nemesis 2)]
-                        {:f :a, :process p, :time (+ (:time ctx) delay)}))
+                        (gen/once {:f :a
+                                   :process p
+                                   :time (+ (:time ctx) delay)})))
                     (gen/limit 3))
                ; The latest process, the nemesis, should start at time 5 and
                ; finish at 15.
