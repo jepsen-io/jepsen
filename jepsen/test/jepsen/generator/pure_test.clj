@@ -572,3 +572,16 @@
               gen/clients
               imperfect
               (mapcat (juxt :time :process :type))))))
+
+(deftest flip-flop-test
+  (is (= [[0 :write 0]
+          [1 :read nil]
+          [1 :write 1]
+          [0 :finalize nil]
+          [0 :write 2]]
+         (->> (gen/flip-flop (map #(gen/once {:f :write, :value %}) (range))
+                             (map gen/once [{:f :read} {:f :finalize}]))
+              (gen/limit 10)
+              gen/clients
+              perfect
+              (map (juxt :process :f :value))))))

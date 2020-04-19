@@ -1121,3 +1121,19 @@
   with :type :ok."
   [gen]
   (UntilOk. gen false))
+
+(defrecord FlipFlop [gens i]
+  Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (op (nth gens i) test ctx)]
+      [op (FlipFlop. (assoc gens i gen')
+                     (mod (inc i) (count gens)))]))
+
+  (update [this test ctx event]
+    this))
+
+(defn flip-flop
+  "Emits an operation from generator A, then B, then A again, then B again,
+  etc. Stops as soon as any gen is exhausted. Updates are ignored."
+  [a b]
+  (FlipFlop. [a b] 0))

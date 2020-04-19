@@ -20,6 +20,7 @@
                     [nemesis :as n]
                     [util :as util :refer [majority
                                            random-nonempty-subset]]]
+            [jepsen.generator.pure :as gen.pure]
             [jepsen.nemesis.time :as nt]))
 
 (def default-interval

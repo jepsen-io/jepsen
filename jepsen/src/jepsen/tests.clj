@@ -22,7 +22,7 @@
    :remote    control/ssh
    :client    client/noop
    :nemesis   nemesis/noop
-   :generator gen/void
+   :generator nil
    :checker   (checker/unbridled-optimism)})
 
 (defn atom-db
