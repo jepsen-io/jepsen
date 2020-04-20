@@ -235,12 +235,23 @@
                                :strobe-clock          :strobe
                                :bump-clock            :bump}
                               (nt/clock-nemesis)})
-          gen     (->> (nt/clock-gen)
-                       (gen/f-map {:reset          :reset-clock
-                                   :check-offsets  :check-clock-offsets
-                                   :strobe         :strobe-clock
-                                   :bump           :bump-clock})
-                       (gen/delay (:interval opts default-interval)))]
+          db (:db opts)
+          target-specs (:targets (:clock opts) (node-specs db))
+          targets (fn [test] (db-nodes test db
+                                       (some-> target-specs seq rand-nth)))
+          clock-gen (gen/phases
+                     (gen/once {:type :info, :f :check-offsets})
+                     ;; Use a random subset of nodes, specificed by
+                     ;; `targets-specs`, as targets in the generators.
+                     (gen/mix [(reset-gen-select  targets)
+                               (bump-gen-select   targets)
+                               (strobe-gen-select targets)]))
+          gen (->> clock-gen
+                   (gen/f-map {:reset          :reset-clock
+                               :check-offsets  :check-clock-offsets
+                               :strobe         :strobe-clock
+                               :bump           :bump-clock})
+                   (gen/delay (:interval opts default-interval)))]
       {:generator         gen
        :final-generator   (gen/once {:type :info, :f :reset-clock})
        :nemesis           nemesis
