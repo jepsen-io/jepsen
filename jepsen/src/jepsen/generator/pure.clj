@@ -109,6 +109,16 @@
   - Instead of using *jepsen.generator/threads*, etc, use helper functions like
     some-free-process.
 
+  - Functions now take zero args (f) or a test and context map (f test ctx),
+    rather than (f test process).
+
+  - Maps are one-shot generators by default, rather than emitting themselves
+    indefinitely. This streamlines the most common use cases--things like (map
+    (fn [x] {:f :write, :value x}) (range)) produces a series of distinct,
+    monotonically increasing writes; (fn [] {:f :inc, :value (rand-nth 5)})
+    produces a series of random increments, rather than a series where every
+    value is the *same* (randomly selected) value, etc.
+
   # In More Detail
 
   A Jepsen history is a list of operations--invocations and completions. A
@@ -139,6 +149,84 @@
   ready invocation, we apply the invocation using the client, obtain a
   completion, and apply the completion back to the graph, obtaining a new
   graph.
+
+  ## By Example
+
+  Perform a single read
+
+    {:f :read}
+
+  Perform a single random write:
+
+    (fn [] {:f :write, :value (rand-int 5))
+
+  Perform 10 random writes. This is regular clojure.core/repeat:
+
+    (repeat 10 (fn [] {:f :write, :value (rand-int 5)))
+
+  Perform a sequence of 50 unique writes. We use regular Clojure sequence
+  functions here:
+
+    (->> (range)
+         (map (fn [x] {:f :write, :value (rand-int 5)}))
+         (take 50))
+
+  Write 3, then (possibly concurrently) read:
+
+    [{:f :write, :value 3} {:f :read}]
+
+  Since these might execute concurrently, the read might not observe the write.
+  To wait for the write to complete first:
+
+    (gen/phases {:f :write, :value 3}
+                {:f :read})
+
+  Have each thread independently perform a single increment, then read:
+
+    (gen/each [{:f :inc} {:f :read}])
+
+  Reserve 5 threads for reads, 10 threads for increments, and the remaining
+  threads reset a counter.
+
+    (gen/reserve 5  (repeat {:f :read})
+                 10 (repeat {:f :inc})
+                    (repeat {:f :reset}))
+
+  Perform a random mixture of unique writes and reads, randomly timed, at
+  roughly 10 Hz, for 30 seconds:
+
+    (->> (gen/mix [(repeat {:f :read})
+                   (map (fn [x] {:f :write, :value x}) (range))])
+         (gen/stagger 1/10)
+         (gen/time-limit 30))
+
+  While that's happening, have the nemesis alternate between
+  breaking and repairing something roughly every 5 seconds:
+
+    (->> (gen/mix [(repeat {:f :read})
+                   (map (fn [x] {:f :write, :value x}) (range))])
+         (gen/stagger 1/10)
+         (gen/nemesis (->> (cycle [{:f :break}
+                                   {:f :repair}])
+                           (gen/stagger 5)))
+         (gen/time-limit 30))
+
+  Follow this by a single nemesis repair (along with an informational log
+  message), wait 10 seconds for recovery, then have clients perform reads until
+  at least one succeeds.
+
+    (gen/phases (->> (gen/mix [(repeat {:f :read})
+                               (map (fn [x] {:f :write, :value x}) (range))])
+                     (gen/stagger 1/10)
+                     (gen/nemesis (->> (cycle [{:f :break}
+                                               {:f :repair}])
+                                       (gen/stagger 5)))
+                     (gen/time-limit 30))
+                (gen/log \"Recovering\")
+                (gen/nemesis {:f :repair})
+                (gen/sleep 10)
+                (gen/log \"Final read\")
+                (gen/clients (gen/until-ok {:f :read})))
 
   ## Contexts
 
@@ -222,16 +310,20 @@
   Nil is a valid generator; it ignores updates and always yields nil for
   operations.
 
-  IPersistentMaps are generators which ignore updates and return operations
-  which look like the map itself, but with default values for time, process,
-  and type provided based on the context. This means you can write a generator
-  like
+  IPersistentMaps are generators which ignore updates and return exactly one
+  operation which looks like the map itself, but with default values for time,
+  process, and type provided based on the context. This means you can write a
+  generator like
 
-  {:f :write, :value 2}
+    {:f :write, :value 2}
 
-  and it will generate (an endless series) of ops like
+  and it will generate a single op like
 
-  {:type :invoke, :process 3, :time 1234, :f :write, :value 2}
+    {:type :invoke, :process 3, :time 1234, :f :write, :value 2}
+
+  To produce an infinite series of ops drawn from the same map, use
+
+    (repeat {:f :write, :value 2}).
 
   Sequences are generators which assume the elements of the sequence are
   themselves generators. They ignore updates, and return all operations from
@@ -247,11 +339,8 @@
   generator; that generator is used until exhausted, and then the function is
   called again to produce a new generator. For instance:
 
-    ; A series of writes with the same (random) value, e.g. 2, 2, 2, ...
-    (fn [] {:f :write, :value (rand-int 5)})
-
     ; Produces a series of different random writes, e.g. 1, 5, 2, 3...
-    (fn [] (gen/once {:f :write, :value (rand-int 5)}))
+    (fn [] {:f :write, :value (rand-int 5)})
 
     ; Alternating write/read ops, e.g. write 2, read, write 5, read, ...
     (fn [] (map gen/once [{:f :write, :value (rand-int 5)}
@@ -352,17 +441,18 @@
   clojure.lang.IPersistentMap
   (update [this test ctx event] this)
   (op [this test ctx]
-    [(if-let [p (some-free-process ctx)]
+    (if-let [p (some-free-process ctx)]
        ; Automatically assign type, time, and process from the context, if not
        ; provided.
-       (cond-> this
+       [(cond-> this
          (nil? (:time this))     (assoc :time (:time ctx))
          (nil? (:process this))  (assoc :process p)
          (nil? (:type this))     (assoc :type :invoke))
+        nil]
 
        ; No process free to accept our request
-       :pending)
-     this])
+       [:pending this]))
+
   clojure.lang.AFunction
   (update [f test ctx event] f)
 
@@ -866,7 +956,7 @@
   "A generator which, when asked for an operation, logs a message and yields
   nil. Occurs only once; use `repeat` to repeat."
   [msg]
-  (once {:type :log, :value msg}))
+  {:type :log, :value msg})
 
 (defrecord Repeat [remaining gen]
   ; Remaining is positive for a limit, or -1 for infinite repeats.
@@ -1057,8 +1147,8 @@
   (DelayTil. (long (util/secs->nanos dt)) nil gen))
 
 (defn sleep
-  "Emits a special operation which causes its receiving process to do nothing
-  for dt seconds."
+  "Emits exactly one special operation which causes its receiving process to do
+  nothing for dt seconds. Use (repeat (sleep 10)) to sleep repeatedly."
   [dt]
   {:type :sleep, :value dt})
 

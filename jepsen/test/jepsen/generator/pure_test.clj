@@ -178,7 +178,7 @@
              :process 0
              :type :invoke
              :f :write}]
-           (perfect (gen/once {:f :write})))))
+           (perfect {:f :write}))))
 
   (testing "concurrent"
     (is (= [{:type :invoke, :process 0, :f :write, :time 0}
@@ -187,7 +187,7 @@
             {:type :invoke, :process :nemesis, :f :write, :time 10}
             {:type :invoke, :process 1, :f :write, :time 10}
             {:type :invoke, :process 0, :f :write, :time 10}]
-           (perfect (gen/limit 6 {:f :write})))))
+           (perfect (repeat 6 {:f :write})))))
 
   (testing "all threads busy"
     (is (= [:pending {:f :write}]
@@ -197,7 +197,7 @@
 (deftest limit-test
   (is (= [{:type :invoke :process 0 :time 0 :f :write :value 1}
           {:type :invoke :process 0 :time 0 :f :write :value 1}]
-         (->> {:f :write :value 1}
+         (->> (repeat {:f :write :value 1})
               (gen/limit 2)
               quick))))
 
@@ -216,16 +216,17 @@
           {:type :invoke, :process 0, :time 12, :f :write}
           {:type :invoke, :process 1, :time 12, :f :write}]
           (->> {:f :write}
-              (gen/delay-til 3e-9)
-              (gen/limit 5)
-              perfect))))
+               gen/repeat
+               (gen/delay-til 3e-9)
+               (gen/limit 5)
+               perfect))))
 
 (deftest seq-test
   (testing "vectors"
     (is (= [1 2 3]
-           (->> [(gen/once {:value 1})
-                 (gen/once {:value 2})
-                 (gen/once {:value 3})]
+           (->> [{:value 1}
+                 {:value 2}
+                 {:value 3}]
                 quick
                 (map :value)))))
 
@@ -234,13 +235,22 @@
            (->> [{:value 1}
                  {:value 2}
                  {:value 3}]
-                (map gen/once)
+                quick
+                (map :value)))))
+
+  (testing "nested"
+    (is (= [1 2 3 4 5]
+           (->> [[{:value 1}
+                  {:value 2}]
+                 [[{:value 3}]
+                  {:value 4}]
+                 {:value 5}]
                 quick
                 (map :value)))))
 
   (testing "updates propagate to first generator"
-    (let [gen (->> [(gen/until-ok {:f :read})
-                    (gen/once {:f :done})]
+    (let [gen (->> [(gen/until-ok (gen/repeat {:f :read}))
+                    {:f :done}]
                    (gen/clients))
           types (atom (concat [nil :fail :fail :ok :ok] (repeat :info)))]
       (is (= [[0 :read :invoke]
@@ -269,20 +279,20 @@
   (testing "returning a literal map"
     (let [ops (->> (fn [] {:f :write, :value (rand-int 10)})
                    (gen/limit 5)
-                   quick)]
+                   perfect)]
       (is (= 5 (count ops)))                      ; limit
-      (is (every? #(<= 0 % 10) (map :value ops))) ; random vals
-      (is (= 1 (count (set (map :value ops)))))   ; random vals
-      (is (every? #{0} (map :process ops)))))     ; processes assigned
-
-  (testing "returning once maps"
-    (let [ops (->> #(gen/once {:f :write, :value (rand-int 10)})
-                   (gen/limit 5)
-                   quick)]
-      (is (= 5 (count ops)))                      ; limit
-      (is (every? #(<= 0 % 10) (map :value ops))) ; random vals
+      (is (every? #(<= 0 % 10) (map :value ops))) ; legal vals
       (is (< 1 (count (set (map :value ops)))))   ; random vals
-      (is (every? #{0} (map :process ops))))))    ; processes assigned
+      (is (= #{0 1 :nemesis} (set (map :process ops)))))) ; processes assigned
+
+  (testing "returning repeat maps"
+    (let [ops (->> #(gen/repeat {:f :write, :value (rand-int 10)})
+                   (gen/limit 5)
+                   perfect)]
+      (is (= 5 (count ops)))                      ; limit
+      (is (every? #(<= 0 % 10) (map :value ops))) ; legal vals
+      (is (= 1 (count (set (map :value ops)))))   ; same vals
+      (is (= #{0 1 :nemesis} (set (map :process ops))))))) ; processes assigned
 
 (deftest on-update+promise-test
   ; We only fulfill p once the write has taken place.
@@ -293,17 +303,16 @@
             {:f :hold, :time 0, :process 0, :type :invoke}
             {:f :hold, :time 0, :process 0, :type :invoke}]
            (->> (gen/any p
-                         [(gen/once {:f :read})
-                          (gen/once {:f :write, :value :x})
+                         [{:f :read}
+                          {:f :write, :value :x}
                           ; We'll do p at this point, then return to hold.
-                          {:f :hold}])
+                          (repeat {:f :hold})])
                 ; We don't deliver p until after the write is complete.
                 (gen/on-update (fn [this test ctx event]
                                  (when (and (op/ok? event)
                                             (= :write (:f event)))
-                                   (deliver p (gen/once
-                                                {:f      :confirm
-                                                 :value  (:value event)})))
+                                   (deliver p {:f      :confirm
+                                               :value  (:value event)}))
                                  this))
                 (gen/limit 5)
                 quick)))))
@@ -323,18 +332,19 @@
                                     0        2
                                     1        1
                                     :nemesis 2)]
-                        (gen/once {:f :a
-                                   :process p
-                                   :time (+ (:time ctx) delay)})))
+                        {:f :a
+                         :process p
+                         :time (+ (:time ctx) delay)}))
                     (gen/limit 3))
                ; The latest process, the nemesis, should start at time 5 and
                ; finish at 15.
-               (gen/synchronize (gen/limit 2 {:f :b}))]
+               (gen/synchronize (repeat 2 {:f :b}))]
               perfect))))
 
 (deftest clients-test
   (is (= #{0 1}
          (->> {}
+              gen/repeat
               (gen/clients)
               (gen/limit 5)
               perfect
@@ -348,9 +358,9 @@
           [:c 0 20]
           [:c 1 20]
           [:c 1 30]]
-         (->> (gen/phases (gen/limit 2 {:f :a})
-                          (gen/limit 1 {:f :b})
-                          (gen/limit 3 {:f :c}))
+         (->> (gen/phases (repeat 2 {:f :a})
+                          (repeat 1 {:f :b})
+                          (repeat 3 {:f :c}))
               gen/clients
               perfect
               (map (juxt :f :process :time))))))
@@ -363,8 +373,8 @@
           [:b 1 0]
           [:a 0 20]
           [:b 1 20]]
-         (->> (gen/any (gen/on #{0} (gen/delay-til 20e-9 {:f :a}))
-                       (gen/on #{1} (gen/delay-til 20e-9 {:f :b})))
+         (->> (gen/any (gen/on #{0} (gen/delay-til 20e-9 (repeat {:f :a})))
+                       (gen/on #{1} (gen/delay-til 20e-9 (repeat {:f :b}))))
               (gen/limit 4)
               perfect
               (map (juxt :f :process :time))))))
@@ -377,7 +387,7 @@
           [10 1 :b]
           [10 0 :b]]
          ; Each thread now gets to evaluate [a b] independently.
-         (->> (gen/each-thread (map gen/once [{:f :a} {:f :b}]))
+         (->> (gen/each-thread [{:f :a} {:f :b}])
               perfect
               (map (juxt :time :process :f))))))
 
@@ -387,7 +397,6 @@
         concurrency (count (:workers default-context))
         ops         (->> (range n)
                          (map (fn [x] {:f :write, :value x}))
-                         (map gen/once)
                          (gen/stagger (util/nanos->secs dt))
                          perfect)
         times       (mapv :time ops)
@@ -400,14 +409,12 @@
   (is (= [{:type :invoke, :process 0, :time 0, :f :b, :value 2}]
          (->> {:f :a, :value 2}
               (gen/f-map {:a :b})
-              gen/once
               perfect))))
 
 (deftest filter-test
   (is (= [0 2 4 6 8]
          (->> (range)
               (map (fn [x] {:value x}))
-              (map gen/once)
               (gen/limit 10)
               (gen/filter (comp even? :value))
               perfect
@@ -415,16 +422,16 @@
 
 (deftest ^:logging log-test
   (is (->> (gen/phases (gen/log :first)
-                       (gen/once {:f :a})
+                       {:f :a}
                        (gen/log :second)
-                       (gen/once {:f :b}))
+                       {:f :b})
            perfect
            (map :f)
            (= [:a :b]))))
 
 (deftest mix-test
-  (let [fs (->> (gen/mix [(gen/limit 5  {:f :a})
-                          (gen/limit 10 {:f :b})])
+  (let [fs (->> (gen/mix [(repeat 5  {:f :a})
+                          (repeat 10 {:f :b})])
                 perfect
                 (map :f))]
     (is (= {:a 5
@@ -440,7 +447,6 @@
           [4 4]]
          (->> (range)
               (map (fn [x] {:value x}))
-              (map gen/once)
               (gen/process-limit 5)
               gen/clients
               perfect-info
@@ -452,8 +458,8 @@
           [20 :b] [20 :b] [20 :b]]
          ; We use two time limits in succession to make sure they initialize
          ; their limits appropriately.
-         (->> [(gen/time-limit (util/nanos->secs 20) {:value :a})
-               (gen/time-limit (util/nanos->secs 10) {:value :b})]
+         (->> [(gen/time-limit (util/nanos->secs 20) (gen/repeat {:value :a}))
+               (gen/time-limit (util/nanos->secs 10) (gen/repeat {:value :b}))]
               perfect
               (map (juxt :time :value))))))
 
@@ -461,8 +467,7 @@
   "A sequence of maps with :value 0, 1, 2, ..., and any other kv pairs."
   [& kv-pairs]
   (->> (range)
-       (map (fn [x] (apply hash-map :value x kv-pairs)))
-       (map gen/once)))
+       (map (fn [x] (apply hash-map :value x kv-pairs)))))
 
 (deftest reserve-test
   ; TODO: can you nest reserves properly? I suspect no.
@@ -512,7 +517,6 @@
                 (fn [k]
                   (->> (range)
                        (map (partial hash-map :type :invoke, :value))
-                       (map gen/once)
                        (gen/limit 3))))
               gen/clients
               perfect
@@ -547,31 +551,31 @@
                 [:k0 :k1 :k2 :k3 :k4] ; 5 keys
                 (fn [k]
                   (->> [:v0 :v1 :v2] ; Three values per key
-                       (map (partial hash-map :type :invoke, :value))
-                       (map gen/once))))
+                       (map (partial hash-map :type :invoke, :value)))))
               (perfect (n+nemesis-context 6)) ; 3 groups of 2 threads each
               (map (juxt :time :process :value))))))
 
 (deftest at-least-one-ok-test
   ; Our goal here is to ensure that at least one OK operation happens.
-  (is (= [0   0 :invoke
-          0   1 :invoke
-          10  1 :fail
-          10  1 :invoke
-          10  0 :fail
-          10  0 :invoke
-          20  0 :info
-          20  2 :invoke
-          20  1 :info
-          20  3 :invoke
-          30  3 :ok
-          30  2 :ok] ; They complete concurrently, so we get two oks
+  (is (= [[0   0 :invoke]
+          [0   1 :invoke]
+          [10  1 :fail]
+          [10  1 :invoke]
+          [10  0 :fail]
+          [10  0 :invoke]
+          [20  0 :info]
+          [20  2 :invoke]
+          [20  1 :info]
+          [20  3 :invoke]
+          [30  3 :ok]
+          [30  2 :ok]] ; They complete concurrently, so we get two oks
          (->> {:f :read}
+              repeat
               gen/until-ok
               (gen/limit 10)
               gen/clients
               imperfect
-              (mapcat (juxt :time :process :type))))))
+              (map (juxt :time :process :type))))))
 
 (deftest flip-flop-test
   (is (= [[0 :write 0]
@@ -579,8 +583,9 @@
           [1 :write 1]
           [0 :finalize nil]
           [0 :write 2]]
-         (->> (gen/flip-flop (map #(gen/once {:f :write, :value %}) (range))
-                             (map gen/once [{:f :read} {:f :finalize}]))
+         (->> (gen/flip-flop (map (fn [x] {:f :write, :value x}) (range))
+                             [{:f :read}
+                              {:f :finalize}])
               (gen/limit 10)
               gen/clients
               perfect
