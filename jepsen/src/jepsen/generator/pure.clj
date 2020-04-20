@@ -212,8 +212,8 @@
          (gen/time-limit 30))
 
   Follow this by a single nemesis repair (along with an informational log
-  message), wait 10 seconds for recovery, then have clients perform reads until
-  at least one succeeds.
+  message), wait 10 seconds for recovery, then have each thread perform reads
+  until that thread sees at least one OK operation.
 
     (gen/phases (->> (gen/mix [(repeat {:f :read})
                                (map (fn [x] {:f :write, :value x}) (range))])
@@ -226,7 +226,7 @@
                 (gen/nemesis {:f :repair})
                 (gen/sleep 10)
                 (gen/log \"Final read\")
-                (gen/clients (gen/until-ok {:f :read})))
+                (gen/clients (gen/each (gen/until-ok {:f :read}))))
 
   ## Contexts
 
@@ -464,15 +464,21 @@
 
   clojure.lang.Seqable
   (update [this test ctx event]
-    ; Updates are passed to the first generator in the sequence.
-    (cons (update (first this) test ctx event) (next this)))
+    (when (seq this)
+      ; Updates are passed to the first generator in the sequence.
+      (cons (update (first this) test ctx event) (next this))))
 
   (op [this test ctx]
     (when (seq this) ; Once we're out of generators, we're done
       (let [gen (first this)]
         (if-let [[op gen'] (op gen test ctx)]
-          ; OK, our first gen has an op for us.
-          [op (cons gen' (next this))]
+          ; OK, our first gen has an op for us. If there's something following
+          ; us, we generate a cons cell as our resulting generator; otherwise,
+          ; just whatever this first element's next gen state is.
+          [op (if-let [nxt (next this)]
+                (cons gen' (next this))
+                gen')]
+
           ; This generator is exhausted; move on
           (recur (next this) test ctx))))))
 

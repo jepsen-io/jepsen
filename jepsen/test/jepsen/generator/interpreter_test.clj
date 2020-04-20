@@ -45,9 +45,9 @@
                                   (invoke! [this test op] (assert false))
                                   (teardown! [this test]))
                       :generator
-                      (->> (gen/limit 2 {:f :read})
+                      (->> (repeat 2 {:f :read})
                            (gen/nemesis
-                             (gen/limit 2 {:type :info, :f :break}))))
+                             (repeat 2 {:type :info, :f :break}))))
           h           (util/with-relative-time (run! test))
           completions (remove op/invoke? h)
           err "indeterminate: Assert failed: false"]
@@ -117,7 +117,7 @@
 
 (deftest run!-test
   (let [time-limit 1
-        sleep-duration 1
+        sleep-duration 1/10
         test (assoc base-test
               :client (reify Client
                         (open! [this test node] this)
@@ -139,20 +139,20 @@
               :generator
               (gen/phases
                 (->> (gen/reserve 2 (->> (range)
-                                         (map (fn [x] {:f :write, :value x}))
-                                         (map gen/once))
-                                  5 (fn []
+                                         (map (fn [x] {:f :write, :value x})))
+                                  5 (fn cas-gen []
                                       {:f      :cas
                                        :value  [(rand-int 5) (rand-int 5)]})
-                                  {:f :read})
-                     (gen/nemesis (gen/mix [{:type :info, :f :break}
-                                            {:type :info, :f :repair}]))
+                                  (repeat {:f :read}))
+                     (gen/nemesis
+                       (gen/mix [(gen/repeat {:type :info, :f :break})
+                                 (gen/repeat {:type :info, :f :repair})]))
                      (gen/time-limit time-limit))
                 (gen/log "Recovering")
-                (gen/nemesis (gen/once {:type :info, :f :recover}))
-                (gen/once (gen/sleep sleep-duration))
+                (gen/nemesis {:type :info, :f :recover})
+                (gen/sleep sleep-duration)
                 (gen/log "Done recovering; final read")
-                (gen/clients (gen/until-ok {:f :read}))))
+                (gen/clients (gen/until-ok (repeat {:f :read})))))
         h    (util/with-relative-time (run! test))
         nemesis-ops (filter (comp #{:nemesis} :process) h)
         client-ops  (remove (comp #{:nemesis} :process) h)]
@@ -191,6 +191,7 @@
 
           (let [by-f (group-by :f mixed-clients)
                 n    (count mixed-clients)]
+            ; (pprint (util/map-vals (comp float #(/ % n) count) by-f))
             (testing "writes"
               (is (< 1/10 (/ (count (by-f :write)) n) 3/10))
               (is (distinct? (map :value (filter (comp #{:invoke} :type)
@@ -216,6 +217,6 @@
     (testing "fast enough"
       ; On my box, 25-28K ops/sec is typical with a sleep time of 0; with 1ms
       ; sleeps, 18K.
-      ; (prn (float (/ (count h) time-limit)))
-      (is (< 10000 (/ (count h) time-limit))))
+      (prn (float (/ (count h) time-limit)))
+      (is (< 10000 (float (/ (count h) time-limit)))))
     ))
