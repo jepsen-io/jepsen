@@ -11,7 +11,9 @@
 
   Big ol box of monads, really."
   (:refer-clojure :exclude [map concat delay seq filter await])
-  (:require [jepsen.util :as util]
+  (:require [dom-top.core :refer [assert+]]
+            [jepsen.util :as util]
+            [jepsen.generator.pure :as gen.pure]
             [knossos.history :as history]
             [clojure.core :as c]
             [clojure.walk :as walk]
@@ -26,6 +28,72 @@
 
 (defprotocol Generator
   (op [gen test process] "Yields an operation to apply."))
+
+(defrecord StatefulPure [stateful pure]
+  Generator
+  (op [_ test process] (op stateful test process)))
+
+(extend-protocol gen.pure/Generator
+  StatefulPure
+  (op [this test ctx]
+    (gen.pure/op (:pure this) test ctx))
+
+  (update [this test ctx event]
+    (gen.pure/update (:pure this) test ctx event)))
+
+; Compatibility layers for the stateful->pure transition
+(defn stateful+pure
+  "A wrapper which combines a stateful generator and a pure generator
+  (hopefully with the same semantics) into one package. For pure generators,
+  this wrapper disappears as soon as ops/updates occur."
+  [stateful pure]
+  (StatefulPure. stateful pure))
+
+(defn stateful?
+  "Can this object be considered a stateful generator?"
+  [x]
+  (satisfies? Generator x))
+
+(defn pure?
+  "Can this object be considered a pure generator?"
+  [x]
+  (satisfies? gen.pure/Generator x))
+
+(defn gen-type-
+  "Returns :stateful, :pure, :both, or nil, based on what the given generator
+  supports."
+  [x]
+  (if (stateful? x)
+    (if (pure? x)
+      :both
+      :stateful)
+    (if (pure? x)
+      :pure
+      nil)))
+
+(defn gen-type
+  "Returns :stateful, :pure, :both, or nil, based on what the given generator
+  can definitely support while remaining compatible with stateful generators.
+  For instance, functions are both stateful and pure generators, but their
+  behavior is incompatible, so we only consider them as stateful generators for
+  now."
+  [x]
+  (if (or (map? x)
+          (instance? clojure.lang.AFunction x))
+    :stateful
+    (gen-type- x)))
+
+(defn gens-type
+  "Given a collection of generators, returns :stateful if they're all stateful
+  generators, :pure if they're all pure generators, and :both if they're all
+  both. Throws if there's a mix."
+  [gens]
+  (let [types (c/map gen-type gens)]
+    (assert+ (apply = types)
+             {:type   ::mixed-generator-types
+              :gens   gens
+              :types  types})
+    (first types)))
 
 (defn op-and-validate
   "Wraps `op` to ensure we produce a valid operation for our

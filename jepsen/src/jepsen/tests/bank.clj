@@ -13,6 +13,7 @@
                     [checker :as checker]
                     [store :as store]
                     [util :as util]]
+            [jepsen.generator.pure :as gen.pure]
             [jepsen.checker.perf :as perf]
             [knossos.history :as history]
             [gnuplot.core :as g]))
@@ -25,7 +26,7 @@
 (defn transfer
   "Generator of a transfer: a random amount between two randomly selected
   accounts."
-  [test process]
+  [test _]
   {:type  :invoke
    :f     :transfer
    :value {:from    (rand-nth (:accounts test))
@@ -38,10 +39,18 @@
                              (-> op :value :to)))
               transfer))
 
+(def pure-diff-transfer
+  "Transfers only between different accounts."
+  (gen.pure/filter (fn [op] (not= (-> op :value :from)
+                                  (-> op :value :to)))
+                   transfer))
+
 (defn generator
   "A mixture of reads and transfers for clients."
   []
-  (gen/mix [diff-transfer read]))
+  (gen/stateful+pure
+    (gen/mix [diff-transfer read])
+    (gen.pure/mix [pure-diff-transfer read])))
 
 (defn err-badness
   "Takes a bank error and returns a number, depending on its type. Bigger

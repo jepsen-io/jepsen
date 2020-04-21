@@ -426,6 +426,7 @@
   "For a classic generator, spawns nemesis and clients, runs a single test
   case, and returns that case's history."
   [test]
+  (warn "Using impure generator")
   (let [history (atom [])
         test    (assoc test :history history)]
 
@@ -457,6 +458,7 @@
   "For a pure generator, uses generator/run! to run a test case, and returns
   that case's history."
   [test]
+  (info "Using pure generator")
   (gen.interpreter/run! test))
 
 (defn run-case!
@@ -574,7 +576,8 @@
                           ; Currently running histories
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
-              _    (info "Running test:\n" (with-out-str (pprint test)))
+              _    (info "Running test:\n" (binding [*print-length* 20]
+                                             (with-out-str (pprint test))))
               test (control/with-remote (:remote test)
                      (control/with-ssh (:ssh test)
                        (with-resources [sessions
