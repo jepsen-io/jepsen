@@ -1,8 +1,7 @@
 (ns jepsen.nemesis-test
-  (:use clojure.test
-        clojure.pprint
-        jepsen.nemesis)
+  (:use clojure.test)
   (:require [jepsen.client :as client]
+            [jepsen.nemesis :refer :all]
             [jepsen.control :as c]
             [jepsen.control.net :as net]
             [jepsen.util :refer [meh]]

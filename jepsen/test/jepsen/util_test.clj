@@ -1,7 +1,6 @@
 (ns jepsen.util-test
-  (:use clojure.test
-        clojure.pprint
-        jepsen.util))
+  (:use clojure.test)
+  (:require [jepsen.util :refer :all]))
 
 (deftest majority-test
   (is (= 1 (majority 0)))
@@ -78,11 +77,11 @@
 
 (deftest letr-test
   (testing "no bindings"
-    (is (= (letr []) nil))
-    (is (= (letr [] 1 2) 2)))
+    (is (= (letr [] nil) nil))
+    (is (= (letr [] (discard-ret-val 1) 2) 2)))
 
   (testing "standard bindings"
-    (is (= (letr [a 1, b a] 2 a) 1)))
+    (is (= (letr [a 1, b a] (discard-ret-val 2) a) 1)))
 
   (testing "early return"
     (let [side-effect (atom false)]
@@ -112,14 +111,14 @@
 
 (deftest timeout-test
   ; Fast operations pass through the inner result or exception.
-  (is ::success (timeout 1000 ::timed-out
-                         ::success))
+  (is (= ::success (timeout 1000 ::timed-out
+                            ::success)))
   (is (thrown? ArithmeticException
                (timeout 1000 ::timed-out
                         (/ 1 0))))
   ; Slow operations are interrupted and return timeout value.
-  (is ::timed-out (timeout 10 ::timed-out
-                           (Thread/sleep 1000)))
+  (is (= ::timed-out (timeout 10 ::timed-out
+                              (Thread/sleep 1000))))
   ; This is a more complicated version of the previous test that
   ; verifies that the function is interrupted when a timeout occurs.
   (let* [p (promise)
@@ -129,8 +128,8 @@
                         (deliver p ::finished)
                         (catch InterruptedException e
                           (deliver p ::exception))))]
-    (is ::timed-out ret)
-    (is ::exception (deref p 10 ::timed-out))))
+    (is (= ::timed-out ret))
+    (is (= ::exception (deref p 10 ::timed-out)))))
 
 (deftest lazy-atom-test
   (testing "reads"

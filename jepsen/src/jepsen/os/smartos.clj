@@ -1,7 +1,7 @@
 (ns jepsen.os.smartos
   "Common tasks for SmartOS boxes."
-  (:use clojure.tools.logging)
   (:require [clojure.set :as set]
+            [clojure.tools.logging :refer [info]]
             [jepsen.util :refer [meh]]
             [jepsen.os :as os]
             [jepsen.control :as c]
@@ -95,7 +95,7 @@
      (for [[pkg version] pkgs]
        (when (not= version (installed-version pkg))
          (info "Installing" pkg version)
-         (c/exec :pkgin :-y :install 
+         (c/exec :pkgin :-y :install
                  (str (name pkg) "-" version)))))
 
                                         ; Install any version

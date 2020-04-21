@@ -241,7 +241,7 @@
 ;(defn all-loggers []
 ;  (->> (org.apache.log4j.LogManager/getCurrentLoggers)
 ;       (java.util.Collections/list)
-;       (cons (org.apache.log4j.LogManager/getRootLogger)))) 
+;       (cons (org.apache.log4j.LogManager/getRootLogger))))
 
 (defn all-jdk-loggers []
   (let [manager (java.util.logging.LogManager/getLogManager)]
@@ -842,3 +842,10 @@
           (when (re-find #"invoke" (.getName method))
             (alength (.getParameterTypes method))))
         (-> c .getDeclaredMethods)))
+
+(defn discard-ret-val
+  "Discard the return value of the argument, useful for avoiding the
+  `unused-ret-vals` warning by the `eastwood` linter."
+  [x]
+  (let [_ x]
+    nil))

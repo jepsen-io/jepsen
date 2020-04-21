@@ -1,7 +1,7 @@
 (ns jepsen.os.centos
   "Common tasks for CentOS boxes."
-  (:use clojure.tools.logging)
   (:require [clojure.set :as set]
+            [clojure.tools.logging :refer [info]]
             [jepsen.util :refer [meh]]
             [jepsen.os :as os]
             [jepsen.control :as c]
@@ -44,7 +44,7 @@
          (update!))))
 
 (defmacro dprint [x]
-  `((fn [x#] do
+  `((fn [x#] ; XXX: 'Could not resolve var: do
       x#) ~x))
 
 (defn installed
@@ -126,7 +126,7 @@
 (defn installed-start-stop-daemon?
   "Is start-stop-daemon Installed?"
   []
-  (->> (c/exec :ls :/usr/bin)
+  (->> (c/exec :ls "/usr/bin")
        str/split-lines
        (some #(if (re-find #"start-stop-daemon" %) true))))
 

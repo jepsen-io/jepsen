@@ -46,7 +46,7 @@
                      nil
                      (catch Exception e
                        (warn e "Error opening client")
-                       (set (.client this) nil)
+                       (set! (.client this) nil)
                        (assoc op
                               :type :fail
                               :error [:no-client (.getMessage e)])))]
@@ -231,7 +231,7 @@
                     (do (doseq [[thread queue] invocations]
                           (.put ^ArrayBlockingQueue queue {:type :exit}))
                         ; Wait for exit
-                        (mapv (comp deref :future) workers)
+                        (util/discard-ret-val (mapv (comp deref :future) workers))
                         (persistent! history)))
 
               ; Nothing we can do right now. Let's try to complete something.
@@ -268,7 +268,7 @@
         ; We only try to cancel each worker *once*--if we try to cancel
         ; multiple times, we might interrupt a worker while it's in the finally
         ; block, cleaning up its client.
-        (mapv (comp future-cancel :future) workers)
+        (util/discard-ret-val (mapv (comp future-cancel :future) workers))
         ; If for some reason *that* doesn't work, we ask them all to exit via
         ; their queue.
         (loop [unfinished workers]
@@ -279,4 +279,3 @@
                 (do (.offer ^java.util.Queue in {:type :exit})
                     (recur unfinished))))))
         (throw t)))))
-

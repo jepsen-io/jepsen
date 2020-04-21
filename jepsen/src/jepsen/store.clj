@@ -2,6 +2,7 @@
   "Persistent storage for test runs and later analysis."
   (:refer-clojure :exclude [load])
   (:require [clojure.data.fressian :as fress]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure [string :as str]
                      [walk :as walk]]
@@ -235,7 +236,7 @@
                      (io/reader (path {:name       test-name
                                        :start-time test-time}
                                       "results.edn")))]
-    (clojure.edn/read {:default default-edn-reader} file)))
+    (edn/read {:default default-edn-reader} file)))
 
 (def memoized-load-results (memoize load-results))
 
@@ -312,7 +313,7 @@
           dest (.. FileSystems
                    getDefault
                    (getPath base-dir (into-array dest)))]
-      (Files/deleteIfExists dest)
+      (util/discard-ret-val (Files/deleteIfExists dest))
       (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
                                 (make-array FileAttribute 0)))))
 

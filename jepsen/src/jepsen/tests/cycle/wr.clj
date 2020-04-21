@@ -8,7 +8,7 @@
 
 (def gen
   "Wrapper around rw-checker/gen."
-  (comp gen/seq (partial r/gen)))
+  (comp gen/seq r/gen))
 
 (defn checker
   "Full checker for write-read registers. Options are:
