@@ -60,7 +60,7 @@
                     :ssh    {:dummy? true})]
     (is (thrown-with-msg? RuntimeException #"^hi$" (run! test)))))
 
-(deftest ^:integration ^:test-refresh/focus basic-cas-test
+(deftest ^:integration basic-cas-test
   (testing "classic generator"
     (let [state (atom nil)
           meta  (atom [])

@@ -199,6 +199,8 @@
         (if-let [op' (.poll completions poll-timeout TimeUnit/MICROSECONDS)]
           (let [thread (gen/process->thread ctx (:process op'))
                 time    (util/relative-time-nanos)
+                ; Update op with new timestamp
+                op'     (assoc op' :time time)
                 ; Update context with new time and thread being free
                 ctx     (-> ctx
                             (assoc :time time)
