@@ -842,10 +842,3 @@
           (when (re-find #"invoke" (.getName method))
             (alength (.getParameterTypes method))))
         (-> c .getDeclaredMethods)))
-
-(defn discard-ret-val
-  "Discard the return value of the argument, useful for avoiding the
-  `unused-ret-vals` warning by the `eastwood` linter."
-  [x]
-  (let [_ x]
-    nil))

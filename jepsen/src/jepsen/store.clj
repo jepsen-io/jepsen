@@ -312,8 +312,8 @@
     (let [src  (.toPath (path test))
           dest (.. FileSystems
                    getDefault
-                   (getPath base-dir (into-array dest)))]
-      (util/discard-ret-val (Files/deleteIfExists dest))
+                   (getPath base-dir (into-array dest)))
+          _    (Files/deleteIfExists dest)]
       (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
                                 (make-array FileAttribute 0)))))
 
