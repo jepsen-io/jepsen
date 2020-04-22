@@ -2,7 +2,7 @@
   "Common tasks for CentOS boxes."
   (:require [clojure.set :as set]
             [clojure.tools.logging :refer [info]]
-            [jepsen.util :refer [meh]]
+            [jepsen.util :as u]
             [jepsen.os :as os]
             [jepsen.control :as c]
             [jepsen.control.util :as cu]
@@ -43,10 +43,6 @@
        (catch Exception e
          (update!))))
 
-(defmacro dprint [x]
-  `((fn [x#] ; XXX: 'Could not resolve var: do
-      x#) ~x))
-
 (defn installed
   "Given a list of centos packages (strings, symbols, keywords, etc), returns
   the set of packages which are installed, as strings."
@@ -58,7 +54,7 @@
          (map (comp second (partial re-find #"(.*)\.[^\-]+")))
          set
          ((partial clojure.set/intersection pkgs))
-         dprint)))
+         u/spy)))
 
 (defn uninstall!
   "Removes a package or packages."
@@ -155,7 +151,7 @@
 
     (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
-    (meh (net/heal! (:net test) test)))
+    (u/meh (net/heal! (:net test) test)))
 
   (teardown! [_ test node]))
 
