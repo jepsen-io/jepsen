@@ -391,15 +391,8 @@ Options:\n")
                                          (merge cli-test)
                                          (assoc :history
                                                 (:history stored-test)))]
-
-                            ;; XXX: constant-test: Test expression is always logical
-                            ;; true or always logical false: (clojure.core/map?
-                            ;; m__8038__auto__) in form (if (clojure.core/map?
-                            ;; m__8038__auto__) (clojure.core/ex-info "Assert
-                            ;; failed" m__8038__auto__) (new
-                            ;; IllegalStateException m__8038__auto__))
-                            ;; (assert+ stored-test IllegalStateException
-                            ;;          "Not sure what the last test was")
+                            (assert+ stored-test IllegalStateException
+                                     "Not sure what the last test was")
                             (assert+ (= (:name stored-test)
                                         (:name cli-test))
                                      IllegalStateException
