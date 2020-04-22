@@ -78,10 +78,10 @@
 (deftest letr-test
   (testing "no bindings"
     (is (= (letr [] nil) nil))
-    (is (= (letr [] (discard-ret-val 1) 2) 2)))
+    (is (= (letr [] 1 2) 2)))
 
   (testing "standard bindings"
-    (is (= (letr [a 1, b a] (discard-ret-val 2) a) 1)))
+    (is (= (letr [a 1, b a] 2 a) 1)))
 
   (testing "early return"
     (let [side-effect (atom false)]
