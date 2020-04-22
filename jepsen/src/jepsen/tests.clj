@@ -33,29 +33,36 @@
     (teardown! [db test node] (reset! state :done))))
 
 (defn atom-client
-  "A CAS client which uses an atom for state."
-  [state]
-  (reify client/Client
-    (open!     [this test node] this)
-    (setup!    [this test])
-    (teardown! [this test])
-    (close!    [this test])
-    (invoke!   [this test op]
-      ; We sleep here to make sure we actually have some concurrency.
-      (Thread/sleep 2)
-      (case (:f op)
-        :write (do (reset! state   (:value op))
-                   (assoc op :type :ok))
+  "A CAS client which uses an atom for state. Should probably move this into
+  core-test."
+  ([state]
+   (atom-client state (atom [])))
+  ([state meta-log]
+   (reify client/Client
+     (open!     [this test node]
+       (swap! meta-log conj :open)
+       this)
+     (setup!    [this test]
+       (swap! meta-log conj :setup)
+       this)
+     (teardown! [this test] (swap! meta-log conj :teardown))
+     (close!    [this test] (swap! meta-log conj :close))
+     (invoke!   [this test op]
+       ; We sleep here to make sure we actually have some concurrency.
+       (Thread/sleep 1)
+       (case (:f op)
+         :write (do (reset! state   (:value op))
+                    (assoc op :type :ok))
 
-        :cas   (let [[cur new] (:value op)]
-                 (try
-                   (swap! state (fn [v]
-                                  (if (= v cur)
-                                    new
-                                    (throw (RuntimeException. "CAS failed")))))
-                   (assoc op :type :ok)
-                   (catch RuntimeException e
-                     (assoc op :type :fail))))
+         :cas   (let [[cur new] (:value op)]
+                  (try
+                    (swap! state (fn [v]
+                                   (if (= v cur)
+                                     new
+                                     (throw (RuntimeException. "CAS failed")))))
+                    (assoc op :type :ok)
+                    (catch RuntimeException e
+                      (assoc op :type :fail))))
 
-        :read  (assoc op :type :ok
-                      :value @state)))))
+         :read  (assoc op :type :ok
+                       :value @state))))))

@@ -454,12 +454,35 @@
 
     @history))
 
+(defmacro with-client-setup-teardown
+  "Evaluates body, setting up clients before, and tearing them down at the end
+  of the test."
+  [test & body]
+  `(let [client# (:client ~test)]
+    ; Setup
+    (try (real-pmap (fn [node#]
+                      (client/with-client [c# (client/open! client# ~test node#)]
+                        (client/setup! c# ~test)))
+                    (:nodes ~test))
+
+         ; Actually run generator
+         (gen.interpreter/run! ~test)
+
+         (finally
+           ; Teardown
+           (real-pmap (fn [node#]
+                        (client/with-client [c# (client/open! client# ~test node#)]
+                          (client/teardown! c# ~test)))
+                      (:nodes ~test))))))
+
 (defn run-case-pure-generator!
   "For a pure generator, uses generator/run! to run a test case, and returns
   that case's history."
   [test]
   (info "Using pure generator")
-  (gen.interpreter/run! test))
+  (with-client-setup-teardown test
+    ; Actually run generator
+    (gen.interpreter/run! test)))
 
 (defn run-case!
   "Takes a test, spawns nemesis and clients, runs the generator, and returns

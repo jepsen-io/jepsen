@@ -117,3 +117,15 @@
   "Wraps a client, validating that its return types are what you'd expect."
   [client]
   (Validate. client))
+
+(defmacro with-client
+  "Analogous to with-open. Takes a binding of the form [client-sym
+  client-expr], and a body. Binds client-sym to client-expr (presumably,
+  client-expr opens a new client), evaluates body with client-sym bound, and
+  ensures client is closed before returning."
+  [[client-sym client-expr] & body]
+  `(let [~client-sym ~client-expr]
+     (try
+       ~@body
+       (finally
+         (close! ~client-sym test)))))

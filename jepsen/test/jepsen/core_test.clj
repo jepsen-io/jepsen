@@ -60,15 +60,16 @@
                     :ssh    {:dummy? true})]
     (is (thrown-with-msg? RuntimeException #"^hi$" (run! test)))))
 
-(deftest ^:integration basic-cas-test
+(deftest ^:integration ^:test-refresh/focus basic-cas-test
   (testing "classic generator"
     (let [state (atom nil)
+          meta  (atom [])
           db    (tst/atom-db state)
           n     10
           test  (run! (assoc tst/noop-test
                              :name       "basic cas"
                              :db         (tst/atom-db state)
-                             :client     (tst/atom-client state)
+                             :client     (tst/atom-client state meta)
                              :generator  (->> gen/cas
                                               (gen/limit n)
                                               (gen/nemesis gen/void))
@@ -77,23 +78,28 @@
 
   (testing "pure generator"
     (let [state (atom nil)
+          meta-log (atom [])
           db    (tst/atom-db state)
-          n     100
+          n     1000
           test  (run!
                   (assoc tst/noop-test
                          :name      "basic cas pure-gen"
                          :db        (tst/atom-db state)
-                         :client    (tst/atom-client state)
+                         :client    (tst/atom-client state meta-log)
                          :concurrency 10
                          :generator
-                         (->> (gen.pure/reserve
-                                5 {:f :read}
-                                (gen.pure/mix
-                                  [(fn [] {:f :write, :value (rand-int 5)})
-                                   (fn [] {:f :cas, :value [(rand-int 5)
-                                                            (rand-int 5)]})]))
-                              (gen.pure/limit n)
-                              (gen.pure/nemesis nil))))
+                         (gen.pure/phases
+                           {:f :read}
+                           (->> (gen.pure/reserve
+                                  5 (repeat {:f :read})
+                                  (gen.pure/mix
+                                    [(fn [] {:f :write
+                                             :value (rand-int 5)})
+                                     (fn [] {:f :cas
+                                             :value [(rand-int 5)
+                                                     (rand-int 5)]})]))
+                                (gen.pure/limit n)
+                                (gen.pure/clients)))))
           h (:history test)
           invokes  (partial filter op/invoke?)
           oks      (partial filter op/ok?)
@@ -105,13 +111,30 @@
           smol-vec? #(and (vector? %)
                           (= 2 (count %))
                           (every? smol? %))]
+      (testing "db teardown"
+        (is (= :done @state)))
+
+      (testing "client setup/teardown"
+        (let [setup     (take 15 @meta-log)
+              run       (->> @meta-log (drop 15) (drop-last 15))
+              teardown  (take-last 15 @meta-log)]
+          (is (= {:open 5
+                  :setup 5
+                  :close 5}
+                 (frequencies setup)))
+          (is (= {:open 10 :close 10} (frequencies run)))
+          (is (= {:open 5 :teardown 5 :close 5} (frequencies teardown)))))
+
       (is (:valid? (:results test)))
-      (is (= (* 2 n) (count h)))
-      (is (= #{:read :write :cas} (set (map :f h))))
-      (is (every? nil? (values (invokes (reads h)))))
-      (is (every? smol? (values (oks (reads h)))))
-      (is (every? smol? (values (writes h))))
-      (is (every? smol-vec? (values (cases h)))))))
+      (testing "first read"
+        (is (= 0 (:value (first (oks (reads h)))))))
+      (testing "history"
+        (is (= (* 2 (+ 1 n)) (count h)))
+        (is (= #{:read :write :cas} (set (map :f h))))
+        (is (every? nil? (values (invokes (reads h)))))
+        (is (every? smol? (values (oks (reads h)))))
+        (is (every? smol? (values (writes h))))
+        (is (every? smol-vec? (values (cases h))))))))
 
 (deftest ^:integration ssh-test
   (let [os-startups  (atom {})
