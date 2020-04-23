@@ -13,6 +13,7 @@
   (:require [jepsen.checker :as checker]
             [jepsen.generator :as gen]
             [jepsen.independent :as independent]
+            [jepsen.generator.pure :as gen.pure]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.tools.logging :refer :all]
@@ -97,15 +98,31 @@
   {:checker   (checker/compose
                {:perf       (checker/perf)
                 :sequential (independent/checker (checker))})
-   :generator (let [n      (count (:nodes opts))
-                    reads  (r)
-                    writes (->> (range)
-                                (map w)
-                                gen/seq)]
-                (independent/concurrent-generator
-                 n
-                 (range)
-                 (fn [k]
-                   (->> (gen/mix [reads writes])
-                        (gen/stagger 1/100)
-                        (gen/limit (:per-key-limit opts 500))))))})
+   :generator (gen/stateful+pure
+                (let [n      (count (:nodes opts))
+                      reads  (r)
+                      writes (->> (range)
+                                  (map w)
+                                  gen/seq)]
+                  (independent/concurrent-generator
+                    n
+                    (range)
+                    (fn [k]
+                      (->> (gen/mix [reads writes])
+                           (gen/stagger 1/100)
+                           (gen/limit (:per-key-limit opts 500))))))
+                (let [n       (count (:nodes opts))
+                      reads   {:f :read}
+                      writes  (map (fn [x] {:f :write, :value x}) (range))]
+                  (independent/pure-concurrent-generator
+                    n
+                    (range)
+                    (fn [k]
+                      ; TODO: I'm not entirely sure this is the same--I
+                      ; thiiiink the original generator didn't actually mean to
+                      ; re-use the same write generator for each distinct key,
+                      ; but if it *did* and relied on that behavior, this will
+                      ; break.
+                      (->> (gen.pure/mix [reads writes]
+                           (gen.pure/stagger 1/100)
+                           (gen/limit (:per-key-limit opts 500))))))))})

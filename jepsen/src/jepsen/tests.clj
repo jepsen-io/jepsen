@@ -5,7 +5,6 @@
             [jepsen.client :as client]
             [jepsen.control :as control]
             [jepsen.nemesis :as nemesis]
-            [jepsen.generator :as gen]
             [knossos.model :as model]
             [jepsen.checker :as checker]
             [jepsen.net :as net]))

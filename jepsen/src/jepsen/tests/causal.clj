@@ -4,6 +4,7 @@
              [checker :as checker]
              [generator :as gen]
              [independent :as independent]]
+            [jepsen.generator.pure :as gen.pure]
             [knossos
              [op :as op]]
             [clojure.tools.logging :refer [info warn]]
@@ -115,16 +116,29 @@
 (defn cw1 [_ _] {:type :invoke, :f :write, :value 1})
 (defn cw2 [_ _] {:type :invoke, :f :write, :value 2})
 
-(defn test [opts]
+(defn test
+  [opts]
   {:checker (independent/checker (check (causal-register)))
-   :generator (->> (independent/concurrent-generator
-                    1
-                    (range)
-                    (fn [k] (gen/seq [ri cw1 r cw2 r])))
-                   (gen/stagger 1)
-                   (gen/nemesis
-                    (gen/seq (cycle [(gen/sleep 10)
-                                     {:type :info, :f :start}
-                                     (gen/sleep 10)
-                                     {:type :info, :f :stop}])))
-                   (gen/time-limit (:time-limit opts)))})
+   :generator (gen/stateful+pure
+                (->> (independent/concurrent-generator
+                       1
+                       (range)
+                       (fn [k] (gen/seq [ri cw1 r cw2 r])))
+                     (gen/stagger 1)
+                     (gen/nemesis
+                       (gen/seq (cycle [(gen/sleep 10)
+                                        {:type :info, :f :start}
+                                        (gen/sleep 10)
+                                        {:type :info, :f :stop}])))
+                     (gen/time-limit (:time-limit opts)))
+                (->> (independent/pure-concurrent-generator
+                       1
+                       (range)
+                       (fn [k] [ri cw1 r cw2 r]))
+                     (gen.pure/stagger 1)
+                     (gen.pure/nemesis
+                       (cycle [(gen.pure/sleep 10)
+                               {:type :info, :f :start}
+                               (gen.pure/sleep 10)
+                               {:type :info, :f :stop}]))
+                     (gen.pure/time-limit (:time-limit opts))))})

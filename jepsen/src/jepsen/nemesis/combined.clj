@@ -112,8 +112,12 @@
                           :value  (rand-nth pause-targets)})
 
         ; Flip-flop generators
-        kill-start   (gen/flip-flop kill start)
-        pause-resume (gen/flip-flop pause resume)
+        kill-start   (gen/stateful+pure
+                       (gen/flip-flop kill start)
+                       (gen.pure/flip-flop kill (repeat start)))
+        pause-resume (gen/stateful+pure
+                       (gen/flip-flop pause resume)
+                       (gen.pure/flip-flop pause (repeat resume)))
 
         ; Automatically generate nemesis failure modes based on what the DB
         ; supports.
@@ -125,7 +129,9 @@
                  pause? (conj resume)
                  kill?  (conj start))]
     {:generator       (gen/mix modes)
-     :final-generator (gen/seq final)}))
+     :final-generator (gen/stateful+pure
+                        (gen/seq final)
+                        final)}))
 
 (defn db-package
   "A nemesis and generator package for acting on a single DB. Options are from
@@ -133,7 +139,11 @@
   [opts]
   (when (some #{:kill :pause} (:faults opts))
     (let [{:keys [generator final-generator]} (db-generators opts)
-          generator (gen/delay (:interval opts default-interval) generator)
+          generator (gen/stateful+pure
+                      (gen/delay (:interval opts default-interval)
+                                 generator)
+                      (gen.pure/delay-til (:interval opts default-interval)
+                                          generator))
           nemesis   (db-nemesis (:db opts))]
       {:generator       generator
        :final-generator final-generator
@@ -215,10 +225,15 @@
                            :f     :start-partition
                            :value (rand-nth targets)})
           stop  {:type :info, :f :stop-partition, :value nil}
-          gen   (->> (gen/flip-flop start stop)
-                     (gen/delay (:interval opts default-interval)))]
+          gen   (gen/stateful+pure
+                  (->> (gen/flip-flop start stop)
+                       (gen/delay (:interval opts default-interval)))
+                  (->> (gen.pure/flip-flop start (repeat stop))
+                       (gen.pure/delay-til (:interval opts default-interval))))]
       {:generator       gen
-       :final-generator (gen/once stop)
+       :final-generator (gen/stateful+pure
+                          (gen/once stop)
+                          stop)
        :nemesis         (partition-nemesis db)
        :perf            #{{:name  "partition"
                            :start #{:start-partition}
@@ -235,14 +250,24 @@
                                :strobe-clock          :strobe
                                :bump-clock            :bump}
                               (nt/clock-nemesis)})
-          gen     (->> (nt/clock-gen)
-                       (gen/f-map {:reset          :reset-clock
-                                   :check-offsets  :check-clock-offsets
-                                   :strobe         :strobe-clock
-                                   :bump           :bump-clock})
-                       (gen/delay (:interval opts default-interval)))]
+          gen     (gen/stateful+pure
+                    (->> (nt/clock-gen)
+                         (gen/f-map {:reset          :reset-clock
+                                     :check-offsets  :check-clock-offsets
+                                     :strobe         :strobe-clock
+                                     :bump           :bump-clock})
+                         (gen/delay (:interval opts default-interval)))
+                    (->> (nt/clock-gen)
+                         (gen.pure/f-map {:reset          :reset-clock
+                                     :check-offsets  :check-clock-offsets
+                                     :strobe         :strobe-clock
+                                     :bump           :bump-clock})
+                         (gen.pure/delay-til
+                           (:interval opts default-interval))))]
       {:generator         gen
-       :final-generator   (gen/once {:type :info, :f :reset-clock})
+       :final-generator   (gen/stateful+pure
+                            (gen/once {:type :info, :f :reset-clock})
+                            {:type :info, :f :reset-clock})
        :nemesis           nemesis
        :perf              #{{:name  "clock"
                              :start #{:bump-clock}
@@ -255,9 +280,13 @@
   one. Generators are mixed together randomly; final generators proceed
   sequentially."
   [packages]
-  {:generator       (gen/mix    (map  :generator packages))
-   :final-generator (apply gen/concat (keep :final-generator packages))
-   :nemesis         (n/compose  (map  :nemesis packages))
+  {:generator       (gen/stateful+pure
+                      (gen/mix (map :generator packages))
+                      (gen.pure/mix (map :generator packages)))
+   :final-generator (gen/stateful+pure
+                      (apply gen/concat (keep :final-generator packages))
+                      (apply concat (keep :final-generator packages)))
+   :nemesis         (n/compose (map :nemesis packages))
    :perf            (reduce into #{} (map :perf packages))})
 
 (defn nemesis-packages

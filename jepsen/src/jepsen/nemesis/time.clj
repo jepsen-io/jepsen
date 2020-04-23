@@ -7,6 +7,7 @@
                     [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]]
+            [jepsen.generator.pure :as gen.pure]
             [clojure.string :as str]
             [clojure.java.io :as io])
   (:import (java.io File)))
@@ -141,13 +142,13 @@
 (defn reset-gen
   "Randomized reset generator. Performs resets on random subsets of the tests'
   nodes."
-  [test process]
+  [test _]
   {:type :info, :f :reset, :value (util/random-nonempty-subset (:nodes test))})
 
 (defn bump-gen
   "Randomized clock bump generator. On random subsets of nodes, bumps the clock
   from -262 to +262 seconds, exponentially distributed."
-  [test process]
+  [test _]
   {:type  :info
    :f     :bump
    :value (zipmap (util/random-nonempty-subset (:nodes test))
@@ -159,7 +160,7 @@
   "Randomized clock strobe generator. On random subsets of the test's nodes,
   introduces clock strobes from 4 ms to 262 seconds, with a period of 1 ms to
   1 second, for a duration of 0-32 seconds."
-  [test process]
+  [test _]
   {:type  :info
    :f     :strobe
    :value (zipmap (util/random-nonempty-subset (:nodes test))
@@ -172,6 +173,10 @@
   "Emits a random schedule of clock skew operations. Always starts by checking
   the clock offsets to establish an initial bound."
   []
-  (gen/phases
-    (gen/once {:type :info, :f :check-offsets})
-    (gen/mix [reset-gen bump-gen strobe-gen])))
+  (gen/stateful+pure
+    (gen/phases
+      (gen/once {:type :info, :f :check-offsets})
+      (gen/mix [reset-gen bump-gen strobe-gen]))
+    (gen.pure/phases
+      {:type :info, :f :check-offsets}
+      (gen.pure/mix [reset-gen bump-gen strobe-gen]))))

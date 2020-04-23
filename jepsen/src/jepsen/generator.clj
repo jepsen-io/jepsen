@@ -445,7 +445,7 @@
   (op [_ test process]
       (op (rand-nth gens) test process)))
 
-(defn mix
+(defn mix-
   "A random mixture of operations. Takes a collection of generators and chooses
   between them uniformly. If the collection is empty, generator returns nil."
   [gens]
@@ -453,6 +453,16 @@
     (if (empty? gens)
       void
       (Mix. (vec gens)))))
+
+(defn mix
+  "A random mixture of operations. Takes a collection of generators and chooses
+  between them uniformly. If the collection is empty, generator returns nil."
+  [gens]
+  (case (gens-type gens)
+    :stateful (mix- gens)
+    :pure     (gen.pure/mix gens)
+    :both     (stateful+pure (mix- gens)
+                             (gen.pure/mix gens))))
 
 ;; Test-specific generators -- should probably move these to jepsen.tests/*
 (def cas

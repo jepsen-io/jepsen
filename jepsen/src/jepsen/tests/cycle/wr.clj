@@ -6,9 +6,12 @@
                     [generator :as gen]
                     [store :as store]]))
 
-(def gen
+(defn gen
   "Wrapper around rw-checker/gen."
-  (comp gen/seq (partial r/gen)))
+  [opts]
+  (gen/stateful+pure
+    (gen/seq (r/gen opts))
+    (r/gen opts)))
 
 (defn checker
   "Full checker for write-read registers. Options are:

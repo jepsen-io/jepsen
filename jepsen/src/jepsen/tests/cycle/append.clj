@@ -21,9 +21,12 @@
                           (store/path! test (:subdirectory opts) "elle")))
                  history)))))
 
-(def gen
+(defn gen
   "Wrapper for elle.list-append/gen; as a Jepsen generator."
-  (comp gen/seq (partial la/gen)))
+  [opts]
+  (gen/stateful+pure
+    (gen/seq (la/gen opts))
+    (la/gen opts)))
 
 (defn test
   "A partial test, including a generator and checker. You'll need to provide a

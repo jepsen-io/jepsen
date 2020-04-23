@@ -421,6 +421,12 @@
        (keep (fn [[t p]] (when (= process p) t)))
        first))
 
+(defn thread->process
+  "Takes a context and a thread, and returns the process this thread is
+  currently executing."
+  [context thread]
+  (get (:workers context) thread))
+
 (defn next-process
   "When a process being executed by a thread crashes, this function returns the
   next process for a given thread. You should probably only use this with the
