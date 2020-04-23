@@ -664,9 +664,9 @@
           (op source test process)))))
 
 (defn on
-  [f source]
   "Forwards operations to source generator iff (f thread) is true. Rebinds
   *threads* appropriately."
+  [f source]
   (On. f source))
 
 (defgenerator Reserve [gens default]

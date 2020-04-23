@@ -23,7 +23,7 @@
 
 (def gen
   "Wrapper for elle.list-append/gen; as a Jepsen generator."
-  (comp gen/seq (partial la/gen)))
+  (comp gen/seq la/gen))
 
 (defn test
   "A partial test, including a generator and checker. You'll need to provide a

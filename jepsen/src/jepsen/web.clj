@@ -43,7 +43,7 @@
   "URL encodes *individual components* of a path, leaving / as / instead of
   encoded."
   [x]
-  (str/replace (java.net.URLEncoder/encode x) #"%2F" "/"))
+  (str/replace (java.net.URLEncoder/encode x "UTF-8") #"%2F" "/"))
 
 (defn fast-tests
   "Abbreviated set of tests"

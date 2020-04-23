@@ -13,7 +13,13 @@ addons:
       - gnuplot-x11
 before_install:
   - cd ${TRAVIS_BUILD_DIR}/jepsen
-script: lein do clean, test
+script:
+  - lein clean
+  # Exclude namespaces importing rhizome.viz, because compiling those requires
+  # X11. For full error message, see:
+  # https://travis-ci.com/github/jepsen-io/jepsen/builds/161202862
+  - lein eastwood '{:config-files [".eastwood.clj"], :exclude-namespaces [jepsen.tests.cycle.wr jepsen.tests.cycle.append]}'
+  - lein test
 notifications:
   email:
     on_success: never

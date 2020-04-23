@@ -1,10 +1,8 @@
 (ns jepsen.core-test
   (:refer-clojure :exclude [run!])
-  (:use jepsen.core
-        clojure.test
-        clojure.pprint
-        clojure.tools.logging)
+  (:use clojure.test)
   (:require [clojure.string :as str]
+            [jepsen.core :refer :all]
             [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.os :as os]
             [jepsen.db :as db]

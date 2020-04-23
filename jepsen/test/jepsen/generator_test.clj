@@ -1,7 +1,5 @@
 (ns jepsen.generator-test
-  (:use clojure.test
-        clojure.pprint
-        clojure.tools.logging)
+  (:use clojure.test)
   (:require [jepsen [common-test :refer [quiet-logging]]
                     [generator :as gen]]
             [tea-time [core :as tt]]
