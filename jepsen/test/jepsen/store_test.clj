@@ -1,10 +1,9 @@
 (ns jepsen.store-test
   (:refer-clojure :exclude [load])
-  (:use clojure.test
-        clojure.pprint
-        jepsen.store)
+  (:use clojure.test)
   (:require [clojure.data.fressian :as fress]
             [clojure.string :as str]
+            [jepsen.store :refer :all]
             [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.core-test :as core-test]
             [jepsen.core :as core]

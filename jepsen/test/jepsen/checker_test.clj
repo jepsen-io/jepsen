@@ -1,13 +1,13 @@
 (ns jepsen.checker-test
   (:refer-clojure :exclude [set])
-  (:use jepsen.checker
-        clojure.test)
+  (:use clojure.test)
   (:require [clojure.datafy :refer [datafy]]
             [knossos [history :as history]
              [model :as model]
              [core :refer [ok-op invoke-op fail-op]]
              [op :as op]]
             [multiset.core :as multiset]
+            [jepsen.checker :refer :all]
             [jepsen.checker.perf :as cp]
             [jepsen.util :as util]))
 

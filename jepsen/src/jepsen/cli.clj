@@ -329,7 +329,9 @@ Options:\n")
                    (web/serve! options)
                    (info (str "Listening on http://"
                               (:ip options) ":" (:port options) "/"))
-                   (while true (Thread/sleep 1000)))}})
+                   (loop [] (do
+                              (Thread/sleep 1000)
+                              (recur))))}})
 
 (defn single-test-cmd
   "A command which runs a single test with standard built-ins. Options:
@@ -389,7 +391,6 @@ Options:\n")
                                          (merge cli-test)
                                          (assoc :history
                                                 (:history stored-test)))]
-
                             (assert+ stored-test IllegalStateException
                                      "Not sure what the last test was")
                             (assert+ (= (:name stored-test)

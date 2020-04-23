@@ -27,7 +27,8 @@
                  [io.lacuna/bifurcan "0.1.0"]]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
-            [lein-codox "0.10.7"]]
+            [lein-codox "0.10.7"]
+            [jonase/eastwood "0.3.10"]]
   :jvm-opts ["-Xmx32g"
              "-server"]
   :test-selectors {:default (fn [m]

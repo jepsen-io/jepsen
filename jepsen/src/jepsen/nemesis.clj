@@ -1,6 +1,6 @@
 (ns jepsen.nemesis
-  (:use clojure.tools.logging)
   (:require [clojure.set :as set]
+            [clojure.tools.logging :refer [info warn]]
             [jepsen [client   :as client]
                     [control  :as c]
                     [net      :as net]
@@ -261,8 +261,8 @@
             (if-not (seq nemeses)
               (throw (IllegalArgumentException.
                        (str "no nemesis can handle " (:f op))))
-              (let [[fs nemesis] (first nemeses)]
-                (if-let [f' (fs f)]
+              (let [[fs- nemesis] (first nemeses)]
+                (if-let [f' (fs- f)]
                   (assoc (invoke-compat! nemesis test (assoc op :f f')) :f f)
                   (recur (next nemeses))))))))
 

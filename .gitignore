@@ -31,3 +31,4 @@ bench/**
 .idea
 *.iml
 jepsen/doc
+.eastwood

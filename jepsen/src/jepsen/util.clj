@@ -241,7 +241,7 @@
 ;(defn all-loggers []
 ;  (->> (org.apache.log4j.LogManager/getCurrentLoggers)
 ;       (java.util.Collections/list)
-;       (cons (org.apache.log4j.LogManager/getRootLogger)))) 
+;       (cons (org.apache.log4j.LogManager/getRootLogger))))
 
 (defn all-jdk-loggers []
   (let [manager (java.util.logging.LogManager/getLogManager)]

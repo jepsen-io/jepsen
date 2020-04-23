@@ -839,8 +839,8 @@
     (let [process (:process event)
           thread  (process->thread ctx process)
           ; Find generator whose thread produced this event.
-          i (reduce (fn red [i range]
-                      (if (range thread)
+          i (reduce (fn red [i range-]
+                      (if (range- thread)
                         (reduced i)
                         (inc i)))
                     0

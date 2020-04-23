@@ -489,7 +489,7 @@
         history     (util/history->latencies history)
         datasets    (invokes-by-f-type history)
         fs          (util/polysort (keys datasets))
-        fs->points  (fs->points fs)
+        fs->points- (fs->points fs)
         output-path (.getCanonicalPath (store/path! test
                                                     subdirectory
                                                     "latency-raw.png"))
@@ -499,7 +499,7 @@
                              {:title     (str (util/name+ f) " " (name t))
                               :with      'points
                               :linetype  (type->color t)
-                              :pointtype (fs->points f)
+                              :pointtype (fs->points- f)
                               :data      (map latency-point data)}))
                          (remove nil?))]
     (-> {:preamble           preamble
@@ -528,8 +528,8 @@
                                  (latencies->quantiles dt qs)
                                  (vector f)))))
         fs          (util/polysort (keys datasets))
-        fs->points  (fs->points fs)
-        qs->colors  (qs->colors qs)
+        fs->points- (fs->points fs)
+        qs->colors- (qs->colors qs)
         output-path (.getCanonicalPath
                      (store/path! test
                                   subdirectory
@@ -539,8 +539,8 @@
         series      (for [f fs, q qs]
                       {:title     (str (util/name+ f) " " q)
                        :with      'linespoints
-                       :linetype  (qs->colors q)
-                       :pointtype  (fs->points f)
+                       :linetype  (qs->colors- q)
+                       :pointtype  (fs->points- f)
                        :data      (get-in datasets [f q])})]
     (-> {:preamble preamble
          :series   series
@@ -578,7 +578,7 @@
                                               #(+ td (or % 0))))
                                  {}))
         fs          (util/polysort (keys datasets))
-        fs->points  (fs->points fs)
+        fs->points- (fs->points fs)
         output-path (.getCanonicalPath (store/path! test
                                                     subdirectory
                                                     "rate.png"))
@@ -588,7 +588,7 @@
                    {:title     (str (util/name+ f) " " (name t))
                     :with      'linespoints
                     :linetype  (type->color t)
-                    :pointtype (fs->points f)
+                    :pointtype (fs->points- f)
                     :data      (let [m (get-in datasets [f t])]
                                  (map (juxt identity #(get m % 0))
                                       (buckets dt t-max)))})]
