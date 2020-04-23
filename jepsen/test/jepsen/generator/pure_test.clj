@@ -317,6 +317,29 @@
                 (gen/limit 5)
                 quick)))))
 
+(deftest delay-test
+  (let [eval-ctx (promise)
+        d (delay (gen/limit 3
+                   (fn [test ctx]
+                     (deliver eval-ctx ctx)
+                     {:f :delayed})))
+        h (->> (gen/phases {:f :write}
+                           {:f :read}
+                           d)
+               gen/clients
+               perfect)]
+    (is (= [{:f :write, :time 0, :process 0, :type :invoke}
+            {:f :read, :time 10, :process 0, :type :invoke}
+            {:f :delayed, :time 20, :process 0, :type :invoke}
+            {:f :delayed, :time 20, :process 1, :type :invoke}
+            {:f :delayed, :time 30, :process 1, :type :invoke}]
+           h))
+    (is (realized? d))
+    (is (= {:time 20
+            :free-threads [0 1]
+            :workers {0 0, 1 1}}
+           @eval-ctx))))
+
 (deftest synchronize-test
   (is (= [{:f :a, :process 0, :time 2, :type :invoke}
           {:f :a, :process 1, :time 3, :type :invoke}

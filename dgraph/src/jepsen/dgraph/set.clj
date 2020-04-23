@@ -7,8 +7,8 @@
             [jepsen.dgraph [client :as c]
                            [trace :as t]]
             [jepsen [client :as client]
-                    [checker :as checker]
-                    [generator :as gen]]))
+                    [checker :as checker]]
+            [jepsen.generator.pure :as gen]))
 
 (defrecord Client [conn]
   client/Client
@@ -52,9 +52,8 @@
    :checker   (checker/set)
    :generator (->> (range)
                    (map (fn [i] {:type :invoke, :f :add, :value i}))
-                   gen/seq
                    (gen/stagger 1/10))
-   :final-generator (gen/each (gen/once {:type :invoke, :f :read}))})
+   :final-generator (gen/each {:type :invoke, :f :read})})
 
 
 ; This variant uses a single UID to store all values.

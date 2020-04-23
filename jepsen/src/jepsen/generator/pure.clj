@@ -346,8 +346,11 @@
     (fn [] (map gen/once [{:f :write, :value (rand-int 5)}
                           {:f :read}]))
 
-  Promises, futures, delays (any IPending) are generators which ignore updates,
-  yield :pending until realized, then are replaced by their delivered value."
+  Promises and delays are generators which ignore updates, yield :pending until
+  realized, then are replaced by whatever generator they contain. Delays are
+  not evaluated until they *could* produce an op, so you can include them in
+  sequences, phases, etc., and they'll be evaluated only once prior ops have
+  been consumed."
   (:refer-clojure :exclude [await concat delay filter map repeat run! update])
   (:require [clojure [core :as c]
                      [datafy :refer [datafy]]
@@ -469,6 +472,12 @@
                    (f))]
       (op [x f] test ctx)))
 
+  clojure.lang.Delay
+  (update [d test ctx event] d)
+
+  (op [d test ctx]
+    (op @d test ctx))
+
   clojure.lang.Seqable
   (update [this test ctx event]
     (when (seq this)
@@ -573,7 +582,7 @@
                  :context ctx}
                 t
                 (with-out-str
-                  (print "Generator threw " t " when asked for an operation. Generator:\n")
+                  (print "Generator threw" (class t) "-" (.getMessage t) "when asked for an operation. Generator:\n")
                   (binding [*print-length* 10]
                     (pprint gen))
                   (println "\nContext:\n")
@@ -965,7 +974,7 @@
   generators from competing for the next slot, making it hard to control the
   mixture of operations."
   [gens]
-  (Mix. (rand-int (count gens)) gens))
+  (Mix. (rand-int (count gens)) (vec gens)))
 
 (defrecord Limit [remaining gen]
   Generator
