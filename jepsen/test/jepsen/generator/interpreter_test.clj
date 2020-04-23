@@ -179,8 +179,7 @@
             gen (->> (fn []
                        (swap! call-count inc)
                        (assert false))
-                     (gen/limit 2)
-                     gen/friendly-exceptions)
+                     (gen/limit 2))
             test (assoc base-test
                       :client     (ok-client)
                       :nemesis    (info-nemesis)
@@ -190,7 +189,6 @@
                     (catch [:type :jepsen.generator.pure/op-threw] e e))]
         (is (= 1 @call-count))
         (is (= :jepsen.generator.pure/op-threw (:type e)))
-        (is (= gen (:generator e)))
         (is (= (dissoc (gen/context test) :time)
                (dissoc (:context e) :time)))))
 
@@ -212,8 +210,6 @@
             e (try+ (util/with-relative-time (run! test))
                     :nope
                     (catch [:type :jepsen.generator.pure/update-threw] e e))]
-        (is (= (assoc-in gen [:gen :gen :remaining] 1)
-               (:generator e)))
         (is (= (-> (gen/context test)
                    (assoc :time (:time (:context e)))
                    (update :free-threads disj 0))

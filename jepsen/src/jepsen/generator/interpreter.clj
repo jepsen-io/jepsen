@@ -177,7 +177,9 @@
   from (:gen test). Spawns a thread for each worker, and hands those workers
   operations from gen; each thread applies the operation using (:client test)
   or (:nemesis test), as appropriate. Invocations and completions are journaled
-  to a history, which is returned at the end of `run`."
+  to a history, which is returned at the end of `run`.
+
+  Generators are automatically wrapped in friendly-exception and validate."
   [test]
   (let [ctx         (gen/context test)
         worker-ids  (gen/all-threads ctx)
@@ -185,10 +187,13 @@
         workers     (mapv (partial spawn-worker test completions
                                    (client-nemesis-worker))
                                    worker-ids)
-        invocations (into {} (map (juxt :id :in) workers))]
+        invocations (into {} (map (juxt :id :in) workers))
+        gen         (->> (:generator test)
+                         gen/friendly-exceptions
+                         gen/validate)]
     (try+
       (loop [ctx            ctx
-             gen            (:generator test)
+             gen            gen
              outstanding    0     ; Number of in-flight ops
              ; How long to poll on the completion queue, in micros.
              poll-timeout   0

@@ -354,6 +354,7 @@
                      [set :as set]]
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn error]]
+            [fipp.edn :refer [pprint]]
             [jepsen [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -519,8 +520,8 @@
                                  (not (map? op))
                                  (conj "should be either :pending or a map")
 
-                                 (not (#{:invoke :sleep :log} (:type op)))
-                                 (conj ":type should be :invoke, :sleep, or :log")
+                                 (not (#{:invoke :info :sleep :log} (:type op)))
+                                 (conj ":type should be :invoke, :info, :sleep, or :log")
 
                                  (not (number? (:time op)))
                                  (conj ":time should be a number")
@@ -533,12 +534,23 @@
                                  (conj (str "process " (pr-str (:process op))
                                             " is not free"))))))]
         (when (seq problems)
-          (binding [*print-length* 10]
             (throw+ {:type      ::invalid-op
-                     :generator gen
                      :context   ctx
-                     :res       res
-                     :problems  problems}))))
+                     ;:res       res
+                     :problems  problems}
+                    nil
+                    (with-out-str
+                      (println "Generator produced an invalid [op, gen'] tuple when asked for an operation:\n")
+                      (binding [*print-length* 10]
+                        (pprint res))
+                      (println "\nSpecifically, this is a problem because:\n")
+                      (doseq [p problems]
+                        (println " -" p))
+                      (println "Generator:\n")
+                      (binding [*print-length* 10]
+                        (pprint gen))
+                      (println "\nContext:\n")
+                      (pprint ctx)))))
       [(first res) (Validate. (second res))]))
 
   (update [this test ctx event]
@@ -557,21 +569,33 @@
       (when-let [[op gen'] (op gen test ctx)]
         [op (FriendlyExceptions. gen')])
       (catch Throwable t
-        (throw+ {:type ::op-threw
-                 :generator this
-                 :context   ctx}
-                t))))
+        (throw+ {:type    ::op-threw
+                 :context ctx}
+                t
+                (with-out-str
+                  (print "Generator threw " t " when asked for an operation. Generator:\n")
+                  (binding [*print-length* 10]
+                    (pprint gen))
+                  (println "\nContext:\n")
+                  (pprint ctx))))))
 
   (update [this test ctx event]
     (try
       (when-let [gen' (update gen test ctx event)]
         (FriendlyExceptions. gen'))
       (catch Throwable t
-        (throw+ {:type ::update-threw
-                 :generator this
-                 :context   ctx
-                 :event     event}
-                t)))))
+        (throw+ {:type    ::update-threw
+                 :context ctx
+                 :event   event}
+                t
+                  (with-out-str
+                    (print "Generator threw " t " when updated with an event. Generator:\n")
+                    (binding [*print-length* 10]
+                      (pprint gen))
+                    (println "\nContext:\n")
+                    (pprint ctx)
+                    (println "Event:\n")
+                    (pprint event)))))))
 
 (defn friendly-exceptions
   "Wraps a generator, so that exceptions thrown from op and update are wrapped
