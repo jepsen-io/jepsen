@@ -8,8 +8,8 @@
             [knossos.op :as op]
             [jepsen.dgraph.client :as c]
             [jepsen [client :as client]
-                    [checker :as checker]
-                    [generator :as gen]]))
+                    [checker :as checker]]
+            [jepsen.generator.pure :as gen]))
 
 (defn hex
   "Turns a number into a hex string."
@@ -168,22 +168,19 @@
                                         {:type  :invoke
                                          :f     :write
                                          :value [nil a v]}))
-                                 gen/seq
                                  (gen/stagger 1/10))
                             (gen/log "Waiting to read")
                             (gen/sleep 10)
-                            (gen/derefer
-                              (delay
-                                (info "Need to read entities" @entities)
-                                (->> (for [e @entities
-                                           a (distinct (map first cases))]
-                                       {:type   :invoke
-                                        :f      :read
-                                        :value  [e a nil]})
-                                     (repeat 3) ; sigh, dgraph likes to stop
-                                                ; taking writes just cuz
-                                     (apply concat)
-                                     shuffle
-                                     gen/seq
-                                     (gen/stagger 1/10)))))
+                            (delay
+                              (info "Need to read entities" @entities)
+                              (->> (for [e @entities
+                                         a (distinct (map first cases))]
+                                     {:type   :invoke
+                                      :f      :read
+                                      :value  [e a nil]})
+                                   (repeat 3) ; sigh, dgraph likes to stop
+                                   ; taking writes just cuz
+                                   (apply concat)
+                                   shuffle
+                                   (gen/stagger 1/10))))
      :client (Client. nil entities)}))

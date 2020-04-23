@@ -53,7 +53,7 @@
    :generator (->> (range)
                    (map (fn [i] {:type :invoke, :f :add, :value i}))
                    (gen/stagger 1/10))
-   :final-generator (gen/each {:type :invoke, :f :read})})
+   :final-generator (gen/each-thread {:type :invoke, :f :read})})
 
 
 ; This variant uses a single UID to store all values.

@@ -92,7 +92,10 @@
     already a pure generator. `gen/seq` didn't just turn sequences into
     generators; it also ensured that only one operation was consumed from each.
     This is now explicit: use `(map gen.pure/once coll)` instead of (gen/seq
-    coll)`, and `coll` instead of `(gen/seq-all coll)`.
+    coll)`, and `coll` instead of `(gen/seq-all coll)`. Where the sequence is
+    of one-shot generators already, there's no need to wrap elements with
+    gen/once: instead of `(gen/seq [{:f :read} {:f :write}])`), you can write
+    [{:f :read} {:f :write}] directly.
 
   - Functions return generators, not just operations, which makes it easier to
     express sequences of operations like 'pick the current leader, isolate it,
@@ -106,6 +109,11 @@
   - `delay` is gone; we think, in practice, users generally want either
     `stagger` (for uncoordinated times) or `delay-til` (for coordinated times).
 
+  - `each` used to mean 'on each process', but in practice what users generally
+    wanted was 'on each thread'--on each process had a tendency to result in
+    unexpected infinite loops when ops crashed. `each-thread` is probably what
+    you want instead.
+
   - Instead of using *jepsen.generator/threads*, etc, use helper functions like
     some-free-process.
 
@@ -113,11 +121,17 @@
     rather than (f test process).
 
   - Maps are one-shot generators by default, rather than emitting themselves
-    indefinitely. This streamlines the most common use cases--things like (map
-    (fn [x] {:f :write, :value x}) (range)) produces a series of distinct,
-    monotonically increasing writes; (fn [] {:f :inc, :value (rand-nth 5)})
-    produces a series of random increments, rather than a series where every
-    value is the *same* (randomly selected) value, etc.
+    indefinitely. This streamlines the most common use cases:
+
+      - (map (fn [x] {:f :write, :value x}) (range)) produces a series of
+        distinct, monotonically increasing writes
+
+      - (fn [] {:f :inc, :value (rand-nth 5)}) produces a series of random
+        increments, rather than a series where every value is the *same*
+        (randomly selected) value.
+
+    When migrating, you can drop most uses of gen/once around maps, and
+    introduce (repeat ...) where you want to repeat an operation more than once.
 
   # In More Detail
 
@@ -183,7 +197,7 @@
 
   Have each thread independently perform a single increment, then read:
 
-    (gen/each [{:f :inc} {:f :read}])
+    (gen/each-thread [{:f :inc} {:f :read}])
 
   Reserve 5 threads for reads, 10 threads for increments, and the remaining
   threads reset a counter.
@@ -226,7 +240,7 @@
                 (gen/nemesis {:f :repair})
                 (gen/sleep 10)
                 (gen/log \"Final read\")
-                (gen/clients (gen/each (gen/until-ok {:f :read}))))
+                (gen/clients (gen/each-thread (gen/until-ok {:f :read}))))
 
   ## Contexts
 
@@ -357,7 +371,7 @@
                      [set :as set]]
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn error]]
-            [fipp.edn :refer [pprint]]
+            [clojure.pprint :refer [pprint]]
             [jepsen [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -837,7 +851,6 @@
   which emitted the operation."
   [gen]
   (EachThread. gen {}))
-
 
 (defrecord Reserve [ranges all-ranges gens]
   ; ranges is a collection of sets of threads engaged in each generator.

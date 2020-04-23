@@ -9,7 +9,6 @@
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [generator :as gen]
                     [util :as util]
                     [store :as store]]
             [jepsen.checker.timeline :as timeline]

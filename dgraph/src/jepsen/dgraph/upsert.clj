@@ -7,8 +7,8 @@
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [generator :as gen]
-                    [independent :as independent]]))
+                    [independent :as independent]]
+            [jepsen.generator.pure :as gen]))
 
 (defrecord Client [conn]
   client/Client
@@ -74,7 +74,7 @@
   [opts]
   {:client    (Client. nil)
    :checker   (independent/checker (checker))
-   :generator (independent/concurrent-generator
+   :generator (independent/pure-concurrent-generator
                 (min (:concurrency opts)
                      (* 2 (count (:nodes opts))))
                 (range)
@@ -84,5 +84,5 @@
                   ; time-limit, it might give up without ever making it to the
                   ; barrier. That *traps* the other threads on the barrier
                   ; forever.
-                  (gen/phases (gen/each (gen/once {:type :invoke, :f :upsert}))
-                              (gen/each (gen/once {:type :invoke, :f :read})))))})
+                  (gen/phases (gen/each-thread {:type :invoke, :f :upsert})
+                              (gen/each-thread {:type :invoke, :f :read}))))})
