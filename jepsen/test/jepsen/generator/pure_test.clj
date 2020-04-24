@@ -635,3 +635,12 @@
               gen/clients
               perfect
               (map (juxt :process :f :value))))))
+
+(deftest pretty-print-test
+  (is (= "(jepsen.generator.pure.Synchronize{\n   :gen {:f :start}}\n jepsen.generator.pure.Synchronize{\n   :gen [1 2 3]}\n jepsen.generator.pure.Synchronize{\n   :gen jepsen.generator.pure.Limit{\n     :remaining 3, :gen {:f :read}}})\n"
+         (with-out-str
+           (pprint (gen/phases
+                     {:f :start}
+                     [1 2 3]
+                     (->> {:f :read}
+                          (gen/limit 3))))))))

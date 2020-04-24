@@ -74,11 +74,10 @@
   [opts]
   {:client    (Client. nil)
    :checker   (independent/checker (checker))
-   :generator (gen/trace :indy
-                         (independent/pure-concurrent-generator
+   :generator (independent/pure-concurrent-generator
                 (min (:concurrency opts)
                      (* 2 (count (:nodes opts))))
                 (range)
                 (fn [k]
                   (gen/phases (gen/each-thread {:f :upsert})
-                              (gen/each-thread {:f :read})))))})
+                              (gen/each-thread {:f :read}))))})

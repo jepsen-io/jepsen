@@ -371,7 +371,7 @@
                      [set :as set]]
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn error]]
-            [clojure.pprint :refer [pprint]]
+            [clojure.pprint :as pprint :refer [pprint]]
             [jepsen [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -381,6 +381,36 @@
 
   (op [gen test context]
       "Obtains the next operation from this generator."))
+
+;; Pretty-printing
+
+(defmethod pprint/simple-dispatch jepsen.generator.pure.Generator
+  [gen]
+  (if (map? gen)
+    (do (.write ^java.io.Writer *out* (str (.getName (class gen)) "{"))
+        (pprint/pprint-newline :mandatory)
+        (let [prefix "  "
+              suffix "}"]
+          (pprint/pprint-logical-block :prefix prefix :suffix suffix
+            (pprint/print-length-loop [aseq (seq gen)]
+              (when aseq
+                (pprint/pprint-logical-block
+                  (pprint/write-out (key (first aseq)))
+                  (.write ^java.io.Writer *out* " ")
+                  (pprint/pprint-newline :miser)
+                  (pprint/write-out (fnext (first aseq))))
+                (when (next aseq)
+                  (.write ^java.io.Writer *out* ", ")
+                  (pprint/pprint-newline :linear)
+                  (recur (next aseq))))))))
+
+    ; Probably a reify or something weird we can't print
+    (prn gen)))
+
+(prefer-method pprint/simple-dispatch
+               jepsen.generator.pure.Generator clojure.lang.IRecord)
+(prefer-method pprint/simple-dispatch
+               jepsen.generator.pure.Generator clojure.lang.IPersistentMap)
 
 ;; Helpers
 
