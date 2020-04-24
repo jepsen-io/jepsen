@@ -1154,7 +1154,7 @@
   [dt gen]
   (TimeLimit. (long (util/secs->nanos dt)) nil gen))
 
-(defrecord Stagger [dts next-time gen]
+(defrecord Stagger [dt next-time gen]
   Generator
   (op [this test ctx]
     (when-let [[op gen'] (op gen test ctx)]
@@ -1164,16 +1164,16 @@
 
             ; We're ready to issue this operation.
             (<= next-time (:time op))
-            [op (Stagger. (next dts) (+ next-time (first dts)) gen')]
+            [op (Stagger. dt (+ next-time (long (rand dt))) gen')]
 
             ; Not ready yet
             true
             [(assoc op :time next-time)
-             (Stagger. (next dts) (+ next-time (first dts)) gen')])))
+             (Stagger. dt (+ next-time (long (rand dt))) gen')])))
 
 
   (update [_ test ctx event]
-    (Stagger. dts next-time (update gen test ctx event))))
+    (Stagger. dt next-time (update gen test ctx event))))
 
 (defn stagger
   "Wraps a generator. Operations from that generator are scheduled at uniformly
@@ -1192,8 +1192,8 @@
   stagger dt is 10, and your concurrency is 5, your new stagger dt should be
   2."
   [dt gen]
-  (let [dt (util/secs->nanos (* 2 dt))]
-    (Stagger. (repeatedly (comp long (partial rand dt))) 0 gen)))
+  (let [dt (long (util/secs->nanos (* 2 dt)))]
+    (Stagger. dt 0 gen)))
 
 ; This isn't actually DelayTil. It spreads out *all* requests evenly. Feels
 ; like it might be useful later.
