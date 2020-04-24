@@ -163,7 +163,8 @@
   [opts]
   (let [entities (atom (sorted-set))]
     {:checker   (checker)
-     :generator (gen/phases (->> cases
+     :generator (gen/phases (gen/log "Starting")
+                            (->> cases
                                  (map (fn [[a v]]
                                         {:type  :invoke
                                          :f     :write

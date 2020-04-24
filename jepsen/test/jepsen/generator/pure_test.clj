@@ -412,7 +412,13 @@
          ; Each thread now gets to evaluate [a b] independently.
          (->> (gen/each-thread [{:f :a} {:f :b}])
               perfect
-              (map (juxt :time :process :f))))))
+              (map (juxt :time :process :f)))))
+
+  (testing "collapses when exhausted"
+    (is (= nil
+           (gen/op (gen/each-thread (gen/limit 0 {:f :read}))
+               {}
+               default-context)))))
 
 (deftest stagger-test
   (let [n           1000
@@ -553,30 +559,46 @@
           [0 2 [:k1 :v1]]
           [0 4 [:k2 :v0]]
           [0 5 [:k2 :v1]]
-          ; We finish off k2 and k1
+          ; Worker 5 finishes k2
           [10 5 [:k2 :v2]]
-          [10 2 [:k1 :v2]]
-          ; Worker 4 in group 3 moves on to k3
+          ; Worker 4 in group 2 moves on to k3
           [10 4 [:k3 :v0]]
-          ; Finish k0
-          [10 1 [:k0 :v2]]
-          ; And worker 3 in group 2 moves on to k4
+          ; Worker 2 in group 1 finishes k1.
+          [10 2 [:k1 :v2]]
+          ; Worker 3 in group 1 starts k4.
           [10 3 [:k4 :v0]]
-          ; Worker 0 has no options left; there are no keys remaining, and other
-          ; groups still have generators, so it holds at :pending.
-          ; Workers 4 & 5 finish k3, and 2 & 3 finish k4
+          ; Worker 1 in group 0 finishes k0
+          [10 1 [:k0 :v2]]
+          ; Worker 0 has no options left; there are no keys remaining for it to
+          ; start afresh, and other groups still have generators, so it holds
+          ; at :pending. Workers 4 & 5 finish k3, and 2 & 3 finish k4
           [20 3 [:k4 :v1]]
-          [20 4 [:k3 :v1]]
           [20 2 [:k4 :v2]]
+          [20 4 [:k3 :v1]]
           [20 5 [:k3 :v2]]]
          (->> (independent/pure-concurrent-generator
-                2
+                2                     ; 2 threads per group
                 [:k0 :k1 :k2 :k3 :k4] ; 5 keys
                 (fn [k]
                   (->> [:v0 :v1 :v2] ; Three values per key
                        (map (partial hash-map :type :invoke, :value)))))
               (perfect (n+nemesis-context 6)) ; 3 groups of 2 threads each
               (map (juxt :time :process :value))))))
+
+(deftest independent-deadlock-case
+  (is (= [[0 0 :meow [0 nil]]
+          [0 1 :meow [0 nil]]
+          [10 0 :meow [1 nil]]
+          [10 1 :meow [1 nil]]
+          [20 0 :meow [2 nil]]]
+          (->> (independent/pure-concurrent-generator
+                2
+                (range)
+                (fn [k] (gen/each-thread {:f :meow})))
+              (gen/limit 5)
+              gen/clients
+              perfect
+              (map (juxt :time :process :f :value))))))
 
 (deftest at-least-one-ok-test
   ; Our goal here is to ensure that at least one OK operation happens.

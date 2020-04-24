@@ -599,7 +599,7 @@
                           ; Currently running histories
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
-              _    (info "Running test:\n" (binding [*print-length* 20]
+              _    (info "Running test:\n" (binding [*print-length* 32]
                                              (with-out-str (pprint test))))
               test (control/with-remote (:remote test)
                      (control/with-ssh (:ssh test)

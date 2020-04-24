@@ -74,15 +74,11 @@
   [opts]
   {:client    (Client. nil)
    :checker   (independent/checker (checker))
-   :generator (independent/pure-concurrent-generator
+   :generator (gen/trace :indy
+                         (independent/pure-concurrent-generator
                 (min (:concurrency opts)
                      (* 2 (count (:nodes opts))))
                 (range)
                 (fn [k]
-                  ; This is broken because phases inserts a global barrier for
-                  ; all threads at this point. When a thread finishes due to
-                  ; time-limit, it might give up without ever making it to the
-                  ; barrier. That *traps* the other threads on the barrier
-                  ; forever.
-                  (gen/phases (gen/each-thread {:type :invoke, :f :upsert})
-                              (gen/each-thread {:type :invoke, :f :read}))))})
+                  (gen/phases (gen/each-thread {:f :upsert})
+                              (gen/each-thread {:f :read})))))})

@@ -117,6 +117,8 @@
 ; workers is a map of worker numbers to the last key that worker wrote.
 (defrecord Generator [n next-key workers]
   gen.pure/Generator
+  (update [this test ctx event] this)
+
   (op [this test ctx]
     ; If a worker's last written key is nil, it can either issue a read for a
     ; write in progress, or it can perform a write itself. To write, it
@@ -125,19 +127,28 @@
     ; to the group covering that key.
     (let [worker (first (gen.pure/free-threads ctx))
           process (gen.pure/thread->process ctx worker)]
-      (if-let [k (get workers worker)]
-        ; We wrote a key; produce a read and clear our last written key.
-        [{:process process, :f :read, :value (read-txn-for n k)}
-         (Generator. n next-key (assoc workers worker nil))]
-        ; OK we didn't wite a key--let's try one of two random options.
-        (if-let [k (and (< (rand) 0.5)
-                        (rand-nth-empty (keep val workers)))]
-          ; Read some other active group
-          [{:process process, :f :read, :value (read-txn-for n k)} this]
+      (if worker
+        (if-let [k (get workers worker)]
+          ; We wrote a key; produce a read and clear our last written key.
+          [(gen.pure/fill-in-op
+             {:process process, :f :read, :value (read-txn-for n k)}
+             ctx)
+           (Generator. n next-key (assoc workers worker nil))]
+          ; OK we didn't wite a key--let's try one of two random options.
+          (if-let [k (and (< (rand) 0.5)
+                          (rand-nth-empty (keep val workers)))]
+            ; Read some other active group
+            [(gen.pure/fill-in-op
+               {:process process, :f :read, :value (read-txn-for n k)}
+               ctx)
+             this]
 
-          ; Write a fresh key
-          [{:process process, :f :write, :value [[:w next-key 1]]}
-           (Generator. n (inc next-key) (assoc workers worker next-key))])))))
+            ; Write a fresh key
+            [(gen.pure/fill-in-op
+               {:process process, :f :write, :value [[:w next-key 1]]}
+               ctx)
+             (Generator. n (inc next-key) (assoc workers worker next-key))]))
+        [:pending this]))))
 
 (defn pure-generator
   "Generates single inserts followed by group reads, mixed with reads of other

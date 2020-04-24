@@ -3,7 +3,8 @@
   threads, spawning processes for interacting with clients and nemeses, and
   recording a history."
   (:refer-clojure :exclude [run!])
-  (:require [clojure [datafy :refer [datafy]]]
+  (:require [clojure [datafy :refer [datafy]]
+                     [pprint :refer [pprint]]]
             [clojure.tools.logging :refer [info warn error]]
             [jepsen [client         :as client]
                     [nemesis        :as nemesis]
@@ -227,7 +228,10 @@
           ; There's nothing to complete; let's see what the generator's up to
           (let [time        (util/relative-time-nanos)
                 ctx         (assoc ctx :time time)
+                ;_ (prn :asking-for-op)
+                ;_ (binding [*print-length* 12] (pprint gen))
                 [op gen']   (gen/op gen test ctx)]
+                ;_ (prn :got op)]
             (condp = op
               ; We're exhausted, but workers might still be going.
               nil (if (pos? outstanding)

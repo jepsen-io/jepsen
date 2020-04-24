@@ -56,7 +56,7 @@
                   (independent/pure-concurrent-generator
                     (* 2 n)
                     (range)
-                    (fn []
+                    (fn [k]
                       (cond->> (gen.pure/reserve n r (gen.pure/mix [w cas cas]))
                         ; We randomize the limit a bit so that over time, keys
                         ; become misaligned, which prevents us from lining up

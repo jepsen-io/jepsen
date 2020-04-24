@@ -87,6 +87,27 @@
   "Given a group size and pure generator context, returns a collection of
   collection of threads, each per group."
   [n ctx]
+  ; Sanity checks
+  (let [group-size   n
+        thread-count (count (pgen/all-threads ctx))
+        group-count (quot thread-count group-size)]
+              (assert (<= group-size thread-count)
+                      (str "With " thread-count " worker threads, this"
+                           " jepsen.concurrent/concurrent-generator cannot"
+                           " run a key with " group-size " threads concurrently."
+                           " Consider raising your test's :concurrency to at least "
+                           group-size "."))
+
+              (assert (= thread-count (* group-size group-count))
+                      (str "This jepsen.independent/concurrent-generator has "
+                           thread-count
+                           " threads to work with, but can only use "
+                           (* group-size group-count)
+                           " of those threads to run " group-count
+                           " concurrent keys with " group-size
+                           " threads apiece. Consider raising or lowering the"
+                           " test's :concurrency to a multiple of " group-size
+                           ".")))
   (->> (pgen/all-threads ctx)
        sort
        (partition n)))
@@ -110,7 +131,8 @@
 (defn tuple-gen
   "Wraps a generator so that it returns :value [k v] tuples."
   [k gen]
-  (pgen/map (fn [op] (assoc op :value (tuple k (:value op))))
+  (pgen/map (fn [op]
+              (assoc op :value (tuple k (:value op))))
             gen))
 
 (defrecord PureConcurrentGenerator [n
@@ -195,11 +217,20 @@
                                    (tuple-gen k (fgen k))))))
                 ; If we had to build a new generator, advance keys.
                 keys (if op keys (next keys))]
-            (recur (next groups)
-                   keys
-                   gens
-                   (pgen/soonest-op-vec soonest
-                                        (when op [op group gen']))))))))
+            (if (or op (nil? (get gens group)))
+              ; Either we generated an op, or we failed to generate one *and*
+              ; there's no replacement generator, because we're out of keys.
+              (recur (next groups)
+                     keys
+                     gens
+                     (pgen/soonest-op-vec soonest
+                                          (when op [op group gen'])))
+              ; We didn't get an op, but we do still have a generator. Let's
+              ; try again.
+              (recur groups
+                     keys
+                     gens
+                     soonest)))))))
 
   (update [this test ctx event]
     (let [process (:process event)

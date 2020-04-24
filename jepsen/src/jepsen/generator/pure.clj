@@ -457,25 +457,30 @@
 
 ;; Generators!
 
+(defn fill-in-op
+  "Takes an operation and fills in missing fields for :type, :process, and
+  :time using context. Returns :pending if no process is free."
+  [op ctx]
+  (if-let [p (some-free-process ctx)]
+    ; Automatically assign type, time, and process from the context, if not
+    ; provided.
+    (persistent!
+      (cond-> (transient op)
+        (nil? (:time op))     (assoc! :time (:time ctx))
+        (nil? (:process op))  (assoc! :process p)
+        (nil? (:type op))     (assoc! :type :invoke)))
+    :pending))
+
 (extend-protocol Generator
   nil
   (update [gen test ctx event] nil)
   (op [this test ctx] nil)
 
-  clojure.lang.IPersistentMap
+  clojure.lang.APersistentMap
   (update [this test ctx event] this)
   (op [this test ctx]
-    (if-let [p (some-free-process ctx)]
-       ; Automatically assign type, time, and process from the context, if not
-       ; provided.
-       [(cond-> this
-         (nil? (:time this))     (assoc :time (:time ctx))
-         (nil? (:process this))  (assoc :process p)
-         (nil? (:type this))     (assoc :type :invoke))
-        nil]
-
-       ; No process free to accept our request
-       [:pending this]))
+    (let [op (fill-in-op this ctx)]
+      [op (if (= :pending op) this nil)]))
 
   clojure.lang.AFunction
   (update [f test ctx event] f)
@@ -499,6 +504,7 @@
       (cons (update (first this) test ctx event) (next this))))
 
   (op [this test ctx]
+    ;(binding [*print-length* 3] (prn :op this))
     (when (seq this) ; Once we're out of generators, we're done
       (let [gen (first this)]
         (if-let [[op gen'] (op gen test ctx)]
@@ -630,20 +636,40 @@
 (defrecord Trace [k gen]
   Generator
   (op [_ test ctx]
-    (try (let [[op gen'] (op gen test ctx)]
-           (info k :op test ctx op gen')
-           [op (when gen' (Trace. k gen'))])
-         (catch Throwable t
-           (info k :op test ctx :threw)
-           (throw t))))
+    (binding [*print-length* 8]
+      (try (let [[op gen'] (op gen test ctx)]
+             (info k :op (with-out-str
+                           (println "\nContext:" ctx)
+                           (println "Operation:" op)
+                           (println "Generator:")
+                           (pprint gen)))
+             (when op
+               [op (when gen' (Trace. k gen'))]))
+           (catch Throwable t
+             (info k :op :threw
+                   (with-out-str
+                     (println "\nContext:" ctx)
+                     (println "Operation:" op)
+                     (println "Generator:")
+                     (pprint gen)))
+             (throw t)))))
 
   (update [_ test ctx event]
-    (try (let [gen' (update gen test ctx event)]
-           (info k :update test ctx event gen')
-           (when gen' (Trace. k gen')))
-         (catch Throwable t
-           (info k :update test ctx event :threw)
-           (throw t)))))
+    (binding [*print-length* 8]
+      (try (let [gen' (update gen test ctx event)]
+             (info k :update (with-out-str
+                               (println "\nContext:" ctx)
+                               (println "Event:" event)
+                               (println "Generator:")
+                               (pprint gen)))
+             (when gen' (Trace. k gen')))
+           (catch Throwable t
+             (info k :update :threw (with-out-str
+                                      (println "\nContext:" ctx)
+                                      (println "Event:" event)
+                                      (println "Generator:")
+                                      (pprint gen)))
+             (throw t))))))
 
 (defn trace
   "Wraps a generator, logging calls to op and update before passing them on to
@@ -1084,6 +1110,7 @@
         ; We have an op; lazily initialize our cutoff and check to see if it's
         ; past.
         (let [cutoff (or cutoff (+ (:time op) limit))]
+          (when-not (:time op) (warn "No time for op:" op))
           (when (< (:time op) cutoff)
             [op (TimeLimit. limit cutoff gen')])))))
 

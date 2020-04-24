@@ -19,7 +19,9 @@
   (reify Client
     (open! [this test node] this)
     (setup! [this test])
-    (invoke! [this test op] (assoc op :type :ok))
+    (invoke! [this test op]
+      (Thread/sleep 10)
+      (assoc op :type :ok))
     (teardown! [this test])
     (close! [this test])))
 
@@ -220,4 +222,3 @@
                 :process  0
                 :type     :invoke}
                (:event e))))))
-
