@@ -250,20 +250,36 @@
                                :strobe-clock          :strobe
                                :bump-clock            :bump}
                               (nt/clock-nemesis)})
-          gen     (gen/stateful+pure
-                    (->> (nt/clock-gen)
-                         (gen/f-map {:reset          :reset-clock
-                                     :check-offsets  :check-clock-offsets
-                                     :strobe         :strobe-clock
-                                     :bump           :bump-clock})
-                         (gen/delay (:interval opts default-interval)))
-                    (->> (nt/clock-gen)
-                         (gen.pure/f-map {:reset          :reset-clock
-                                     :check-offsets  :check-clock-offsets
-                                     :strobe         :strobe-clock
-                                     :bump           :bump-clock})
-                         (gen.pure/delay-til
-                           (:interval opts default-interval))))]
+          db (:db opts)
+          target-specs (:targets (:clock opts) (node-specs db))
+          targets (fn [test] (db-nodes test db
+                                       (some-> target-specs seq rand-nth)))
+          clock-gen (gen/stateful+pure
+                      (gen/phases
+                       (gen/once {:type :info, :f :check-offsets})
+                       ;; Use a random subset of nodes, specificed by
+                       ;; `targets-specs`, as targets in the generators.
+                       (gen/mix [(nt/reset-gen-select  targets)
+                                 (nt/bump-gen-select   targets)
+                                 (nt/strobe-gen-select targets)]))
+                      (gen.pure/phases
+                       {:type :info, :f :check-offsets}
+                       (gen.pure/mix [(nt/reset-gen-select  targets)
+                                      (nt/bump-gen-select   targets)
+                                      (nt/strobe-gen-select targets)])))
+          gen (gen/stateful+pure
+                (->> clock-gen
+                     (gen/f-map {:reset          :reset-clock
+                                 :check-offsets  :check-clock-offsets
+                                 :strobe         :strobe-clock
+                                 :bump           :bump-clock})
+                     (gen/delay (:interval opts default-interval)))
+                (->> clock-gen
+                     (gen.pure/f-map {:reset          :reset-clock
+                                      :check-offsets  :check-clock-offsets
+                                      :strobe         :strobe-clock
+                                      :bump           :bump-clock})
+                     (gen.pure/delay-til (:interval opts default-interval))))]
       {:generator         gen
        :final-generator   (gen/stateful+pure
                             (gen/once {:type :info, :f :reset-clock})
