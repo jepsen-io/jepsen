@@ -123,6 +123,6 @@
                       ; re-use the same write generator for each distinct key,
                       ; but if it *did* and relied on that behavior, this will
                       ; break.
-                      (->> (gen.pure/mix [reads writes]
+                      (->> (gen.pure/mix [reads writes])
                            (gen.pure/stagger 1/100)
-                           (gen/limit (:per-key-limit opts 500))))))))})
+                           (gen/limit (:per-key-limit opts 500)))))))})
