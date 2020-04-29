@@ -177,7 +177,7 @@
        ~@body)
      (finally
        (when-not (:leave-db-running? ~test)
-         (control/on-nodes ~test (partial db/teardown! (:db ~test)))))))
+         (control/on-nodes ~test (partial db/retrying-teardown! db/cycle-tries (:db ~test)))))))
 
 (defprotocol Worker
   "Polymorphic lifecycle for worker threads; synchronized setup, run, and

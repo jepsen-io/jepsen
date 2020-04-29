@@ -86,6 +86,24 @@
       LogFiles
       (log-files [db test node] [log-file cap-file]))))
 
+(defn retrying-teardown!
+  "Tries to tear down the database, and keeps retrying `teardown-tries` times if
+  exceptions are thrown."
+  [teardown-tries db test node]
+  (loop [tries teardown-tries]
+    (if (= :retry (try+
+                   (info "Tearing down DB")
+                   (teardown! db test node)
+                   (catch Exception e
+                     (if (< 1 tries)
+                       (do (info :throwable (pr-str (type (:throwable &throw-context))))
+                           (warn (:throwable &throw-context)
+                                 "Unable to tear down database; retrying...")
+                           :retry)
+                       ;; Out of tries, abort!
+                       (throw+ e)))))
+      (recur (dec tries)))))
+
 (def cycle-tries
   "How many tries do we get to set up a database?"
   3)
@@ -100,8 +118,7 @@
   (let [db (:db test)]
     (loop [tries cycle-tries]
       ; Tear down every node
-      (info "Tearing down DB")
-      (control/on-nodes test (partial teardown! db))
+      (control/on-nodes test (partial retrying-teardown! cycle-tries db))
 
       ; Start up every node
       (if (= :retry (try+
