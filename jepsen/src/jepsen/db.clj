@@ -94,7 +94,7 @@
     (if (= :retry (try+
                    (info "Tearing down DB")
                    (teardown! db test node)
-                   (catch Exception e
+                   (catch [:type ::teardown-failed] e
                      (if (< 1 tries)
                        (do (info :throwable (pr-str (type (:throwable &throw-context))))
                            (warn (:throwable &throw-context)
