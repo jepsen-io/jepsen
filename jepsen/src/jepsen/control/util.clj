@@ -76,6 +76,10 @@
         (recur (dec tries))
         res))))
 
+
+; TODO: only force? should have a ?, because it's a boolean. User and pw
+; should be renamed without ?, and probably use whatever username/password
+; naming convention we use in jepsen.control etc.
 (defn wget!
   "Downloads a string URL and returns the filename as a string. Skips if the
   file already exists.
