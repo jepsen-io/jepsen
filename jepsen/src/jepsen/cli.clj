@@ -400,13 +400,14 @@ Options:\n")
                                           ") and CLI test (" (:name cli-test)
                                           ") have different names; aborting"))
 
-                            (info "Combined test:\n"
-                                  (-> test
-                                      (update :history (partial take 5))
-                                      (update :history vector)
-                                      (update :history conj '...)
-                                      pprint
-                                      with-out-str))
+                            (binding [*print-length* 32]
+                              (info "Combined test:\n"
+                                    (-> test
+                                        (update :history (partial take 5))
+                                        (update :history vector)
+                                        (update :history conj '...)
+                                        pprint
+                                        with-out-str)))
 
                             (jepsen/analyze! test)))}}))
 
