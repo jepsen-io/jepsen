@@ -142,7 +142,7 @@
           generator (gen/stateful+pure
                       (gen/delay (:interval opts default-interval)
                                  generator)
-                      (gen.pure/delay-til (:interval opts default-interval)
+                      (gen.pure/stagger (:interval opts default-interval)
                                           generator))
           nemesis   (db-nemesis (:db opts))]
       {:generator       generator
@@ -279,7 +279,7 @@
                                       :check-offsets  :check-clock-offsets
                                       :strobe         :strobe-clock
                                       :bump           :bump-clock})
-                     (gen.pure/delay-til (:interval opts default-interval))))]
+                     (gen.pure/stagger (:interval opts default-interval))))]
       {:generator         gen
        :final-generator   (gen/stateful+pure
                             (gen/once {:type :info, :f :reset-clock})
