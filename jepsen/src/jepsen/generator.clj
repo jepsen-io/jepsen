@@ -88,12 +88,14 @@
   generators, :pure if they're all pure generators, and :both if they're all
   both. Throws if there's a mix."
   [gens]
-  (let [types (c/map gen-type gens)]
-    (assert+ (apply = types)
-             {:type   ::mixed-generator-types
-              :gens   gens
-              :types  types})
-    (first types)))
+  (if (c/seq gens)
+    (let [types (c/map gen-type gens)]
+      (assert+ (apply = types)
+               {:type   ::mixed-generator-types
+                :gens   gens
+                :types  types})
+      (first types))
+    :both))
 
 (defn op-and-validate
   "Wraps `op` to ensure we produce a valid operation for our
