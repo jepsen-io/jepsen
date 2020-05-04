@@ -221,15 +221,15 @@
   (when ((:faults opts) :partition)
     (let [db      (:db opts)
           targets (:targets (:partition opts) (partition-specs db))
-          start (fn [_ _] {:type  :info
-                           :f     :start-partition
-                           :value (rand-nth targets)})
+          start (fn start [_ _] {:type  :info
+                                 :f     :start-partition
+                                 :value (rand-nth targets)})
           stop  {:type :info, :f :stop-partition, :value nil}
           gen   (gen/stateful+pure
                   (->> (gen/flip-flop start stop)
                        (gen/delay (:interval opts default-interval)))
                   (->> (gen.pure/flip-flop start (repeat stop))
-                       (gen.pure/delay-til (:interval opts default-interval))))]
+                       (gen.pure/stagger (:interval opts default-interval))))]
       {:generator       gen
        :final-generator (gen/stateful+pure
                           (gen/once stop)

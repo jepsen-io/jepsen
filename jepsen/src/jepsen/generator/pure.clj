@@ -1257,7 +1257,10 @@
 
 (defn delay-til
   "Given a time dt in seconds, and an underlying generator gen, constructs a
-  generator which aligns invocations to intervals of dt seconds."
+  generator which aligns invocations to intervals of dt seconds.
+
+  TODO: I think this might be broken??? It seems like it only returned one
+  entry in a recent test."
   [dt gen]
   (DelayTil. (long (util/secs->nanos dt)) nil gen))
 
