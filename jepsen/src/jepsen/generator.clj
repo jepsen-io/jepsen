@@ -78,7 +78,7 @@
   behavior is incompatible, so we only consider them as stateful generators for
   now."
   [x]
-  (if (or (map? x)
+  (if (or (instance? clojure.lang.APersistentMap x)
           (instance? clojure.lang.AFunction x))
     :stateful
     (gen-type- x)))
