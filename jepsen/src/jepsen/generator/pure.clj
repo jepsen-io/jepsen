@@ -103,11 +103,11 @@
     :write, :value (rand-int 5))` instead of `(fn [] {:f :write, :value
     (rand-int 5)})`.
 
-  - `stagger`, `delay-til`, etc. now take total rates, rather than the rate per
+  - `stagger`, `delay`, etc. now take total rates, rather than the rate per
     thread.
 
-  - `delay` is gone; we think, in practice, users generally want either
-    `stagger` (for uncoordinated times) or `delay-til` (for coordinated times).
+  - `delay-til` is gone. It should come back; I just haven't written it yet.
+    Defining what exactly delay-til means is... surprisingly tricky.
 
   - `each` used to mean 'on each process', but in practice what users generally
     wanted was 'on each thread'--on each process had a tendency to result in
