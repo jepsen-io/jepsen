@@ -203,7 +203,8 @@
         ; because they're latency sensitive--if we wait, we introduce false
         ; concurrency.
         (if-let [op' (.poll completions poll-timeout TimeUnit/MICROSECONDS)]
-          (let [thread (gen/process->thread ctx (:process op'))
+          (let [;_      (prn :completed op')
+                thread (gen/process->thread ctx (:process op'))
                 time    (util/relative-time-nanos)
                 ; Update op with new timestamp
                 op'     (assoc op' :time time)
@@ -231,7 +232,7 @@
                 ;_ (prn :asking-for-op)
                 ;_ (binding [*print-length* 12] (pprint gen))
                 [op gen']   (gen/op gen test ctx)]
-                ;_ (prn :got op)]
+                ;_ (prn :time time :got op)]
             (condp = op
               ; We're exhausted, but workers might still be going.
               nil (if (pos? outstanding)
@@ -252,11 +253,12 @@
               ; Good, we've got an invocation.
               (if (< time (:time op))
                 ; Can't evaluate this op yet!
-                (recur ctx gen outstanding
-                       ; Unless something changes, we don't need to ask the
-                       ; generator for another op until it's time.
-                       (long (/ (- (:time op) time) 1000))
-                       history)
+                (do ;(prn :waiting (util/nanos->secs (- (:time op) time)) "s")
+                    (recur ctx gen outstanding
+                           ; Unless something changes, we don't need to ask the
+                           ; generator for another op until it's time.
+                           (long (/ (- (:time op) time) 1000))
+                           history))
 
                 ; Good, we can run this.
                 (let [thread (gen/process->thread ctx (:process op))

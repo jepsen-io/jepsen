@@ -1230,39 +1230,35 @@
 ;  [dt gen]
 ;  (DelayTil. (long (util/secs->nanos dt)) nil nil gen))
 
-(defrecord DelayTil [dt anchor gen]
+; dt is our interval between ops in nanos
+; next-time is the next timestamp we plan to emit.
+(defrecord Delay [dt next-time gen]
   Generator
   (op [_ test ctx]
     (when-let [[op gen'] (op gen test ctx)]
       (if (= op :pending)
         ; Just pass these through; we don't know when they'll occur!
-        [op (DelayTil. dt anchor gen')]
+        [op (Delay. dt next-time gen')]
 
         ; OK we have an actual op. Compute its new event time.
-        (let [t      (:time op)
-              anchor (or anchor t)
-              ; A helpful way to test this at the REPL:
-              ; (let [anchor 0 dt 3]
-              ;   (->> (range 20)
-              ;        (map (fn [t]
-              ;          [t (+ t (mod (- dt (mod (- t anchor) dt)) dt))]))))
-              ; We do a second mod here because mod has an off-by-one
-              ; problem in this form; it'll compute offsets that push 10 -> 15,
-              ; rather than letting 10->10.
-              t      (+ t (mod (- dt (mod (- t anchor) dt)) dt))]
-          [(assoc op :time t) (DelayTil. dt anchor gen')]))))
+        (let [next-time (or next-time (:time op))
+              op        (c/update op :time max next-time)]
+          [op (Delay. dt (+ next-time dt) gen')]))))
 
   (update [this test ctx event]
-    (DelayTil. dt anchor (update gen test ctx event))))
+    (Delay. dt next-time (update gen test ctx event))))
 
-(defn delay-til
+(defn delay
   "Given a time dt in seconds, and an underlying generator gen, constructs a
-  generator which aligns invocations to intervals of dt seconds.
+  generator which tries to emit operations exactly dt seconds apart. Emits
+  operations more frequently if it falls behind. Like `stagger`, this should
+  result in histories where operations happen roughly every dt seconds.
 
-  TODO: I think this might be broken??? It seems like it only returned one
-  entry in a recent test."
+  Note that this definition of delay differs from its stateful cousin delay,
+  which a.) introduced dt seconds of delay between *completion* and subsequent
+  invocation, and b.) emitted 1/dt ops/sec *per thread*, rather than globally."
   [dt gen]
-  (DelayTil. (long (util/secs->nanos dt)) nil gen))
+  (Delay. (long (util/secs->nanos dt)) nil gen))
 
 (defn sleep
   "Emits exactly one special operation which causes its receiving process to do

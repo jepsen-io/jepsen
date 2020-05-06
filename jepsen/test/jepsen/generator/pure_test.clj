@@ -75,7 +75,7 @@
           ctx        ctx]
      ;(binding [*print-length* 3] (prn :invoking :gen gen))
      (let [[invoke gen'] (gen/op gen default-test ctx)]
-       ;(prn :invoke invoke :in-flight in-flight)
+       ; (prn :invoke invoke :in-flight in-flight)
        (if (nil? invoke)
          ; We're done
          (into ops in-flight)
@@ -123,6 +123,19 @@
   "How long perfect operations take"
   10)
 
+(defn perfect*
+  "Simulates the series of ops obtained from a generator where the system
+  executes every operation successfully in 10 nanoseconds. Returns full
+  history."
+  ([gen]
+   (perfect* default-context gen))
+  ([ctx gen]
+   (simulate ctx gen
+             (fn [ctx invoke]
+               (-> invoke
+                   (assoc :type :ok)
+                   (update :time + perfect-latency))))))
+
 (defn perfect
   "Simulates the series of ops obtained from a generator where the system
   executes every operation successfully in 10 nanoseconds. Returns only
@@ -130,12 +143,7 @@
   ([gen]
    (perfect default-context gen))
   ([ctx gen]
-   (invocations
-     (simulate ctx gen
-               (fn [ctx invoke]
-                 (-> invoke
-                     (assoc :type :ok)
-                     (update :time + perfect-latency)))))))
+   (invocations (perfect* ctx gen))))
 
 (defn perfect-info
   "Simulates the series of ops obtained from a generator where every operation
@@ -209,15 +217,15 @@
               (perfect)
               (map :value)))))
 
-(deftest delay-til-test
+(deftest delay-test
   (is (= [{:type :invoke, :process 0, :time 0, :f :write}
-          {:type :invoke, :process 1, :time 0, :f :write}
-          {:type :invoke, :process :nemesis, :time 0, :f :write}
-          {:type :invoke, :process 0, :time 12, :f :write}
+          {:type :invoke, :process 1, :time 3, :f :write}
+          {:type :invoke, :process :nemesis, :time 6, :f :write}
+          {:type :invoke, :process 0, :time 9, :f :write}
           {:type :invoke, :process 1, :time 12, :f :write}]
           (->> {:f :write}
-               gen/repeat
-               (gen/delay-til 3e-9)
+               repeat
+               (gen/delay 3e-9)
                (gen/limit 5)
                perfect))))
 
@@ -396,8 +404,8 @@
           [:b 1 0]
           [:a 0 20]
           [:b 1 20]]
-         (->> (gen/any (gen/on #{0} (gen/delay-til 20e-9 (repeat {:f :a})))
-                       (gen/on #{1} (gen/delay-til 20e-9 (repeat {:f :b}))))
+         (->> (gen/any (gen/on #{0} (gen/delay 20e-9 (repeat {:f :a})))
+                       (gen/on #{1} (gen/delay 20e-9 (repeat {:f :b}))))
               (gen/limit 4)
               perfect
               (map (juxt :f :process :time))))))

@@ -142,7 +142,7 @@
           generator (gen/stateful+pure
                       (gen/delay (:interval opts default-interval)
                                  generator)
-                      (gen.pure/stagger (:interval opts default-interval)
+                      (gen.pure/delay (:interval opts default-interval)
                                           generator))
           nemesis   (db-nemesis (:db opts))]
       {:generator       generator
@@ -221,15 +221,16 @@
   (when ((:faults opts) :partition)
     (let [db      (:db opts)
           targets (:targets (:partition opts) (partition-specs db))
-          start (fn start [_ _] {:type  :info
-                                 :f     :start-partition
-                                 :value (rand-nth targets)})
+          start (fn start [_ _]
+                  {:type  :info
+                   :f     :start-partition
+                   :value (rand-nth targets)})
           stop  {:type :info, :f :stop-partition, :value nil}
           gen   (gen/stateful+pure
                   (->> (gen/flip-flop start stop)
                        (gen/delay (:interval opts default-interval)))
                   (->> (gen.pure/flip-flop start (repeat stop))
-                       (gen.pure/stagger (:interval opts default-interval))))]
+                       (gen.pure/delay (:interval opts default-interval))))]
       {:generator       gen
        :final-generator (gen/stateful+pure
                           (gen/once stop)
@@ -279,7 +280,7 @@
                                       :check-offsets  :check-clock-offsets
                                       :strobe         :strobe-clock
                                       :bump           :bump-clock})
-                     (gen.pure/stagger (:interval opts default-interval))))]
+                     (gen.pure/delay (:interval opts default-interval))))]
       {:generator         gen
        :final-generator   (gen/stateful+pure
                             (gen/once {:type :info, :f :reset-clock})
