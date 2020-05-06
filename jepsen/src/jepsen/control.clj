@@ -442,7 +442,7 @@
    (->> nodes
         (map (fn [node]
                (let [session (get (:sessions test) node)]
-                 (assert session (str "No session for node" (pr-str node)))
+                 (assert session (str "No session for node " (pr-str node)))
                  [node session])))
         (real-pmap (bound-fn [[node session]]
                      (with-thread-name (str "jepsen node " (name node))
