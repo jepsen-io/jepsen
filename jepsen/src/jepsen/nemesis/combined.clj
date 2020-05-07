@@ -35,7 +35,8 @@
      :one           - Chooses a single random node
      :minority      - Chooses a random minority of nodes
      :majority      - Chooses a random majority of nodes
-     :primaries     - All nodes which we think are primaries
+     :primaries     - A random nonempty subset of nodes which we think are
+                      primaries
      :all           - All nodes
      [\"a\", ...]   - The specified nodes"
   [test db node-spec]
@@ -45,7 +46,7 @@
       :one        (list (rand-nth nodes))
       :minority   (take (dec (majority (count nodes))) (shuffle nodes))
       :majority   (take      (majority (count nodes))  (shuffle nodes))
-      :primaries  (db/primaries db test)
+      :primaries  (random-nonempty-subset (db/primaries db test))
       :all        nodes
       node-spec)))
 
@@ -163,7 +164,8 @@
     :one              Isolates a single node
     :majority         A clean majority/minority split
     :majorities-ring  Overlapping majorities in a ring
-    :primaries        Isolates all primaries into single-node components"
+    :primaries        Isolates a nonempty subset of primaries into
+                      single-node components"
   [test db part-spec]
   (let [nodes (:nodes test)]
     (case part-spec
@@ -172,6 +174,7 @@
       :majorities-ring  (n/majorities-ring nodes)
       :primaries        (let [primaries (db/primaries db test)]
                           (->> primaries
+                               random-nonempty-subset
                                (map list) ; Put each in its own singleton list
                                (cons (remove (set primaries) nodes)) ; others
                                n/complete-grudge)) ; And make it a grudge
