@@ -103,15 +103,12 @@
       (on-nodes test
                 (keys grudge)
                 (fn snub [_ node]
-                  (or (seq (get grudge node))
-                      (throw+ {:type    :empty-grudge
-                               :grudge  grudge
-                               :node    node}))
-                  (su (exec :iptables :-A :INPUT :-s
-                            (->> (get grudge node)
-                                 (map control.net/ip)
-                                 (str/join ","))
-                            :-j :DROP :-w)))))))
+                  (when (seq (get grudge node))
+                    (su (exec :iptables :-A :INPUT :-s
+                              (->> (get grudge node)
+                                   (map control.net/ip)
+                                   (str/join ","))
+                              :-j :DROP :-w))))))))
 
 (def ipfilter
   "IPFilter rules"
