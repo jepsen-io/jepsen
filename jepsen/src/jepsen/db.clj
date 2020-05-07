@@ -49,7 +49,9 @@
   "A database which runs a tcpdump capture from setup! to teardown!, and yields
   a `tcpdump` logfile. Options:
 
-    :filter A filter string to apply (in addition to ports)
+    :filter A filter string to apply (in addition to ports).
+            e.g. \"host 192.168.122.1\", which can be helpful for seeing *just*             client traffic from the control node.
+
     :ports  A collection of ports to grab traffic from."
   [opts]
   (let [dir      "/tmp/jepsen/tcpdump"
