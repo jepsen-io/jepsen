@@ -454,34 +454,35 @@
 
     @history))
 
-(defmacro with-client-setup-teardown
-  "Evaluates body, setting up clients before, and tearing them down at the end
-  of the test."
+(defmacro with-client+nemesis-setup-teardown
+  "Evaluates body, setting up clients and nemesis before, and tearing them down
+  at the end of the test."
   [test & body]
-  `(let [client# (:client ~test)]
+  `(let [client#  (:client ~test)
+         nemesis# (:nemesis ~test)]
     ; Setup
-    (try (real-pmap (fn [node#]
-                      (client/with-client [c# (client/open! client# ~test node#)]
-                        (client/setup! c# ~test)))
-                    (:nodes ~test))
-
-         ; Actually run generator
-         (gen.interpreter/run! ~test)
-
-         (finally
-           ; Teardown
+    (try (let [nf# (future (nemesis/setup-compat! nemesis# ~test nil))]
            (real-pmap (fn [node#]
                         (client/with-client [c# (client/open! client# ~test node#)]
-                          (client/teardown! c# ~test)))
-                      (:nodes ~test))))))
+                          (client/setup! c# ~test)))
+                      (:nodes ~test))
+           @nf#)
+         ~@body
+         (finally
+           ; Teardown
+           (let [nf# (future (nemesis/teardown-compat! nemesis# ~test))]
+             (real-pmap (fn [node#]
+                          (client/with-client [c# (client/open! client# ~test node#)]
+                            (client/teardown! c# ~test)))
+                        (:nodes ~test))
+             @nf#)))))
 
 (defn run-case-pure-generator!
   "For a pure generator, uses generator/run! to run a test case, and returns
   that case's history."
   [test]
   (info "Using pure generator")
-  (with-client-setup-teardown test
-    ; Actually run generator
+  (with-client+nemesis-setup-teardown test
     (gen.interpreter/run! test)))
 
 (defn run-case!
