@@ -627,6 +627,8 @@
                                                       :barrier
                                                       :active-histories
                                                       :sessions)]
+                                     ; TODO: move test analysis outside the
+                                     ; DB/ssh block.
                                      (info "Run complete, writing")
                                      (when (:name test) (store/save-1! test))
                                      (analyze! test))))))))))]

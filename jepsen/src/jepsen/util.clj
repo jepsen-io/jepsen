@@ -40,9 +40,10 @@
 
 (defn random-nonempty-subset
   "A randomly selected, randomly ordered, non-empty subset of the given
-  collection."
-  [nodes]
-  (take (inc (rand-int (count nodes))) (shuffle nodes)))
+  collection. Returns nil if collection is empty."
+  [coll]
+  (when (seq coll)
+    (take (inc (rand-int (count coll))) (shuffle coll))))
 
 (defn name+
   "Tries name, falls back to pr-str."
