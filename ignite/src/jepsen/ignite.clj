@@ -136,7 +136,8 @@
          )
 
     (teardown! [_ test node]
-      (nuke! node test))
+      (nuke! node test)
+               )
 
     db/LogFiles
       (log-files [_ test node]
@@ -149,7 +150,7 @@
     (.setCacheMode                cfg (:cache-mode       cache-config))
     (.setAtomicityMode            cfg (:atomicity-mode   cache-config))
     (.setWriteSynchronizationMode cfg (:write-sync-mode  cache-config))
-    (.setReadFromBackup           cfg (:read-from-backup cache-config))))
+    (.setReadFromBackup           cfg (Boolean/parseBoolean (:read-from-backup cache-config)))))
 
 (defn get-cache-config
   [options]
