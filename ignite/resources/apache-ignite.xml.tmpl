@@ -32,6 +32,11 @@
 
         <property name="clientMode" value="##clientmode##"/>
         <property name="igniteInstanceName" value="##instancename##"/>
+        <property name="binaryConfiguration">
+            <bean class="org.apache.ignite.configuration.BinaryConfiguration">
+                <property name="compactFooter" value="true"/>
+            </bean>
+        </property>
 
         <!-- Set to true to enable distributed class loading for examples, default is false. -->
         <property name="peerClassLoadingEnabled" value="true"/>
