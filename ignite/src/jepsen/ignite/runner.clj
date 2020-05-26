@@ -26,10 +26,6 @@
    "ATOMIC"                 CacheAtomicityMode/ATOMIC
    "TRANSACTIONAL_SNAPSHOT" CacheAtomicityMode/TRANSACTIONAL_SNAPSHOT})
 
-(def read-from-backups
-  {"YES" true
-   "NO"  false})
-
 (def cache-write-sync-modes
   {"FULL_SYNC"    CacheWriteSynchronizationMode/FULL_SYNC
    "PRIMARY_SYNC" CacheWriteSynchronizationMode/PRIMARY_SYNC
@@ -73,9 +69,9 @@
    [nil
     "--read-from-backup ReadFromBackup"
     "Whether data can be read from backup."
-    :default  true
-    :parse-fn read-from-backups
-    :validate [identity (jc/one-of read-from-backups)]]
+    :default  :true
+    :parse-fn str
+    :validate [#{"true" "false"} "One of `true` or `false`"]]
    [nil
     "--transaction-concurrency TransactionConcurrency"
     "Which transaction concurrency control to use."
@@ -92,7 +88,7 @@
     "How many backups to use."
     :default 2
     :parse-fn #(Long/parseLong %)
-    :validate [pos? "Must be positive"]]
+    :validate [nat-int? "Must be positive"]]
    ["-v" "--version VERSION"
     "What version of Apache Ignite to install"
     :default "2.7.0"]
