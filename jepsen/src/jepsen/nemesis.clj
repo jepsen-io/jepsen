@@ -220,7 +220,7 @@
   (if (map? nemeses)
     (reify Nemesis
       (setup! [this test]
-        (compose (util/map-vals #(setup % test) nemeses)))
+        (compose (util/map-vals #(setup! % test) nemeses)))
 
       (invoke! [this test op]
         (let [f (:f op)]
