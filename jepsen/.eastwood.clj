@@ -15,8 +15,8 @@
           testing for."})
 
 (disable-warning
-  {:linter    :unused-ret-vals
-   :for-macro 'clojure.pprint/pprint-length-loop
+  {:linter        :unused-ret-vals
+   :for-macro     'clojure.pprint/pprint-length-loop
    :if-inside-macroexpansion-of #{'clojure.core/defmethod}
-   :within-depth nil
-   :reason    "It's a goddamn pretty printer, the whole point is side effects, come the fuck on"})
+   :within-depth  nil
+   :reason        "It's a goddamn pretty printer, the whole point is side effects, come the fuck on"})
