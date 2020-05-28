@@ -69,39 +69,6 @@
   [nemesis]
   (Validate. nemesis))
 
-(defn setup-compat!
-  "Calls `jepsen.nemesis/setup!`, if possible, falling back to
-  `jepsen.client/setup!`. Warns users that nemeses implementing `jepsen.client`
-  have been deprecated."
-  [nemesis test node]
-  (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (try
-      (setup! nemesis test)
-      (catch AbstractMethodError e
-        nemesis))
-    (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, calling `jepsen.client/setup!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
-        (client/setup! nemesis test node))))
-
-(defn invoke-compat!
-  "Calls `jepsen.nemesis/invoke!`, if possible, falling back to `jepsen.client/invoke!`."
-  [nemesis test op]
-  (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (invoke! nemesis test op)
-    ;; DEPRECATED
-    (client/invoke! nemesis test op)))
-
-(defn teardown-compat!
-  "Calls `jepsen.nemesis/teardown!`, if possible, falling back to
-  `jepsen.client/teardown!`. Warns users that nemeses implementing
-  `jepsen.client` have been deprecated."
-  [nemesis test]
-  (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (try (teardown! nemesis test)
-         (catch AbstractMethodError e
-           nemesis))
-    (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, falling back to `jepsen.client/teardown!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
-        (client/teardown! nemesis test))))
-
 (defn timeout
   "Sometimes nemeses are unreliable. If you wrap them in this nemesis, it'll
   time out their operations with the given timeout, in milliseconds. Timed out
@@ -253,7 +220,7 @@
   (if (map? nemeses)
     (reify Nemesis
       (setup! [this test]
-        (compose (util/map-vals #(setup-compat! % test nil) nemeses)))
+        (compose (util/map-vals #(setup % test) nemeses)))
 
       (invoke! [this test op]
         (let [f (:f op)]
@@ -263,11 +230,11 @@
                        (str "no nemesis can handle " (:f op))))
               (let [[fs- nemesis] (first nemeses)]
                 (if-let [f' (fs- f)]
-                  (assoc (invoke-compat! nemesis test (assoc op :f f')) :f f)
+                  (assoc (invoke! nemesis test (assoc op :f f')) :f f)
                   (recur (next nemeses))))))))
 
       (teardown! [this test]
-        (util/map-vals #(teardown-compat! % test) nemeses))
+        (util/map-vals #(teardown! % test) nemeses))
 
       Reflection
       (fs [this]
@@ -295,16 +262,16 @@
                      nemeses)]
       (reify Nemesis
         (setup! [this test]
-          (compose (map #(setup-compat! % test nil) nemeses)))
+          (compose (map #(setup! % test) nemeses)))
 
         (invoke! [this test op]
           (if-let [n (get fm (:f op))]
-            (invoke-compat! n test op)
+            (invoke! n test op)
             (throw (IllegalArgumentException.
                      (str "No nemesis can handle " (pr-str (:f op)))))))
 
         (teardown! [this test]
-          (map #(teardown-compat! % test) nemeses))
+          (map #(teardown! % test) nemeses))
 
         Reflection
         (fs [this]

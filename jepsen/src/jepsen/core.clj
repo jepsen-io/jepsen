@@ -185,7 +185,7 @@
   `(let [client#  (:client ~test)
          nemesis# (:nemesis ~test)]
     ; Setup
-    (try (let [nf# (future (nemesis/setup-compat! nemesis# ~test nil))]
+    (try (let [nf# (future (nemesis/setup! nemesis# ~test))]
            (real-pmap (fn [node#]
                         (client/with-client [c# (client/open! client# ~test node#)]
                           (client/setup! c# ~test)))
@@ -194,7 +194,7 @@
          ~@body
          (finally
            ; Teardown
-           (let [nf# (future (nemesis/teardown-compat! nemesis# ~test))]
+           (let [nf# (future (nemesis/teardown! nemesis# ~test))]
              (real-pmap (fn [node#]
                           (client/with-client [c# (client/open! client# ~test node#)]
                             (client/teardown! c# ~test)))
