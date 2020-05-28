@@ -221,10 +221,12 @@
 
 (deftest delay-test
   (is (= [{:type :invoke, :process 0, :time 0, :f :write}
-          {:type :invoke, :process 1, :time 3, :f :write}
-          {:type :invoke, :process :nemesis, :time 6, :f :write}
-          {:type :invoke, :process 0, :time 9, :f :write}
-          {:type :invoke, :process 1, :time 12, :f :write}]
+          {:type :invoke, :process :nemesis, :time 3, :f :write}
+          {:type :invoke, :process 1, :time 6, :f :write}
+          ; This would normally execute at 9 and 12, but every thread was busy
+          ; for 10 nanos: they start as soon as they can.
+          {:type :invoke, :process 0, :time 10, :f :write}
+          {:type :invoke, :process :nemesis, :time 13, :f :write}]
           (->> {:f :write}
                repeat
                (gen/delay 3e-9)
@@ -329,7 +331,7 @@
                               (Set/from [0 1]))))))))
 
 
-(deftest delay-test
+(deftest clojure-delay-test
   (let [eval-ctx (promise)
         d (delay (gen/limit 3
                    (fn [test ctx]
