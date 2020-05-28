@@ -12,7 +12,8 @@
             [jepsen.generator.pure :as gen]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent ArrayBlockingQueue
-                                 TimeUnit)))
+                                 TimeUnit)
+           (io.lacuna.bifurcan Set)))
 
 
 (defprotocol Worker
@@ -33,7 +34,8 @@
                        ^:unsynchronized-mutable process
                        ^:unsynchronized-mutable client]
   Worker
-  (open [this test id] this)
+  (open [this test id]
+    this)
 
   (invoke! [this test op]
     (if (not= process (:process op))
@@ -76,6 +78,7 @@
 (defrecord ClientNemesisWorker []
   Worker
   (open [this test id]
+    ;(locking *out* (prn :spawn id))
     (if (integer? id)
       (let [nodes (:nodes test)]
         (ClientWorker. (nth nodes (mod id (count nodes))) nil nil))
@@ -209,9 +212,10 @@
                 ; Update op with new timestamp
                 op'     (assoc op' :time time)
                 ; Update context with new time and thread being free
-                ctx     (-> ctx
-                            (assoc :time time)
-                            (update :free-threads conj thread))
+                ctx     (assoc ctx
+                              :time         time
+                              :free-threads (.add ^Set (:free-threads ctx)
+                                                  thread))
                 ; Workers that crash (other than the nemesis) should be assigned
                 ; new thread identifiers.
                 ctx     (if (or (= :nemesis thread) (not= :info (:type op')))
@@ -265,9 +269,11 @@
                       ; Dispatch it to a worker as quick as we can
                       _ (.put ^ArrayBlockingQueue (get invocations thread) op)
                       ; Update our context to reflect
-                      ctx (-> ctx
-                              (assoc :time (:time op)) ; Use time instead?
-                              (update :free-threads disj thread))
+                      ctx (assoc ctx
+                                 :time (:time op) ; Use time instead?
+                                 :free-threads (.remove
+                                                 ^Set (:free-threads ctx)
+                                                 thread))
                       ; Let the generator know about the invocation
                       gen' (gen/update gen' test ctx op)
                       history (if (goes-in-history? op)

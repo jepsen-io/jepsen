@@ -176,10 +176,10 @@
 
       ; We go through each free group, and find the soonest operation any of
       ; those groups can offer us.
-      (loop [groups free-groups
-             keys   keys
-             gens   gens2
-             [soonest-op soonest-group soonest-gen' :as soonest] nil]
+      (loop [groups   free-groups
+             keys     keys
+             gens     gens2
+             soonest  nil]
         ;(prn :----------)
         ;(prn :group (first groups))
         ;(prn :keys keys)
@@ -187,12 +187,12 @@
         ;(prn :soonest-op soonest-op)
         (if-not (seq groups)
           ; We're done
-          (if soonest-op
+          (if (:op soonest)
             ; We have an operation to yield
-            [soonest-op
+            [(:op soonest)
              (PureConcurrentGenerator. n fgen group->threads thread->group
-                                       keys (assoc gens soonest-group
-                                                   soonest-gen'))]
+                                       keys (assoc gens (:group soonest)
+                                                   (:gen' soonest)))]
             ; We don't have an operation to yield given the current context,
             ; but some groups which weren't currently free might have ops to
             ; yield still. If there's a generator left... we're still pending.
@@ -223,8 +223,13 @@
               (recur (next groups)
                      keys
                      gens
-                     (pgen/soonest-op-vec soonest
-                                          (when op [op group gen'])))
+                     (pgen/soonest-op-map soonest
+                                          (when op {:op     op
+                                                    :group  group
+                                                    :gen'   gen'
+                                                    :weight (count
+                                                              (group->threads
+                                                                group))})))
               ; We didn't get an op, but we do still have a generator. Let's
               ; try again.
               (recur groups

@@ -373,7 +373,8 @@
             [clojure.tools.logging :refer [info warn error]]
             [clojure.pprint :as pprint :refer [pprint]]
             [jepsen [util :as util]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import (io.lacuna.bifurcan Set)))
 
 (defprotocol Generator
   (update [gen test context event]
@@ -412,12 +413,27 @@
 (prefer-method pprint/simple-dispatch
                jepsen.generator.pure.Generator clojure.lang.IPersistentMap)
 
+;; Fair sets
+;
+; Our contexts need a set of free threads which supports an efficient way of
+; getting a single thread. An easy solution is to use `first` to get the first
+; element of the set, but if a thread executes quickly, it's possible that the
+; thread will go right *back* into the set at the first position immediately,
+; which can lead to thread starvation: some workers never execute requests. We
+; want a more fair scheduler, which gives each thread a uniform chance of
+; executing.
+;
+; To do this, we use a Set from ztellman's Bifurcan collections, which supports
+; efficient nth.
+
 ;; Helpers
 
 (defn context
   "Constructs a new context from a test."
   [test]
-  (let [threads (into #{:nemesis} (range (:concurrency test)))]
+  (let [threads (->> (range (:concurrency test))
+                     (cons :nemesis))
+        threads (.forked (Set/from ^Iterable threads))]
     {:time          0
      :free-threads  threads
      :workers       (->> threads
@@ -425,10 +441,10 @@
                          (c/map vec)
                          (into {}))}))
 
-(defn random-int-seq
+(defn rand-int-seq
   "Generates a reproducible sequence of random longs, given a random seed. If
   seed is not provided, taken from (rand-int))."
-  ([] (random-int-seq (rand-int Integer/MAX_VALUE)))
+  ([] (rand-int-seq (rand-int Integer/MAX_VALUE)))
   ([seed]
    (let [gen (java.util.Random. seed)]
      (repeatedly #(.nextLong gen)))))
@@ -440,17 +456,20 @@
   (c/map (:workers context) (:free-threads context)))
 
 (defn some-free-process
-  "Faster than (first (free-processes ctx)), because we don't map over the
-  whole free-threads collection."
+  "Given a context, returns a random free process."
   [context]
-  (get (:workers context) (first (:free-threads context))))
+  (let [free-threads ^Set (:free-threads context)
+        n                 (.size free-threads)]
+    (when-not (zero? n)
+      (let [thread (.nth free-threads (rand-int n))]
+        (get (:workers context) thread)))))
 
 (defn all-processes
   "Given a context, returns all processes currently being executed by threads."
   [context]
   (vals (:workers context)))
 
-(defn free-threads
+(defn ^Set free-threads
   "Given a context, returns a collection of threads that are not actively
   processing invocations."
   [context]
@@ -553,7 +572,7 @@
   constructs, like promises, use reify rather than classes, and have no
   distinct interface we can extend."
   [proto klass & specs]
-  (let [cn (symbol (.getName (eval klass)))]
+  (let [cn (symbol (.getName ^Class (eval klass)))]
     `(extend-protocol ~proto ~cn ~@specs)))
 
 (extend-protocol-runtime Generator
@@ -786,7 +805,14 @@
   returns true if a thread should be included in the context."
   [f ctx]
   (let [; Filter free threads to just those we want
-        ctx     (c/update ctx :free-threads (partial c/filter f))
+        ctx (assoc ctx :free-threads
+                   (.forked ^Set
+                     (reduce (fn [^Set free-threads thread]
+                               (if (f thread)
+                                 (.add free-threads thread)
+                                 free-threads))
+                             (.linear (Set.))
+                             (:free-threads ctx))))
         ; Update workers to remove threads we won't use
         ctx (->> (:workers ctx)
                  (c/filter (comp f key))
@@ -815,35 +841,62 @@
 
 (def on "For backwards compatibility" on-threads)
 
-(defn soonest-op-vec
-  "Takes two [op, ...] vectors, and returns the vector whose op occurs first.
-  Op maps occur before those which are :pending. :pending occurs before `nil`.
+(defn soonest-op-map
+  "Takes a pair of maps wrapping operations. Each map has the following
+  structure:
 
-  We use vectors here because you may want to pass [op, gen'] pairs, or
-  possibly encode additional information into the vector, so you can, for
-  instance, identify *which* of several generators was the next one."
-  [pair1 pair2]
+    :op       An operation
+    :weight   An optional integer weighting.
+
+  Returns whichever map has an operation which occurs sooner. If one map is
+  nil, the other happens sooner. If one map's op is :pending, the other happens
+  sooner. If one op has a lower :time, it happens sooner. If the two ops have
+  equal :times, resolves the tie randomly proportional to the two maps'
+  respective :weights. With weights 2 and 3, returns the first map 2/5 of the
+  time, and the second 3/5 of the time.
+
+  The :weight of the returned map is the *sum* of both weights if their times
+  are equal, which makes this function suitable for use in a reduction over
+  many generators.
+
+  Why is this nondeterministic? Because we use this function to decide between
+  several alternative generators, and always biasing towards an earlier or
+  later generator could lead to starving some threads or generators."
+  [m1 m2]
   (condp = nil
-    pair1 pair2
-    pair2 pair1
-    (let [op1 (first pair1)
-          op2 (first pair2)]
+    m1 m2
+    m2 m1
+    (let [op1 (:op m1)
+          op2 (:op m2)]
       (condp = :pending
-        op1 pair2
-        op2 pair1
-        (if (<= (:time op1) (:time op2))
-          pair1
-          pair2)))))
+        op1 m2
+        op2 m1
+        (let [t1 (:time op1)
+              t2 (:time op2)]
+          (if (= t1 t2)
+            ; We have a tie; decide based on weights.
+            (let [w1 (:weight m1 1)
+                  w2 (:weight m2 1)
+                  w  (+ w1 w2)]
+              (assoc (if (< (rand-int w) w1) m1 m2)
+                     :weight w))
+            ; Not equal times; which comes sooner?
+            (if (< t1 t2)
+              m1
+              m2)))))))
 
 (defrecord Any [gens]
   Generator
   (op [this test ctx]
-    (when-let [[op gen' i] (->> gens
-                                (map-indexed
-                                  (fn [i gen]
-                                    (when-let [pair (op gen test ctx)]
-                                      (conj pair i))))
-                                (reduce soonest-op-vec nil))]
+    (when-let [{:keys [op gen' i]}
+               (->> gens
+                    (map-indexed
+                      (fn [i gen]
+                        (when-let [[op gen'] (op gen test ctx)]
+                          {:op    op
+                           :gen'  gen'
+                           :i     i})))
+                    (reduce soonest-op-map nil))]
       [op (Any. (assoc gens i gen'))]))
 
   (update [this test ctx event]
@@ -866,24 +919,27 @@
   (op [this test ctx]
     (let [free-threads (free-threads ctx)
           all-threads  (all-threads ctx)
-          [op gen' thread :as soonest]
+          {:keys [op gen' thread] :as soonest}
           (->> free-threads
                (keep (fn [thread]
-                      (let [gen (get gens thread fresh-gen)
+                      (let [gen     (get gens thread fresh-gen)
                             process (get (:workers ctx) thread)
                             ; Give this generator a context *just* for one
                             ; thread
                             ctx (assoc ctx
-                                       :free-threads [thread]
+                                       :free-threads (Set/from ^Iterable
+                                                               [thread])
                                        :workers {thread process})]
-                        (when-let [pair (op gen test ctx)]
-                          (conj pair thread)))))
-               (reduce soonest-op-vec nil))]
+                        (when-let [[op gen'] (op gen test ctx)]
+                          {:op      op
+                           :gen'    gen'
+                           :thread  thread}))))
+               (reduce soonest-op-map nil))]
       (cond ; A free thread has an operation
             soonest [op (EachThread. fresh-gen (assoc gens thread gen'))]
 
             ; Some thread is busy; we can't tell what to do just yet
-            (not= (count free-threads) (count all-threads))
+            (not= (.size free-threads) (count all-threads))
             [:pending this]
 
             ; Every thread is exhausted
@@ -915,7 +971,7 @@
   ; default generator.
   Generator
   (op [_ test ctx]
-    (let [[op gen' i :as soonest]
+    (let [{:keys [op gen' i] :as soonest}
           (->> ranges
                (map-indexed
                  (fn [i threads]
@@ -923,16 +979,22 @@
                          ; Restrict context to this range of threads
                          ctx (on-threads-context threads ctx)]
                      ; Ask this range's generator for an op
-                     (when-let [pair (op gen test ctx)]
+                     (when-let [[op gen'] (op gen test ctx)]
                        ; Remember our index
-                       (conj pair i)))))
+                       {:op     op
+                        :gen'   gen'
+                        :weight (count threads)
+                        :i      i}))))
                ; And for the default generator, compute a context without any
                ; threads from defined ranges...
                (cons (let [ctx (on-threads-context (complement all-ranges) ctx)]
                        ; And construct a triple for the default generator
-                       (when-let [pair (op (peek gens) test ctx)]
-                         (conj pair (count ranges)))))
-               (reduce soonest-op-vec nil))]
+                       (when-let [[op gen'] (op (peek gens) test ctx)]
+                         {:op     op
+                          :gen'   gen'
+                          :weight (count (:workers ctx))
+                          :i      (count ranges)})))
+               (reduce soonest-op-map nil))]
       (when soonest
         ; A range has an operation to do!
         [op (Reserve. ranges all-ranges (assoc gens i gen'))])))
@@ -1271,7 +1333,7 @@
   (op [this test ctx]
     (let [free (free-threads ctx)
           all  (all-threads ctx)]
-      (if (and (= (count free)
+      (if (and (= (.size free)
                   (count all))
                (= (set free)
                   (set all)))
