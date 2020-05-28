@@ -136,28 +136,23 @@
          )
 
     (teardown! [_ test node]
-      (nuke! node test))
+      (nuke! node test)
+               )
 
     db/LogFiles
       (log-files [_ test node]
       [logfile])))
 
-(defn getCacheConfiguration
-  [cache-config]
-  (let [cfg (new CacheConfiguration "JepsenCache")]
-    (.setBackups                  cfg (:backups          cache-config))
-    (.setCacheMode                cfg (:cache-mode       cache-config))
-    (.setAtomicityMode            cfg (:atomicity-mode   cache-config))
-    (.setWriteSynchronizationMode cfg (:write-sync-mode  cache-config))
-    (.setReadFromBackup           cfg (:read-from-backup cache-config))))
-
 (defn get-cache-config
-  [options]
-  {:atomicity-mode   (:cache-atomicity-mode options)
-   :cache-mode       (:cache-mode options)
-   :write-sync-mode  (:cache-write-sync-mode options)
-   :read-from-backup (:read-from-backup options)
-   :backups          (:backups options)})
+      [options cache-name]
+      (let [config (CacheConfiguration.)]
+           (.setName                     config cache-name)
+           (.setAtomicityMode            config (:cache-atomicity-mode options))
+           (.setCacheMode                config (:cache-mode options))
+           (.setBackups                  config (:backups options))
+           (.setReadFromBackup           config (Boolean/parseBoolean (:read-from-backup options)))
+           (.setWriteSynchronizationMode config (:cache-write-sync-mode options))
+           config))
 
 (defn get-transaction-config
   [options]
