@@ -16,6 +16,7 @@
 (defrecord Kitten [fuzz mew])
 
 (def base-test (assoc noop-test
+                      :pure-generators true
                       :name     "store-test"
                       :record   (Kitten. "fluffy" "smol")
                       :multiset (into (multiset/multiset)

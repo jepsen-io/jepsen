@@ -24,9 +24,7 @@
 (defn gen
   "Wrapper for elle.list-append/gen; as a Jepsen generator."
   [opts]
-  (gen/stateful+pure
-    (gen/seq (la/gen opts))
-    (la/gen opts)))
+  (la/gen opts))
 
 (defn test
   "A partial test, including a generator and checker. You'll need to provide a

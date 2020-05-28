@@ -2,10 +2,9 @@
   (:require [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
             [jepsen [db :as db]
-                    [util :as util]]
-            [jepsen.generator [pure :as gen]
-                              [pure-test :as pt]
-                              [interpreter :as interpreter]
+                    [util :as util]
+                    [generator :as gen]]
+            [jepsen.generator [interpreter :as interpreter]
                               [interpreter-test :as it]]
             [jepsen.nemesis.combined :refer :all]))
 

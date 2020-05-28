@@ -7,7 +7,6 @@
                     [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]]
-            [jepsen.generator.pure :as gen.pure]
             [clojure.string :as str]
             [clojure.java.io :as io])
   (:import (java.io File)))
@@ -194,10 +193,6 @@
   "Emits a random schedule of clock skew operations. Always starts by checking
   the clock offsets to establish an initial bound."
   []
-  (gen/stateful+pure
-    (gen/phases
-      (gen/once {:type :info, :f :check-offsets})
-      (gen/mix [reset-gen bump-gen strobe-gen]))
-    (gen.pure/phases
-      {:type :info, :f :check-offsets}
-      (gen.pure/mix [reset-gen bump-gen strobe-gen]))))
+  (gen/phases
+    {:type :info, :f :check-offsets}
+    (gen/mix [reset-gen bump-gen strobe-gen])))

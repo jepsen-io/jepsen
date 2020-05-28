@@ -13,7 +13,6 @@
                     [independent :as independent]
                     [generator :as gen]]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.generator.pure :as gen.pure]
             [knossos.model :as model]))
 
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -38,32 +37,17 @@
                                 {:model (:model opts (model/cas-register))})
                 :timeline     (timeline/html)}))
    :generator (let [n (count (:nodes opts))]
-                (gen/stateful+pure
-                  (independent/concurrent-generator
-                    (* 2 n)
-                    (range)
-                    (fn [k]
-                      (cond->> (gen/reserve n r (gen/mix [w cas cas]))
-                        ; We randomize the limit a bit so that over time, keys
-                        ; become misaligned, which prevents us from lining up
-                        ; on Significant Event Boundaries.
-                        (:per-key-limit opts)
-                        (gen/limit (* (+ (rand 0.1) 0.9)
-                                      (:per-key-limit opts )))
+                (independent/concurrent-generator
+                  (* 2 n)
+                  (range)
+                  (fn [k]
+                    (cond->> (gen/reserve n r (gen/mix [w cas cas]))
+                      ; We randomize the limit a bit so that over time, keys
+                      ; become misaligned, which prevents us from lining up
+                      ; on Significant Event Boundaries.
+                      (:per-key-limit opts)
+                      (gen/limit (* (+ (rand 0.1) 0.9)
+                                    (:per-key-limit opts 20)))
 
-                        true
-                        (gen/process-limit (:process-limit opts 20)))))
-                  (independent/pure-concurrent-generator
-                    (* 2 n)
-                    (range)
-                    (fn [k]
-                      (cond->> (gen.pure/reserve n r (gen.pure/mix [w cas cas]))
-                        ; We randomize the limit a bit so that over time, keys
-                        ; become misaligned, which prevents us from lining up
-                        ; on Significant Event Boundaries.
-                        (:per-key-limit opts)
-                        (gen.pure/limit (* (+ (rand 0.1) 0.9)
-                                           (:per-key-limit opts 20)))
-
-                        true
-                        (gen.pure/process-limit (:process-limit opts 20)))))))})
+                      true
+                      (gen/process-limit (:process-limit opts 20))))))})

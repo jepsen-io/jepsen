@@ -13,7 +13,6 @@
             [jepsen.store :as store]
             [jepsen.checker :as checker]
             [jepsen.nemesis :as nemesis]
-            [jepsen.generator.pure :as gen.pure]
             [knossos [model :as model]
                      [op :as op]]))
 
@@ -53,86 +52,72 @@
 
              (teardown! [this test node]))
         test (assoc tst/noop-test
+                    :pure-generators true
                     :name   "interesting exception"
                     :db     db
                     :ssh    {:dummy? true})]
     (is (thrown-with-msg? RuntimeException #"^hi$" (run! test)))))
 
 (deftest ^:integration basic-cas-test
-  (testing "classic generator"
-    (let [state (atom nil)
-          meta  (atom [])
-          db    (tst/atom-db state)
-          n     10
-          test  (run! (assoc tst/noop-test
-                             :name       "basic cas"
-                             :db         (tst/atom-db state)
-                             :client     (tst/atom-client state meta)
-                             :generator  (->> gen/cas
-                                              (gen/limit n)
-                                              (gen/nemesis gen/void))
-                             :model      (model/->CASRegister 0)))]
-      (is (:valid? (:results test)))))
+  (let [state (atom nil)
+        meta-log (atom [])
+        db    (tst/atom-db state)
+        n     1000
+        test  (run!
+                (assoc tst/noop-test
+                       :name      "basic cas pure-gen"
+                       :db        (tst/atom-db state)
+                       :client    (tst/atom-client state meta-log)
+                       :concurrency 10
+                       :pure-generators true
+                       :generator
+                       (gen/phases
+                         {:f :read}
+                         (->> (gen/reserve
+                                5 (repeat {:f :read})
+                                (gen/mix
+                                  [(fn [] {:f :write
+                                           :value (rand-int 5)})
+                                   (fn [] {:f :cas
+                                           :value [(rand-int 5)
+                                                   (rand-int 5)]})]))
+                              (gen/limit n)
+                              (gen/clients)))))
+        h (:history test)
+        invokes  (partial filter op/invoke?)
+        oks      (partial filter op/ok?)
+        reads    (partial filter (comp #{:read} :f))
+        writes   (partial filter (comp #{:write} :f))
+        cases    (partial filter (comp #{:cas} :f))
+        values   (partial map :value)
+        smol?    #(<= 0 % 4)
+        smol-vec? #(and (vector? %)
+                        (= 2 (count %))
+                        (every? smol? %))]
+    (testing "db teardown"
+      (is (= :done @state)))
 
-  (testing "pure generator"
-    (let [state (atom nil)
-          meta-log (atom [])
-          db    (tst/atom-db state)
-          n     1000
-          test  (run!
-                  (assoc tst/noop-test
-                         :name      "basic cas pure-gen"
-                         :db        (tst/atom-db state)
-                         :client    (tst/atom-client state meta-log)
-                         :concurrency 10
-                         :generator
-                         (gen.pure/phases
-                           {:f :read}
-                           (->> (gen.pure/reserve
-                                  5 (repeat {:f :read})
-                                  (gen.pure/mix
-                                    [(fn [] {:f :write
-                                             :value (rand-int 5)})
-                                     (fn [] {:f :cas
-                                             :value [(rand-int 5)
-                                                     (rand-int 5)]})]))
-                                (gen.pure/limit n)
-                                (gen.pure/clients)))))
-          h (:history test)
-          invokes  (partial filter op/invoke?)
-          oks      (partial filter op/ok?)
-          reads    (partial filter (comp #{:read} :f))
-          writes   (partial filter (comp #{:write} :f))
-          cases    (partial filter (comp #{:cas} :f))
-          values   (partial map :value)
-          smol?    #(<= 0 % 4)
-          smol-vec? #(and (vector? %)
-                          (= 2 (count %))
-                          (every? smol? %))]
-      (testing "db teardown"
-        (is (= :done @state)))
+    (testing "client setup/teardown"
+      (let [setup     (take 15 @meta-log)
+            run       (->> @meta-log (drop 15) (drop-last 15))
+            teardown  (take-last 15 @meta-log)]
+        (is (= {:open 5
+                :setup 5
+                :close 5}
+               (frequencies setup)))
+        (is (= {:open 10 :close 10} (frequencies run)))
+        (is (= {:open 5 :teardown 5 :close 5} (frequencies teardown)))))
 
-      (testing "client setup/teardown"
-        (let [setup     (take 15 @meta-log)
-              run       (->> @meta-log (drop 15) (drop-last 15))
-              teardown  (take-last 15 @meta-log)]
-          (is (= {:open 5
-                  :setup 5
-                  :close 5}
-                 (frequencies setup)))
-          (is (= {:open 10 :close 10} (frequencies run)))
-          (is (= {:open 5 :teardown 5 :close 5} (frequencies teardown)))))
-
-      (is (:valid? (:results test)))
-      (testing "first read"
-        (is (= 0 (:value (first (oks (reads h)))))))
-      (testing "history"
-        (is (= (* 2 (+ 1 n)) (count h)))
-        (is (= #{:read :write :cas} (set (map :f h))))
-        (is (every? nil? (values (invokes (reads h)))))
-        (is (every? smol? (values (oks (reads h)))))
-        (is (every? smol? (values (writes h))))
-        (is (every? smol-vec? (values (cases h))))))))
+    (is (:valid? (:results test)))
+    (testing "first read"
+      (is (= 0 (:value (first (oks (reads h)))))))
+    (testing "history"
+      (is (= (* 2 (+ 1 n)) (count h)))
+      (is (= #{:read :write :cas} (set (map :f h))))
+      (is (every? nil? (values (invokes (reads h)))))
+      (is (every? smol? (values (oks (reads h)))))
+      (is (every? smol? (values (writes h))))
+      (is (every? smol-vec? (values (cases h)))))))
 
 (deftest ^:integration ssh-test
   (let [os-startups  (atom {})
@@ -144,6 +129,7 @@
         nonce-file   "/tmp/jepsen-test"
         test (run! (assoc tst/noop-test
                           :name      "ssh test"
+                          :pure-generators true
                           :os (reify os/OS
                                 (setup! [_ test node]
                                   (swap! os-startups assoc node
@@ -205,9 +191,10 @@
                            (teardown! [c t])
                            (close! [c t]))
                  :checker  (checker/unbridled-optimism)
-                 :generator (->> (gen/queue)
+                 :pure-generators true
+                 :generator (->> (repeat {:f :read})
                                  (gen/limit n)
-                                 (gen/nemesis gen/void))))
+                                 (gen/nemesis nil))))
       (is (= n @invocations))))
 
 (deftest ^:integration generator-recovery-test
@@ -218,19 +205,19 @@
   ; abort cleanly.
   (let [conns (atom #{})]
     (is (thrown-with-msg?
-          ArithmeticException #"Divide by zero"
+          clojure.lang.ExceptionInfo #"Divide by zero"
           (run! (assoc tst/noop-test
                        :name "generator recovery"
                        :client (tracking-client conns)
+                       :pure-generators true
                        :generator (gen/clients
                                     (gen/phases
-                                      (gen/each
+                                      (gen/each-thread
                                         (gen/once
-                                          (reify gen/Generator
-                                            (op [_ test process]
-                                              (if (= process 0)
-                                                (/ 1 0)
-                                                {:type :invoke, :f :meow})))))
+                                          (fn [test ctx]
+                                            (if (= [0] (seq (:free-threads ctx)))
+                                              (/ 1 0)
+                                              {:type :invoke, :f :meow}))))
                                       (gen/once {:type :invoke, :f :done})))))))
     (is (empty? @conns))))
 
@@ -251,6 +238,7 @@
                     (teardown! [n test]     (if (= :teardown t) (assert false)))))
         test (fn [client-type nemesis-type]
                (run! (assoc tst/noop-test
+                            :pure-generators true
                             :client   (client client-type)
                             :nemesis  (nemesis nemesis-type))))]
     (testing "client open"      (is (thrown-with-msg? AssertionError #"false" (test :open  nil))))

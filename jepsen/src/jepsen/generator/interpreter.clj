@@ -9,7 +9,7 @@
             [jepsen [client         :as client]
                     [nemesis        :as nemesis]
                     [util           :as util]]
-            [jepsen.generator.pure :as gen]
+            [jepsen.generator :as gen]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent ArrayBlockingQueue
                                  TimeUnit)

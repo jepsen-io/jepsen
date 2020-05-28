@@ -1,7 +1,7 @@
 (ns jepsen.generator.interpreter-test
   (:refer-clojure :exclude [run!])
   (:require [clojure.tools.logging :refer [info warn]]
-            [jepsen.generator.pure :as gen]
+            [jepsen.generator :as gen]
             [jepsen.generator.interpreter :refer :all]
             [jepsen [client :refer [Client]]
                     [nemesis :refer [Nemesis]]
@@ -188,9 +188,9 @@
                       :generator  gen)
             e (try+ (util/with-relative-time (run! test))
                     :nope
-                    (catch [:type :jepsen.generator.pure/op-threw] e e))]
+                    (catch [:type :jepsen.generator/op-threw] e e))]
         (is (= 1 @call-count))
-        (is (= :jepsen.generator.pure/op-threw (:type e)))
+        (is (= :jepsen.generator/op-threw (:type e)))
         (is (= (dissoc (gen/context test) :time)
                (dissoc (:context e) :time)))))
 
@@ -211,7 +211,7 @@
                         :generator gen)
             e (try+ (util/with-relative-time (run! test))
                     :nope
-                    (catch [:type :jepsen.generator.pure/update-threw] e e))]
+                    (catch [:type :jepsen.generator/update-threw] e e))]
         (is (= (let [ctx (gen/context test)]
                  (assoc ctx
                         :time     (:time (:context e))

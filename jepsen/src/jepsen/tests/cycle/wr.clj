@@ -9,9 +9,7 @@
 (defn gen
   "Wrapper around rw-checker/gen."
   [opts]
-  (gen/stateful+pure
-    (gen/seq (r/gen opts))
-    (r/gen opts)))
+  (r/gen opts))
 
 (defn checker
   "Full checker for write-read registers. Options are:
