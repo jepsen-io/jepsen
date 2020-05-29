@@ -209,13 +209,6 @@
        (map escape)
        (apply exec*)))
 
-(defn scp*
-  "Evaluates an SCP from the current host to the node."
-  [current-path node-path]
-  (warn "scp* is deprecated: use (upload current-path node-path) instead.")
-  (rc/with-conn [s *session*]
-    (upload! s current-path node-path [])))
-
 (defn file->path
   "Takes an object, if it's an instance of java.io.File, gets the path, otherwise
   returns the object"
@@ -302,23 +295,10 @@
   `(binding [*trace* true]
      ~@body))
 
-(defn check-name
-  "Ensures a given hostname is string. Warns user if legacy behavior passes in a
-  keyword host.
-  TODO This can be removed when tests no tests generate keyword hosts. CLI already
-       refuses keyword hostnames."
-  [host]
-  (when (keyword? host)
-    (warn (str "DEPRECATED: Host "
-               host
-               " is a keyword; please provide node hostnames as strings. Support for keyword hosts will be removed in future versions of jepsen.")))
-  (name host))
-
 (defn clj-ssh-session
   "Opens a raw session to the given host."
   [host]
-  (let [host  (check-name host)
-        agent (ssh/ssh-agent {})
+  (let [agent (ssh/ssh-agent {})
         _     (when *private-key-path*
                 (ssh/add-identity agent
                                   {:private-key-path *private-key-path*}))]

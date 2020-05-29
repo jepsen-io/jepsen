@@ -17,15 +17,14 @@
           "Close the client connection when work is completed or an invocation
            crashes the client. Close should not affect the logical state of the
           test.")
-  (setup! [client test] [client test node]
-          "Called once to set up database state for testing. 3 arity form is
-           deprecated and will be removed in a future jepsen version.")
+  (setup! [client test]
+          "Called to set up database state for testing.")
   (invoke! [client test operation]
            "Apply an operation to the client, returning an operation to be
            appended to the history. For multi-stage operations, the client may
            reach into the test and conj onto the history atom directly.")
   (teardown! [client test]
-           "Tear down the client when work is complete."))
+           "Tear down database state when work is complete."))
 
 (def noop
   "Does nothing."

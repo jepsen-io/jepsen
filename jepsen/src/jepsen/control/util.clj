@@ -223,13 +223,6 @@
          (exec :rm :-rf tmpdir))))
    dest))
 
-(defn install-tarball!
-  ([node url dest]
-   (install-tarball! node url dest false))
-  ([node url dest force?]
-   (warn "DEPRECATED: jepsen.control.util/install-tarball! is now named jepsen.control.util/install-archive!, and the `node` argument is no longer required.")
-   (install-archive! url dest force?)))
-
 (defn ensure-user!
   "Make sure a user exists."
   [username]

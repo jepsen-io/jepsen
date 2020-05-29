@@ -61,13 +61,7 @@
          Opts is a map of options controlling checker execution. Keys include:
 
          :subdirectory - A directory within this test's store directory where
-                         output files should be written. Defaults to nil.
-
-          DEPRECATED Checkers should now implement the 4-arity check method
-          without model. If the checker still needs a model, provide it at
-          construction rather than as an argument to `Checker/check`. See the
-          queue and linearizable checkers for examples."))
-
+                         output files should be written. Defaults to nil."))
 (defn noop
   "An empty checker that only returns nil."
   []

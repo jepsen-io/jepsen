@@ -219,8 +219,6 @@
   (info "Analyzing...")
   (let [; Give each op in the history a monotonically increasing index
         test (assoc test :history (history/index (:history test)))
-        _ (when (:model test)
-            (warn "DEPRECATED: Checker model is assigned to test, which is no longer supported. If the checker still needs a model, see `jepsen.checker` documentation for details."))
         ; Run checkers
         test (assoc test :results (checker/check-safe
                                    (:checker test)
