@@ -8,6 +8,8 @@
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan Set)))
 
+(gen/init!)
+
 (def default-test
   "A default test map."
   {})

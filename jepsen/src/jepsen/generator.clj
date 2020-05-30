@@ -575,14 +575,27 @@
   (let [cn (symbol (.getName ^Class (eval klass)))]
     `(extend-protocol ~proto ~cn ~@specs)))
 
-(extend-protocol-runtime Generator
-  (class (promise))
-  (update [p test ctx event] p)
+(defonce initialized?
+  (atom false))
 
-  (op [p test ctx]
-    (if (realized? p)
-      (op @p test ctx)
-      [:pending p])))
+(defn init!
+  "We do some magic to extend the Generator protocol over promises etc, but
+  it's fragile and could break with... I think AOT compilation, but also
+  apparently plain old dependencies? I'm not certain. It's weird. Just to be
+  safe, we move this into a function that gets called by
+  jepsen.generator.interpreter, so that we observe the *real* version of the
+  promise reify auto-generated class."
+  []
+  (when (compare-and-set! initialized? false true)
+    (eval
+      `(extend-protocol-runtime Generator
+                                (class (promise))
+                                (update [p# test# ctx# event#] p#)
+
+                                (op [p# test# ctx#]
+                                    (if (realized? p#)
+                                      (op @p# test# ctx#)
+                                      [:pending p#]))))))
 
 (defrecord Validate [gen]
   Generator

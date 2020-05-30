@@ -183,8 +183,12 @@
   or (:nemesis test), as appropriate. Invocations and completions are journaled
   to a history, which is returned at the end of `run`.
 
-  Generators are automatically wrapped in friendly-exception and validate."
+  Generators are automatically wrapped in friendly-exception and validate.
+
+  Automatically initializes the generator system, which, on first invocation,
+  extends the Generator protocol over some dynamic classes like (promise)."
   [test]
+  (gen/init!)
   (let [ctx         (gen/context test)
         worker-ids  (gen/all-threads ctx)
         completions (ArrayBlockingQueue. (count worker-ids))
