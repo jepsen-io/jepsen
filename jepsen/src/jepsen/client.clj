@@ -54,13 +54,13 @@
                 nil
                 "expected open! to return a Client, but got %s instead"
                 (pr-str res)))
-      res))
+      (Validate. res)))
 
   (close! [this test]
     (close! client test))
 
   (setup! [this test]
-          (setup! client test))
+          (Validate. (setup! client test)))
 
   (invoke! [this test op]
     (let [op' (invoke! client test op)]

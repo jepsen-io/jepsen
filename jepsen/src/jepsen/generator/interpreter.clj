@@ -44,7 +44,8 @@
           ; Try to open new client
           (let [err (try
                       (set! (.client this)
-                            (client/open! (:client test) test node))
+                            (client/open! (client/validate (:client test))
+                                          test node))
                       (set! (.process this) (:process op))
                      nil
                      (catch Exception e
@@ -184,6 +185,7 @@
   to a history, which is returned at the end of `run`.
 
   Generators are automatically wrapped in friendly-exception and validate.
+  Clients are wrapped in a validator as well.
 
   Automatically initializes the generator system, which, on first invocation,
   extends the Generator protocol over some dynamic classes like (promise)."
