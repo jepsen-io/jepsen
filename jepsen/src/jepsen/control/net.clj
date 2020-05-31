@@ -15,8 +15,10 @@
   "The local node's eth0 address"
   []
   (nth (->> (c/exec :ifconfig "eth0")
-            (re-find #"inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"))
-       1))
+            ; Old ifconfig put addr: in front of the address; new ifconfig
+            ; doesn't.
+            (re-find #"inet (addr:)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"))
+       2))
 
 (defn ip*
   "Look up an ip for a hostname. Unmemoized."
