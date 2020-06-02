@@ -8,7 +8,7 @@
                  [org.clojure/tools.logging "1.1.0"]
                  [org.clojure/tools.cli "1.0.194"]
                  [spootnik/unilog "0.7.25"]
-                 [elle "0.1.1"]
+                 [elle "0.1.2-SNAPSHOT"]
                  [clj-time "0.15.2"]
                  [jepsen.txn "0.1.2"]
                  [knossos "0.3.7-SNAPSHOT" :exclusions [org.slf4j/slf4j-log4j12]]

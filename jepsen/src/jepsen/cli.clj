@@ -479,17 +479,21 @@ Options:\n")
     :tests-fn     A function that receives the transformed option map and
                   constructs a sequence of tests to run."
   [opts]
-  {"test-all"
-   {:opt-spec (into test-opt-spec (:opt-spec opts))
-    :opt-fn   test-opt-fn
-    :usage    "Runs all tests"
-    :run      (fn run [{:keys [options]}]
-                (info "CLI options:\n" (with-out-str (pprint options)))
-                (->> options
-                     ((:tests-fn opts))
-                     test-all-run-tests!
-                     test-all-print-summary!
-                     test-all-exit!))}})
+  (let [opt-fn  test-opt-fn
+        opt-fn  (if-let [f (:opt-fn opts)]
+                  (comp f opt-fn)
+                  opt-fn)]
+    {"test-all"
+     {:opt-spec (into test-opt-spec (:opt-spec opts))
+      :opt-fn   opt-fn
+      :usage    "Runs all tests"
+      :run      (fn run [{:keys [options]}]
+                  (info "CLI options:\n" (with-out-str (pprint options)))
+                  (->> options
+                       ((:tests-fn opts))
+                       test-all-run-tests!
+                       test-all-print-summary!
+                       test-all-exit!))}}))
 
 (defn -main
   [& args]

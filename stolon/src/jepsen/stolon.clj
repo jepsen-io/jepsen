@@ -43,6 +43,13 @@
        (map keyword)
        (mapcat #(get special-nemeses % [%]))))
 
+(def short-isolation
+  {:serializable        "S"
+   :snapshot-isolation  "SI"
+   :repeatable-read     "RR"
+   :read-committed      "RC"
+   :read-uncommitted    "RU"})
+
 (defn stolon-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
   :concurrency, ...), constructs a test map."
@@ -63,6 +70,8 @@
     (merge tests/noop-test
            opts
            {:name (str "stolon " (name workload-name)
+                       " " (short-isolation (:isolation opts)) " ("
+                       (short-isolation (:expected-consistency-model opts)) ")"
                        " " (str/join "," (map name (:nemesis opts))))
             :pure-generators true
             :os   debian/os
@@ -85,6 +94,19 @@
   "Additional CLI options"
   [[nil "--etcd-version STRING" "What version of etcd should we install?"
     :default "3.4.3"]
+
+   ["-i" "--isolation LEVEL" "What level of isolation we should set: serializable, repeatable-read, etc."
+    :default :serializable
+    :parse-fn keyword
+    :validate [#{:read-uncommitted
+                 :read-committed
+                 :repeatable-read
+                 :serializable}
+               "Should be one of read-uncommitted, read-committed, repeatable-read, or serializable"]]
+
+   [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults to the same as --isolation."
+    :default nil
+    :parse-fn keyword]
 
    [nil "--just-postgres" "Don't bother with replication or anything, just set up a plain old single-node postgres install."
     :default false]
@@ -148,13 +170,21 @@
     (->> (all-test-options cli nemeses workloads)
          (map test-fn))))
 
+(defn opt-fn
+  "Transforms CLI options before execution."
+  [parsed]
+  (update-in parsed [:options :expected-consistency-model]
+             #(or % (get-in parsed [:options :isolation]))))
+
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
   [& args]
   (cli/run! (merge (cli/single-test-cmd {:test-fn  stolon-test
-                                         :opt-spec cli-opts})
+                                         :opt-spec cli-opts
+                                         :opt-fn   opt-fn})
                    (cli/test-all-cmd {:tests-fn (partial all-tests stolon-test)
-                                      :opt-spec cli-opts})
+                                      :opt-spec cli-opts
+                                      :opt-fn   opt-fn})
                    (cli/serve-cmd))
             args))

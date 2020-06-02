@@ -28,10 +28,45 @@
   [table-count k]
   (table-name (mod (hash k) table-count)))
 
+(defn insert!
+  "Performs an initial insert of a key with initial element e. Catches
+  duplicate key exceptions, returning true if succeeded. If the insert fails
+  due to a duplicate key, it'll break the rest of the transaction, assuming
+  we're in a transaction, so we establish a savepoint before inserting and roll
+  back to it on failure."
+  [conn txn? table k e]
+  (try
+    (info (if txn? "" "not") "in transaction")
+    (when txn? (j/execute! conn ["savepoint upsert"]))
+    (info :insert (j/execute! conn
+                              [(str "insert into " table " (id, sk, val)"
+                                    " values (?, ?, ?)")
+                               k k e]))
+    (when txn? (j/execute! conn ["release savepoint upsert"]))
+    true
+    (catch org.postgresql.util.PSQLException e
+      (if (re-find #"duplicate key value" (.getMessage e))
+        (do (info "insert failed: " (.getMessage e))
+            (when txn? (j/execute! conn ["rollback to savepoint upsert"]))
+            false)
+        (throw e)))))
+
+(defn update!
+  "Performs an update of a key k, adding element e. Returns true if the update
+  succeeded, false otherwise."
+  [conn table k e]
+  (let [res (-> conn
+                (j/execute-one! [(str "update " table " set val = CONCAT(val, ',', ?)"
+                                      " where id = ?") e k]))]
+    (info :update res)
+    (-> res
+        :next.jdbc/update-count
+        pos?)))
+
 (defn mop!
   "Executes a transactional micro-op on a connection. Returns the completed
   micro-op."
-  [conn test [f k v]]
+  [conn test txn? [f k v]]
   (let [table-count (:table-count test default-table-count)
         table (table-for table-count k)]
     [f k (case f
@@ -47,28 +82,36 @@
                 (when-let [v (:val (first r))]
                   (mapv parse-long (str/split v #","))))
 
-
-           :w (do (j/execute! conn [(str "insert into " table
-                                         " (id, sk, val) values (?, ?, ?)"
-                                         ; " on duplicate key update val = ?")
-                                         "on conflict do update set val = ?")
-                                    k k v v])
-                  v)
-
            :append
-           (let [r (j/execute!
-                     conn
-                     [(str "insert into " table " as t"
-                           " (id, sk, val) values (?, ?, ?)"
-                           " on conflict (id) do update set"
-                           " val = CONCAT(t.val, ',', ?) where t.id = ?")
-                      k k (str v) (str v) k])]
+           (let [vs (str v)]
+             (if (:on-conflict test)
+                 ; Use an INSERT ... ON CONFLICT statement to upsert in one go.
+                 (let [r (j/execute!
+                           conn
+                           [(str "insert into " table " as t"
+                                 " (id, sk, val) values (?, ?, ?)"
+                                 " on conflict (id) do update set"
+                                 " val = CONCAT(t.val, ',', ?) where t.id = ?")
+                            k k vs vs k])])
+                 ; Try an update, and if that fails, back off to an insert.
+                 (or (update! conn table k vs)
+                     ; No dice, fall back to an insert
+                     (insert! conn txn? table k vs)
+                     ; OK if THAT failed then we probably raced with another
+                     ; insert; let's try updating again.
+                     (update! conn table k vs)
+                     ; And if THAT failed, all bets are off. This happens even
+                     ; under SERIALIZABLE, which feels like... a bug?
+                     (throw+ {:type     ::homebrew-upsert-failed
+                              :key      k
+                              :element  v})))
              v))]))
 
 (defrecord Client [conn]
   client/Client
   (open! [this test node]
     (let [c (c/await-open node)]
+      (c/set-transaction-isolation! c (:isolation test))
       (assoc this :conn c)))
 
   (setup! [_ test]
@@ -94,10 +137,10 @@
             use-txn?  (< 1 (count txn))
             txn'      (if use-txn?
                       ;(if true
-                        (j/with-transaction [t conn {:isolation :serializable}]
-                        ;(j/with-transaction [t conn {:isolation :read-committed}]
-                          (mapv (partial mop! t test) txn))
-                        (mapv (partial mop! conn test) txn))]
+                        (j/with-transaction [t conn
+                                             {:isolation (:isolation test)}]
+                          (mapv (partial mop! t test true) txn))
+                        (mapv (partial mop! conn test false) txn))]
         (assoc op :type :ok, :value txn'))))
 
   (teardown! [_ test]
@@ -113,5 +156,5 @@
                                              :max-txn-length
                                              :max-writes-per-key])
                           :min-txn-length 1
-                          :consistency-models [:strict-serializable]))
+                          :consistency-models [(:expected-consistency-model opts)]))
       (assoc :client (Client. nil))))

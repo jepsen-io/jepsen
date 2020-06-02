@@ -33,9 +33,19 @@
                :sslmode   "disable"}
         ds    (j/get-datasource spec)
         conn  (j/get-connection ds)]
-    ; Force serializable isolation by default JUST IN CASE
-    (.setTransactionIsolation conn Connection/TRANSACTION_SERIALIZABLE)
     conn))
+
+(defn set-transaction-isolation!
+  "Sets the transaction isolation level on a connection. Returns conn."
+  [conn level]
+  (.setTransactionIsolation
+    conn
+    (case level
+      :serializable     Connection/TRANSACTION_SERIALIZABLE
+      :repeatable-read  Connection/TRANSACTION_REPEATABLE_READ
+      :read-committed   Connection/TRANSACTION_READ_COMMITTED
+      :read-uncommitted Connection/TRANSACTION_READ_UNCOMMITTED))
+  conn)
 
 (defn close!
   "Closes a connection."
