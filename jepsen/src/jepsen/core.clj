@@ -185,21 +185,29 @@
   `(let [client#  (:client ~test)
          nemesis# (:nemesis ~test)]
     ; Setup
-    (try (let [nf# (future (nemesis/setup! nemesis# ~test))]
-           (real-pmap (fn [node#]
-                        (client/with-client [c# (client/open! client# ~test node#)]
-                          (client/setup! c# ~test)))
-                      (:nodes ~test))
-           @nf#)
-         ~@body
-         (finally
-           ; Teardown
-           (let [nf# (future (nemesis/teardown! nemesis# ~test))]
-             (real-pmap (fn [node#]
-                          (client/with-client [c# (client/open! client# ~test node#)]
-                            (client/teardown! c# ~test)))
-                        (:nodes ~test))
-             @nf#)))))
+    (let [nf# (future (nemesis/setup! nemesis# ~test))
+               clients# (real-pmap (fn [node#]
+                                     (with-thread-name
+                                       (str "jepsen node " node#)
+                                       (let [c# (client/open! client# ~test node#)]
+                                         (client/setup! c# ~test)
+                                         c#)))
+                                   (:nodes ~test))]
+      (try
+        @nf#
+        (dorun clients#)
+        ~@body
+        (finally
+          ; Teardown (and close clients)
+          (let [nf# (future (nemesis/teardown! nemesis# ~test))]
+            (dorun (real-pmap (fn [[c# node#]]
+                                (with-thread-name
+                                  (str "jepsen node " node#))
+                                (try (client/teardown! c# ~test)
+                                     (finally
+                                       (client/close! c# ~test))))
+                              (zipmap clients# (:nodes ~test))))
+            @nf#))))))
 
 (defn run-case!
   "Takes a test, spawns nemesis and clients, runs the generator, and returns
