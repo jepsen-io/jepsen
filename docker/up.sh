@@ -116,7 +116,7 @@ fi
 rm -rf ./control/jepsen
 mkdir -p ./control/jepsen/jepsen
 # Copy the jepsen directory if we're not mounting the JEPSEN_ROOT
-if [ -n "${DEV}" ]; then
+if [ -z "${DEV}" ]; then
     # Dockerfile does not allow `ADD ..`. So we need to copy it here in setup.
     INFO "Copying .. to control/jepsen"
     (
