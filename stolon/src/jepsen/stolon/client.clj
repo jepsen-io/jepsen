@@ -16,6 +16,7 @@
   (let [spec  {:dbtype    "postgresql"
                ;:dbname    "jepsen"
                :host      node
+               :port      (:postgres-port     test)
                :user      (:postgres-user     test)
                :password  (:postgres-password test)
                ; The docs say ssl is a boolean but also it's mere *presence*

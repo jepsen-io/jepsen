@@ -146,11 +146,15 @@
     :parse-fn read-string
     :validate [pos? "Must be a positive number."]]
 
-   [nil "--postgres-user NAME" "What username should we use to connect to postgres? Only use this with --existing-postgres, or you'll probably confuse the Stolon setup."
-    :default "postgres"]
-
    [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
     :default "pw"]
+
+   [nil "--postgres-port NUMBER" "What port should we connect to when talking to postgres?"
+    :default 5432
+    :parse-fn parse-long]
+
+   [nil "--postgres-user NAME" "What username should we use to connect to postgres? Only use this with --existing-postgres, or you'll probably confuse the Stolon setup."
+    :default "postgres"]
 
    ["-r" "--rate HZ" "Approximate request rate, in hz"
     :default 100
