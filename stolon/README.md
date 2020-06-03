@@ -1,14 +1,19 @@
 # jepsen.stolon
 
-A Clojure library designed to ... well, that part is up to you.
+Jepsen tests for the Stolon Postgres replication system. Also happens to test single-node Postgres installs.
 
 ## Usage
 
-FIXME
+If you have a postgres process on localhost, with a postgres user (and
+database) named `jepsen`, and password `pw`, try:
+
+```
+lein run test-all -w append --max-writes-per-key 4 --concurrency 50 -r 500 --isolation serializable --time-limit 60 --nemesis none --existing-postgres --node localhost --no-ssh --postgres-user jepsen --postgres-password pw
+```
 
 ## License
 
-Copyright © 2020 FIXME
+Copyright © 2020 Jepsen, LLC
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at

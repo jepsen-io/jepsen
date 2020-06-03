@@ -10,22 +10,14 @@
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.sql Connection)))
 
-(def user
-  "The user we use to connect to postgres. This is set, by Stolon, to the linux user that we used to run the keeper."
-  "postgres")
-
-(def password
-  "The password we use to connect to postgres."
-  "pw")
-
 (defn open
   "Opens a connection to the given node."
-  [node]
+  [test node]
   (let [spec  {:dbtype    "postgresql"
                ;:dbname    "jepsen"
                :host      node
-               :user      user
-               :password  password
+               :user      (:postgres-user     test)
+               :password  (:postgres-password test)
                ; The docs say ssl is a boolean but also it's mere *presence*
                ; implies using SSL, so... maybe we have to set disable too?
                :ssl       false

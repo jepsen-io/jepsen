@@ -111,7 +111,7 @@
 (defrecord Client [node conn]
   client/Client
   (open! [this test node]
-    (let [c (c/open node)]
+    (let [c (c/open test node)]
       (c/set-transaction-isolation! c (:isolation test))
       (assoc this :node node :conn c)))
 
@@ -137,7 +137,7 @@
                 (info "Retrying IO error")
                 (Thread/sleep 1000)
                 (c/close! conn)
-                (retry (c/await-open node)
+                (retry (c/await-open test node)
                        (dec tries)))
 
             (throw e))))))

@@ -151,9 +151,9 @@
         :--store-endpoints    (store-endpoints)
         :--uid                pg-id
         :--data-dir           (str data-dir "/" pg-id)
-        :--pg-su-password     "pw"
+        :--pg-su-password     (:postgres-password test)
         :--pg-repl-username   "repluser"
-        :--pg-repl-password   "pw"
+        :--pg-repl-password   (:postgres-password test)
         :--pg-listen-address  (cn/local-ip)
         :--pg-port            5433
         :--pg-bin-path        "/usr/lib/postgresql/12/bin"))))
@@ -212,7 +212,7 @@
     (start-sentinel!  test node)
     (start-keeper!    test node)
     (start-proxy!     test node)
-    (sc/close! (sc/await-open node)))
+    (sc/close! (sc/await-open test node)))
 
   (teardown! [db test node]
     (stop-proxy!    test node)

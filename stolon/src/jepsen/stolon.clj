@@ -5,7 +5,9 @@
                      [string :as str]]
             [jepsen [cli :as cli]
                     [checker :as checker]
+                    [db :as jdb]
                     [generator :as gen]
+                    [os :as os]
                     [tests :as tests]
                     [util :as util :refer [parse-long]]]
             [jepsen.os.debian :as debian]
@@ -58,9 +60,12 @@
   [opts]
   (let [workload-name (:workload opts)
         workload      ((workloads workload-name) opts)
-        db            (if (:just-postgres opts)
-                        (db/just-postgres opts)
-                        (db/db opts))
+        db            (cond (:existing-postgres opts) jdb/noop
+                            (:just-postgres opts)     (db/just-postgres opts)
+                            true                      (db/db opts))
+        os            (if (:existing-postgres opts)
+                        os/noop
+                        debian/os)
         nemesis       (nemesis/nemesis-package
                         {:db        db
                          :nodes     (:nodes opts)
@@ -76,7 +81,7 @@
                        (short-isolation (:expected-consistency-model opts)) ")"
                        " " (str/join "," (map name (:nemesis opts))))
             :pure-generators true
-            :os   debian/os
+            :os   os
             :db   db
             :checker (checker/compose
                        {:perf       (checker/perf
@@ -105,6 +110,9 @@
                  :repeatable-read
                  :serializable}
                "Should be one of read-uncommitted, read-committed, repeatable-read, or serializable"]]
+
+   [nil "--existing-postgres" "If set, assumes nodes already have a running Postgres instance, skipping any OS and DB setup and teardown. Suitable for debugging issues against a local instance of Postgres (or some sort of pre-built cluster) when you don't want to set up a whole-ass Jepsen environment."
+    :default false]
 
    [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults to the same as --isolation."
     :default nil
@@ -137,6 +145,12 @@
     :default 2
     :parse-fn read-string
     :validate [pos? "Must be a positive number."]]
+
+   [nil "--postgres-user NAME" "What username should we use to connect to postgres? Only use this with --existing-postgres, or you'll probably confuse the Stolon setup."
+    :default "postgres"]
+
+   [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
+    :default "pw"]
 
    ["-r" "--rate HZ" "Approximate request rate, in hz"
     :default 100
