@@ -1,12 +1,13 @@
 (ns jepsen.stolon.client
   "Helper functions for interacting with PostgreSQL clients."
-  (:require [clojure.tools.logging :refer [info]]
+  (:require [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [with-retry]]
             [jepsen [client :as client]
                     [util :as util]]
             [next.jdbc :as j]
             [next.jdbc.result-set :as rs]
-            [next.jdbc.sql.builder :as sqlb])
+            [next.jdbc.sql.builder :as sqlb]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.sql Connection)))
 
 (def user
@@ -81,6 +82,9 @@
         #"Connection to .+ refused"
         (retry (dec tries))
 
+        #"An I/O error occurred"
+        (retry (dec tries))
+
         (throw e)))))
 
 (defmacro with-errors
@@ -88,6 +92,10 @@
   or :info ops."
   [op & body]
   `(try ~@body
+        (catch clojure.lang.ExceptionInfo e#
+          (warn e# "Caught ex-info")
+          (assoc ~op :type :info, :error [:ex-info (.getMessage e#)]))
+
         (catch org.postgresql.util.PSQLException e#
           (condp re-find (.getMessage e#)
             #"ERROR: could not serialize access"
@@ -95,5 +103,11 @@
 
             #"ERROR: deadlock detected"
             (assoc ~op :type :fail, :error [:deadlock (.getMessage e#)])
+
+            #"An I/O error occurred"
+            (assoc ~op :type :info, :error :io-error)
+
+            #"connection has been closed"
+            (assoc ~op :type :info, :error :connection-has-been-closed)
 
             (throw e#)))))

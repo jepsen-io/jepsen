@@ -3,6 +3,7 @@
   (:require [clojure.tools.logging :refer [info warn]]
             [clojure [pprint :refer [pprint]]
                      [string :as str]]
+            [dom-top.core :refer [with-retry]]
             [elle.core :as elle]
             [jepsen [checker :as checker]
              [client :as client]
@@ -46,7 +47,7 @@
     true
     (catch org.postgresql.util.PSQLException e
       (if (re-find #"duplicate key value" (.getMessage e))
-        (do (info "insert failed: " (.getMessage e))
+        (do (info (if txn? "txn") "insert failed: " (.getMessage e))
             (when txn? (j/execute! conn ["rollback to savepoint upsert"]))
             false)
         (throw e)))))
@@ -107,18 +108,19 @@
                               :element  v})))
              v))]))
 
-(defrecord Client [conn]
+(defrecord Client [node conn]
   client/Client
   (open! [this test node]
-    (let [c (c/await-open node)]
+    (let [c (c/open node)]
       (c/set-transaction-isolation! c (:isolation test))
-      (assoc this :conn c)))
+      (assoc this :node node :conn c)))
 
   (setup! [_ test]
     (dotimes [i (:table-count test default-table-count)]
       ; OK, so first worrying thing: why can this throw duplicate key errors if
       ; it's executed with "if not exists"?
-      (try
+      (with-retry [conn  conn
+                   tries 10]
         (j/execute! conn
                     [(str "create table if not exists " (table-name i)
                           " (id int not null primary key,
@@ -128,6 +130,15 @@
           (condp re-find (.getMessage e)
             #"duplicate key value violates unique constraint"
             :dup
+
+            #"An I/O error occurred|connection has been closed"
+            (do (when (zero? tries)
+                  (throw e))
+                (info "Retrying IO error")
+                (Thread/sleep 1000)
+                (c/close! conn)
+                (retry (c/await-open node)
+                       (dec tries)))
 
             (throw e))))))
 
@@ -143,8 +154,7 @@
                         (mapv (partial mop! conn test false) txn))]
         (assoc op :type :ok, :value txn'))))
 
-  (teardown! [_ test]
-    (j/execute-one! conn ["drop table if exists lists"]))
+  (teardown! [_ test])
 
   (close! [this test]
     (c/close! conn)))
@@ -157,4 +167,4 @@
                                              :max-writes-per-key])
                           :min-txn-length 1
                           :consistency-models [(:expected-consistency-model opts)]))
-      (assoc :client (Client. nil))))
+      (assoc :client (Client. nil nil))))

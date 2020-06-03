@@ -68,27 +68,22 @@
                            dir))
     (c/exec :chown :-R (str user ":" user) dir)))
 
-(defn stolonctl!
-  "Calls stolonctl with args."
-  [& args]
-  (c/sudo user
-    (c/cd dir
-          (apply c/exec "bin/stolonctl" args))))
-
 (defn store-endpoints
   "Computes the etcd address for stolon commands"
   []
   (str "http://" (cn/local-ip) ":2379"))
 
-(defn init-cluster!
-  "Sets up Stolon's cluster data. Maybe not necessary if we tell sentinels about init spec?"
-  [test node]
+(defn stolonctl!
+  "Calls stolonctl with args. Provides cluster name and store connection args
+  automatically."
+  [& args]
   (c/sudo user
-    (stolonctl! :--cluster-name "jepsen-cluster"
-              "--store-backend=etcdv3"
-              :--store-endpoints (store-endpoints)
-              :init
-              :--initial-cluster-spec)))
+    (c/cd dir
+          (apply c/exec "bin/stolonctl"
+                 :--cluster-name "jepsen-cluster"
+                 :--store-backend "etcdv3"
+                 :--store-endpoints (store-endpoints)
+                 args))))
 
 (defn initial-cluster-spec
   "The data structure we use for our stolon initial cluster specification. See
@@ -96,7 +91,20 @@
   options."
   [test]
   {:synchronousReplication true
-   :initMode               :new})
+   :initMode               :new
+   :sleepInterval          "1s"
+   :requestTimeout         "2s"
+   :failInterval           "4s"
+   :proxyCheckInterval     "1s"
+   :proxyTimeout           "3s"
+   ; TODO: this is set to 48 hours, and it feels DANGEROUS, let's make it small
+   ; later.
+   :deadKeeperRemovalInterval "48h"
+   :maxStandbysPerSender    (dec (count (:nodes test)))
+   ; Default is 1, but I'm pretty sure that allows bad things to happen.
+   :minSynchronousStandbys  1
+   :maxSynchronousStandbys  1
+   })
 
 (defn start-sentinel!
   "Starts a Stolon sentinel process."
@@ -117,10 +125,21 @@
                   :--store-endpoints  (store-endpoints)
                   :--initial-cluster-spec init-spec)))))
 
+(defn node->pg-id
+  "Turns a node into a postgres ID, e.g. pg1"
+  [test node]
+  (str "pg" (inc (.indexOf (:nodes test) node))))
+
+(defn pg-id->node
+  "Turns a postgres ID into a node."
+  [test pg-id]
+  (nth (:nodes test)
+       (Long/parseLong ((re-find #"pg(.+)" pg-id) 1))))
+
 (defn start-keeper!
   "Starts a Stolon keeper process."
   [test node]
-  (let [uid (str "pg" (.indexOf (:nodes test) node))]
+  (let [pg-id (node->pg-id test node)]
     (c/sudo user
       (cu/start-daemon!
         {:chdir   dir
@@ -130,8 +149,8 @@
         :--cluster-name       cluster-name
         :--store-backend      "etcdv3"
         :--store-endpoints    (store-endpoints)
-        :--uid                uid
-        :--data-dir           (str data-dir "/" uid)
+        :--uid                pg-id
+        :--data-dir           (str data-dir "/" pg-id)
         :--pg-su-password     "pw"
         :--pg-repl-username   "repluser"
         :--pg-repl-password   "pw"
@@ -171,13 +190,25 @@
   (c/sudo user
           (cu/stop-daemon! proxy-bin proxy-pidfile)))
 
+(defn status
+  "Returns the status of the stolon cluster, as a string."
+  []
+  (c/sudo user (stolonctl! :status)))
+
+(defn primary-keeper
+  "Returns the keeper the current node thinks is primary."
+  [test]
+  (let [status (status)]
+    (if-let [match (re-find #"Master Keeper:\s+(.+)\n" status)]
+      (pg-id->node test (nth match 1))
+      (info :couldn't-parse status))))
+
 (defrecord Stolon [etcd etcd-test]
   db/DB
   (setup! [db test node]
     (db/setup! etcd (etcd-test test) node)
     (install-pg!      test node)
     (install-stolon!  test node)
-    ; (init-cluster! test node)
     (start-sentinel!  test node)
     (start-keeper!    test node)
     (start-proxy!     test node)
@@ -195,7 +226,36 @@
     (concat [sentinel-logfile
              keeper-logfile
              proxy-logfile]
-            (db/log-files etcd (etcd-test test) node))))
+            (db/log-files etcd (etcd-test test) node)))
+
+  db/Primary
+  (setup-primary! [db test node])
+
+  (primaries [db test]
+    (->> (c/on-nodes test (fn [test node]
+                            (try+
+                              (primary-keeper test)
+                              (catch [:exit 1] e
+                                ; Ah well
+                                nil))))
+         vals
+         (remove nil?)
+         distinct)))
+
+
+(defn db
+  "Sets up stolon"
+  [opts]
+  (Stolon.
+    (etcd/db)
+    ; A function which transforms our test into a test for an etcd DB.
+    (let [initialized? (atom false)
+          members      (atom (into (sorted-set) (:nodes opts)))]
+      (fn [test]
+        (assoc test
+               :version      (:etcd-version test)
+               :initialized? initialized?
+               :members      members)))))
 
 (defn just-postgres
   "A database which just runs a regular old Postgres instance, to help rule out
@@ -232,16 +292,3 @@
         (concat (db/log-files tcpdump test node)
                 [just-postgres-log-file])))))
 
-(defn db
-  "Sets up stolon"
-  [opts]
-  (Stolon.
-    (etcd/db)
-    ; A function which transforms our test into a test for an etcd DB.
-    (let [initialized? (atom false)
-          members      (atom (into (sorted-set) (:nodes opts)))]
-      (fn [test]
-        (assoc test
-               :version      (:etcd-version test)
-               :initialized? initialized?
-               :members      members)))))

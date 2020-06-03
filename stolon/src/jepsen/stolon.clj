@@ -44,7 +44,9 @@
        (mapcat #(get special-nemeses % [%]))))
 
 (def short-isolation
-  {:serializable        "S"
+  {:strict-serializable "Strict-1SR"
+   :serializable        "S"
+   :strong-snapshot-isolation "Strong-SI"
    :snapshot-isolation  "SI"
    :repeatable-read     "RR"
    :read-committed      "RC"
