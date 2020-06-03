@@ -29,13 +29,26 @@
   [table-count k]
   (table-name (mod (hash k) table-count)))
 
+(defn append-using-on-conflict!
+  "Appends an element to a key using an INSERT ... ON CONFLICT statement."
+  [conn test table k e]
+  (j/execute!
+    conn
+    [(str "insert into " table " as t"
+          " (id, sk, val) values (?, ?, ?)"
+          " on conflict (id) do update set"
+          " val = CONCAT(t.val, ',', ?) where "
+          (if (< (rand) 0.5) "t.id" "t.sk")
+          " = ?")
+     k k e e k]))
+
 (defn insert!
   "Performs an initial insert of a key with initial element e. Catches
   duplicate key exceptions, returning true if succeeded. If the insert fails
   due to a duplicate key, it'll break the rest of the transaction, assuming
   we're in a transaction, so we establish a savepoint before inserting and roll
   back to it on failure."
-  [conn txn? table k e]
+  [conn test txn? table k e]
   (try
     (info (if txn? "" "not") "in transaction")
     (when txn? (j/execute! conn ["savepoint upsert"]))
@@ -55,7 +68,7 @@
 (defn update!
   "Performs an update of a key k, adding element e. Returns true if the update
   succeeded, false otherwise."
-  [conn table k e]
+  [conn test table k e]
   (let [res (-> conn
                 (j/execute-one! [(str "update " table " set val = CONCAT(val, ',', ?)"
                                       " where id = ?") e k]))]
@@ -73,10 +86,7 @@
     [f k (case f
            :r (let [r (j/execute! conn
                                   [(str "select (val) from " table " where "
-                                        (if (or (:use-index test)
-                                                (:predicate-read test))
-                                          "sk"
-                                          "id")
+                                        (if (< (rand) 0.5) "id" "sk")
                                         " = ? ")
                                    k]
                                   {:builder-fn rs/as-unqualified-lower-maps})]
@@ -86,26 +96,21 @@
            :append
            (let [vs (str v)]
              (if (:on-conflict test)
-                 ; Use an INSERT ... ON CONFLICT statement to upsert in one go.
-                 (let [r (j/execute!
-                           conn
-                           [(str "insert into " table " as t"
-                                 " (id, sk, val) values (?, ?, ?)"
-                                 " on conflict (id) do update set"
-                                 " val = CONCAT(t.val, ',', ?) where t.id = ?")
-                            k k vs vs k])])
-                 ; Try an update, and if that fails, back off to an insert.
-                 (or (update! conn table k vs)
-                     ; No dice, fall back to an insert
-                     (insert! conn txn? table k vs)
-                     ; OK if THAT failed then we probably raced with another
-                     ; insert; let's try updating again.
-                     (update! conn table k vs)
-                     ; And if THAT failed, all bets are off. This happens even
-                     ; under SERIALIZABLE, which feels like... a bug?
-                     (throw+ {:type     ::homebrew-upsert-failed
-                              :key      k
-                              :element  v})))
+               ; Use ON CONFLICT
+               (append-using-on-conflict! conn test table k vs)
+               ; Try an update, and if that fails, back off to an insert.
+               (or (update! conn test table k vs)
+                   ; No dice, fall back to an insert
+                   (insert! conn test txn? table k vs)
+                   ; OK if THAT failed then we probably raced with another
+                   ; insert; let's try updating again.
+                   (update! conn test table k vs)
+                   ; And if THAT failed, all bets are off. This happens even
+                   ; under SERIALIZABLE, but I don't think it technically
+                   ; VIOLATES serializability.
+                   (throw+ {:type     ::homebrew-upsert-failed
+                            :key      k
+                            :element  v})))
              v))]))
 
 (defrecord Client [node conn]
@@ -140,7 +145,10 @@
                 (retry (c/await-open test node)
                        (dec tries)))
 
-            (throw e))))))
+            (throw e))))
+      ; Make sure we start fresh--in case we're using an existing postgres
+      ; cluster and the DB automation isn't wiping the state for us.
+      (j/execute! conn [(str "delete from " (table-name i))])))
 
   (invoke! [_ test op]
     (c/with-errors op
