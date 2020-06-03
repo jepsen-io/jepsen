@@ -73,6 +73,9 @@
    [nil "--strict-host-key-checking" "Whether to check host keys"
     :default false]
 
+   [nil "--no-ssh" "If set, doesn't try to establish SSH connections to any nodes."
+    :default false]
+
    [nil "--ssh-private-key FILE" "Path to an SSH identity file"]
 
    [nil "--concurrency NUMBER" "How many workers should we run? Must be an integer, optionally followed by n (e.g. 3n) to multiply by the number of nodes."
@@ -208,17 +211,20 @@ Options:\n")
 (defn rename-ssh-options
   "Takes a parsed map and moves SSH options to a map under :ssh."
   [parsed]
-  (let [{:keys [username
+  (let [{:keys [no-ssh
+                username
                 password
                 strict-host-key-checking
                 ssh-private-key]} (:options parsed)]
     (assoc parsed :options
            (-> (:options parsed)
-               (assoc :ssh {:username                  username
+               (assoc :ssh {:dummy?                    (boolean no-ssh)
+                            :username                  username
                             :password                  password
                             :strict-host-key-checking  strict-host-key-checking
                             :private-key-path          ssh-private-key})
-               (dissoc :username
+               (dissoc :no-ssh
+                       :username
                        :password
                        :strict-host-key-checking
                        :private-key-path)))))
