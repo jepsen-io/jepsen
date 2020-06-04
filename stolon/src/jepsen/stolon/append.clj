@@ -113,12 +113,18 @@
                             :element  v})))
              v))]))
 
-(defrecord Client [node conn]
+; initialized? is an atom which we set when we first use the connection--we set
+; up initial isolation levels, logging info, etc. This has to be stateful
+; because we don't necessarily know what process is going to use the connection
+; at open! time.
+(defrecord Client [node conn initialized?]
   client/Client
   (open! [this test node]
     (let [c (c/open test node)]
-      (c/set-transaction-isolation! c (:isolation test))
-      (assoc this :node node :conn c)))
+      (assoc this
+             :node          node
+             :conn          c
+             :initialized?  (atom false))))
 
   (setup! [_ test]
     (dotimes [i (:table-count test default-table-count)]
@@ -151,6 +157,12 @@
       (j/execute! conn [(str "delete from " (table-name i))])))
 
   (invoke! [_ test op]
+    ; One-time connection setup
+    (when (compare-and-set! initialized? false true)
+      (j/execute! conn [(str "set application_name = 'jepsen process "
+                        (:process op) "'")])
+      (c/set-transaction-isolation! conn (:isolation test)))
+
     (c/with-errors op
       (let [txn       (:value op)
             use-txn?  (< 1 (count txn))
@@ -175,4 +187,4 @@
                                              :max-writes-per-key])
                           :min-txn-length 1
                           :consistency-models [(:expected-consistency-model opts)]))
-      (assoc :client (Client. nil nil))))
+      (assoc :client (Client. nil nil nil))))
