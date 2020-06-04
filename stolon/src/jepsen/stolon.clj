@@ -156,11 +156,13 @@
    [nil "--postgres-user NAME" "What username should we use to connect to postgres? Only use this with --existing-postgres, or you'll probably confuse the Stolon setup."
     :default "postgres"]
 
+   [nil "--prepare-threshold INT" "Passes a prepareThreshold option to the JDBC spec."
+    :parse-fn parse-long]
+
    ["-r" "--rate HZ" "Approximate request rate, in hz"
     :default 100
     :parse-fn read-string
     :validate [pos? "Must be a positive number."]]
-
 
    ["-v" "--version STRING" "What version of Stolon should we test?"
     :default "0.16.0"]

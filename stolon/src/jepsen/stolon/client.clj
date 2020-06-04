@@ -7,7 +7,8 @@
             [next.jdbc :as j]
             [next.jdbc.result-set :as rs]
             [next.jdbc.sql.builder :as sqlb]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [slingshot.slingshot :refer [try+ throw+]]
+            [wall.hack :as wh])
   (:import (java.sql Connection)))
 
 (defn open
@@ -25,8 +26,12 @@
                ; OK neither of these apparently works, so... let's try in the
                ; server config.
                :sslmode   "disable"}
+        spec  (if-let [pt (:prepare-threshold test)]
+                (assoc spec :prepareThreshold pt)
+                spec)
         ds    (j/get-datasource spec)
         conn  (j/get-connection ds)]
+    (info :conn (wh/field org.postgresql.jdbc.PgConnection :prepareThreshold conn))
     conn))
 
 (defn set-transaction-isolation!

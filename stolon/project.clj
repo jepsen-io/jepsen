@@ -8,6 +8,7 @@
                  [jepsen.etcd "0.2.1-SNAPSHOT"]
                  [seancorfield/next.jdbc "1.0.445"]
                  [org.postgresql/postgresql "42.2.12"]
-                 [cheshire "5.10.0"]]
+                 [cheshire "5.10.0"]
+                 [clj-wallhack "1.0.1"]]
   :main jepsen.stolon
   :repl-options {:init-ns jepsen.stolon})
