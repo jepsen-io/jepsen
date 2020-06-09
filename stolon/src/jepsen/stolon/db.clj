@@ -5,7 +5,8 @@
                      [string :as str]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
-            [dom-top.core :refer [real-pmap]]
+            [dom-top.core :refer [disorderly
+                                  real-pmap]]
             [jepsen [control :as c]
                     [core :as jepsen]
                     [db :as db]
@@ -282,6 +283,9 @@
 
       (teardown! [_ test node]
         (c/su (c/exec :service :postgresql :stop)
+              ; This might not actually work, so we have to kill the processes
+              ; too
+              (cu/grepkill! "postgres")
               (c/exec :rm :-rf (c/lit "/var/lib/postgresql/12/main/*")))
         (c/sudo user
                 (c/exec :truncate :-s 0 just-postgres-log-file))
@@ -290,5 +294,25 @@
       db/LogFiles
       (log-files [_ test node]
         (concat (db/log-files tcpdump test node)
-                [just-postgres-log-file])))))
+                [just-postgres-log-file]))
 
+      db/Primary
+      (setup-primary! [db test node])
+      (primaries [db test]
+        ; Everyone's a winner! Really, there should only be one node here,
+        ; so... it's kinda trivial.
+        (:nodes test))
+
+      db/Process
+      (start! [db test node]
+        (c/su (c/exec :service :postgresql :restart)))
+
+      (kill! [db test node]
+        (doseq [pattern (shuffle
+                          ["postgres -D" ; Main process
+                           "main: checkpointer"
+                           "main: background writer"
+                           "main: walwriter"
+                           "main: autovacuum launcher"])]
+          (Thread/sleep (rand-int 100))
+          (info "Killing" pattern "-" (cu/grepkill! pattern)))))))

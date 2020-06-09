@@ -31,7 +31,6 @@
                 spec)
         ds    (j/get-datasource spec)
         conn  (j/get-connection ds)]
-    (info :conn (wh/field org.postgresql.jdbc.PgConnection :prepareThreshold conn))
     conn))
 
 (defn set-transaction-isolation!
