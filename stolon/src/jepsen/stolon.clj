@@ -13,10 +13,12 @@
             [jepsen.os.debian :as debian]
             [jepsen.stolon [append :as append]
                            [db :as db]
+                           [ledger :as ledger]
                            [nemesis :as nemesis]]))
 
 (def workloads
   {:append      append/workload
+   :ledger      ledger/workload
    :none        (fn [_] tests/noop-test)})
 
 (def all-workloads
