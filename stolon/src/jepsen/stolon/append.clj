@@ -83,6 +83,7 @@
   [conn test txn? [f k v]]
   (let [table-count (:table-count test default-table-count)
         table (table-for table-count k)]
+    (Thread/sleep (rand-int 10))
     [f k (case f
            :r (let [r (j/execute! conn
                                   [(str "select (val) from " table " where "
