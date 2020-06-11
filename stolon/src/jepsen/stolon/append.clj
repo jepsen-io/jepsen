@@ -38,7 +38,8 @@
           " (id, sk, val) values (?, ?, ?)"
           " on conflict (id) do update set"
           " val = CONCAT(t.val, ',', ?) where "
-          (if (< (rand) 0.5) "t.id" "t.sk")
+          "t.id"
+          ;(if (< (rand) 0.5) "t.id" "t.sk")
           " = ?")
      k k e e k]))
 
@@ -87,7 +88,8 @@
     [f k (case f
            :r (let [r (j/execute! conn
                                   [(str "select (val) from " table " where "
-                                        (if (< (rand) 0.5) "id" "sk")
+                                        ;(if (< (rand) 0.5) "id" "sk")
+                                        "id"
                                         " = ? ")
                                    k]
                                   {:builder-fn rs/as-unqualified-lower-maps})]

@@ -4,6 +4,12 @@ Jepsen tests for the Stolon Postgres replication system. Also happens to test si
 
 ## Usage
 
+To demonstrate that Postgres `SERIALIZABLE` isn't serializable, try
+
+```
+lein run test-all -w append --concurrency 50 --isolation serializable --just-postgres --node n1 --nemesis none --time-limit 120 -r 200 --test-count 2 --max-writes-per-key 16
+```
+
 If you have a postgres process on localhost, with a postgres user (and
 database) named `jepsen`, and password `pw`, try:
 
