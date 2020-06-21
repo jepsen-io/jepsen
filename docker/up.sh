@@ -53,6 +53,7 @@ do
         --dev)
             if [ ! "$JEPSEN_ROOT" ]; then
                 JEPSEN_ROOT="$(cd ../ && pwd)"
+                export JEPSEN_ROOT
                 INFO "JEPSEN_ROOT is not set, defaulting to: $JEPSEN_ROOT"
             fi
             INFO "Running docker-compose with dev config"
