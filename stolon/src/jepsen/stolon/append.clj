@@ -123,7 +123,7 @@
 (defrecord Client [node conn initialized?]
   client/Client
   (open! [this test node]
-    (let [c (c/open test node)]
+    (let [c (c/open node)]
       (assoc this
              :node          node
              :conn          c
@@ -151,7 +151,7 @@
                 (info "Retrying IO error")
                 (Thread/sleep 1000)
                 (c/close! conn)
-                (retry (c/await-open test node)
+                (retry (c/await-open node)
                        (dec tries)))
 
             (throw e))))
