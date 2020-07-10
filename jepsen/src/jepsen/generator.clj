@@ -750,6 +750,13 @@
   (update [_ test ctx event]
     (Map. f (update gen test ctx event))))
 
+(defn concat
+  "Where your generators are sequences, you can use Clojure's `concat` to make
+  them a generator. This `concat` is useful when you're trying to concatenate
+  arbitrary generators. Right now, (concat a b c) is simply '(a b c)."
+  [& gens]
+  (seq gens))
+
 (defn map
   "A generator which wraps another generator g, transforming operations it
   generates with (f op). When the underlying generator yields :pending or nil,
