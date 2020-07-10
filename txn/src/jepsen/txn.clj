@@ -16,6 +16,11 @@
           init-state
           history))
 
+(defn op-mops
+  "A lazy sequence of all [op mop] pairs from a history."
+  [history]
+  (mapcat (fn [op] (map (fn [mop] [op mop]) (:value op))) history))
+
 (defn ext-reads
   "Given a transaction, returns a map of keys to values for its external reads:
   values that transaction observed which it did not write itself."
@@ -46,3 +51,23 @@
                  (assoc! ext k v))
                (next txn)))
       (persistent! ext))))
+
+(defn int-write-mops
+  "Returns a map of keys to vectors of of all non-final write mops to that key."
+  [txn]
+  (loop [int (transient {})
+         txn txn]
+    (if (seq txn)
+      (let [[f k v :as mop] (first txn)]
+        (recur (if (= :r f)
+                 int
+                 (let [writes (get int k [])]
+                   (assoc! int k (conj writes mop))))
+               (next txn)))
+      ; All done; trim final writes.
+      (->> int
+           persistent!
+           (keep (fn [[k vs]]
+                   (when (< 1 (count vs))
+                     [k (subvec vs 0 (dec (count vs)))])))
+           (into {})))))
