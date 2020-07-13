@@ -105,6 +105,7 @@
           :--expose_trace
           :--v 2
           :--vmodule=groups=3 ;; flag to set -v=3 for worker/groups.go
+          "--whitelist=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
           (when (:dgraph-jaeger-collector test)
             [:--jaeger.collector (:dgraph-jaeger-collector test)])
           (when (:dgraph-jaeger-agent test)
