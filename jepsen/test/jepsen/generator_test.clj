@@ -1,5 +1,6 @@
 (ns jepsen.generator-test
   (:require [jepsen.generator :as gen]
+            [jepsen.generator.test :as gen.test]
             [jepsen.independent :as independent]
             [jepsen [util :as util]]
             [clojure [pprint :refer [pprint]]
@@ -8,181 +9,8 @@
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan Set)))
 
-(gen/init!)
-
-(def default-test
-  "A default test map."
-  {})
-
-(defn n+nemesis-context
-  "A context with n numeric worker threads and one nemesis."
-  [n]
-  (gen/context {:concurrency n}))
-
-(def default-context
-  "A default initial context for running these tests. Two worker threads, one
-  nemesis."
-  (n+nemesis-context 2))
-
-(defn invocations
-  "Only invokes, not returns"
-  [history]
-  (filter #(= :invoke (:type %)) history))
-
-(defmacro with-fixed-rand-int
-  "Rebinds rand-int to yield a deterministic series of random values.
-  Definitely not threadsafe, but fine for tests I think."
-  [seed & body]
-  `(let [values#    (atom (gen/rand-int-seq ~seed))
-         rand-int#  (fn [limit#]
-                      (if (zero? limit#)
-                        0
-                        (mod (first (swap! values# next))
-                             limit#)))]
-     (with-redefs [rand-int rand-int#]
-       ~@body)))
-
-(def rand-seed
-  "We need tests to be deterministic for reproducibility, but also
-  pseudorandom. Changing this seed will force rewriting some tests, but it
-  might be necessary for discovering edge cases."
-  45100)
-
-(defn simulate
-  "Simulates the series of operations obtained from a generator, given a
-  function that takes a context and op and returns the completion for that op."
-  ([gen complete-fn]
-   (simulate default-context gen complete-fn))
-  ([ctx gen complete-fn]
-   (with-fixed-rand-int rand-seed
-     (loop [ops        []
-            in-flight  [] ; Kept sorted by time
-            gen        (gen/validate gen)
-            ctx        ctx]
-       ;(binding [*print-length* 3] (prn :invoking :gen gen))
-       (let [[invoke gen'] (gen/op gen default-test ctx)]
-         ; (prn :invoke invoke :in-flight in-flight)
-         (if (nil? invoke)
-           ; We're done
-           (into ops in-flight)
-
-           ; TODO: the order of updates for worker maps here isn't correct; fix
-           ; it.
-           (if (and (not= :pending invoke)
-                    (or (empty? in-flight)
-                        (<= (:time invoke) (:time (first in-flight)))))
-
-             ; We have an invocation that's not pending, and that invocation is
-             ; before every in-flight completion
-             (let [thread    (gen/process->thread ctx (:process invoke))
-                   ; Advance clock, mark thread as free
-                   ctx       (-> ctx
-                                 (update :time max (:time invoke))
-                                 (assoc :free-threads
-                                        (.remove (:free-threads ctx) thread)))
-                   ; Update the generator with this invocation
-                   gen'      (gen/update gen' default-test ctx invoke)
-                   ; Add the completion to the in-flight set
-                   ;_         (prn :invoke invoke)
-                   complete  (complete-fn ctx invoke)
-                   in-flight (sort-by :time (conj in-flight complete))]
-               (recur (conj ops invoke) in-flight gen' ctx))
-
-             ; We need to complete something before we can apply the next
-             ; invocation.
-             (let [op     (first in-flight)
-                   _      (assert op "generator pending and nothing in flight???")
-                   thread (gen/process->thread ctx (:process op))
-                   ; Advance clock, mark thread as free
-                   ctx    (-> ctx
-                              (update :time max (:time op))
-                              (assoc :free-threads (.add (:free-threads ctx)
-                                                         thread)))
-                   ; Update generator with completion
-                   gen'   (gen/update gen default-test ctx op)
-                   ; Update worker mapping if this op crashed
-                   ctx    (if (or (= :nemesis thread) (not= :info (:type op)))
-                            ctx
-                            (update ctx :workers
-                                    assoc thread (gen/next-process ctx thread)))]
-               (recur (conj ops op) (rest in-flight) gen' ctx)))))))))
-
-(defn quick-ops
-  "Simulates the series of ops obtained from a generator where the
-  system executes every operation perfectly, immediately, and with zero
-  latency."
-  ([gen]
-   (quick-ops default-context gen))
-  ([ctx gen]
-   (simulate ctx gen (fn [ctx invoke] (assoc invoke :type :ok)))))
-
-(defn quick
-  "Like quick-ops, but returns just invocations."
-  ([gen]
-   (quick default-context gen))
-  ([ctx gen]
-   (invocations (quick-ops ctx gen))))
-
-(def perfect-latency
-  "How long perfect operations take"
-  10)
-
-(defn perfect*
-  "Simulates the series of ops obtained from a generator where the system
-  executes every operation successfully in 10 nanoseconds. Returns full
-  history."
-  ([gen]
-   (perfect* default-context gen))
-  ([ctx gen]
-   (simulate ctx gen
-             (fn [ctx invoke]
-               (-> invoke
-                   (assoc :type :ok)
-                   (update :time + perfect-latency))))))
-
-(defn perfect
-  "Simulates the series of ops obtained from a generator where the system
-  executes every operation successfully in 10 nanoseconds. Returns only
-  invocations."
-  ([gen]
-   (perfect default-context gen))
-  ([ctx gen]
-   (invocations (perfect* ctx gen))))
-
-(defn perfect-info
-  "Simulates the series of ops obtained from a generator where every operation
-  crashes with :info in 10 nanoseconds. Returns only invocations."
-  ([gen]
-   (perfect-info default-context gen))
-  ([ctx gen]
-   (invocations
-     (simulate ctx gen
-               (fn [ctx invoke]
-                 (-> invoke
-                     (assoc :type :info)
-                     (update :time + perfect-latency)))))))
-
-(defn imperfect
-  "Simulates the series of ops obtained from a generator where threads
-  alternately fail, info, then ok, and repeat, taking 10 ns each. Returns
-  invocations and completions."
-  ([gen]
-   (imperfect default-context gen))
-  ([ctx gen]
-   (let [state (atom {})]
-     (simulate ctx gen
-               (fn [ctx invoke]
-                 (let [t (gen/process->thread ctx (:process invoke))]
-                   (-> invoke
-                       (assoc :type (get (swap! state update t {nil   :fail
-                                                                :fail :info
-                                                                :info :ok
-                                                                :ok   :fail})
-                                         t))
-                       (update :time + perfect-latency))))))))
-
 (deftest nil-test
-  (is (= [] (perfect nil))))
+  (is (= [] (gen.test/perfect nil))))
 
 (deftest map-test
   (testing "once"
@@ -190,7 +18,7 @@
              :process 0
              :type :invoke
              :f :write}]
-           (perfect {:f :write}))))
+           (gen.test/perfect {:f :write}))))
 
   (testing "concurrent"
     (is (= [{:type :invoke, :process 0, :f :write, :time 0}
@@ -199,11 +27,11 @@
             {:type :invoke, :process 1, :f :write, :time 10}
             {:type :invoke, :process :nemesis, :f :write, :time 10}
             {:type :invoke, :process 0, :f :write, :time 10}]
-           (perfect (repeat 6 {:f :write})))))
+           (gen.test/perfect (repeat 6 {:f :write})))))
 
   (testing "all threads busy"
     (is (= [:pending {:f :write}]
-           (gen/op {:f :write} {} (assoc default-context
+           (gen/op {:f :write} {} (assoc gen.test/default-context
                                          :free-threads (Set.)))))))
 
 (deftest limit-test
@@ -211,14 +39,14 @@
           {:type :invoke, :process :nemesis, :time 0, :f :write, :value 1}]
          (->> (repeat {:f :write :value 1})
               (gen/limit 2)
-              quick))))
+              gen.test/quick))))
 
 (deftest repeat-test
   (is (= [0 0 0]
          (->> (range)
               (map (partial hash-map :value))
               (gen/repeat 3)
-              (perfect)
+              (gen.test/perfect)
               (map :value)))))
 
 (deftest delay-test
@@ -233,7 +61,7 @@
                repeat
                (gen/delay 3e-9)
                (gen/limit 5)
-               perfect))))
+               gen.test/perfect))))
 
 (deftest seq-test
   (testing "vectors"
@@ -241,7 +69,7 @@
            (->> [{:value 1}
                  {:value 2}
                  {:value 3}]
-                quick
+                gen.test/quick
                 (map :value)))))
 
   (testing "seqs"
@@ -249,7 +77,7 @@
            (->> [{:value 1}
                  {:value 2}
                  {:value 3}]
-                quick
+                gen.test/quick
                 (map :value)))))
 
   (testing "nested"
@@ -259,7 +87,7 @@
                  [[{:value 3}]
                   {:value 4}]
                  {:value 5}]
-                quick
+                gen.test/quick
                 (map :value)))))
 
   (testing "updates propagate to first generator"
@@ -280,7 +108,7 @@
               ; The other succeeds and is finished
               [20 :read :ok]
               [30 :done :info]]
-             (->> (simulate default-context gen
+             (->> (gen.test/simulate gen.test/default-context gen
                             (fn [ctx op]
                               (-> op (update :time + 10)
                                   (assoc :type (first (swap! types next))))))
@@ -288,12 +116,12 @@
 
 (deftest fn-test
   (testing "returning nil"
-    (is (= [] (quick (fn [])))))
+    (is (= [] (gen.test/quick (fn [])))))
 
   (testing "returning a literal map"
     (let [ops (->> (fn [] {:f :write, :value (rand-int 10)})
                    (gen/limit 5)
-                   perfect)]
+                   gen.test/perfect)]
       (is (= 5 (count ops)))                      ; limit
       (is (every? #(<= 0 % 10) (map :value ops))) ; legal vals
       (is (< 1 (count (set (map :value ops)))))   ; random vals
@@ -302,7 +130,7 @@
   (testing "returning repeat maps"
     (let [ops (->> #(gen/repeat {:f :write, :value (rand-int 10)})
                    (gen/limit 5)
-                   perfect)]
+                   gen.test/perfect)]
       (is (= 5 (count ops)))                      ; limit
       (is (every? #(<= 0 % 10) (map :value ops))) ; legal vals
       (is (= 1 (count (set (map :value ops)))))   ; same vals
@@ -329,7 +157,7 @@
                                                :value  (:value event)}))
                                  this))
                 (gen/limit 5)
-                (quick (assoc default-context :free-threads
+                (gen.test/quick (assoc gen.test/default-context :free-threads
                               (Set/from [0 1]))))))))
 
 
@@ -345,7 +173,7 @@
                            {:f :read}
                            d)
                gen/clients
-               perfect)]
+               gen.test/perfect)]
     (is (= [{:f :write, :time 0, :process 0, :type :invoke}
             {:f :read, :time 10, :process 1, :type :invoke}
             {:f :delayed, :time 20, :process 1, :type :invoke}
@@ -380,7 +208,7 @@
                ; The latest process, the nemesis, should start at time 5 and
                ; finish at 15.
                (gen/synchronize (repeat 2 {:f :b}))]
-              perfect))))
+              gen.test/perfect))))
 
 (deftest clients-test
   (is (= #{0 1}
@@ -388,7 +216,7 @@
               gen/repeat
               (gen/clients)
               (gen/limit 5)
-              perfect
+              gen.test/perfect
               (map :process)
               set))))
 
@@ -403,7 +231,7 @@
                           (repeat 1 {:f :b})
                           (repeat 3 {:f :c}))
               gen/clients
-              perfect
+              gen.test/perfect
               (map (juxt :f :process :time))))))
 
 (deftest any-test
@@ -417,7 +245,7 @@
          (->> (gen/any (gen/on #{0} (gen/delay 20e-9 (repeat {:f :a})))
                        (gen/on #{1} (gen/delay 20e-9 (repeat {:f :b}))))
               (gen/limit 4)
-              perfect
+              gen.test/perfect
               (map (juxt :f :process :time))))))
 
 (deftest each-thread-test
@@ -429,23 +257,23 @@
           [10 0 :b]]
          ; Each thread now gets to evaluate [a b] independently.
          (->> (gen/each-thread [{:f :a} {:f :b}])
-              perfect
+              gen.test/perfect
               (map (juxt :time :process :f)))))
 
   (testing "collapses when exhausted"
     (is (= nil
            (gen/op (gen/each-thread (gen/limit 0 {:f :read}))
                {}
-               default-context)))))
+               gen.test/default-context)))))
 
 (deftest stagger-test
   (let [n           1000
         dt          20
-        concurrency (count (:workers default-context))
+        concurrency (count (:workers gen.test/default-context))
         ops         (->> (range n)
                          (map (fn [x] {:f :write, :value x}))
                          (gen/stagger (util/nanos->secs dt))
-                         perfect)
+                         gen.test/perfect)
         times       (mapv :time ops)
         max-time    (peek times)
         rate        (float (/ n max-time))
@@ -456,7 +284,7 @@
   (is (= [{:type :invoke, :process 0, :time 0, :f :b, :value 2}]
          (->> {:f :a, :value 2}
               (gen/f-map {:a :b})
-              perfect))))
+              gen.test/perfect))))
 
 (deftest filter-test
   (is (= [0 2 4 6 8]
@@ -464,7 +292,7 @@
               (map (fn [x] {:value x}))
               (gen/limit 10)
               (gen/filter (comp even? :value))
-              perfect
+              gen.test/perfect
               (map :value)))))
 
 (deftest ^:logging log-test
@@ -472,14 +300,14 @@
                        {:f :a}
                        (gen/log :second)
                        {:f :b})
-           perfect
+           gen.test/perfect
            (map :f)
            (= [:a :b]))))
 
 (deftest mix-test
   (let [fs (->> (gen/mix [(repeat 5  {:f :a})
                           (repeat 10 {:f :b})])
-                perfect
+                gen.test/perfect
                 (map :f))]
     (is (= {:a 5
             :b 10}
@@ -496,7 +324,7 @@
               (map (fn [x] {:value x}))
               (gen/process-limit 5)
               gen/clients
-              perfect-info
+              gen.test/perfect-info
               (map (juxt :process :value))))))
 
 (deftest time-limit-test
@@ -507,7 +335,7 @@
          ; their limits appropriately.
          (->> [(gen/time-limit (util/nanos->secs 20) (gen/repeat {:value :a}))
                (gen/time-limit (util/nanos->secs 10) (gen/repeat {:value :b}))]
-              perfect
+              gen.test/perfect
               (map (juxt :time :value))))))
 
 (defn integers
@@ -528,7 +356,7 @@
               {:f :a, :process 1,        :time 0, :type :invoke, :value 2}]
              (->> (gen/reserve as)
                   (gen/limit 3)
-                  perfect))))
+                  gen.test/perfect))))
 
     (testing "three ranges"
       (is (= [[0 1 :a 0]
@@ -550,7 +378,7 @@
                                3 bs
                                cs)
                   (gen/limit 15)
-                  (perfect (n+nemesis-context 5))
+                  (gen.test/perfect (gen.test/n+nemesis-context 5))
                   (map (juxt :time :process :f :value))))))))
 
 (deftest independent-sequential-test
@@ -567,7 +395,7 @@
                        (map (partial hash-map :type :invoke, :value))
                        (gen/limit 3))))
               gen/clients
-              perfect
+              gen.test/perfect
               (map (juxt :time :process :value))))))
 
 (deftest independent-concurrent-test
@@ -604,7 +432,7 @@
                 (fn [k]
                   (->> [:v0 :v1 :v2] ; Three values per key
                        (map (partial hash-map :type :invoke, :value)))))
-              (perfect (n+nemesis-context 6)) ; 3 groups of 2 threads each
+              (gen.test/perfect (gen.test/n+nemesis-context 6)) ; 3 groups of 2 threads each
               (map (juxt :time :process :value))))))
 
 (deftest independent-deadlock-case
@@ -619,7 +447,7 @@
                 (fn [k] (gen/each-thread {:f :meow})))
               (gen/limit 5)
               gen/clients
-              perfect
+              gen.test/perfect
               (map (juxt :time :process :f :value))))))
 
 (deftest at-least-one-ok-test
@@ -641,7 +469,7 @@
               gen/until-ok
               (gen/limit 10)
               gen/clients
-              imperfect
+              gen.test/imperfect
               (map (juxt :time :process :type))))))
 
 (deftest flip-flop-test
@@ -655,7 +483,7 @@
                               {:f :finalize}])
               (gen/limit 10)
               gen/clients
-              perfect
+              gen.test/perfect
               (map (juxt :process :f :value))))))
 
 (deftest pretty-print-test
@@ -673,5 +501,5 @@
                            {:value :b}]
                           (gen/limit 1 {:value :c})
                           {:value :d})
-              perfect
+              gen.test/perfect
               (map :value)))))

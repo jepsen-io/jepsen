@@ -6,7 +6,7 @@
             [jepsen.independent :refer :all]
             [jepsen.checker :as checker]
             [jepsen.generator :as gen]
-            [jepsen.generator-test :as gen-test]))
+            [jepsen.generator.test :as gen.test]))
 
 (use-fixtures :once quiet-logging)
 
@@ -21,7 +21,7 @@
                                   (map (partial array-map :value))))
                      (sequential-generator [0 1 2 3])
                      (gen/nemesis nil)
-                     (gen-test/perfect (gen-test/n+nemesis-context 3))
+                     (gen.test/perfect (gen.test/n+nemesis-context 3))
                      (concat [{:value :not-sharded}]))]
     (is (= {:valid? false
             :results {1 {:valid? true}
