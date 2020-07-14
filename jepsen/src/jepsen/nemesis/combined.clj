@@ -269,7 +269,7 @@
   sequentially."
   [packages]
   {:generator       (gen/mix (map :generator packages))
-   :final-generator (apply concat (keep :final-generator packages))
+   :final-generator (keep :final-generator packages)
    :nemesis         (n/compose (map :nemesis packages))
    :perf            (reduce into #{} (map :perf packages))})
 
