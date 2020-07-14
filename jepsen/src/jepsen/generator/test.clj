@@ -1,4 +1,11 @@
 (ns jepsen.generator.test
+  "This namespace contains functions for testing generators. See the
+  `jepsen.generator-test` namespace in the `test/` directory for a concrete
+  example of how these functions can be used.
+
+  NOTE: While the `simulate` function is considered stable at this point, the
+  others might still be subject to change -- use with care and expect possible
+  breakage in future releases."
   (:require [jepsen.generator :as gen]))
 
 (def default-test
