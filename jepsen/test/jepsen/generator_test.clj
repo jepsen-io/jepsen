@@ -9,6 +9,8 @@
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan Set)))
 
+(gen/init!)
+
 (deftest nil-test
   (is (= [] (gen.test/perfect nil))))
 

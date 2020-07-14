@@ -1,8 +1,6 @@
 (ns jepsen.generator.test
   (:require [jepsen.generator :as gen]))
 
-(gen/init!)
-
 (def default-test
   "A default test map."
   {})
