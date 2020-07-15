@@ -79,7 +79,6 @@
 (defrecord K8sRemote [context namespace]
   Remote
   (connect [this pod-name]
-    "Ignore host assuming direct kubectl cli access. Host parameter is misused to carry the name of the pod"
     (assoc this
            :context (or-parameter "context" context)
            :namespace (or-parameter "namespace" namespace)
