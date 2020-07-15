@@ -666,3 +666,12 @@
                      [1 2 3]
                      (->> {:f :read}
                           (gen/limit 3))))))))
+
+(deftest concat-test
+  (is (= [:a :b :c :d]
+         (->> (gen/concat [{:value :a}
+                           {:value :b}]
+                          (gen/limit 1 {:value :c})
+                          {:value :d})
+              perfect
+              (map :value)))))
