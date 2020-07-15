@@ -27,7 +27,7 @@ bench/**
 */timeline.html
 */resources/datomic/download-key
 */resources/datomic/riak-transactor.properties
-/.nrepl-port
+*/.nrepl-port
 .idea
 *.iml
 jepsen/doc
