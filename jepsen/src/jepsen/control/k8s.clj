@@ -107,5 +107,4 @@
              (str "kubectl get pods " context " " namespace
                   " | tail -n +2 "
                   " | awk '{print $1}'"))]
-    (info (str "" res))
     (lazy-seq (split-lines (trim (:out res))))))
