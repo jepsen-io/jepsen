@@ -92,8 +92,9 @@
   (download! [this remote-paths local-path _rest]
     (cp-from context namespace (:pod-name this) remote-paths local-path)))
 
-(def k8s
-  "A remote that does things via `kubectl exec` and `kubectl cp`."
+(defn k8s
+  "Returns a remote that does things via `kubectl exec` and `kubectl cp`, in the default context and namespacd."
+  []
   (->K8sRemote nil nil))
 
 (defn list-pods
