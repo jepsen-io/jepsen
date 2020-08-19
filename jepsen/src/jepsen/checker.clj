@@ -734,9 +734,8 @@
 (defn counter
   "A counter starts at zero; add operations should increment it by that much,
   and reads should return the present value. This checker validates that at
-  each read, the value is greater than the sum of all :ok increments and
-  attempted decrements, and lower than the sum of all attempted increments and
-  :ok decrements.
+  each read, the value is greater than the sum of all :ok increments, and lower
+  than the sum of all attempted increments.
 
   Returns a map:
 
