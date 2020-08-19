@@ -737,6 +737,9 @@
   each read, the value is greater than the sum of all :ok increments, and lower
   than the sum of all attempted increments.
 
+  Note that this counter verifier assumes the value monotonically increases:
+  decrements are not allowed.
+
   Returns a map:
 
   {:valid?              Whether the counter remained within bounds
@@ -780,7 +783,8 @@
                          (conj reads (conj r upper))))
 
                 [:invoke :add]
-                (recur history lower (+ upper (:value op)) pending-reads reads)
+                (do (assert (not (neg? (:value op))))
+                    (recur history lower (+ upper (:value op)) pending-reads reads))
 
                 [:ok :add]
                 (recur history (+ lower (:value op)) upper pending-reads reads)
