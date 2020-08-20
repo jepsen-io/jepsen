@@ -222,14 +222,17 @@
                               :time         time
                               :free-threads (.add ^Set (:free-threads ctx)
                                                   thread))
-                ; Workers that crash (other than the nemesis) should be assigned
-                ; new thread identifiers.
+                ; Let generator know about our completion. We use the context
+                ; with the new time and thread free, but *don't* assign a new
+                ; process here, so that thread->process recovers the right
+                ; value for this event.
+                gen     (gen/update gen test ctx op')
+                ; Threads that crash (other than the nemesis) should be assigned
+                ; new process identifiers.
                 ctx     (if (or (= :nemesis thread) (not= :info (:type op')))
                           ctx
                           (update ctx :workers assoc thread
                                   (gen/next-process ctx thread)))
-                ; Let generator know about our completion
-                gen     (gen/update gen test ctx op')
                 history (if (goes-in-history? op')
                           (conj! history op')
                           history)]

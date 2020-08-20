@@ -315,9 +315,11 @@
   Updates use a context with a specific relationship to the event:
 
   - The context :time is equal to the event :time
-  - The free processes and worker maps reflect the state after the event has
-    taken place; e.g. if the event is an invoke, the thread is listed as no
-    longer free; if the event is a completion, the thread is listed as free.
+  - The free processes set reflects the state after the event has taken place;
+    e.g. if the event is an invoke, the thread is listed as no longer free; if
+    the event is a completion, the thread is listed as free.
+  - The worker map reflects the process which that thread worker was executing
+    at the time the event occurred.
 
   ## Default implementations
 
