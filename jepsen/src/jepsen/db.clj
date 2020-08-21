@@ -71,6 +71,11 @@
             :-w  cap-file
             :-s  65535
             :-B  16384 ; buffer in KB
+            :-U ; Theoretically, killing tcpdump with SIGINT should cause it to
+                ; neatly flush its packets to disk and exit, but... as far as
+                ; I can tell, it leaves the capture half-finished (and missing
+                ; important packets from the end of the test!) no matter what?
+                ; Let's try *not* buffering.
             (->> (:ports opts)
                  (map (partial str "port "))
                  (cons (:filter opts))
@@ -79,8 +84,19 @@
 
       (teardown! [this test node]
         (control/su
-          ; We want to get a nice clean exit here, if possible
-          (meh (control/exec :kill :-term (control/exec :cat pid-file)))
+          (when-let [pid (try+ (control/exec :cat pid-file)
+                               (catch [:type :jepsen.control/nonzero-exit] e
+                                 nil))]
+            ; We want to get a nice clean exit here, if possible
+            (meh (control/exec :kill :-s :INT pid))
+            ; Wait for it to flush
+            (while (try+ (control/exec :ps :-p pid)
+                         true
+                         (catch [:type :jepsen.control/nonzero-exit] e
+                           false))
+              (info "Waiting for tcpdump" pid "to exit")
+              (Thread/sleep 50)))
+
           ; Okay, nuke it and clean up pidfile, etc
           (cu/stop-daemon! :tcpdump pid-file)
           (control/exec :rm :-rf dir)))
