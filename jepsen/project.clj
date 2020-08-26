@@ -30,6 +30,7 @@
             [lein-codox "0.10.7"]
             [jonase/eastwood "0.3.10"]]
   :jvm-opts ["-Xmx32g"
+             "-Djava.awt.headless=true"
              "-server"]
   :test-selectors {:default (fn [m]
                               (not (or (:perf m)
