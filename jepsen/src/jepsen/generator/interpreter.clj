@@ -38,7 +38,8 @@
     this)
 
   (invoke! [this test op]
-    (if (not= process (:process op))
+    (if (and (not= process (:process op))
+             (not (client/is-reusable? client test)))
       ; New process, new client!
       (do (close! this test)
           ; Try to open new client

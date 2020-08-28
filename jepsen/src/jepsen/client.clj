@@ -26,6 +26,19 @@
   (teardown! [client test]
            "Tear down database state when work is complete."))
 
+(defprotocol Reusable
+  (reusable? [client test]
+             "If true, this client can be re-used with a fresh process after a
+             call to `invoke` throws or returns an `info` operation. If false
+             (or if this protocol is not implemented), crashed clients will be
+             closed and new ones opened to replace them."))
+
+(defn is-reusable?
+  "Wrapper around reusable?; returns false when not implemented."
+  [client test]
+  (and (satisfies? Reusable client)
+       (reusable? client test)))
+
 (def noop
   "Does nothing."
   (reify Client
