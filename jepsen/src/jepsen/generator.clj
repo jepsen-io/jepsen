@@ -1242,18 +1242,19 @@
   Generator
   (op [this test ctx]
     (when-let [[op gen'] (op gen test ctx)]
-      (cond ; No need to do anything to pending ops
-            (= :pending op)
-            [op this]
+      (let [next-time (or next-time (:time ctx))]
+        (cond ; No need to do anything to pending ops
+              (= :pending op)
+              [op this]
 
-            ; We're ready to issue this operation.
-            (<= next-time (:time op))
-            [op (Stagger. dt (+ next-time (long (rand dt))) gen')]
+              ; We're ready to issue this operation.
+              (<= next-time (:time op))
+              [op (Stagger. dt (+ next-time (long (rand dt))) gen')]
 
-            ; Not ready yet
-            true
-            [(assoc op :time next-time)
-             (Stagger. dt (+ next-time (long (rand dt))) gen')])))
+              ; Not ready yet
+              true
+              [(assoc op :time next-time)
+               (Stagger. dt (+ next-time (long (rand dt))) gen')]))))
 
 
   (update [_ test ctx event]
@@ -1277,7 +1278,7 @@
   2."
   [dt gen]
   (let [dt (long (util/secs->nanos (* 2 dt)))]
-    (Stagger. dt 0 gen)))
+    (Stagger. dt nil gen)))
 
 ; This isn't actually DelayTil. It spreads out *all* requests evenly. Feels
 ; like it might be useful later.
