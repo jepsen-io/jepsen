@@ -4,7 +4,8 @@
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as control]
                     [util :refer [fcatch meh]]]
-            [jepsen.control.util :as cu]
+            [jepsen.control [util :as cu]
+                            [net :as cn]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol DB
@@ -49,6 +50,10 @@
   "A database which runs a tcpdump capture from setup! to teardown!, and yields
   a `tcpdump` logfile. Options:
 
+    :clients-only?  If true, applies a filter string which yields only traffic
+                    from Jepsen clients, rather than capturing inter-DB-node
+                    traffic.
+
     :filter A filter string to apply (in addition to ports).
             e.g. \"host 192.168.122.1\", which can be helpful for seeing *just*             client traffic from the control node.
 
@@ -63,24 +68,30 @@
       (setup! [this test node]
         (control/su
           (control/exec :mkdir :-p dir)
-          (cu/start-daemon!
-            {:logfile log-file
-             :pidfile pid-file
-             :chdir   dir}
-            "/usr/sbin/tcpdump"
-            :-w  cap-file
-            :-s  65535
-            :-B  16384 ; buffer in KB
-            :-U ; Theoretically, killing tcpdump with SIGINT should cause it to
-                ; neatly flush its packets to disk and exit, but... as far as
-                ; I can tell, it leaves the capture half-finished (and missing
-                ; important packets from the end of the test!) no matter what?
-                ; Let's try *not* buffering.
-            (->> (:ports opts)
-                 (map (partial str "port "))
-                 (cons (:filter opts))
-                 (remove nil?)
-                 (str/join " and ")))))
+          ; Combine custom, port, and client filters
+          (let [filters (remove nil? [(->> (:ports opts)
+                                           (map (partial str "port "))
+                                           (str/join " and "))
+                                      (when (:clients-only? opts)
+                                        (str "host " (cn/control-ip)))
+                                      (:filter opts)])
+                filter-str (str/join " and " filters)]
+            (info :filter-str filter-str)
+            (cu/start-daemon!
+              {:logfile log-file
+               :pidfile pid-file
+               :chdir   dir}
+              "/usr/sbin/tcpdump"
+              :-w  cap-file
+              :-s  65535
+              :-B  16384 ; buffer in KB
+              ; Theoretically, killing tcpdump with SIGINT should cause it to
+              ; neatly flush its packets to disk and exit, but... as far as
+              ; I can tell, it leaves the capture half-finished (and missing
+              ; important packets from the end of the test!) no matter what?
+              ; Let's try *not* buffering.
+              :-U
+              filter-str))))
 
       (teardown! [this test node]
         (control/su

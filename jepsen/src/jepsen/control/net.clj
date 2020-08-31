@@ -42,3 +42,16 @@
 (def ip
   "Look up an ip for a hostname. Memoized."
   (memoize ip*))
+
+(defn control-ip
+  "Assuming you have a DB node bound in jepsen.client, returns the IP address
+  of the *control* node, as perceived by that DB node. This is helpful when you
+  want to, say, set up a tcpdump filter which snarfs traffic coming from the
+  control node."
+  []
+  ; We have to escape the sudo env for this to work, since the env var doesn't
+  ; make its way into subshells.
+  (binding [c/*sudo* nil]
+    (nth (re-find #"^(.+?)\s"
+                  (c/exec :bash :-c "echo $SSH_CLIENT"))
+         1)))
