@@ -3,16 +3,34 @@ x-node:
   &default-node
   build: ./node
   env_file: ./secret/node.env
+  secrets:
+    - authorized_keys
   privileged: true
+  tty: true
+  tmpfs:
+    #- /run:size=100M
+    - /run/lock:size=100M
+  volumes:
+    - "/sys/fs/cgroup:/sys/fs/cgroup:ro"
   networks:
     - jepsen
   ports:
     - ${JEPSEN_PORT:-22}
 
+secrets:
+  authorized_keys:
+    file: ./secret/authorized_keys
+
 services:
   control:
     container_name: jepsen-control
     hostname: control
+    depends_on:
+      - n1
+      - n2
+      - n3
+      - n4
+      - n5
     build: ./control
     env_file: ./secret/control.env
     privileged: true

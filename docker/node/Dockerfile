@@ -1,28 +1,35 @@
-# Based on the deprecated `https://github.com/tutumcloud/tutum-debian`
-FROM debian:buster
+# See https://github.com/jgoerzen/docker-debian-base
+# See https://hub.docker.com/r/jgoerzen/debian-base-standard
+FROM jgoerzen/debian-base-standard:buster
+
+# I think this is a bug--debian-base-setup crashes because policy-rc.d isn't
+# present in this image, and if you create it, exim crashes... do we actually NEED this? Maybe not...
+#RUN mkdir /usr/sbin/policy-rc.d
+#RUN run-parts --exit-on-error --verbose /usr/local/debian-base-setup
+
+# Basic system stuff
+RUN apt-get install -y apt-transport-https
 
 # Install packages
 RUN apt-get -qy update && \
     apt-get -qy install \
         dos2unix \
         openssh-server \
-        pwgen \
-        && \
-mkdir -p /var/run/sshd && \
-sed -i "s/UsePrivilegeSeparation.*/UsePrivilegeSeparation no/g" /etc/ssh/sshd_config && \
-sed -i "s/PermitRootLogin without-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
+        pwgen
 
-ENV AUTHORIZED_KEYS **None**
+# When run, boot-debian-base will call this script, which will copy the
+# authorized_keys file into root's .ssh
+ADD setup-authorized-keys.sh /usr/local/preinit/03-setup-authorized-keys
+RUN chmod +x /usr/local/preinit/03-setup-authorized-keys
 
-ADD run.sh /run.sh
-RUN dos2unix /run.sh \
-    && chmod +x /*.sh
+# Configure SSHD
+RUN sed -i "s/#PermitRootLogin prohibit-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
 
-RUN apt-get update
-RUN apt-get install -y apt-transport-https
+# Enable SSH server
+ENV DEBBASE_SSH enabled
 
 # Install Jepsen deps
-RUN apt-get install -qy build-essential bzip2 curl faketime iproute2 iptables iputils-ping libzip4 logrotate man man-db net-tools ntpdate psmisc python rsyslog sudo tar unzip vim wget
+RUN apt-get install -qy build-essential bzip2 curl faketime iproute2 iptables iputils-ping libzip4 logrotate man man-db net-tools ntpdate psmisc python rsyslog sudo tar unzip vim wget ca-certificates
 
 EXPOSE 22
-CMD ["/run.sh"]
+CMD ["/usr/local/bin/boot-debian-base"]
