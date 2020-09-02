@@ -147,9 +147,9 @@ INFO "Running \`docker-compose up\`"
 if [ "${RUN_AS_DAEMON}" -eq 1 ]; then
     # shellcheck disable=SC2086
     docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} up -d
-    INFO "All containers started, run \`docker ps\` to view"
+    INFO "All containers started! Run \`docker ps\` to view, and \`bin/console\` to get started."
 else
-    INFO "Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed"
+    INFO "Please run \`bin/console\` in another terminal to proceed"
     # shellcheck disable=SC2086
     docker-compose -f docker-compose.yml ${COMPOSE} ${DEV} up
 fi
