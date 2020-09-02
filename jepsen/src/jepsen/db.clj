@@ -76,7 +76,6 @@
                                         (str "host " (cn/control-ip)))
                                       (:filter opts)])
                 filter-str (str/join " and " filters)]
-            (info :filter-str filter-str)
             (cu/start-daemon!
               {:logfile log-file
                :pidfile pid-file
