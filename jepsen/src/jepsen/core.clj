@@ -13,7 +13,8 @@
   Jepsen automates the setup and teardown of the environment and distributed
   system by using an *OS* and *client* respectively. See `run!` for details."
   (:refer-clojure :exclude [run!])
-  (:require [clojure.stacktrace :as trace]
+  (:require [clojure.java.shell :refer [sh]]
+            [clojure.stacktrace :as trace]
             [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
@@ -251,6 +252,28 @@
             true      "Everything looks good! ヽ(‘ー`)ノ")))
   test)
 
+(defn log-test-start!
+  "Logs some basic information at the start of a test: the Git version of the
+  working directory, the lein arguments to re-run the test, etc."
+  [test]
+  (let [git-head (sh "git" "rev-parse" "HEAD")]
+    (when (zero? (:exit git-head))
+      (let [head      (str/trim-newline (:out git-head))
+            clean? (-> (sh "git" "status" "--porcelain=v1")
+                       :out
+                       str/blank?)]
+        (info (str "Test version " head
+                   (when-not clean? " (plus uncommitted changes)"))))))
+  (when-let [argv (:argv test)]
+    (info (str "Command line:\n"
+          (->> (:argv test)
+               (map control/escape)
+               (list* "lein" "run")
+               (str/join " ")))))
+  (info (str "Running test:\n"
+             (binding [*print-length* 32]
+               (with-out-str (pprint test))))))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -323,8 +346,7 @@
                           ; Currently running histories
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
-              _    (info "Running test:\n" (binding [*print-length* 32]
-                                             (with-out-str (pprint test))))
+              _    (log-test-start! test)
               test (control/with-remote (:remote test)
                      (control/with-ssh (:ssh test)
                        (with-resources [sessions

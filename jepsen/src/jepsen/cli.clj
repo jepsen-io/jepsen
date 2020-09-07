@@ -269,7 +269,7 @@ Options:\n")
   function with parsed options, and exits with status 0.
 
   Catches exceptions, logs them to the console, and exits with status 255."
-  [subcommands [command & arguments]]
+  [subcommands [command & arguments :as argv]]
   (try
     (assert (not (get subcommands "--help")))
     (assert (not (get subcommands "help")))
@@ -298,6 +298,7 @@ Options:\n")
       (let [{:keys [options arguments summary errors] :as parsed-opts}
             (-> arguments
                 (cli/parse-opts opt-spec)
+                (update :options assoc :argv argv)
                 opt-fn)]
 
         ; Subcommand help
