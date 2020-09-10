@@ -380,10 +380,13 @@
 
 (defprotocol Generator
   (update [gen test context event]
-          "Updates the generator to reflect an event having taken place.")
+          "Updates the generator to reflect an event having taken place.
+          Returns a generator (presumably, `gen`, perhaps with some changes)
+          resulting from the update.")
 
   (op [gen test context]
-      "Obtains the next operation from this generator."))
+      "Obtains the next operation from this generator. Returns an pair
+      of [op gen'], or [:pending gen], or nil if this generator is exhausted."))
 
 ;; Pretty-printing
 
@@ -608,24 +611,24 @@
               [(str "should return a vector of two elements.")]
               (let [[op gen'] res]
                   (if (= :pending op)
-                               []
-                               (cond-> []
-                                 (not (map? op))
-                                 (conj "should be either :pending or a map")
+                    []
+                    (cond-> []
+                      (not (map? op))
+                      (conj "should be either :pending or a map")
 
-                                 (not (#{:invoke :info :sleep :log} (:type op)))
-                                 (conj ":type should be :invoke, :info, :sleep, or :log")
+                      (not (#{:invoke :info :sleep :log} (:type op)))
+                      (conj ":type should be :invoke, :info, :sleep, or :log")
 
-                                 (not (number? (:time op)))
-                                 (conj ":time should be a number")
+                      (not (number? (:time op)))
+                      (conj ":time should be a number")
 
-                                 (not (:process op))
-                                 (conj "no :process")
+                      (not (:process op))
+                      (conj "no :process")
 
-                                 (not-any? #{(:process op)}
-                                           (free-processes ctx))
-                                 (conj (str "process " (pr-str (:process op))
-                                            " is not free"))))))]
+                      (not-any? #{(:process op)}
+                                (free-processes ctx))
+                      (conj (str "process " (pr-str (:process op))
+                                 " is not free"))))))]
         (when (seq problems)
             (throw+ {:type      ::invalid-op
                      :context   ctx
@@ -1125,7 +1128,11 @@
   To be precise, a mix behaves like a sequence of one-time, randomly selected
   generators from the given collection. This is efficient and prevents multiple
   generators from competing for the next slot, making it hard to control the
-  mixture of operations."
+  mixture of operations.
+
+  TODO: This can interact badly with generators that return :pending; gen/mix
+  won't let other generators (which could help us get unstuck!) advance. We
+  should probably cycle on :pending."
   [gens]
   (Mix. (rand-int (count gens)) (vec gens)))
 
