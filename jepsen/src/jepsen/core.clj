@@ -193,14 +193,14 @@
                                        (let [c# (client/open! client# ~test node#)]
                                          (client/setup! c# ~test)
                                          c#)))
-                                   (:nodes ~test))]
+                                   (:nodes ~test))
+               nf# @nf#]
       (try
-        @nf#
         (dorun clients#)
         ~@body
         (finally
           ; Teardown (and close clients)
-          (let [nf# (future (nemesis/teardown! nemesis# ~test))]
+          (let [nf# (future (nemesis/teardown! nf# ~test))]
             (dorun (real-pmap (fn [[c# node#]]
                                 (with-thread-name
                                   (str "jepsen node " node#))
