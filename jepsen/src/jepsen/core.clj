@@ -184,7 +184,7 @@
   at the end of the test."
   [test & body]
   `(let [client#  (:client ~test)
-         nemesis# (:nemesis ~test)]
+         nemesis# (nemesis/validate (:nemesis ~test))]
     ; Setup
     (let [nf# (future (nemesis/setup! nemesis# ~test))
                clients# (real-pmap (fn [node#]
