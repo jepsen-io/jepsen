@@ -271,7 +271,7 @@
                      (str "No nemesis can handle " (pr-str (:f op)))))))
 
         (teardown! [this test]
-          (map #(teardown! % test) nemeses))
+          (mapv #(teardown! % test) nemeses))
 
         Reflection
         (fs [this]
