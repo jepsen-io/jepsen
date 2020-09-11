@@ -148,6 +148,10 @@
     (c/on node
           (while @running?
             (try (update-node-view! state test node opts)
+                 (catch InterruptedException e
+                   ; This normally happens at the end of our test; changes are
+                   ; good we're shutting down.
+                   nil)
                  (catch Throwable t
                    (warn t "Node view updater caught throwable; will retry")))
             (Thread/sleep (* 1000 node-view-interval))))))
