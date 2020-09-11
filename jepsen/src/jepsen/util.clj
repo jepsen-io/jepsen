@@ -843,3 +843,11 @@
           (when (re-find #"invoke" (.getName method))
             (alength (.getParameterTypes method))))
         (-> c .getDeclaredMethods)))
+
+(defn fixed-point
+  "Applies f repeatedly to x until it converges."
+  [f x]
+  (let [x' (f x)]
+    (if (= x x')
+      x
+      (recur f x'))))
