@@ -98,7 +98,11 @@
         op'))
 
   (teardown! [this test]
-    (teardown! client test)))
+    (teardown! client test))
+
+  Reusable
+  (reusable? [this test]
+    (reusable? client test)))
 
 (defn validate
   "Wraps a client, validating that its return types are what you'd expect."
