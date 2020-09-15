@@ -374,6 +374,7 @@
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn error]]
             [clojure.pprint :as pprint :refer [pprint]]
+            [fipp.ednize :as fipp.ednize]
             [jepsen [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan Set)))
@@ -417,6 +418,18 @@
                jepsen.generator.Generator clojure.lang.IRecord)
 (prefer-method pprint/simple-dispatch
                jepsen.generator.Generator clojure.lang.IPersistentMap)
+
+(extend-protocol fipp.ednize/IOverride (:on-interface Generator))
+(extend-protocol fipp.ednize/IEdn (:on-interface Generator)
+  (-edn [gen]
+    (if (map? gen)
+      ; Ugh this is such a hack but Fipp's extension points are sort of a
+      ; mess--you can't override the document generation behavior on a
+      ; per-class basis. Probably sensible for perf reasons, but makes our life
+      ; hard.
+      (list (symbol (.getName (class gen)))
+            (into {} gen))
+      gen)))
 
 ;; Fair sets
 ;

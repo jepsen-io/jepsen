@@ -10,7 +10,8 @@
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [bounded-future]]
-            [fipp.edn :as fipp]
+            [fipp [edn :as fipp]
+                  [engine :as fipp.engine]]
             [knossos.history :as history])
   (:import (java.lang.reflect Method)
            (java.util.concurrent.locks LockSupport)
@@ -232,12 +233,38 @@
   op)
 
 (def logger (agent nil))
+
 (defn log-print
       [_ & things]
       (apply println things))
+
 (defn log
       [& things]
       (apply send-off logger log-print things))
+
+(defn test->str
+  "Pretty-prints a test to a string. This binds *print-length* to avoid printing
+  infinite sequences for generators."
+  [test]
+  ; What we're doing here is basically recreating normal map pretty-printing at
+  ; the top level, but overriding generators so that they only print 8 or so
+  ; elements.
+  (with-out-str
+    (fipp.engine/pprint-document
+      [:group "{"
+       [:nest 1
+        (->> test
+             (map (fn [[k v]]
+                    [:group
+                     (fipp/pretty k)
+                     :line
+                     (if (= k :generator)
+                       (binding [*print-length* 8]
+                         (fipp/pretty v))
+                       (fipp/pretty v))]))
+             (interpose [:line ", " ""]))]
+        "}"]
+      {:width 80})))
 
 ;(defn all-loggers []
 ;  (->> (org.apache.log4j.LogManager/getCurrentLoggers)

@@ -271,8 +271,7 @@
                (list* "lein" "run")
                (str/join " ")))))
   (info (str "Running test:\n"
-             (binding [*print-length* 32]
-               (with-out-str (pprint test))))))
+             (util/test->str test))))
 
 (defn run!
   "Runs a test. Tests are maps containing
