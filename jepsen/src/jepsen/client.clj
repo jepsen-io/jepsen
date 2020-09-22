@@ -36,8 +36,12 @@
 (defn is-reusable?
   "Wrapper around reusable?; returns false when not implemented."
   [client test]
-  (and (satisfies? Reusable client)
-       (reusable? client test)))
+  ; satisfies? Reusable is somehow true for records which DEFINITELY don't
+  ; implement it and I don't know how this is possible, so we're falling back
+  ; to IllegalArgException
+  (try (reusable? client test)
+       (catch IllegalArgumentException e
+         false)))
 
 (def noop
   "Does nothing."
