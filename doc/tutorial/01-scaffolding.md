@@ -39,7 +39,7 @@ Verschlimmbesserung: a library for talking to etcd.
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main jepsen.etcdemo
   :dependencies [[org.clojure/clojure "1.10.0"]
-                 [jepsen "0.1.13"]
+                 [jepsen "0.2.1-SNAPSHOT"]
                  [verschlimmbesserung "0.1.3"]])
 ```
 
@@ -87,6 +87,7 @@ errors, logging, etc. Let's pull in the `jepsen.cli` namespace, call it `cli` fo
   :concurrency, ...), constructs a test map."
   [opts]
   (merge tests/noop-test
+         {:pure-generators true}
          opts))
 
 (defn -main

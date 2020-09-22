@@ -272,8 +272,7 @@ in a generator using `gen/seq`, like we did for the nemesis' infinite cycle of s
   {:client (SetClient. "a-set" nil)
    :checker (checker/set)
    :generator (->> (range)
-                   (map (fn [x] {:type :invoke, :f :add, :value x}))
-                   gen/seq)
+                   (map (fn [x] {:type :invoke, :f :add, :value x})))
    :final-generator (gen/once {:type :invoke, :f :read, :value nil})})
 ```
 
@@ -310,31 +309,35 @@ generator, based on the set workload.
         workload  (set/workload opts)]
     (merge tests/noop-test
            opts
-           {:name       (str "etcd q=" quorum)
-            :quorum     quorum
-            :os         debian/os
-            :db         (db "v3.1.5")
-            :client     (Client. nil)
-            :nemesis    (nemesis/partition-random-halves)
-            :checker    (checker/compose
-                          {:perf      (checker/perf)
-                           :linear    (independent/checker (checker/linearizable 
-                                                             {:model     (model/cas-register)
-                                                              :algorithm :linear}))
-                           :timeline  (independent/checker (timeline/html))})
-            :generator  (->> (independent/concurrent-generator
-                               10
-                               (range)
-                               (fn [k]
-                                 (->> (gen/mix [r w cas])
-                                      (gen/stagger (/ (:rate opts)))
-                                      (gen/limit (:ops-per-key opts)))))
-                             (gen/nemesis
-                               (gen/seq (cycle [(gen/sleep 5)
-                                                {:type :info, :f :start}
-                                                (gen/sleep 5)
-                                                {:type :info, :f :stop}])))
-                             (gen/time-limit (:time-limit opts)))}
+           {:pure-generators true
+            :name            (str "etcd q=" quorum)
+            :quorum          quorum
+            :os              debian/os
+            :db              (db "v3.1.5")
+            :client          (Client. nil)
+            :nemesis         (nemesis/partition-random-halves)
+            :checker         (checker/compose
+                               {:perf   (checker/perf)
+                                :indep (independent/checker
+                                         (checker/compose
+                                           {:linear   (checker/linearizable
+                                                        {:model (model/cas-register)
+                                                         :algorithm :linear})
+                                            :timeline (timeline/html)}))})
+            :generator       (->> (independent/concurrent-generator
+                                    10
+                                    (range)
+                                    (fn [k]
+                                      (->> (gen/mix [r w cas])
+                                           (gen/stagger (/ (:rate opts)))
+                                           (gen/limit (:ops-per-key opts)))))
+                                  (gen/nemesis
+                                    (->> [(gen/sleep 5)
+                                          {:type :info, :f :start}
+                                          (gen/sleep 5)
+                                          {:type :info, :f :stop}]
+                                         cycle))
+                                  (gen/time-limit (:time-limit opts)))}
            {:client    (:client workload)
             :checker   (:checker workload)
 ```
@@ -351,10 +354,10 @@ read. `gen/phases` helps us write those kind of multi-stage generators.
                          (->> (:generator workload)
                               (gen/stagger (/ (:rate opts)))
                               (gen/nemesis
-                                (gen/seq (cycle [(gen/sleep 5)
-                                                 {:type :info, :f :start}
-                                                 (gen/sleep 5)
-                                                 {:type :info, :f :stop}])))
+                                (cycle [(gen/sleep 5)
+                                        {:type :info, :f :start}
+                                        (gen/sleep 5)
+                                        {:type :info, :f :stop}]))
                               (gen/time-limit (:time-limit opts)))
                          (gen/log "Healing cluster")
                          (gen/nemesis (gen/once {:type :info, :f :stop}))
@@ -464,7 +467,8 @@ name.
         workload  ((get workloads (:workload opts)) opts)]
     (merge tests/noop-test
            opts
-           {:name       (str "etcd q=" quorum " "
+           {:pure-generators true
+            :name       (str "etcd q=" quorum " "
                              (name (:workload opts)))
             :quorum     quorum
             :os         debian/os
