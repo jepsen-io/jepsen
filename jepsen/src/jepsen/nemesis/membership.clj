@@ -253,13 +253,13 @@
     resolved, and removed from the pending set."
   [opts]
   (when (contains? (:faults opts) :membership)
-    (let [opts    (:membership opts)
-          state   (atom (:state opts))
+    (let [mopts    (:membership opts)
+          state   (atom (:state mopts))
           nem     (map->Nemesis {:state state
-                                 :opts (select-keys opts [:log-node-views?
-                                                          :log-view?
-                                                          :log-resolve?
-                                                          :log-resolve-op?])})
+                                 :opts (select-keys mopts [:log-node-views?
+                                                           :log-view?
+                                                           :log-resolve?
+                                                           :log-resolve-op?])})
           gen     (->> (Generator. state)
                        (gen/stagger (:interval opts 10)))]
       {:nemesis   nem
