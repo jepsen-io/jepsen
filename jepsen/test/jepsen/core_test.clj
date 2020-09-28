@@ -2,6 +2,7 @@
   (:refer-clojure :exclude [run!])
   (:use clojure.test)
   (:require [clojure.string :as str]
+            [clojure.pprint :refer [pprint]]
             [jepsen.core :refer :all]
             [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.os :as os]
@@ -98,15 +99,14 @@
       (is (= :done @state)))
 
     (testing "client setup/teardown"
-      (let [setup     (take 15 @meta-log)
-            run       (->> @meta-log (drop 15) (drop-last 15))
-            teardown  (take-last 15 @meta-log)]
-        (is (= {:open 5
-                :setup 5
-                :close 5}
-               (frequencies setup)))
-        (is (= {:open 10 :close 10} (frequencies run)))
-        (is (= {:open 5 :teardown 5 :close 5} (frequencies teardown)))))
+      (let [n         (count (:nodes test))
+            n2        (* 2 n)
+            setup     (take n2 @meta-log)
+            run       (->> @meta-log (drop n2) (drop-last n2))
+            teardown  (take-last n2 @meta-log)]
+        (is (= {:open     n   :setup n}   (frequencies setup)))
+        (is (= {:open     n2  :close n2}  (frequencies run)))
+        (is (= {:teardown n   :close n}   (frequencies teardown)))))
 
     (is (:valid? (:results test)))
     (testing "first read"

@@ -207,7 +207,7 @@
                                 (try (client/teardown! c# ~test)
                                      (finally
                                        (client/close! c# ~test))))
-                              (zipmap clients# (:nodes ~test))))
+                              (map vector clients# (:nodes ~test))))
             @nf#))))))
 
 (defn run-case!
