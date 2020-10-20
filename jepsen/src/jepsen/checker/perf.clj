@@ -232,12 +232,10 @@
 
 (defn interval->times
   "Given an interval of two operations [a b], returns the times [time-a time-b]
-  covering the interval. If b is missing, uses the maximum from (:xrange plot)."
-  [plot [a b]]
+  covering the interval. If b is missing, yields [time-a nil]."
+  [[a b]]
   [(double (util/nanos->secs (:time a)))
-   (if b
-     (double (util/nanos->secs (:time b)))
-     (second (:xrange plot)))])
+   (when b (double (util/nanos->secs (:time b))))])
 
 (defn nemesis-regions
   "Given nemesis activity, emits a sequence of gnuplot commands rendering
@@ -259,11 +257,12 @@
                                     (* height (inc i)))
                  top             (+ bot height)]
              (->> (:intervals n)
-                  (map (partial interval->times plot))
+                  (map interval->times)
                   (map (fn [[start stop]]
                          [:set :obj :rect
                           :from (g/list start [:graph (+ bot padding)])
-                          :to   (g/list stop  [:graph (- top padding)])
+                          :to   (g/list (or stop [:graph 1])
+                                        [:graph (- top padding)])
                           :fillcolor :rgb color
                           :fillstyle :transparent :solid transparency
                           :noborder]))))))
@@ -319,6 +318,7 @@
     :fs     A set of :f's otherwise related to this nemesis"
   [plot history nemeses]
   (let [nemeses (nemesis-activity nemeses history)]
+    (info :nemesis-regions (nemesis-regions plot nemeses))
     (-> plot
         (update :series   concat (nemesis-series  plot nemeses))
         (update :preamble concat (nemesis-regions plot nemeses)
