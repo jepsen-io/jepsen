@@ -103,8 +103,7 @@
       ; Every node can see a majority
       (is (every? #(< (count %) 5) (vals grudge)))
       ; But every node bans at least 3 nodes.
-      (is (every? #(< 3 (count %)) (vals grudge))))))
-
+      (is (every? #(<= 3 (count %)) (vals grudge))))))
 
 (deftest simple-partition-test)
   ;(let [n (partition-halves)]
