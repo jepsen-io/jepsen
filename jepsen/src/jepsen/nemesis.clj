@@ -179,17 +179,24 @@
   []
   (partitioner (comp complete-grudge split-one)))
 
+(defn majorities-ring-perfect
+  "The perfect variant of majorities-ring, used for 5-node clusters."
+  [nodes]
+  (let [U (set nodes)
+        n (count nodes)
+        m (util/majority n)]
+    (->> nodes
+         shuffle                ; randomize
+         cycle                  ; form a ring
+         (partition m 1)        ; construct majorities
+         (take n)               ; one per node
+         (map (fn [majority]    ; invert into connections to *drop*
+                [(nth majority (Math/floor (/ (count majority) 2)))
+                 (set/difference U (set majority))]))
+         (into {}))))
 
-(defn majorities-ring
-  "A grudge in which every node can see a majority, but no node sees the *same*
-  majority as any other. There are nice, exact solutions where the topology
-  *does* look like a ring: these are possible for 4, 5, 6, 8, etc nodes. Seven,
-  however, does *not* work so cleanly--some nodes must be connected to *more*
-  than four others. For generality, we use a stochastic mechanism to build
-  these grudges.
-
-  Wow this actually is *shockingly* complicated. Wonder if there's a better
-  way?"
+(defn majorities-ring-stochastic
+  "The stochastic variant of majorities-ring, used for larger clusters."
   [nodes]
   (let [n (count nodes)
         m (util/majority n)
@@ -229,6 +236,23 @@
                                (update ad' conj-set a)
                                (update bd' conj-set b))]
             (recur conns' by-degree')))))))
+
+(defn majorities-ring
+  "A grudge in which every node can see a majority, but no node sees the *same*
+  majority as any other. There are nice, exact solutions where the topology
+  *does* look like a ring: these are possible for 4, 5, 6, 8, etc nodes. Seven,
+  however, does *not* work so cleanly--some nodes must be connected to *more*
+  than four others. We therefore offer two algorithms: one which provides an
+  exact ring for 5-node clusters (generally common in Jepsen), and a stochastic
+  one which doesn't guarantee efficient ring structures, but works for larger
+  clusters.
+
+  Wow this actually is *shockingly* complicated. Wonder if there's a better
+  way?"
+  [nodes]
+  (if (<= (count nodes) 5)
+    (majorities-ring-perfect nodes)
+    (majorities-ring-stochastic nodes)))
 
 (defn partition-majorities-ring
   "Every node can see a majority, but no node sees the *same* majority as any
