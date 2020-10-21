@@ -35,6 +35,13 @@
           4 #{1 2}
           5 #{1 2}})))
 
+(defn symmetric-grudge?
+  "Is the given grudge map symmetric?"
+  [grudge]
+  (every? (fn [[k vs]]
+            (every? (fn [v] (contains? (get grudge v) k)) vs))
+          grudge))
+
 (deftest majorities-ring-test
   (let [nodes  (range 5)
         grudge (majorities-ring nodes)]
@@ -83,7 +90,18 @@
       (testing "path is palindromic"
         (is (= path (reverse path))))
       (testing "path is properly sized"
-        (is (= (inc (* 2 (count U))) (count path)))))))
+        (is (= (inc (* 2 (count U))) (count path))))))
+
+  (testing "10 nodes"
+    (let [nodes  (range 10)
+          grudge (majorities-ring nodes)
+          U      (set (keys grudge))]
+      ; If a -> b, b -> a
+      (is (symmetric-grudge? grudge))
+      ; Every node has a grudge
+      (is (= (set nodes) U))
+      ; Every node can see a majority
+      (is (every? #(< (count %) 5) (vals grudge))))))
 
 
 (deftest simple-partition-test)

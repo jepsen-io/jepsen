@@ -111,6 +111,16 @@
             {}
             components)))
 
+(defn invert-grudge
+  "Takes a universe of nodes and a map of nodes to nodes they should be
+  connected to, and returns a map of nodes to nodes they should NOT be
+  connected to."
+  [nodes conns]
+  (let [nodes (set nodes)]
+    (->> nodes
+         (map (fn [a] [a (set/difference nodes (conns a #{}))]))
+         (into (sorted-map)))))
+
 (defn bridge
   "A grudge which cuts the network in half, but preserves a node in the middle
   which has uninterrupted bidirectional connectivity to both components."
@@ -169,22 +179,56 @@
   []
   (partitioner (comp complete-grudge split-one)))
 
+
 (defn majorities-ring
   "A grudge in which every node can see a majority, but no node sees the *same*
-  majority as any other."
+  majority as any other. There are nice, exact solutions where the topology
+  *does* look like a ring: these are possible for 4, 5, 6, 8, etc nodes. Seven,
+  however, does *not* work so cleanly--some nodes must be connected to *more*
+  than four others. For generality, we use a stochastic mechanism to build
+  these grudges.
+
+  Wow this actually is *shockingly* complicated. Wonder if there's a better
+  way?"
   [nodes]
-  (let [U (set nodes)
-        n (count nodes)
-        m (util/majority n)]
-    (->> nodes
-         shuffle                ; randomize
-         cycle                  ; form a ring
-         (partition m 1)        ; construct majorities
-         (take n)               ; one per node
-         (map (fn [majority]    ; invert into connections to *drop*
-                [(nth majority (Math/floor (/ (count majority) 2)))
-                 (set/difference U (set majority))]))
-         (into {}))))
+  (let [n (count nodes)
+        m (util/majority n)
+        U (set nodes)]
+    (loop [; We're going to build up a connection graph incrementally
+           conns (->> nodes (map (juxt identity hash-set)) (into {}))
+           ; By connecting the least-connected nodes to other least-connected
+           ; nodes.
+           by-degree (sorted-map 1 (set nodes))]
+      (let [; Construct a shuffled, in-degree-order seq of [degree, node] pairs
+            dns (mapcat (fn [[degree nodes]]
+                          (map vector (repeat degree) (shuffle nodes)))
+                        by-degree)
+            ; Pick a node `a` with minimal degree.
+            [a-degree a] (first dns)]
+        (if (<= m a-degree)
+          ; Every node has a majority
+          (invert-grudge nodes conns)
+
+          ; Link a to some other minimally-connected node b which a is *not*
+          ; already connected to.
+          (let [[b-degree b] (->> dns
+                                  (remove (comp (conns a) second))
+                                  first)
+                ; Link a to b
+                conns' (-> conns
+                            (update a conj b)
+                            (update b conj a))
+                ; Conj which creates a set if necessary
+                conj-set (fn [s x] (if s (conj s x) #{x}))
+                ; And increment their counts
+                ad' (inc a-degree)
+                bd' (inc b-degree)
+                by-degree' (-> by-degree
+                               (update a-degree disj a)
+                               (update b-degree disj b)
+                               (update ad' conj-set a)
+                               (update bd' conj-set b))]
+            (recur conns' by-degree')))))))
 
 (defn partition-majorities-ring
   "Every node can see a majority, but no node sees the *same* majority as any
