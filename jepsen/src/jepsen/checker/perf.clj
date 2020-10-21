@@ -318,7 +318,6 @@
     :fs     A set of :f's otherwise related to this nemesis"
   [plot history nemeses]
   (let [nemeses (nemesis-activity nemeses history)]
-    (info :nemesis-regions (nemesis-regions plot nemeses))
     (-> plot
         (update :series   concat (nemesis-series  plot nemeses))
         (update :preamble concat (nemesis-regions plot nemeses)
