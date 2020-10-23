@@ -19,6 +19,7 @@
                     [generator :as gen]
                     [nemesis :as n]
                     [util :as util :refer [majority
+                                           minority-third
                                            random-nonempty-subset]]]
             [jepsen.nemesis.time :as nt]))
 
@@ -30,14 +31,15 @@
   "Takes a test, a DB, and a node specification. Returns a collection of
   nodes taken from that test. node-spec may be one of:
 
-     nil            - Chooses a random, non-empty subset of nodes
-     :one           - Chooses a single random node
-     :minority      - Chooses a random minority of nodes
-     :majority      - Chooses a random majority of nodes
-     :primaries     - A random nonempty subset of nodes which we think are
-                      primaries
-     :all           - All nodes
-     [\"a\", ...]   - The specified nodes"
+     nil              - Chooses a random, non-empty subset of nodes
+     :one             - Chooses a single random node
+     :minority        - Chooses a random minority of nodes
+     :majority        - Chooses a random majority of nodes
+     :minority-third  - Up to, but not including, 1/3rd of nodes
+     :primaries       - A random nonempty subset of nodes which we think are
+                        primaries
+     :all             - All nodes
+     [\"a\", ...]     - The specified nodes"
   [test db node-spec]
   (let [nodes (:nodes test)]
     (case node-spec
@@ -45,6 +47,7 @@
       :one        (list (rand-nth nodes))
       :minority   (take (dec (majority (count nodes))) (shuffle nodes))
       :majority   (take      (majority (count nodes))  (shuffle nodes))
+      :minority-third (take (minority-third (count nodes)) (shuffle nodes))
       :primaries  (random-nonempty-subset (db/primaries db test))
       :all        nodes
       node-spec)))
@@ -53,7 +56,7 @@
   "Returns all possible node specification for the given DB. Helpful when you
   don't know WHAT you want to test."
   [db]
-  (cond-> [nil :one :minority :majority :all]
+  (cond-> [nil :one :minority-third :minority :majority :all]
     (satisfies? db/Primary db) (conj :primaries)))
 
 (defn db-nemesis

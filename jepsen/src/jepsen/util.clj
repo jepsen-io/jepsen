@@ -82,6 +82,12 @@
   [n]
   (inc (int (Math/floor (/ n 2)))))
 
+(defn minority-third
+  "Given a number, returns the largest integer strictly less than 1/3rd.
+  Helpful for testing byzantine fault-tolerant systems."
+  [n]
+  (-> n dec (/ 3) long))
+
 (defn min-by
   "Finds the minimum element of a collection based on some (f element), which
   returns Comparables. If `coll` is empty, returns nil."
