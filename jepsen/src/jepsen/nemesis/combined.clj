@@ -157,6 +157,8 @@
     :one              Isolates a single node
     :majority         A clean majority/minority split
     :majorities-ring  Overlapping majorities in a ring
+    :minority-third   Cleanly splits away up to, but not including, 1/3rd of
+                      nodes
     :primaries        Isolates a nonempty subset of primaries into
                       single-node components"
   [test db part-spec]
@@ -165,6 +167,9 @@
       :one              (n/complete-grudge (n/split-one nodes))
       :majority         (n/complete-grudge (n/bisect (shuffle nodes)))
       :majorities-ring  (n/majorities-ring nodes)
+      :minority-third   (n/complete-grudge (split-at (util/minority-third
+                                                       (count nodes))
+                                                     (shuffle nodes)))
       :primaries        (let [primaries (db/primaries db test)]
                           (->> primaries
                                random-nonempty-subset
