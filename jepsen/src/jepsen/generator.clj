@@ -422,14 +422,18 @@
 (extend-protocol fipp.ednize/IOverride (:on-interface Generator))
 (extend-protocol fipp.ednize/IEdn (:on-interface Generator)
   (-edn [gen]
-    (if (map? gen)
+    (if (record? gen)
       ; Ugh this is such a hack but Fipp's extension points are sort of a
       ; mess--you can't override the document generation behavior on a
       ; per-class basis. Probably sensible for perf reasons, but makes our life
       ; hard.
+      ;
+      ; Convert records (which respond to map?) into maps.
       (list (symbol (.getName (class gen)))
             (into {} gen))
-      gen)))
+      ; We can't return a reify without entering an infinite loop (ugh) so uhhh
+      (tagged-literal 'unprintable (str gen))
+      )))
 
 ;; Fair sets
 ;
