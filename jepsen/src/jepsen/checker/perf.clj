@@ -434,7 +434,7 @@
   "
   [opts]
   ; (info :plotting (with-out-str (pprint opts)))
-  (assert (every? seq (map :data (:series opts)))
+  (assert (every? sequential? (map :data (:series opts)))
           (str "Series has no :data points\n"
                (with-out-str (pprint (remove (comp seq :data)
                                              (:series opts))))))
