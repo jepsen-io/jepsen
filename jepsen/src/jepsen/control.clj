@@ -74,6 +74,10 @@
   "A literal pipe character."
   (lit "|"))
 
+(def &&
+  "A literal &&"
+  (lit "&&"))
+
 (defn escape
   "Escapes a thing for the shell.
 
