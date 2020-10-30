@@ -80,33 +80,38 @@
 (defn install
   "Ensure the given packages are installed. Can take a flat collection of
   packages, passed as symbols, strings, or keywords, or, alternatively, a map
-  of packages to version strings."
-  [pkgs]
-  (if (map? pkgs)
-    ; Install specific versions
-    (dorun
-      (for [[pkg version] pkgs]
-        (when (not= version (installed-version pkg))
-          (info "Installing" pkg version)
-          (c/exec :env "DEBIAN_FRONTEND=noninteractive"
+  of packages to version strings. Can optionally take a collection of
+  additional CLI options to be passed to apt-get."
+  ([pkgs]
+   (install [] pkgs))
+  ([apt-opts pkgs]
+   (if (map? pkgs)
+     ; Install specific versions
+     (dorun
+       (for [[pkg version] pkgs]
+         (when (not= version (installed-version pkg))
+           (info "Installing" pkg version)
+           (c/exec :env "DEBIAN_FRONTEND=noninteractive"
+                   :apt-get :install
+                   :-y
+                   :--allow-downgrades
+                   :--allow-change-held-packages
+                   apt-opts
+                   (str (name pkg) "=" version)))))
+
+     ; Install any version
+     (let [pkgs    (set (map name pkgs))
+           missing (set/difference pkgs (installed pkgs))]
+       (when-not (empty? missing)
+         (c/su
+           (info "Installing" missing)
+           (apply c/exec :env "DEBIAN_FRONTEND=noninteractive"
                   :apt-get :install
                   :-y
                   :--allow-downgrades
                   :--allow-change-held-packages
-                  (str (name pkg) "=" version)))))
-
-    ; Install any version
-    (let [pkgs    (set (map name pkgs))
-          missing (set/difference pkgs (installed pkgs))]
-      (when-not (empty? missing)
-        (c/su
-          (info "Installing" missing)
-          (apply c/exec :env "DEBIAN_FRONTEND=noninteractive"
-                 :apt-get :install
-                 :-y
-                 :--allow-downgrades
-                 :--allow-change-held-packages
-                 missing))))))
+                  apt-opts
+                  missing)))))))
 
 (defn add-key!
   "Receives an apt key from the given keyserver."
