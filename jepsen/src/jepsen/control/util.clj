@@ -260,6 +260,8 @@
   "Starts a daemon process, logging stdout and stderr to the given file.
   Invokes `bin` with `args`. Options are:
 
+  :env                  A string (or collection of strings) like
+                        \"FOO=4 BAZ=xyzzy\", which controls the daemon's env
   :background?
   :chdir
   :logfile
@@ -271,9 +273,11 @@
   [opts bin & args]
   (info "starting" (.getName (file (name bin))))
   (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
-        "Jepsen starting" bin (escape args)
+        "Jepsen starting" (:env opts) bin (escape args)
         :>> (:logfile opts))
-  (apply exec :start-stop-daemon :--start
+  (apply exec
+         (:env opts)
+         :start-stop-daemon :--start
          (when (:background? opts true) [:--background :--no-close])
          (when (:make-pidfile? opts true) :--make-pidfile)
          (when (:match-executable? opts true) [:--exec bin])
