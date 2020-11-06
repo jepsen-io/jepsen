@@ -11,6 +11,7 @@
             [dom-top.core :refer [with-retry]]
             [jepsen.reconnect :as rc]
             [clojure.string :as str]
+            [clojure.java.io :as io]
             [clojure.tools.logging :refer [warn info debug error]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -240,6 +241,17 @@
             (retry (dec tries)))
         (throw+ (merge {:type ::upload-failed}
                        (debug-data)))))))
+
+(defn upload-resource!
+  "Uploads a local JVM resource (as a string) to the given remote path."
+  [resource-name remote-path]
+  (with-open [reader (io/reader (io/resource resource-name))]
+    (let [tmp-file (File/createTempFile "jepsen-resource" ".upload")]
+      (try
+        (io/copy reader tmp-file)
+        (upload (.getCanonicalPath tmp-file) remote-path)
+        (finally
+          (.delete tmp-file))))))
 
 (defn download
   "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from.
