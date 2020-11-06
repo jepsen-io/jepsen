@@ -1,7 +1,7 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
-            [jepsen.util :refer [meh name+]]
+            [jepsen.util :as util :refer [meh name+]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
@@ -9,6 +9,29 @@
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
+
+(defn await-tcp-port
+  "Blocks until a local TCP port is bound. Options:
+
+  :retry-interval   How long between retries, in ms. Default 1s.
+  :timeout          How long until giving up and throwing :type :timeout, in
+                    ms. Default 60 seconds."
+  ([port]
+   (await-tcp-port port {}))
+  ([port opts]
+   (let [deadline (+ (util/linear-time-nanos)
+                     (* 1e6 (:timeout opts 60000)))]
+     (while (try+
+              (exec :nc :-z :localhost port)
+              nil
+              (catch [:type :jepsen.control/nonzero-exit
+                      :exit 1] _
+                (when (<= deadline (util/linear-time-nanos))
+                  (throw+ {:type :timeout
+                           :port port}))
+                (info "Waiting for port" port "...")
+                (Thread/sleep (:retry-interval opts 1000))
+                true))))))
 
 (defn file?
   [filename]
