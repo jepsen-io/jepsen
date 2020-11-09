@@ -79,15 +79,15 @@
   :started)
 
 (defn lru-opt
-  "Between 1.0.4 and 1.0.5, Dgraph changed the name of their mandatory LRU
+  "Between 1.0.4, 1.0.5 and 20.11, Dgraph changed the name of their mandatory LRU
   memory option and there's no option that works across build, so we have to
   detect which version of the option name to use from the help in order to test
   different builds."
   []
   (let [usage (c/exec (str dir "/" binary) :alpha :--help)
-        opt (re-find #"(--(lru|memory)_mb)" usage)]
+        opt (re-find #"(--(lru|memory|cache)_mb)" usage)]
     (assert+ opt RuntimeException
-             (str "Not sure whether to use --lru_mb or --memory_mb with "
+             (str "Not sure whether to use --lru_mb, --memory_mb or --cache_mb with "
                   "this dgraph build. It told me:\n\n" usage))
     [(opt 1) 1024]))
 
