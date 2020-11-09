@@ -17,6 +17,7 @@
                  [gnuplot "0.1.3"]
                  [http-kit "2.3.0"]
                  [ring "1.8.1"]
+                 [com.hierynomus/sshj "0.30.0"]
                  [hiccup "1.0.5"]
                  [metametadata/multiset "0.1.1"]
                  [byte-streams "0.2.5-alpha2"]

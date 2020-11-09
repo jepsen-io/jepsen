@@ -35,6 +35,8 @@
     interpreted by the underlying implementation; for example, with a clj-ssh
     remote, these args are the remainder args to `scp-from`."))
 
+(declare ssh)
+
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
 (def ^:dynamic *host*     "Current hostname"                nil)
@@ -47,8 +49,8 @@
 (def ^:dynamic *port*     "SSH listening port"              22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
+(def ^:dynamic *remote* "The remote to use for remote control actions" ssh)
 (def ^:dynamic *retries*  "How many times to retry conns"   5)
-
 
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
@@ -355,8 +357,6 @@
       (apply ssh/scp-from session remote-paths local-path rest))))
 
 (def ssh "A remote that does things via clj-ssh." (SSHRemote. nil))
-
-(def ^:dynamic *remote* "The remote to use for remote control actions." ssh)
 
 (defn session
   "Wraps control session in a wrapper for reconnection."
