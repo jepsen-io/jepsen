@@ -12,13 +12,9 @@
        (catch RuntimeException _ false)))
 
 (defn local-ip
-  "The local node's eth0 address"
+  "The local node's IP address"
   []
-  (nth (->> (c/exec :ifconfig "eth0")
-            ; Old ifconfig put addr: in front of the address; new ifconfig
-            ; doesn't.
-            (re-find #"inet (addr:)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"))
-       2))
+  (first (str/split (c/exec :hostname :-I) #"\s+")))
 
 (defn ip*
   "Look up an ip for a hostname. Unmemoized."
