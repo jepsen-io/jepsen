@@ -83,8 +83,8 @@
   of packages to version strings. Can optionally take a collection of
   additional CLI options to be passed to apt-get."
   ([pkgs]
-   (install [] pkgs))
-  ([apt-opts pkgs]
+   (install pkgs []))
+  ([pkgs apt-opts]
    (if (map? pkgs)
      ; Install specific versions
      (dorun
