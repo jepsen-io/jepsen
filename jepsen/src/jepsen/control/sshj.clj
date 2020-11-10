@@ -5,30 +5,56 @@
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :refer :all]]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (net.schmizz.sshj SSHClient)
+  (:import (com.jcraft.jsch.agentproxy AgentProxy
+                                       ConnectorFactory)
+           (com.jcraft.jsch.agentproxy.sshj AuthAgent)
+           (net.schmizz.sshj SSHClient)
            (net.schmizz.sshj.common IOUtils)
            (net.schmizz.sshj.connection.channel.direct Session)
            (net.schmizz.sshj.userauth UserAuthException)
+           (net.schmizz.sshj.userauth.method AuthMethod)
            (net.schmizz.sshj.xfer FileSystemFile)
            (java.io IOException)
            (java.util.concurrent TimeUnit)))
+
+(defn auth-methods
+  "Returns a list of AuthMethods we can use for logging in via an AgentProxy."
+  [^AgentProxy agent]
+  (map (fn [identity]
+         (AuthAgent. agent identity))
+    (.getIdentities agent)))
+
+(defn ^AgentProxy agent-proxy
+  []
+  (-> (ConnectorFactory/getDefault)
+      .createConnector
+      AgentProxy.))
 
 (defn auth!
   "Tries a bunch of ways to authenticate an SSHClient. We start with the given
   key file, if provided, then fall back to general public keys, then fall back
   to username/password."
   [^SSHClient c]
-  ; Try given key
-  (when-let [k *private-key-path*]
-    (.authPublickey c *username* (into-array [k])))
+  (or ; Try given key
+      (when-let [k *private-key-path*]
+        (.authPublickey c *username* (into-array [k]))
+        true)
 
-  ; TODO: add SSH agent support using https://github.com/ymnk/jsch-agent-proxy/blob/master/examples/src/main/java/com/jcraft/jsch/agentproxy/examples/SshjWithAgentProxy.java?
+      ; Try agent
+      (try
+        (let [agent-proxy (agent-proxy)
+              methods (auth-methods agent-proxy)]
+          (.auth c *username* methods)
+          true))
 
-  ; Fall back to standard id_rsa/id_dsa keys
-  (try (.authPublickey c ^String *username*)
-       (catch UserAuthException e
-         ; OK, standard keys didn't work, try username+password
-         (.authPassword c *username* *password*))))
+      ; Fall back to standard id_rsa/id_dsa keys
+      (try (.authPublickey c ^String *username*)
+           true
+           (catch UserAuthException e
+             false))
+
+      ; OK, standard keys didn't work, try username+password
+      (.authPassword c *username* *password*)))
 
 (defrecord SSHJRemote [^SSHClient client]
   jepsen.control/Remote

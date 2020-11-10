@@ -18,6 +18,10 @@
                  [http-kit "2.3.0"]
                  [ring "1.8.1"]
                  [com.hierynomus/sshj "0.30.0"]
+                 [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
+                 [com.jcraft/jsch.agentproxy.sshj "0.0.9"
+                  :exclusions [net.schmizz/sshj]]
+                 [org.bouncycastle/bcprov-jdk15on "1.67"]
                  [hiccup "1.0.5"]
                  [metametadata/multiset "0.1.1"]
                  [byte-streams "0.2.5-alpha2"]

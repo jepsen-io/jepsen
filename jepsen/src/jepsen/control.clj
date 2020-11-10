@@ -15,7 +15,6 @@
             [clojure.tools.logging :refer [warn info debug error]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
-
 (defprotocol Remote
   (connect [this host]
     "Set up the remote to work with a particular node. Returns a Remote which
