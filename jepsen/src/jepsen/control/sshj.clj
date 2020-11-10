@@ -45,7 +45,9 @@
         (let [agent-proxy (agent-proxy)
               methods (auth-methods agent-proxy)]
           (.auth c *username* methods)
-          true))
+          true)
+        (catch UserAuthException e
+          false))
 
       ; Fall back to standard id_rsa/id_dsa keys
       (try (.authPublickey c ^String *username*)
