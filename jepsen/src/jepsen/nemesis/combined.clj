@@ -276,6 +276,7 @@
   one. Generators are mixed together randomly; final generators proceed
   sequentially."
   [packages]
+  ; TODO: gen/mix might not be the right call here: perhaps we want gen/any?
   {:generator       (gen/mix (map :generator packages))
    :final-generator (keep :final-generator packages)
    :nemesis         (n/compose (map :nemesis packages))
