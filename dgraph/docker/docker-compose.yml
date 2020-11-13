@@ -7,12 +7,12 @@ services:
     networks:
       - jepsen
     image: jaegertracing/all-in-one:1.16
-    container_name: jaeger
+    container_name: jepsen-jaeger
     hostname: jaeger
     ports:
-      - "16686:16686" # UI
-      - "14268:14268" # Collector
-      - "14269:14269" # Admin endpoint for metrics & pprof
+      - "16686" # UI
+      - "14268" # Collector
+      - "14269" # Admin endpoint for metrics & pprof
     environment:
       - SPAN_STORAGE_TYPE=badger
       - BADGER_EPHEMERAL=false
@@ -23,13 +23,13 @@ services:
     networks:
       - jepsen
     image: grafana/grafana:6.5.3
-    container_name: grafana
+    container_name: jepsen-grafana
     hostname: grafana
     environment:
     - GF_AUTH_ANONYMOUS_ENABLED=true
     - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     ports:
-    - 3000:3000
+    - 3000
     volumes:
     - type: volume
       source: grafana-volume
@@ -51,10 +51,10 @@ services:
     networks:
       - jepsen
     image: prom/prometheus:v2.15.1
-    container_name: prometheus
+    container_name: jepsen-prometheus
     hostname: prometheus
     ports:
-    - 9090:9090
+    - 9090
     volumes:
     - type: volume
       source: prometheus-volume
