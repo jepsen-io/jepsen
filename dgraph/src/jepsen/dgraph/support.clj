@@ -69,6 +69,7 @@
           :--port_offset        zero-port-offset
           :--expose_trace
           :--v 2
+          :--enable_sentry=false
           :--replicas           (:replicas test)
           :--rebalance_interval (:rebalance-interval test)
           (when (:dgraph-jaeger-collector test)
@@ -104,6 +105,7 @@
           (lru-opt)
           :--expose_trace
           :--v 2
+          :--enable_sentry=false
           :--vmodule=groups=3 ;; flag to set -v=3 for worker/groups.go
           "--whitelist=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
           (when (:dgraph-jaeger-collector test)
