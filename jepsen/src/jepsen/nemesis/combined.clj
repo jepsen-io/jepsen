@@ -305,7 +305,7 @@
   (case (count packages)
     0 noop
     1 (first packages)
-    {:generator       (gen/any (map :generator packages))
+    {:generator       (apply gen/any (keep :generator packages))
      :final-generator (keep :final-generator packages)
      :nemesis         (n/compose (map :nemesis packages))
      :perf            (reduce into #{} (map :perf packages))}))
