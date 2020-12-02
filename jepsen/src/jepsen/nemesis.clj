@@ -1,6 +1,7 @@
 (ns jepsen.nemesis
   (:require [clojure.set :as set]
             [clojure.tools.logging :refer [info warn]]
+            [fipp.ednize :as fipp.ednize]
             [jepsen [client   :as client]
                     [control  :as c]
                     [net      :as net]
@@ -19,12 +20,31 @@
   (fs [this] "What :f functions does this nemesis support? Returns a set.
              Helpful for composition."))
 
+(extend-protocol fipp.ednize/IOverride (:on-interface Nemesis))
+(extend-protocol fipp.ednize/IEdn (:on-interface Nemesis)
+  (-edn [gen]
+    (if (record? gen)
+      ; Ugh this is such a hack but Fipp's extension points are sort of a
+      ; mess--you can't override the document generation behavior on a
+      ; per-class basis. Probably sensible for perf reasons, but makes our life
+      ; hard.
+      ;
+      ; Convert records (which respond to map?) into (RecordName {:some map
+      ; ...), so they pretty-print with fewer indents.
+      (list (symbol (.getName (class gen)))
+            (into {} gen))
+      ; We can't return a reify without entering an infinite loop (ugh) so uhhh
+      (tagged-literal 'unprintable (str gen))
+      )))
+
 (def noop
   "Does nothing."
   (reify Nemesis
     (setup! [this test] this)
     (invoke! [this test op] op)
-    (teardown! [this test] this)))
+    (teardown! [this test] this)
+    Reflection
+    (fs [this] #{})))
 
 (defrecord Validate [nemesis]
   Nemesis
