@@ -27,6 +27,13 @@
   "The default interval, in seconds, between nemesis operations."
   10)
 
+(def noop
+  "A package which does nothing."
+  {:generator       nil
+   :final-generator nil
+   :nemesis         n/noop
+   :perf            #{}})
+
 (defn db-nodes
   "Takes a test, a DB, and a node specification. Returns a collection of
   nodes taken from that test. node-spec may be one of:
@@ -296,7 +303,7 @@
   sequentially."
   [packages]
   (case (count packages)
-    0 (throw (IllegalArgumentException. "Can't compose zero packages."))
+    0 noop
     1 (first packages)
     {:generator       (gen/any (map :generator packages))
      :final-generator (keep :final-generator packages)
