@@ -292,14 +292,16 @@
 
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
-  one. Generators are mixed together randomly; final generators proceed
+  one. Generators are combined with gen/any. Final generators proceed
   sequentially."
   [packages]
-  ; TODO: gen/mix might not be the right call here: perhaps we want gen/any?
-  {:generator       (gen/mix (map :generator packages))
-   :final-generator (keep :final-generator packages)
-   :nemesis         (n/compose (map :nemesis packages))
-   :perf            (reduce into #{} (map :perf packages))})
+  (case (count packages)
+    0 (throw (IllegalArgumentException. "Can't compose zero packages."))
+    1 (first packages)
+    {:generator       (gen/any (map :generator packages))
+     :final-generator (keep :final-generator packages)
+     :nemesis         (n/compose (map :nemesis packages))
+     :perf            (reduce into #{} (map :perf packages))}))
 
 (defn nemesis-packages
   "Just like nemesis-package, but returns a collection of packages, rather than
