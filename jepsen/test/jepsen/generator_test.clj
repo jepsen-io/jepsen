@@ -505,3 +505,28 @@
                           {:value :d})
               gen.test/perfect
               (map :value)))))
+
+(deftest any-stagger-test
+  ; We want to make sure that when mixing two different staggers together using
+  ; any, no stagger gets starved.
+  (let [n 1000
+        h (->> (gen/any (gen/stagger 3 (repeat {:f :a}))
+                        (gen/stagger 5 (repeat {:f :b})))
+               (gen/limit n)
+               gen/clients
+               gen.test/perfect)
+        as (filter (comp #{:a} :f) h)
+        bs (filter (comp #{:b} :f) h)
+        mean (fn [xs] (/ (reduce + xs) (count xs)))
+        mean-interval (fn [ops]
+                        (->> ops
+                             (map :time)
+                             (partition 2 1)
+                             (map (partial apply -))
+                             (map -)
+                             mean
+                             util/nanos->secs))
+        ]
+    (is (= n (count h)))
+    (is (< 2.5 (mean-interval as) 3.5))
+    (is (< 4.5 (mean-interval bs) 5.5))))
