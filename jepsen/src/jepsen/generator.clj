@@ -795,7 +795,6 @@
   [f-map g]
   (map (fn transform [op] (c/update op :f f-map)) g))
 
-
 (defrecord Filter [f gen]
   Generator
   (op [_ test ctx]

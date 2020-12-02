@@ -16,8 +16,8 @@
 
 (defprotocol Reflection
   "Optional protocol for reflecting on nemeses."
-  (fs [this] "What :f functions does this nemesis support? Helpful for
-             composition."))
+  (fs [this] "What :f functions does this nemesis support? Returns a set.
+             Helpful for composition."))
 
 (def noop
   "Does nothing."
@@ -260,6 +260,105 @@
   []
   (partitioner majorities-ring))
 
+(declare f-map)
+
+(defrecord FMap [lift unlift nem]
+  Nemesis
+  (setup! [this test]
+    (f-map lift (setup! nem test)))
+
+  (invoke! [this test op]
+    (-> nem
+        (invoke! test (update op :f unlift))
+        (update :f lift)))
+
+  (teardown! [this test]
+    (teardown! nem test))
+
+  Reflection
+  (fs [this]
+    (set (map lift (fs nem)))))
+
+(defn f-map
+  "Remaps the :f values that a nemesis accepts. Takes a function (presumably
+  injective) which transforms `:f` values: `(lift f) -> g`, and a nemesis which
+  accepts operations like `{:f f}`. The nemesis must support Reflection/fs.
+  Returns a new nemesis which takes `{:f g}` instead. For example:
+
+    (f-map (fn [f] [:foo f]) (partition-random-halves))
+
+  ... yields a nemesis which takes ops like `{:f [:foo :start] ...}` and calls
+  the underlying partitioner nemesis with `{:f :start ...}`. This is designed
+  for symmetry with generator/f-map, so you can say:
+
+    (gen/f-map lift gen)
+    (nem/f-map lift gen)
+
+  and get a generator and nemesis that work together. Particularly handy for
+  building up complex nemesis packages using nemesis.combined!
+
+  If you know all of your fs in advance, you can also do this with `compose`,
+  but it turns out to be handy to have this as a separate function."
+  [lift nem]
+  ; Construct the inverse of `lift` by materializing the whole f domain
+  ; into a map.
+  (let [fs (fs nem)
+        unlift (zipmap (map lift fs) fs)]
+    (FMap. lift unlift nem)))
+
+(declare compose)
+
+; This version of a composed nemesis uses the Reflection protocol to identify
+; which fs map to which nemeses.
+(defrecord ReflCompose [fm nemeses]
+  Nemesis
+  (setup! [this test]
+    (compose (map #(setup! % test) nemeses)))
+
+  (invoke! [this test op]
+    (if-let [n (get fm (:f op))]
+      (invoke! n test op)
+      (throw (IllegalArgumentException.
+               (str "No nemesis can handle " (pr-str (:f op)))))))
+
+  (teardown! [this test]
+    (mapv #(teardown! % test) nemeses))
+
+  Reflection
+  (fs [this]
+    (reduce into #{} (map fs nemeses))))
+
+; This version of a composed nemesis uses an explicit map of fs to nemeses.
+(defrecord MapCompose [nemeses]
+  Nemesis
+  (setup! [this test]
+    (compose (util/map-vals #(setup! % test) nemeses)))
+
+  (invoke! [this test op]
+    (let [f (:f op)]
+      (loop [nemeses nemeses]
+        (if-not (seq nemeses)
+          (throw (IllegalArgumentException.
+                   (str "no nemesis can handle " (:f op))))
+          (let [[fs- nemesis] (first nemeses)]
+            (if-let [f' (fs- f)]
+              (assoc (invoke! nemesis test (assoc op :f f')) :f f)
+              (recur (next nemeses))))))))
+
+  (teardown! [this test]
+    (util/map-vals #(teardown! % test) nemeses))
+
+  Reflection
+  (fs [this]
+    (->> (keys nemeses)
+         (mapcat (fn [f-map]
+                   (cond (map? f-map) (keys f-map)
+                         (set? f-map) f-map
+                         true
+                         (throw+ {:type    ::can't-infer-fs
+                                  :message "We can only infer fs from compose nemeses built with maps or sets as their f mapping objects."}))))
+         (into #{}))))
+
 (defn compose
   "Combines multiple Nemesis objects into one. If all, or all but one, nemesis
   support Reflection, compose can simply take a collection of nemeses, and use
@@ -286,35 +385,7 @@
   partition-random-halves."
   [nemeses]
   (if (map? nemeses)
-    (reify Nemesis
-      (setup! [this test]
-        (compose (util/map-vals #(setup! % test) nemeses)))
-
-      (invoke! [this test op]
-        (let [f (:f op)]
-          (loop [nemeses nemeses]
-            (if-not (seq nemeses)
-              (throw (IllegalArgumentException.
-                       (str "no nemesis can handle " (:f op))))
-              (let [[fs- nemesis] (first nemeses)]
-                (if-let [f' (fs- f)]
-                  (assoc (invoke! nemesis test (assoc op :f f')) :f f)
-                  (recur (next nemeses))))))))
-
-      (teardown! [this test]
-        (util/map-vals #(teardown! % test) nemeses))
-
-      Reflection
-      (fs [this]
-        (->> (keys nemeses)
-             (mapcat (fn [f-map]
-                       (cond (map? f-map) (keys f-map)
-                             (set? f-map) f-map
-                             true
-                             (throw+ {:type    ::can't-infer-fs
-                                      :message "We can only infer fs from compose nemeses built with maps or sets as their f mapping objects."}))))
-             (into #{}))))
-
+    (MapCompose. nemeses)
     ; A collection; use reflection to compute a map of :fs to nemeses.
     (let [fm (reduce (fn [fm n]
                        (reduce (fn [fm f]
@@ -328,22 +399,7 @@
                                (fs n)))
                      {}
                      nemeses)]
-      (reify Nemesis
-        (setup! [this test]
-          (compose (map #(setup! % test) nemeses)))
-
-        (invoke! [this test op]
-          (if-let [n (get fm (:f op))]
-            (invoke! n test op)
-            (throw (IllegalArgumentException.
-                     (str "No nemesis can handle " (pr-str (:f op)))))))
-
-        (teardown! [this test]
-          (mapv #(teardown! % test) nemeses))
-
-        Reflection
-        (fs [this]
-          (reduce into #{} (map fs nemeses)))))))
+      (ReflCompose. fm nemeses))))
 
 (defn set-time!
   "Set the local node time in POSIX seconds."

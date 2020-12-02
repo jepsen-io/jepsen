@@ -271,6 +271,25 @@
                              :fs    #{:strobe-clock}
                              :color "#A0E9E3"}}})))
 
+(defn f-map-perf
+  "Takes a perf map, and transforms the fs in it using `lift`."
+  [lift perf]
+  (cond-> perf
+    (:start perf) (assoc :start (set (map lift (:start perf))))
+    (:stop perf)  (assoc :stop  (set (map lift (:stop perf))))
+    (:fs perf)    (assoc :fs    (set (map lift (:fs perf))))))
+
+(defn f-map
+  "Takes a function `lift` which (presumably injectively) transforms the :f
+  values used in operations, and a nemesis package. Yields a new nemesis
+  package which uses the lifted fs. See generator/f-map and nemesis/f-map."
+  [lift pkg]
+  (assoc pkg
+         :generator       (gen/f-map  lift (:generator pkg))
+         :final-generator (gen/f-map  lift (:final-generator pkg))
+         :nemesis         (n/f-map    lift (:nemesis pkg))
+         :perf            (f-map-perf lift (:perf pkg))))
+
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
   one. Generators are mixed together randomly; final generators proceed
