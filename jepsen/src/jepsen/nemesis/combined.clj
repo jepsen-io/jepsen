@@ -14,6 +14,7 @@
   We also take advantage of the Process and Pause protocols in jepsen.db,
   which allow us to start, kill, pause, and resume processes."
   (:require [clojure.tools.logging :refer [info warn]]
+            [clojure [set :as set]]
             [jepsen [control :as c]
                     [db :as db]
                     [generator :as gen]
@@ -281,10 +282,14 @@
 (defn f-map-perf
   "Takes a perf map, and transforms the fs in it using `lift`."
   [lift perf]
-  (cond-> perf
-    (:start perf) (assoc :start (set (map lift (:start perf))))
-    (:stop perf)  (assoc :stop  (set (map lift (:stop perf))))
-    (:fs perf)    (assoc :fs    (set (map lift (:fs perf))))))
+  (let [lift-set (comp set (partial map lift))]
+    (set (map (fn [perf]
+                (cond-> perf
+                  true          (update :name  lift)
+                  (:start perf) (update :start lift-set)
+                  (:stop perf)  (update :stop  lift-set)
+                  (:fs perf)    (update :fs    lift-set)))
+              perf))))
 
 (defn f-map
   "Takes a function `lift` which (presumably injectively) transforms the :f
@@ -308,7 +313,7 @@
     {:generator       (apply gen/any (keep :generator packages))
      :final-generator (keep :final-generator packages)
      :nemesis         (n/compose (map :nemesis packages))
-     :perf            (reduce into #{} (map :perf packages))}))
+     :perf            (reduce set/union (map :perf packages))}))
 
 (defn nemesis-packages
   "Just like nemesis-package, but returns a collection of packages, rather than
