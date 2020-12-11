@@ -89,7 +89,7 @@ $ lein run test --time-limit 60
                             {:type :info, :f :stop}]))
                           (gen/time-limit (:time-limit opts)))
 ```
-如果你运行几次这个测试,你会注意到一个有趣的结果.有些时候它会失败.
+如果你多次运行这个测试,你会注意到一个有趣的结果.有些时候它会失败.
 ```bash
 $ lein run test --test-count 10
 ...
