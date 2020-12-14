@@ -17,7 +17,7 @@
             [slingshot.slingshot :refer [try+]]
             [verschlimmbesserung.core :as v]))
 ```
-还记得如何将我们的操作映射为读、写和cas操作码?
+还记得如何将我们的操作映射为读、写和cas操作吗?
 ```clojure
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -55,9 +55,9 @@ Knossos checker为cas和registers定义了常见的模型.这是一个[cas寄存
                                   " from register " value))))))
 ```
 只要*knossos*为我们正在检测的组件提供了模型类型,我们就不需要在测试中写cas寄存器.这只是为了你可以看到操作在后台运行的方式.  
-此defrecord定义了一个名为*CASRegister*的新的数据类型,它拥有唯一不变的字段,名为*value*.它实现了我们之前讨论的`Model`接口,它的`step`函数接收当前寄存器`r`和操作`op`作为参数.当我们需要写入新值时,只需要简单返回一个赋值好的`CASRegister`.为了对两个值进行cas,我们将操作中当前值和新值分开,如果当前值和新值相匹配,则构建一个带有新值的寄存器.如果它们不匹配,则返回带有`inconsistent`的特定的模型类型,它表明上一操作不能应用于寄存器.读操作类似,除非我们始终允许`nil`读取通过.这要求我们满足历史操作,包括从未返回过的读操作.  
+此defrecord定义了一个名为*CASRegister*的新的数据类型,它拥有唯一不变的字段,名为*value*.它实现了我们之前讨论的`Model`接口,它的`step`函数接收当前寄存器`r`和操作`op`作为参数.当我们需要写入新值时,只需要简单返回一个已经赋值的`CASRegister`.为了对两个值进行cas,我们将操作中当前值和新值分开,如果当前值和新值相匹配,则构建一个带有新值的寄存器.如果它们不匹配,则返回带有`inconsistent`的特定的模型类型,它表明上一操作不能应用于寄存器.读操作类似,除非我们始终允许`nil`读取通过.这要求我们满足历史操作,包括从未返回过的读操作.  
 为了分析历史操作,我们需要为测试定义一个`:checker`,同时需要提供一个`:model`来指明系统*should*如何运行  
-`checker/linearizable`使用Knossos线性checker来验证每一个操作是否自动处于调用和返回之间的位置.线性checker需要一个模型并指明一个特定的算法,然后再选项中将map传递给该算法
+`checker/linearizable`使用Knossos线性checker来验证每一个操作是否自动处于调用和返回之间的位置.线性checker需要一个模型并指明一个特定的算法,然后在选项中将map传递给该算法
 ```clojure
 (defn etcd-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
@@ -102,7 +102,7 @@ INFO [2019-04-18 03:53:32,714] jepsen test runner - jepsen.core {:valid? true,
 
 Everything looks good! ヽ(‘ー`)ノ
 ```
-历史记录中最后的操作是write `1`,可以确信,checker中的最终值也是`1`,该历史记录时线性一致的
+历史记录中最后的操作是write `1`,可以确信,checker中的最终值也是`1`,该历史记录是线性一致的
 # 多checkers
 checkers能够渲染多种类型的输出--包括数据结构、图像、或者可视化交互动画.例如:如果我们安装了`gnuplot`,Jepsen可以帮我们生成吞吐量和延迟图.让我们使用`checker/compose`来进行线性分析并生成性能图
 ```clojure
@@ -138,4 +138,4 @@ $ lein run test
 ...
 $ open store/latest/timeline.html
 ```
-现在我们已经通过测试,接下来详述系统中的(错误详解)[#]
+现在我们已经通过测试,接下来详述系统中的[错误详解](https://github.com/jaydenwen123/jepsen/blob/main/doc/cn_tutorial/05-cn-nemesis.md)
