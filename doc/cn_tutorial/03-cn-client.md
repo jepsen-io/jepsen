@@ -49,7 +49,7 @@
 
 Jepsen的客户端有五部分的生命周期。我们先从*种子*客户端`(client)`开始。当我们调用客户端的`open!`的时候，我们得到跟一个特定节点绑定的客户端的*副本*。`setup!`函数测试所需要的所有数据结构-例如创建表格或者设置固件。`invoke!`将操作应用到系统然后返回相应的完成操作。`teardown!`会清理`setup!`可能创建的任何表格。`close!`会断开所有网络连接并完成客户端的生命周期。
 
-我们使用`(Client.)`来构建一个新的客户端，并传入`nil`作为`conn`的值。请记住，我们最初的种子客户端没有连接。Jepsen后续会调用`open!`来获取已连接的客户端。
+当需要将客户端添加到测试中时,我们使用`(Client.)`来构建一个新的客户端，并传入`nil`作为`conn`的值。请记住，我们最初的种子客户端没有连接。Jepsen后续会调用`open!`来获取已连接的客户端。
 
 ```clj
 (defn etcd-test
@@ -147,7 +147,7 @@ WARN [2020-09-21 20:16:33,150] jepsen worker 0 - jepsen.generator.interpreter Pr
 clojure.lang.ExceptionInfo: throw+: {:type :jepsen.client/invalid-completion, :op {:type :invoke, :f :read, :value nil, :time 26387538, :process 0}, :op' nil, :problems ["should be a map" ":type should be :ok, :info, or :fail" ":process should be the same" ":f should be the same"]}
 ```
 
-现在这个版本客户端的`invoke!`函数，接收到调用操作，但是没有进行任何相关处理，返回的是一个`nil`结果。Jepsen通过这段日志告诉我们，op应该是一个映射表，尤指带有相应的`:type`字段、`:process`字段和`:f`字段的映射表。简而言之，我们必须构建一个完成操作来结束本次调用操作。如果操作成功，我们将使用类型`:ok`来构建此完成操作；如果操作失败，我们将使用类型`:fail`来构建；或者如果不确定则使用`:info`来构建。`invoke`可以抛出一个异常，会自动呗转为一个`:info`完成操作。
+现在这个版本客户端的`invoke!`函数，接收到调用操作，但是没有进行任何相关处理，返回的是一个`nil`结果。Jepsen通过这段日志告诉我们，op应该是一个映射表，尤指带有相应的`:type`字段、`:process`字段和`:f`字段的映射表。简而言之，我们必须构建一个完成操作来结束本次调用操作。如果操作成功，我们将使用类型`:ok`来构建此完成操作；如果操作失败，我们将使用类型`:fail`来构建；或者如果不确定则使用`:info`来构建。`invoke`可以抛出一个异常，会自动被转为一个`:info`完成操作。
 
 现在我们从处理读操作开始。我们将使用`v/get`来读取一个键的值。我们可以挑选任意一个名字作为这个键的名称，比如“foo”。
 
