@@ -30,7 +30,7 @@
       (info node "tearing down etcd"))))
 ```
 
-如上代码块所示，`（defn db ...`之后的字符串是*文档字符串* ，记录了函数的行为。 当获得`version`时，`db`函数使用`reify`构造一个满足Jepsen的`DB`协议的新对象（来自`db`命名空间）。该协议指定所有数据库必须支持的两个功能：`(setup！db test)`和`(teardown! db test node)`，分别代表设置和拆除数据这两大功能。 我们提供存根（stub）实现在这里，它仅仅是输出一条参考消息日志。
+如上代码块所示，`（defn db ...`之后的字符串是*文档字符串* ，记录了函数的行为。 当获得`version`时，`db`函数使用`reify`构造一个满足Jepsen的`DB`协议的新对象（来自`db`命名空间）。该协议指定所有数据库必须支持的两个功能：`(setup！db test node)`和`(teardown! db test node)`，分别代表设置和拆除数据这两大功能。 我们提供存根（stub）实现在这里，它仅仅是输出一条参考消息日志。
 
 现在，我们将通过添加`:os`来扩展默认的`noop-test`，以告诉Jepsen如何处理操作系统设置，以及一个`:db`，我们可以使用刚编写的`db`函数来构造。我们将测试etcd版本`v3.1.5`。
 
@@ -74,7 +74,7 @@ INFO [2017-03-30 10:08:52,386] jepsen node n5 - jepsen.etcdemo :n5 installing et
 ...
 ```
 
-看到了版本字符串`"v3.1.5"`是怎么从`etcd-test`传递到`db`，最终被reify表达式获取使用的吗？这就是我们*参数化*Jepsen测试的方式，因此相同的代码可以测试多个版本或选项。【待确定翻译】另请注意对象`reify`返回的结果在其词法范围内关闭，*记住*`version`的值。【See how the version string `"v3.1.5"` was passed from `etcd-test` to `db`,
+看到了版本字符串`"v3.1.5"`是怎么从`etcd-test`传递到`db`，最终被reify表达式获取使用的吗？这就是我们*参数化*Jepsen测试的方式，因此相同的代码可以测试多个版本或选项。另请注意对象`reify`返回的结果在其词法范围内关闭，*记住*`version`的值。
 where it was captured by the `reify` expression? This is how we *parameterize*
 Jepsen tests, so the same code can test multiple versions or options. Note also
 that the object `reify` returns closes over its lexical scope, *remembering*
@@ -213,7 +213,7 @@ INFO [2017-03-30 12:08:20,963] jepsen node n3 - jepsen.control.util starting etc
 ...
 ```
 
-上面的运行结果看起来很棒。我们可以通过在测试后检查etcd目录是否为空来确认`teardown'是否已完成工作。
+上面的运行结果看起来很棒。我们可以通过在测试后检查etcd目录是否为空来确认`teardown`是否已完成工作。
 
 ```bash
 $ ssh n1 ls /opt/etcd
