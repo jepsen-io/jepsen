@@ -1,5 +1,5 @@
 # 正确性校验
-通过我们的生成器和客户端执行操作,我们可以分析其正确性.Jepsen使用*model*代表系统的抽象行为,*checker*来验证历史记录是否符合该模型.我们需要`knossos.model`和`jepsen.checker`:
+通过生成器和客户端执行一些操作,我们获取历史记录并分析其正确性.Jepsen使用*model*代表系统的抽象行为,*checker*来验证历史记录是否符合该模型.我们需要`knossos.model`和`jepsen.checker`:
 ```clojure
 (ns jepsen.etcdemo
   (:require [clojure.tools.logging :refer :all]
@@ -17,7 +17,7 @@
             [slingshot.slingshot :refer [try+]]
             [verschlimmbesserung.core :as v]))
 ```
-还记得如何将我们的操作映射为读、写和cas操作吗?
+还记得我们如何构建读、写和cas操作吗?
 ```clojure
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
 (defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
@@ -36,7 +36,7 @@ Jepsen并不知道`:f :read`或`:f :cas`的含义,就其而言,他们可以是�
         Models should be a pure, deterministic function of their state and an
         operation's :f and :value."))
 ```
-Knossos checker为cas和registers定义了常见的模型.这是一个[cas寄存器](https://github.com/jepsen-io/knossos/blob/443a5a081c76be315eb01c7990cc7f1d9e41ed9b/src/knossos/model.clj#L66-L80)--正是我们需要建模的数据类型
+结果发现Knossos checker为lock和寄存器等东西定义了一些常见的模型.这是一个[cas寄存器](https://github.com/jepsen-io/knossos/blob/443a5a081c76be315eb01c7990cc7f1d9e41ed9b/src/knossos/model.clj#L66-L80)--正是我们需要建模的数据类型
 ```clojure
 (defrecord CASRegister [value]
   Model
@@ -54,8 +54,8 @@ Knossos checker为cas和registers定义了常见的模型.这是一个[cas寄存
                (inconsistent (str "can't read " (:value op)
                                   " from register " value))))))
 ```
-只要*knossos*为我们正在检测的组件提供了模型类型,我们就不需要在测试中写cas寄存器.这只是为了你可以看到操作在后台运行的方式.  
-此defrecord定义了一个名为*CASRegister*的新的数据类型,它拥有唯一不变的字段,名为*value*.它实现了我们之前讨论的`Model`接口,它的`step`函数接收当前寄存器`r`和操作`op`作为参数.当我们需要写入新值时,只需要简单返回一个已经赋值的`CASRegister`.为了对两个值进行cas,我们将操作中当前值和新值分开,如果当前值和新值相匹配,则构建一个带有新值的寄存器.如果它们不匹配,则返回带有`inconsistent`的特定的模型类型,它表明上一操作不能应用于寄存器.读操作类似,除非我们始终允许`nil`读取通过.这要求我们满足历史操作,包括从未返回过的读操作.  
+只要*knossos*为我们正在检测的组件提供了模型,我们就不需要在测试中写cas寄存器.这只是为了你可以看到操作在后台运行的方式.  
+此defrecord定义了一个名为*CASRegister*的新的数据类型,它拥有唯一不变的字段,名为*value*.它实现了我们之前讨论的`Model`接口,它的`step`函数接收当前寄存器`r`和操作`op`作为参数.当我们需要写入新值时,只需要简单返回一个已经赋值的`CASRegister`.为了对两个值进行cas,我们在操作中将当前值和新值分开,如果当前值和新值相匹配,则构建一个带有新值的寄存器.如果它们不匹配,则返回带有`inconsistent`的特定的模型类型,它表明上一操作不能应用于寄存器.读操作类似,除非我们始终允许`nil`读取通过.这要求我们满足历史操作,包括从未返回过的读操作.  
 为了分析历史操作,我们需要为测试定义一个`:checker`,同时需要提供一个`:model`来指明系统*should*如何运行  
 `checker/linearizable`使用Knossos线性checker来验证每一个操作是否自动处于调用和返回之间的位置.线性checker需要一个模型并指明一个特定的算法,然后在选项中将map传递给该算法
 ```clojure
