@@ -38,7 +38,7 @@ Exception in thread "main" java.lang.Exception: Cannot find anything to run for:
 ...
 ```
 
-运行完后看到这样的数据结果并不意外，因为我们尚未写任何实质性的代码让程序取运行。在`jepsen.etcdemo`命名空间下，我们需要一个main函数来接收命令行参数并运行测试。在`src/jepsen/etcdemo.clj`文件中我们定义如下main函数：
+运行完后看到这样的数据结果并不意外，因为我们尚未写任何实质性的代码让程序去运行。在`jepsen.etcdemo`命名空间下，我们需要一个main函数来接收命令行参数并运行测试。在`src/jepsen/etcdemo.clj`文件中我们定义如下main函数：
 
 ```clj
 (ns jepsen.etcdemo)
