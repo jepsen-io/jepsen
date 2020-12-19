@@ -1,19 +1,15 @@
-# 提炼测试
+# 完善测试
+我们的测试确定了一个故障，但需要一些运气和聪明的猜测才能发现它，现在是时候完善我们的测试了，使得它更快、更容易理解以及功能更加强大。
 
+为了分析单个key的历史记录，Jepsen通过搜索并发操作的每种排列，以查找遵循cas寄存器操作规则的历史记录，这意味着在任何给定的时间点的并发操作数后，我们的搜索是指数级的。
 
-我们的测试确定了一个故障，但需要一些运气和聪明的猜测去偶然发现，现在是时候提炼我们的测试了，使得它更快、更容易理解以及功能更加强大。
+Jepsen运行时需要指定一个工作线程数，这通常情况下也限制并发操作的数量。但是，当操作**崩溃**(或者是返回一个`:info`的结果，再或者是抛出一个异常)，我们放弃该操作并且让当前线程去做新的事情。这可能会出现如下情况：崩溃的进程操作仍然在运行，并且可能会在后面的时间里被数据库执行。这意味着**对于后面整个历史记录的剩余时间内，崩溃的操作跟其他操作是并发的。**
 
-为了分析单个key的历史记录，jepsen通过搜索并发操作的每种排列，以查找遵循cas寄存器操作规则的历史记录，这意味着在任何给定的时间点的并发操作数后，我们的搜索是指数级的
+崩溃的操作越多，历史记录结束时的并发操作就越多。并发数线性的增加伴随着验证时间的指数增加。我们的首要任务是减少崩溃的操作数量，下面我们将从读取开始。
 
+## 崩溃读操作
 
-jepsen 运行时需要指定一个工作线程数，这通常情况下也限制并发操作的数量。但是，当操作**crash**(或者是返回一个`:info`的结果，再或者是抛出一个异常),我们放弃该操作并且让当前线程去做新的事情。这可能会出现如下情况：crashed的进程操作仍然在运行，并且可能会在后面的时间里被数据库执行。这意味着**对于后面整个历史记录的剩余时间内，crashed的操作是并发的。**
-
-
-crashed的操作越多，历史记录结束时的并发操作就越多。并发数线性的增加伴随着验证时间的指数增加。我们的首要任务是减少crash的操作数量，下面我们将从读取开始
-
-## Crashed reads
-
-当一个操作超时时，我们会得到类似下面的这样一长串的堆栈信息
+当一个操作超时时，我们会得到类似下面的这样一长串的堆栈信息。
 
 ```
 WARN [2018-02-02 16:14:37,588] jepsen worker 1 - jepsen.core Process 11 crashed
@@ -22,8 +18,8 @@ java.net.SocketTimeoutException: Read timed out
   ...
 ```
 
-... 同时进程的操作转成了一个`:info`的消息，因为我们不能确定该操作是成功了还是失败了。
-但是，*幂等*操作，向读操作并没有改变系统的状态。读操作是否成功不影响，因为效果是相同的。因此我们可以安全的将crashed读操作转为读操作失败，并提升checker的性能。
+同时进程的操作转成了一个`:info`的消息，因为我们不能确定该操作是成功了还是失败了。
+但是，*幂等*操作，像读操作，并不会改变系统的状态。读操作是否成功不影响，因为效果是相同的。因此我们可以安全的将崩溃的读操作转为读操作失败，并提升checker的性能。
 
 ```clj
   (invoke! [_ test op]
@@ -45,7 +41,7 @@ java.net.SocketTimeoutException: Read timed out
                (assoc op :type :fail, :error :not-found)))))
 ```
 
-更好的是，如果我们一旦能立即捕获三个路径中的网络超时异常，我们就可以避免所有的异常堆栈信息出现在日志中。我们也将处理不存在的错误(not-found errors)，尽管它只出现在`:cas`操作中，处理该错误后，将能保持代码更加的清爽。
+更好的是，如果我们一旦能立即捕获三个路径中的网络超时异常，我们就可以避免所有的异常堆栈信息出现在日志中。我们也将处理key不存在错误(not-found errors)，尽管它只出现在`:cas`操作中，处理该错误后，将能保持代码更加的清爽。
 
 
 
@@ -79,11 +75,11 @@ java.net.SocketTimeoutException: Read timed out
 INFO [2017-03-31 19:34:47,351] jepsen worker 4 - jepsen.util 4  :info :cas  [4 4] :timeout
 ```
 
-## Independent keys
+## 独立的数个键
 
-我们有一个单个key线性一致性的工作测试。但是，进程迟早将会crash，并且并发数将会上升，分析变慢。我们需要一种方法来**绑定**单个key的历史操作记录的长度，同时又能执行足够多的操作来观察并发错误。
+我们已经有了一个单个线性键的测试。但是，这些进程迟早将会crash，并且并发数将会上升，拖慢分析速度。我们需要一种方法来**限制**单个键的历史操作记录长度，同时又能执行足够多的操作来观察到并发错误。
 
-因为独立的keys的操作线性独立，因此我们**提升**我们的单个key测试为对多个key操作的测试，`jepsen.independent`命名空间提这样的支持。
+因为独立的键的线性操作是彼此独立的，因此我们可以将对单个键得测试**升级**为对多个键的测试，`jepsen.independent`命名空间提这样的支持。
 
 ```clj
 (ns jepsen.etcdemo
@@ -106,8 +102,7 @@ INFO [2017-03-31 19:34:47,351] jepsen worker 4 - jepsen.util 4  :info :cas  [4 4
             [verschlimmbesserung.core :as v]))
 ```
 
-我们有一个generator，它可以对单个key发出操作，例如：`{:type :invoke,
-:f :write, :value 3}`。我们想提升这个操作为写**多个**key。代替`:value v`，我们想`value [key v]`
+我们已经有了一个对单个键生成操作的生成器，例如：`{:type :invoke, :f :write, :value 3}`。我们想升级这个操作为写**多个**key。我们想操作`value [key v]`而不是`:value v`。
 
 ```clj
           :generator  (->> (independent/concurrent-generator
@@ -125,8 +120,8 @@ INFO [2017-03-31 19:34:47,351] jepsen worker 4 - jepsen.util 4  :info :cas  [4 4
                            (gen/time-limit (:time-limit opts)))}))
 ```
 
-我们的read、write、cas操作的组合仍然不变，但是它被包裹在一个**函数**内，这个函数有一个参数k并且返回一个指定key的values的generator。我们使用`concurrent-generator`,使得每个key有10个线程，keys来自无限的证书序列`(range)`,同时这些keys的generators生成自`(fn [k] ...)`
-`concurrent-generator` 改变了我们的values的结构，从`v`变成了`[k v]`，因此我们需要更新我们的client，以便它知道对不同的keys如何读和写。
+我们的read、write和cas操作的组合仍然不变，但是它被包裹在一个**函数**内，这个函数有一个参数k并且返回一个指定键的值生成器。我们使用`concurrent-generator`，使得每个键有10个线程，多个键来自无限的整数序列`(range)`，同时这些键的生成器生成自`(fn [k] ...)`。
+`concurrent-generator`改变了我们的values的结构，从`v`变成了`[k v]`，因此我们需要更新我们的客户端，以便它知道对不同的键如何读和写。
 
 ```clj
   (invoke! [_ test op]
@@ -155,9 +150,9 @@ INFO [2017-03-31 19:34:47,351] jepsen worker 4 - jepsen.util 4  :info :cas  [4 4
           (assoc op :type :fail, :error :not-found)))))
 ```
 
-看看我们的硬编码的key `"foo"`是如何消失的？现在每个key都被操作自身参数化了。注意我们更新value的位置--例如：`:f :read`--我们必须构建一个指定 `independent/tuple` 的键值对。具有元组的特殊数据类型，它能允许`jepsen.independent`在后面分隔历史记录。
+看看我们的硬编码的键`"foo"`是如何消失的？现在每个键都被操作自身参数化了。注意我们修改数值的地方--例如：在`:f :read`中--我们必须构建一个指定`independent/tuple`的键值对。为元组使用特殊数据类型，才能允许`jepsen.independent`在后面将不同键的历史记录分隔开来。
 
-最后，我们的checker以单个值的方式尽心思考--但是我们可以转换一个checker，它通过由key标识来**independent**的值。
+最后，我们的检查器以单个值的方式来进行验证--但是我们可以把它转变成一个可以合理处理好多个**独立**值的检查器，即依靠多个键来辨识这些**独立**值。
 
 ```clj
           :checker   (checker/compose
@@ -170,7 +165,7 @@ INFO [2017-03-31 19:34:47,351] jepsen worker 4 - jepsen.util 4  :info :cas  [4 4
 ```
 
 
-写一个checker，免费获得一个由n个checker构成的家庭，哈哈哈哈
+写一个检查器，不费力地获得一个由n个checker构成的家族，哈哈哈哈
 
 ```bash
 $ lein run test --time-limit 30
@@ -180,7 +175,7 @@ java.util.concurrent.ExecutionException: java.lang.AssertionError: Assert failed
 ```
 
 
-阿哈，我们默认的并发是5个线程，但我们为了运行单个key，至少10个，运行10个key的话，需要100个线程。
+阿哈，我们默认的并发是5个线程，但我们为了运行单个键，我们就要求了至少10个线程，运行10个键的话，需要100个线程。
 
 ```bash
 $ lein run test --time-limit 30 --concurrency 100
@@ -206,4 +201,4 @@ $ lein run test --time-limit 30 --concurrency 100
 
 看上述结果，在有限的时间窗口内我们可以执行更多的操作。这帮助我们能能快的发现bugs。
 
-到目前为止，我们硬编码的地方很多，让我们在命令行中进行这些选择[配置](07-cn-parameters.md)
+到目前为止，我们硬编码的地方很多，下面在命令行中，我们将让其中一些选项变得[可配置](07-cn-parameters.md)。
