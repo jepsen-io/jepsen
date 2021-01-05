@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# Builds a docker-compose file. You'd THINK we could do this with `replicas`
+# but nooooooo, down that path lies madness. Instead we're going to do some
+# janky templating with sed and awk. I am so, so sorry.
+
+# Takes a number of nodes to generate a file for, and emits a file
+# `docker-compose.yml`.
+
+NODE_COUNT=$1
+
+DEPS=""
+DBS=""
+
+# For each node
+for ((n=1;n<=NODE_COUNT;n++)); do
+  # Build up deps for control
+  LINE=`cat template/depends.yml | sed s/%%N%%/${n}/g`
+  DEPS="${DEPS}${LINE}"$'\n'
+
+  # Build up DB service
+  DB=`cat template/db.yml | sed s/%%N%%/${n}/g`
+  DBS="${DBS}${DB}"$'\n'
+done
+
+# Build docker-compose file
+export DEPS
+export DBS
+cat template/docker-compose.yml |
+  awk ' {gsub(/%%DEPS%%/, ENVIRON["DEPS"]); print} ' |
+  awk ' {gsub(/%%DBS%%/, ENVIRON["DBS"]); print} ' \
+  > docker-compose.yml

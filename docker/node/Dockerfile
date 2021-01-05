@@ -8,6 +8,7 @@ FROM jgoerzen/debian-base-standard:buster
 #RUN run-parts --exit-on-error --verbose /usr/local/debian-base-setup
 
 # Basic system stuff
+RUN apt-get update
 RUN apt-get install -y apt-transport-https
 
 # Install packages
@@ -17,10 +18,10 @@ RUN apt-get -qy update && \
         openssh-server \
         pwgen
 
-# When run, boot-debian-base will call this script, which will copy the
-# authorized_keys file into root's .ssh
-ADD setup-authorized-keys.sh /usr/local/preinit/03-setup-authorized-keys
-RUN chmod +x /usr/local/preinit/03-setup-authorized-keys
+# When run, boot-debian-base will call this script, which does final
+# per-db-node setup stuff.
+ADD setup-jepsen.sh /usr/local/preinit/03-setup-jepsen
+RUN chmod +x /usr/local/preinit/03-setup-jepsen
 
 # Configure SSHD
 RUN sed -i "s/#PermitRootLogin prohibit-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
@@ -29,7 +30,7 @@ RUN sed -i "s/#PermitRootLogin prohibit-password/PermitRootLogin yes/g" /etc/ssh
 ENV DEBBASE_SSH enabled
 
 # Install Jepsen deps
-RUN apt-get install -qy build-essential bzip2 curl faketime iproute2 iptables iputils-ping libzip4 logrotate man man-db net-tools ntpdate psmisc python rsyslog sudo tar unzip vim wget ca-certificates
+RUN apt-get install -qy build-essential bzip2 curl dnsutils faketime iproute2 iptables iputils-ping libzip4 logrotate man man-db net-tools ntpdate psmisc python rsyslog sudo tar unzip vim wget ca-certificates
 
 EXPOSE 22
 CMD ["/usr/local/bin/boot-debian-base"]
