@@ -1,0 +1,47 @@
+version: '3.7'
+x-node:
+  &default-node
+  build: ./node
+  env_file: ./secret/node.env
+  secrets:
+    - authorized_keys
+  privileged: true
+  tty: true
+  tmpfs:
+    #- /run:size=100M
+    - /run/lock:size=100M
+  volumes:
+    - "/sys/fs/cgroup:/sys/fs/cgroup:ro"
+    - "jepsen-shared:/var/jepsen/shared"
+  networks:
+    - jepsen
+  ports:
+    - ${JEPSEN_PORT:-22}
+
+volumes:
+  jepsen-shared:
+
+secrets:
+  authorized_keys:
+    file: ./secret/authorized_keys
+
+networks:
+  jepsen:
+
+services:
+  control:
+    container_name: jepsen-control
+    hostname: control
+    depends_on:
+%%DEPS%%
+    build: ./control
+    env_file: ./secret/control.env
+    privileged: true
+    ports:
+      - "22"
+      - "8080"
+    networks:
+      - jepsen
+    volumes:
+      - "jepsen-shared:/var/jepsen/shared"
+%%DBS%%
