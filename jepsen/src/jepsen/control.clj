@@ -191,7 +191,8 @@
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
         (throw+ (merge {:type ::ssh-failed}
-                       (debug-data)))))))
+                       (debug-data))
+                e)))))
 
 (defn exec*
   "Like exec, but does not escape."
