@@ -258,7 +258,8 @@
                  (cond
                    (not (tuple? v)) op
                    (= k (key v))    (assoc op :value (val v))
-                   true             nil))))))
+                   true             nil))))
+       vec))
 
 (defn checker
   "Takes a checker that operates on :values like `v`, and lifts it to a checker
