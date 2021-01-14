@@ -17,9 +17,9 @@
             [clojure.stacktrace :as trace]
             [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
-            [clojure.pprint :refer [pprint]]
             [clojure.datafy :refer [datafy]]
             [dom-top.core :as dt :refer [assert+]]
+            [fipp.edn :refer [pprint]]
             [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
