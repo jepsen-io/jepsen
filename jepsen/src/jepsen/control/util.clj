@@ -64,6 +64,16 @@
          ls
          (map (partial str dir)))))
 
+(defn tmp-file!
+  "Creates a random, temporary file under tmp-dir-base, and returns its path."
+  []
+  (let [file (str tmp-dir-base "/" (rand-int Integer/MAX_VALUE))]
+    (if (exists? file)
+      (recur)
+      (do
+        (exec :touch file)
+        file))))
+
 (defn tmp-dir!
   "Creates a temporary directory under /tmp/jepsen and returns its path."
   []
@@ -73,6 +83,22 @@
       (do
         (exec :mkdir :-p dir)
         dir))))
+
+(defn write-file!
+  "Writes a string to a filename."
+  [string file]
+  (let [cmd (->> [:cat :> file]
+                 (map escape)
+                 (str/join " "))
+        action {:cmd cmd
+                :in  string}]
+    (-> action
+        wrap-cd
+        wrap-sudo
+        wrap-trace
+        ssh*
+        throw-on-nonzero-exit)
+    file))
 
 (def std-wget-opts
   "A list of standard options we pass to wget"
