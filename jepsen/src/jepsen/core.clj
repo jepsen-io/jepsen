@@ -153,12 +153,14 @@
   logs in the event of JVM shutdown, so you can ctrl-c a test and get something
   useful."
   [test & body]
-  `(let [^Thread hook# (Thread.
-                         (bound-fn []
-                           (with-thread-name "Jepsen shutdown hook"
-                             (info "Downloading DB logs before JVM shutdown...")
-                             (snarf-logs! ~test)
-                             (store/update-symlinks! ~test))))]
+  `(let [^Runnable hook-fn#
+         (bound-fn []
+           (with-thread-name "Jepsen shutdown hook"
+             (info "Downloading DB logs before JVM shutdown...")
+             (snarf-logs! ~test)
+             (store/update-symlinks! ~test)))
+
+         ^Thread hook# (Thread. hook-fn#)]
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
        (let [res# (do ~@body)]

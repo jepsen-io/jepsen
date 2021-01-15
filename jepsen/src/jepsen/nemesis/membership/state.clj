@@ -1,7 +1,8 @@
 (ns jepsen.nemesis.membership.state
   "This namespace defines the protocol for nemesis membership state
   machines---how to find the current view from a node, how to merge node views
-  together, how to generate, apply, and complete operations, etc.")
+  together, how to generate, apply, and complete operations, etc."
+  (:refer-clojure :exclude [resolve]))
 
 (defprotocol State
   (node-view [this test node]
