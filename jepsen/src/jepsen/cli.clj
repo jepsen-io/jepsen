@@ -393,11 +393,8 @@ Options:\n")
                                 (with-out-str (pprint options)))
                           (let [cli-test    (test-fn options)
                                 stored-test (store/latest)
-                                test (-> stored-test
-                                         (dissoc :results)
-                                         (merge cli-test)
-                                         (assoc :history
-                                                (:history stored-test)))]
+                                test (-> cli-test
+                                         (merge (dissoc stored-test :results)))]
                             (assert+ stored-test IllegalStateException
                                      "Not sure what the last test was")
                             (assert+ (= (:name stored-test)
