@@ -312,7 +312,7 @@
     1 (first packages)
     {:generator       (apply gen/any (keep :generator packages))
      :final-generator (keep :final-generator packages)
-     :nemesis         (n/compose (map :nemesis packages))
+     :nemesis         (n/compose (keep :nemesis packages))
      :perf            (reduce set/union (map :perf packages))}))
 
 (defn nemesis-packages
