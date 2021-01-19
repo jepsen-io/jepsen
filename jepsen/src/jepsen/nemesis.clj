@@ -339,7 +339,8 @@
     (if-let [n (get fm (:f op))]
       (invoke! n test op)
       (throw (IllegalArgumentException.
-               (str "No nemesis can handle " (pr-str (:f op)))))))
+               (str "No nemesis can handle :f " (pr-str (:f op))
+                    " (expected one of " (pr-str (keys fm)) ")")))))
 
   (teardown! [this test]
     (mapv #(teardown! % test) nemeses))
