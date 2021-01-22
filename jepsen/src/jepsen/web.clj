@@ -139,21 +139,25 @@
   (let [results-file  (io/file f "results.edn")
         valid?        (try (with-open [r (java.io.PushbackReader.
                                            (io/reader results-file))]
-                             (:valid? (clojure.edn/read r)))
+                             (:valid?
+                               (clojure.edn/read
+                                 {:default vector}
+                                 r)))
                            (catch java.io.FileNotFoundException e
                              nil)
                            (catch RuntimeException e
+                             (info e :caught)
                              :unknown))]
-  [:a {:href (file-url f)
-       :style "text-decoration: none;
-              color: #000;"}
-   [:div {:style (str "background: " (valid-color valid?) ";\n"
-                      "display: inline-block;
-                      margin: 10px;
-                      padding: 10px;
-                      overflow: hidden;
-                      width: 280px;")}
-    (.getName f)]]))
+    [:a {:href (file-url f)
+         :style "text-decoration: none;
+                color: #000;"}
+     [:div {:style (str "background: " (valid-color valid?) ";\n"
+                        "display: inline-block;
+                        margin: 10px;
+                        padding: 10px;
+                        overflow: hidden;
+                        width: 280px;")}
+      (.getName f)]]))
 
 (defn file-cell
   "Renders a File for a directory view."
