@@ -1,0 +1,6 @@
+version: '3.7'
+services:
+  control:
+    volumes:
+      - ${JECCI_ROOT}:/jecci # Mounts $JECCI_ROOT on host to /jecci control container
+      - ${PROJECT_ROOT}:/project
