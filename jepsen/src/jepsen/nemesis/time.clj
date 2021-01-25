@@ -7,27 +7,30 @@
                     [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]]
+            [jepsen.control.util :as cu]
             [clojure.string :as str]
             [clojure.java.io :as io])
   (:import (java.io File)))
 
 (defn compile!
-  "Takes a Reader to C source code and spits out a binary to /opt/jepsen/<bin>."
+  "Takes a Reader to C source code and spits out a binary to /opt/jepsen/<bin>,
+  if it doesn't already exist."
   [reader bin]
   (c/su
-    (let [tmp-file (File/createTempFile "jepsen-upload" ".c")]
-      (try
-        (io/copy reader tmp-file)
-        ; Upload
-        (c/exec :mkdir :-p "/opt/jepsen")
-        (c/exec :chmod "a+rwx" "/opt/jepsen")
-        (c/upload (.getCanonicalPath tmp-file) (str "/opt/jepsen/" bin ".c"))
-        (c/cd "/opt/jepsen"
-              (c/exec :gcc (str bin ".c"))
-              (c/exec :mv "a.out" bin))
-        (finally
-          (.delete tmp-file)))))
-  bin)
+    (when-not (cu/exists? (str "/opt/jepsen/" bin))
+      (let [tmp-file (File/createTempFile "jepsen-upload" ".c")]
+        (try
+          (io/copy reader tmp-file)
+          ; Upload
+          (c/exec :mkdir :-p "/opt/jepsen")
+          (c/exec :chmod "a+rwx" "/opt/jepsen")
+          (c/upload (.getCanonicalPath tmp-file) (str "/opt/jepsen/" bin ".c"))
+          (c/cd "/opt/jepsen"
+                (c/exec :gcc (str bin ".c"))
+                (c/exec :mv "a.out" bin))
+          (finally
+            (.delete tmp-file)))))
+    bin))
 
 (defn compile-resource!
   "Given a resource name, spits out a binary to /opt/jepsen/<bin>."
@@ -103,8 +106,6 @@
       (c/with-test-nodes test (install!))
       ; Try to stop ntpd service in case it is present and running.
       (c/with-test-nodes test
-        (try (c/su (c/exec :service :ntp :stop))
-             (catch RuntimeException e))
         (try (c/su (c/exec :service :ntpd :stop))
              (catch RuntimeException e)))
       (reset-time! test)
