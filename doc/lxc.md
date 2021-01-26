@@ -45,6 +45,14 @@ for i in {1..10}; do
 done
 ```
 
+Start the network, and set it to start at boot so the dnsmasq will be
+available.
+
+```
+virsh net-autostart default;
+virsh net-start default
+```
+
 If you configure resolv.conf by hand, add the libvirt local dnsmasq to
 resolv.conf:
 
@@ -56,6 +64,7 @@ If you're letting dhclient manage it, then:
 
 ```
 echo "prepend domain-name-servers 192.168.122.1;" >>/etc/dhcp/dhclient.conf
+sudo service networking restart
 ```
 
 Slip your preferred SSH key into each node's `.authorized-keys`:
@@ -64,15 +73,9 @@ Slip your preferred SSH key into each node's `.authorized-keys`:
 for i in {1..10}; do
   mkdir -p /var/lib/lxc/n${i}/rootfs/root/.ssh
   chmod 700 /var/lib/lxc/n${i}/rootfs/root/.ssh/
-  cp ~admin/.ssh/id_rsa.pub /var/lib/lxc/n${i}/rootfs/root/.ssh/authorized_keys
+  cp ~/.ssh/id_rsa.pub /var/lib/lxc/n${i}/rootfs/root/.ssh/authorized_keys
   chmod 644 /var/lib/lxc/n${i}/rootfs/root/.ssh/authorized_keys
 done
-```
-
-Start the virtual network...
-
-```
-virsh net-start default
 ```
 
 And start the nodes:
