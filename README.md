@@ -167,3 +167,10 @@ ssh-keyscan -t rsa n5 >> ~/.ssh/known_hosts
 ```
 
 to add unhashed versions of each node's hostkey to your `~/.ssh/known_hosts`.
+
+## Other Projects
+
+Additional projects that may be of interest:
+
+- [Jecci](https://github.com/michaelzenz/jecci): A wrapper framework around Jepsen
+- [Porcupine](https://github.com/anishathalye/porcupine): a linearizability checker written in Go.
