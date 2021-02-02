@@ -49,6 +49,15 @@
                     (assoc m k [v])
                     (update m k conj v))))]))
 
+(defn merge-opt-specs
+  "Takes two option specifications and merges them together. Where both offer
+  the same option name, prefers the latter."
+  [a b]
+  (->> (merge (group-by second a)
+              (group-by second b))
+       vals
+       (map first)))
+
 (def help-opt
   ["-h" "--help" "Print out this message and exit"])
 
@@ -343,7 +352,7 @@ Options:\n")
 (defn single-test-cmd
   "A command which runs a single test with standard built-ins. Options:
 
-  {:opt-spec A vector of additional options for tools.cli. Appended to
+  {:opt-spec A vector of additional options for tools.cli. Merge into
              `test-opt-spec`. Optional.
    :opt-fn   A function which transforms parsed options. Composed after
              `test-opt-fn`. Optional.
@@ -357,7 +366,7 @@ Options:\n")
   analyzes a history from disk instead.
   "
   [opts]
-  (let [opt-spec (into test-opt-spec (:opt-spec opts))
+  (let [opt-spec (merge-opt-specs test-opt-spec (:opt-spec opts))
         opt-spec (if-let [default-tarball (:tarball opts)]
                    (conj opt-spec
                          [nil "--tarball URL" "URL for the DB tarball to install. May be either HTTP, HTTPS, or a local file on each DB node. For instance, --tarball https://foo.com/bar.tgz, or file:///tmp/bar.tgz"
