@@ -101,6 +101,10 @@
      (.lock read-lock#)
      (let [~c (conn ~wrapper)]
        (try ~@body
+            (catch InterruptedException e#
+              ; When threads are interrupted, we're generally
+              ; terminating--there's no reason to reopen or log a message here.
+              (throw e#))
             (catch Exception e#
               ; We can't acquire the write lock until we release our read lock,
               ; because ???
