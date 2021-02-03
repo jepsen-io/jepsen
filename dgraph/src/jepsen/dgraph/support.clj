@@ -65,7 +65,7 @@
            :chdir   dir}
           binary
           :zero
-          :--idx                (node-idx test node)
+          :--raft               (str "idx=" (node-idx test node))
           :--port_offset        zero-port-offset
           :--expose_trace
           :--v 2
@@ -112,7 +112,7 @@
             [:--jaeger.collector (:dgraph-jaeger-collector test)])
           (when (:dgraph-jaeger-agent test)
             [:--jaeger.agent (:dgraph-jaeger-agent test)])
-          :--idx        (node-idx test node)
+          :--raft       (str "idx=" (node-idx test node))
           :--my         (str node ":" alpha-internal-port)
           :--zero       (str node ":" zero-internal-port)))
   :started)
