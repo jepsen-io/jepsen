@@ -1,6 +1,7 @@
 (ns yugabyte.auto
   "Shared automation functions for configuring, starting and stopping nodes."
-  (:require [clojure.tools.logging :refer :all]
+  (:require [clojure.java.io :as io]
+            [clojure.tools.logging :refer :all]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [clj-http.client :as http]
@@ -12,6 +13,7 @@
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
+            [jepsen.reconnect :as rc]
             [yugabyte.ycql.client :as ycql.client]
             [yugabyte.ysql.client :as ysql.client]
             [slingshot.slingshot :refer [try+ throw+]])
@@ -53,6 +55,20 @@
   (stop-master!   [db])
   (stop-tserver!  [db])
   (wipe!          [db]))
+
+(defmacro suppress-interrupted-exception
+  "When there's an error encountered on one of the node, the whole cluster worker thread group
+  is interrupted (see dom-top.core/real-pmap-helper). This is likely to interrupt a bunch of waits
+  and sleeps in SSH connection helpers, which would cause a lot of noise in the log.
+  Same happens when the Ctrl+C is pressed.
+
+  Since interruption only happens on error, we can safely suppress those InterruptedExceptions -
+  execution as a whole will error out anyway."
+  [& body]
+  `(try+
+     (do ~@body)
+     (catch InterruptedException e#
+       (info "Interrupted, probably an error happened on another node"))))
 
 (defn master-nodes
   "Given a test, returns the nodes we run masters on."
@@ -135,6 +151,7 @@
       (condp re-find (.getMessage e)
         #"Timed out"                              (retry (dec tries))
         #"Leader not yet ready to serve requests" (retry (dec tries))
+        #"Could not locate the leader master"     (retry (dec tries))
         (throw e)))))
 
 (defn await-tservers
@@ -338,13 +355,17 @@
                 (assert (re-find #"Python 2\.7"
                                  (c/exec :python :--version (c/lit "2>&1"))))
 
-                (info "Installing tarball")
+                (info "Installing tarball into" dir)
                 (cu/install-archive! url dir)
-                (c/su (info "Post-install script")
-                      (c/exec "./bin/post_install.sh")
+                (c/su (let [post-install-script-path "./bin/post_install.sh"]
+                        (info "Post-install script")
 
-                      (c/exec :echo url :>> installed-url-file)
-                      (info "Done with setup")))))))
+                        (assert (= (count (cu/ls post-install-script-path)) 1)
+                                "Post-install script does not exist!")
+                        (c/exec post-install-script-path)
+
+                        (c/exec :echo url :>> installed-url-file)
+                        (info "Done with setup"))))))))
 
   (configure! [db test node]
     ; YB will explode after creating just a handful of tables if we don't raise
@@ -407,17 +428,20 @@
     (c/su (cu/grepkill! "postgres")))
 
   (wipe! [db]
-    (c/su (c/exec :rm :-rf ce-data-dir)))
+    (suppress-interrupted-exception
+      (c/su (c/exec :rm :-rf ce-data-dir))))
 
   db/DB
   (setup! [db test node]
-    (install! db test)
-    (configure! db test node)
-    (start! db test node))
+    (suppress-interrupted-exception
+      (install! db test)
+      (configure! db test node)
+      (start! db test node)))
 
   (teardown! [db test node]
-    (stop! db test node)
-    (wipe! db))
+    (suppress-interrupted-exception
+      (stop! db test node)
+      (wipe! db)))
 
   db/Primary
   (setup-primary! [this test node]

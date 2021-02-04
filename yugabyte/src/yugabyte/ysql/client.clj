@@ -147,7 +147,8 @@
       {:name  node
        :open  (partial open-conn node)
        :close close-conn
-       :log?  true})))
+       ; Do not log intermediate reconnection errors (if the reconnect fails, we'll still get it)
+       :log?  false})))
 
 (defprotocol YSQLYbClient
   "Used by defclient macro in conjunction with jepsen.client/Client specifying actual logic"
