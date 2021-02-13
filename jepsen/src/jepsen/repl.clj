@@ -5,5 +5,5 @@
 
 (defn latest-test
   "Returns the most recently run test"
-  [test-name]
+  []
   (store/latest))
