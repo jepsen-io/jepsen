@@ -327,7 +327,8 @@
   (System/nanoTime))
 
 (def ^:dynamic ^Long *relative-time-origin*
-  "A reference point for measuring time in a test run.")
+  "A reference point for measuring time in a test run."
+  nil)
 
 (defmacro with-relative-time
   "Binds *relative-time-origin* at the start of body."
