@@ -173,9 +173,13 @@
   [obj]
   (walk/prewalk (fn transform [x]
                   ; (prn :x (class x) (instance? AbstractList x))
-                  (if (instance? AbstractList x)
-                    (vec x)
-                    x))
+                  (cond (instance? clojure.lang.Atom x)
+                        (atom (postprocess-fressian @x))
+
+                        (instance? AbstractList x)
+                        (vec x)
+
+                        :else x))
                 obj))
 
 (defn load-fressian-file
