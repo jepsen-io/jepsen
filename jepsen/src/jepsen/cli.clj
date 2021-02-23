@@ -356,6 +356,7 @@ Options:\n")
              `test-opt-spec`. Optional.
    :opt-fn   A function which transforms parsed options. Composed after
              `test-opt-fn`. Optional.
+   :opt-fn*  Replaces test-opt-fn, in case you want to override it altogether.
    :tarball If present, adds a --tarball option to this command, defaulting to
             whatever URL is given here.
    :usage   Defaults to `jc/test-usage`. Optional.
@@ -380,6 +381,7 @@ Options:\n")
         opt-fn  (if-let [f (:opt-fn opts)]
                   (comp f opt-fn)
                   opt-fn)
+        opt-fn  (or (:opt-fn* opts) opt-fn)
         test-fn (:test-fn opts)]
   {"test" {:opt-spec opt-spec
            :opt-fn   opt-fn
@@ -488,6 +490,7 @@ Options:\n")
                   test-opt-spec. Optional.
     :opt-fn       A function which transforms parsed options. Composed after
                   test-opt-fn. Optional.
+    :opt-fn*      Replaces test-opt-fn, instead of composing with it.
     :usage        Defaults to `test-usage`. Optional.
     :tests-fn     A function that receives the transformed option map and
                   constructs a sequence of tests to run."
@@ -495,7 +498,8 @@ Options:\n")
   (let [opt-fn  test-opt-fn
         opt-fn  (if-let [f (:opt-fn opts)]
                   (comp f opt-fn)
-                  opt-fn)]
+                  opt-fn)
+        opt-fn  (or (:opt-fn* opts) opt-fn)]
     {"test-all"
      {:opt-spec (into test-opt-spec (:opt-spec opts))
       :opt-fn   opt-fn
