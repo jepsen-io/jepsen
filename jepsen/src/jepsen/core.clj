@@ -358,24 +358,23 @@
                          (let [test (->> sessions
                                          (map vector (:nodes test))
                                          (into {})
-                                         (assoc test :sessions))]
-                           ; Setup
-                           (with-os test
-                             (with-db test
-                               (util/with-relative-time
-                                 ; Run a single case
-                                 (let [test (assoc test :history
-                                                   (run-case! test))
-                                       ; Remove state
-                                       test (dissoc test
-                                                    :barrier
-                                                    :active-histories
-                                                    :sessions)]
-                                   ; TODO: move test analysis outside the
-                                   ; DB/ssh block.
-                                   (info "Run complete, writing")
-                                   (when (:name test) (store/save-1! test))
-                                   (analyze! test)))))))))]
+                                         (assoc test :sessions))
+                               ; Launch OS, DBs, evaluate test
+                               test (with-os test
+                                      (with-db test
+                                        (util/with-relative-time
+                                          ; Run a single case
+                                          (-> test
+                                              (assoc :history
+                                                     (run-case! test))
+                                              ; Remove state
+                                              (dissoc
+                                                :barrier
+                                                :active-histories
+                                                :sessions)))))]
+                           (info "Run complete, writing")
+                           (when (:name test) (store/save-1! test))
+                           (analyze! test)))))]
           (log-results test)))
       (catch Throwable t
         (warn t "Test crashed!")
