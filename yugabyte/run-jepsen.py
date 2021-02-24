@@ -49,13 +49,23 @@ NODES_FILE = os.path.expanduser("~/code/jepsen/nodes")
 DEFAULT_TARBALL_URL = "https://downloads.yugabyte.com/yugabyte-1.3.1.0-linux.tar.gz"
 
 TESTS = [
-   "single-key-acid",
-   "multi-key-acid",
-   "counter",  # There used to be "counter-inc" and "counter-inc-dec" previously.
-   "bank",
-   "set",
-   "set-index",
-   "long-fork"
+   "ycql/counter",
+   "ycql/set",
+   "ycql/set-index",
+   "ycql/bank",
+   "ycql/long-fork",
+   "ycql/single-key-acid",
+   "ycql/multi-key-acid",
+
+   "ysql/counter",
+   "ysql/set",
+   "ysql/bank",
+   "ysql/bank-multitable",
+   "ysql/long-fork",
+   "ysql/single-key-acid",
+   "ysql/multi-key-acid",
+   "ysql/append",
+   "ysql/default-value",
 ]
 NEMESES = [
     "none",
