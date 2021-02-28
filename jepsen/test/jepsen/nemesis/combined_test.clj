@@ -23,16 +23,35 @@
       ["n1"])))
 
 (deftest partition-package-gen-test
-  (let [pkg (partition-package {:faults   #{:partition}
-                                :interval 3/10
-                                :db       (first-primary-db)})
-        gen (gen/nemesis (gen/limit 5 (:generator pkg)))
-        test (assoc it/base-test
-                    :client     (it/ok-client)
-                    :nemesis    (it/info-nemesis)
-                    :generator  gen)
-        ; Interpreted
-        h   (util/with-relative-time (interpreter/run! test))]
-    (is (= (take 10 (cycle [:start-partition :start-partition
-                            :stop-partition  :stop-partition]))
-           (map :f h)))))
+  (let [check-db (fn [db primaries?]
+                   (let [pkg (partition-package {:faults   #{:partition}
+                                                 :interval 3/100
+                                                 :db       db})
+                         n   10 ; Op count
+                         gen (gen/nemesis (gen/limit n (:generator pkg)))
+                         test (assoc it/base-test
+                                     :client     (it/ok-client)
+                                     :nemesis    (it/info-nemesis)
+                                     :generator  gen)
+                         ; Generate some ops
+                         h   (util/with-relative-time (interpreter/run! test))]
+                     ; Should be alternating start/stop ops
+                     (is (= (take (* 2 n)
+                                  (cycle [:start-partition :start-partition
+                                          :stop-partition  :stop-partition]))
+                            (map :f h)))
+                     ; Ensure we generate valid target values
+                     (let [targets (cond-> #{:one :minority-third :majority
+                                             :majorities-ring}
+                                     primaries? (conj :primaries))]
+                       (is (->> (filter (comp #{:stop-partition} :f) h)
+                                (map :value)
+                                (every? nil?)))
+                       (is (->> (filter (comp #{:start-partition} :f) h)
+                                (map :value)
+                                (every? targets))))))]
+    (testing "no primaries"
+      (check-db db/noop false))
+
+    (testing "primaries"
+      (check-db (first-primary-db) true))))

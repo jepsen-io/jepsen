@@ -190,7 +190,7 @@
 (defn partition-specs
   "All possible partition specs for a DB."
   [db]
-  (cond-> [nil :one :majority :majorities-ring]
+  (cond-> [:one :minority-third :majority :majorities-ring]
     (satisfies? db/Primary db) (conj :primaries)))
 
 (defn partition-nemesis
