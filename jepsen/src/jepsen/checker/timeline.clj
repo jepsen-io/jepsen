@@ -58,7 +58,24 @@
 
 (defn nemesis? [op] (= :nemesis (:process op)))
 
-(defn render-op    [op] (str "Op:\n" (pprint-str op)))
+(defn render-op-extra-keys
+  "Helper for render-op which renders keys we didn't explicitly print"
+  [op]
+  (->> (dissoc op :process :type :f :index :sub-index :value :time)
+       (map (fn [[k v]]
+              (str "\n " k " " (pr-str v))))
+       (str/join "")))
+
+(defn render-op
+  [op]
+  (str "Op:\n"
+       "{:process " (:process op)
+       "\n :type "  (:type op)
+       "\n :f "     (:f op)
+       "\n :index " (:index op)
+       (render-op-extra-keys op)
+       "\n :value " (:value op) "}"))
+
 (defn render-msg   [op] (str "Msg: " (pr-str (:value op))))
 (defn render-error [op] (str "Err: " (pr-str (:error op))))
 
