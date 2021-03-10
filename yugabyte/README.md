@@ -151,7 +151,7 @@ To run test with specific nemesis, for example `start-stop-master`:
 lein run test --nodes-file ~/code/jepsen/nodes --nemesis start-stop-master
 ```
 
-To run all tests one by one under each nemesis in infinite loop:
+Wrapper to manage log files seperately and summarize tests, for use in automated jenkins testing:
 ```bash
 ./run-jepsen.py
 ```

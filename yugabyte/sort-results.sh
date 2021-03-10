@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-readonly SAVED_DIR=$(pwd)
+readonly SAVED_DIR="$(pwd)"
 
 readonly SCRIPT_DIR="${0%/*}"
 readonly STORE_DIR="$SCRIPT_DIR/store"
@@ -16,8 +16,8 @@ cd "${0%/*}"
 
 find $STORE_DIR -name "jepsen.log" -printf "%T+\t%p\n" | sort | cut -f2 |
   while IFS= read -r log_path; do
-    rel_log_path=${log_path#$STORE_DIR/}
-    rel_dir_path=${rel_log_path%/jepsen.log}
+    rel_log_path="${log_path#$STORE_DIR/}"
+    rel_dir_path="${rel_log_path%/jepsen.log}"
     if grep -q ':valid? false' "$log_path"; then
       category="invalid"
     elif grep -q ':valid? :unknown' "$log_path"; then
