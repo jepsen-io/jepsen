@@ -7,6 +7,7 @@ readonly SAVED_DIR="$(pwd)"
 readonly SCRIPT_DIR="${0%/*}"
 readonly STORE_DIR="$SCRIPT_DIR/store"
 readonly SORTED_DIR="$SCRIPT_DIR/results-sorted"
+readonly SUMMARY_FILE="$SORTED_DIR/summary_${1:-jepsen}.txt"
 
 mkdir -p $STORE_DIR
 
@@ -42,4 +43,6 @@ find $STORE_DIR -name "jepsen.log" -printf "%T+\t%p\n" | sort | cut -f2 |
     mv "$STORE_DIR/$rel_dir_path" "$dest_dir"
     rm -f "$SORTED_DIR/latest"
     ln -sf "../$dest_dir" "$SORTED_DIR/latest"
+    # Report category in summary file.
+    echo "$category $rel_dir_path" >> "$SUMMARY_FILE"
   done
