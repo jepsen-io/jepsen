@@ -36,7 +36,7 @@ value in for the completion op.
 
 Now we need to take these operations and *apply* them to etcd. We'll use
 the [Verschlimmbessergung](https://github.com/aphyr/verschlimmbesserung)
-library to talk to etcd. We'll start by requireing Verschlimmbesserung, and
+library to talk to etcd. We'll start by requiring Verschlimmbesserung, and
 writing an empty implementation of Jepsen's Client protocol:
 
 ```clj
