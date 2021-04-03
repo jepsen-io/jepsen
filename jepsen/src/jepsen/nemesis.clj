@@ -528,7 +528,7 @@
       (let [plan (:value op)]
         (c/on-nodes test
                     (keys plan)
-                    (fn [node]
+                    (fn [_ node]
                       (let [{:keys [file drop]} (plan node)]
                         (assert (string? file))
                         (assert (integer? drop))
