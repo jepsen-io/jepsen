@@ -165,12 +165,12 @@
     (info node "setting up debian")
 
     (setup-hostfile!)
-
     (maybe-update!)
 
     (c/su
       ; Packages!
       (install [:apt-transport-https
+                :libzip4
                 :wget
                 :curl
                 :vim
@@ -188,11 +188,7 @@
                 :rsyslog
                 :logrotate
                 :dirmngr
-                :tcpdump])
-      (try+ (install [:libzip4])
-            (catch [:exit 100] _
-              ; Wrong package name; let's use the old one for jessie
-              (install [:libzip2]))))
+                :tcpdump]))
 
     (meh (net/heal! (:net test) test)))
 
