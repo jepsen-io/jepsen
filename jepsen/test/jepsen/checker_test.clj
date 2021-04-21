@@ -7,9 +7,12 @@
              [core :refer [ok-op invoke-op fail-op]]
              [op :as op]]
             [multiset.core :as multiset]
-            [jepsen.checker :refer :all]
-            [jepsen.checker.perf :as cp]
-            [jepsen.util :as util]))
+            [jepsen [checker :refer :all]
+                    [db :as db]
+                    [store :as store]
+                    [tests :as tests]
+                    [util :as util]]
+            [jepsen.checker.perf :as cp]))
 
 (deftest unhandled-exceptions-test
   (let [e1 (datafy (IllegalArgumentException. "bad args"))
@@ -676,3 +679,20 @@
                ;
                ; t 0  1   2  3  4    5   6  7  8    9
                (c [a0 a0' a1 r2 r2'1 a1' r2 r3 r3'1 r2'0])))))))
+
+(deftest log-file-pattern-test
+  (let [test (assoc tests/noop-test
+                    :name       "checker-log-file-pattern"
+                    :start-time 0
+                    :nodes      ["n1" "n2" "n3"])]
+    ; Create fake logfiles
+    (spit (store/path! test "n1" "db.log") "foo\nevil1\nevil2 more text\nbar")
+    (spit (store/path! test "n2" "db.log") "foo\nbar\nbaz evil\nfoo\n")
+    ; Check
+    (let [res (check (log-file-pattern "evil\\d+" "db.log")
+                     test nil nil)]
+      (is (= false (:valid? res)))
+      (is (= 2 (:count res)))
+      (is (= [{:node "n1", :line "evil1"}
+              {:node "n1", :line "evil2 more text"}]
+             (:matches res))))))

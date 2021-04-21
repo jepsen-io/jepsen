@@ -897,4 +897,5 @@
               (str "Shell command " (pr-str args)
                    " returned exit status " (:exit res) "\n"
                    (:out res) "\n"
-                   (:err res))))))
+                   (:err res))))
+    res))
