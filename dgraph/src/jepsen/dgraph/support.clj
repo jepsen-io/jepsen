@@ -79,19 +79,6 @@
             [:--peer (str (jepsen/primary test) ":" zero-internal-port)])))
   :started)
 
-(defn lru-opt
-  "Between 1.0.4, 1.0.5 and 20.11, Dgraph changed the name of their mandatory LRU
-  memory option and there's no option that works across build, so we have to
-  detect which version of the option name to use from the help in order to test
-  different builds."
-  []
-  (let [usage (c/exec (str dir "/" binary) :alpha :--help)
-        opt (re-find #"(--(lru|memory|cache)_mb)" usage)]
-    (assert+ opt RuntimeException
-             (str "Not sure whether to use --lru_mb, --memory_mb or --cache_mb with "
-                  "this dgraph build. It told me:\n\n" usage))
-    [(opt 1) 1024]))
-
 (defn start-alpha!
   "Launch dgraph data server on a node."
   [test node]
@@ -102,7 +89,6 @@
            :chdir   dir}
           binary
           :alpha
-          (lru-opt)
           :--expose_trace
           :--v 2
           :--telemetry "sentry=false"
