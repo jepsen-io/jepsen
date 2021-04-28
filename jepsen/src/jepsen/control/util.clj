@@ -14,24 +14,37 @@
   "Blocks until a local TCP port is bound. Options:
 
   :retry-interval   How long between retries, in ms. Default 1s.
+  :log-interval     How long between logging that we're still waiting, in ms.
+                    Default `retry-interval.
   :timeout          How long until giving up and throwing :type :timeout, in
                     ms. Default 60 seconds."
   ([port]
    (await-tcp-port port {}))
   ([port opts]
-   (let [deadline (+ (util/linear-time-nanos)
-                     (* 1e6 (:timeout opts 60000)))]
+   (let [retry-interval (:retry-interval opts 1000)
+         log-interval   (:log-interval opts retry-interval)
+         timeout        (:timeout opts 60000)
+         t0             (util/linear-time-nanos)
+         log-deadline   (atom (+ t0 (* 1e6 log-interval)))
+         deadline       (+ t0 (* 1e6 timeout))]
      (while (try+
               (exec :nc :-z :localhost port)
               nil
-              (catch [:type :jepsen.control/nonzero-exit
-                      :exit 1] _
-                (when (<= deadline (util/linear-time-nanos))
-                  (throw+ {:type :timeout
-                           :port port}))
-                (info "Waiting for port" port "...")
-                (Thread/sleep (:retry-interval opts 1000))
-                true))))))
+              (catch [:type :jepsen.control/nonzero-exit, :exit 1] _
+                (let [now (util/linear-time-nanos)]
+                  ; Are we out of time?
+                  (when (<= deadline now)
+                    (throw+ {:type :timeout
+                             :port port}))
+
+                  ; Should we log something?
+                  (when (<= @log-deadline now)
+                    (info "Waiting for port" port "...")
+                    (swap! log-deadline + (* log-interval 1e6)))
+
+                  ; Right, sleep and retry
+                  (Thread/sleep retry-interval)
+                  true)))))))
 
 (defn file?
   [filename]
@@ -64,6 +77,16 @@
          ls
          (map (partial str dir)))))
 
+(defn tmp-file!
+  "Creates a random, temporary file under tmp-dir-base, and returns its path."
+  []
+  (let [file (str tmp-dir-base "/" (rand-int Integer/MAX_VALUE))]
+    (if (exists? file)
+      (recur)
+      (do
+        (exec :touch file)
+        file))))
+
 (defn tmp-dir!
   "Creates a temporary directory under /tmp/jepsen and returns its path."
   []
@@ -73,6 +96,22 @@
       (do
         (exec :mkdir :-p dir)
         dir))))
+
+(defn write-file!
+  "Writes a string to a filename."
+  [string file]
+  (let [cmd (->> [:cat :> file]
+                 (map escape)
+                 (str/join " "))
+        action {:cmd cmd
+                :in  string}]
+    (-> action
+        wrap-cd
+        wrap-sudo
+        wrap-trace
+        ssh*
+        throw-on-nonzero-exit)
+    file))
 
 (def std-wget-opts
   "A list of standard options we pass to wget"

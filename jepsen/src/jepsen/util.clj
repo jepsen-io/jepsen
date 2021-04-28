@@ -5,14 +5,16 @@
             [clojure [string :as str]]
             [clojure.pprint :refer [pprint]]
             [clojure.walk :as walk]
-            [clojure.java.io :as io]
+            [clojure.java [io :as io]
+                          [shell :as shell]]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [bounded-future]]
             [fipp [edn :as fipp]
                   [engine :as fipp.engine]]
-            [knossos.history :as history])
+            [knossos.history :as history]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.lang.reflect Method)
            (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
@@ -327,7 +329,8 @@
   (System/nanoTime))
 
 (def ^:dynamic ^Long *relative-time-origin*
-  "A reference point for measuring time in a test run.")
+  "A reference point for measuring time in a test run."
+  nil)
 
 (defmacro with-relative-time
   "Binds *relative-time-origin* at the start of body."
@@ -884,3 +887,15 @@
     (if (= x x')
       x
       (recur f x'))))
+
+(defn sh
+  "A wrapper around clojure.java.shell's sh which throws on nonzero exit."
+  [& args]
+  (let [res (apply shell/sh args)]
+    (when-not (zero? (:exit res))
+      (throw+ (assoc res :type ::nonzero-exit)
+              (str "Shell command " (pr-str args)
+                   " returned exit status " (:exit res) "\n"
+                   (:out res) "\n"
+                   (:err res))))
+    res))

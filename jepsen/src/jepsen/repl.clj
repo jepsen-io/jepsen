@@ -3,11 +3,7 @@
   (:require [jepsen.store :as store]
             [jepsen.report :as report]))
 
-(defn last-test
+(defn latest-test
   "Returns the most recently run test"
-  [test-name]
-  (->> (store/tests test-name)
-       (sort-by key)
-       last
-       val
-       deref))
+  []
+  (store/latest))

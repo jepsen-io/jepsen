@@ -5,7 +5,9 @@ It is intended to be used by a CI tool or anyone with Docker who wants to try Je
 
 It contains all the jepsen dependencies and code. It uses [Docker
 Compose](https://github.com/docker/compose) to spin up the five containers used
-by Jepsen.
+by Jepsen. A script builds a `docker-compose.yml` file out of fragments in
+`template/`, because this is the future, and using `awk` to generate YAML to
+generate computers is *cloud native*.
 
 ## Quickstart
 
@@ -25,6 +27,8 @@ locally by running using `bin/web`. This can be a handy way to browse test
 results.
 
 ## Advanced
+
+You can change the number of DB nodes by running (e.g.) `bin/up -n 9`.
 
 If you need to log into a DB node (e.g. to debug a test), you can `ssh n1` (or n2, n3, ...) from inside the control node, or:
 

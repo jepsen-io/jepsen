@@ -207,7 +207,8 @@
         (do (Thread/sleep (+ 1000 (rand-int 1000)))
             (retry (dec tries)))
         (throw+ (merge {:type ::ssh-failed}
-                       (debug-data)))))))
+                       (debug-data))
+                e)))))
 
 (defn exec*
   "Like exec, but does not escape."
@@ -327,10 +328,15 @@
   `(binding [*trace* true]
      ~@body))
 
+(def clj-ssh-agent
+  "Acquiring an SSH agent is expensive and involves a global lock; we save the
+  agent and re-use it to speed things up."
+  (delay (ssh/ssh-agent {})))
+
 (defn clj-ssh-session
   "Opens a raw session to the given host."
   [host]
-  (let [agent (ssh/ssh-agent {})
+  (let [agent @clj-ssh-agent
         _     (when *private-key-path*
                 (ssh/add-identity agent
                                   {:private-key-path *private-key-path*}))]

@@ -1,22 +1,11 @@
 # How to set up nodes via LXC
-## Debian Testing:
 
-(refer to https://wiki.debian.org/LXC)
+## Debian Buster
 
-```sh
-aptitude install lxc bridge-utils ebtables libvirt-bin debootstrap dnsmasq
-```
-
-Add this line to /etc/fstab:
+(Refer to https://wiki.debian.org/LXC)
 
 ```
-cgroup  /sys/fs/cgroup  cgroup  defaults  0   0
-```
-
-Mount ze cgroup
-
-```
-mount /sys/fs/cgroup
+apt install lxc debootstrap bridge-utils libvirt-clients libvirt-daemon-system iptables ebtables dnsmasq-base libxml2-utils iproute2
 ```
 
 Apply google and kernel parameters until checkconfig passes:
@@ -25,149 +14,96 @@ Apply google and kernel parameters until checkconfig passes:
 lxc-checkconfig
 ```
 
-Create a VM or five
+Create VMs:
 
 ```
-lxc-create -n n1 -t debian -- --release jessie
-lxc-create -n n2 -t debian -- --release jessie
-lxc-create -n n3 -t debian -- --release jessie
-lxc-create -n n4 -t debian -- --release jessie
-lxc-create -n n5 -t debian -- --release jessie
+for i in {1..10}; do sudo lxc-create -n n$i -t debian -- --release buster; done
 ```
 
-Note the root passwords.
-
-Edit /var/lib/lxc/n1/config and friends, changing the network hwaddr to something unique. I suggest using sequential mac addresses for n1, n2, n3, ....
-
-```
-# Template used to create this container: /usr/share/lxc/templates/lxc-debian
-# Parameters passed to the template:
-# For additional config options, please look at lxc.conf(5)
-
-lxc.rootfs = /var/lib/lxc/n1/rootfs
-
-# Common configuration
-lxc.include = /usr/share/lxc/config/debian.common.conf
-
-# Container specific configuration
-lxc.mount = /var/lib/lxc/n1/fstab
-lxc.utsname = n1
-lxc.arch = amd64
-
-# Stuff to add:
-lxc.network.type = veth
-lxc.network.flags = up
-lxc.network.link = virbr0
-lxc.network.ipv4 = 0.0.0.0/24
-lxc.network.hwaddr = 00:1E:62:AA:AA:AA
-```
-
-Set up libvirt network, and assign MAC->IP bindings for the LXC node mac addrs
-
-```sh
-virsh net-edit default
-```
-
-```xml
-<network>
-  <name>default</name>
-  <uuid>08063db9-38f4-4c9c-8887-08000f13ce80</uuid>
-  <forward mode='nat'/>
-  <bridge name='virbr0' stp='on' delay='0'/>
-  <mac address='52:54:00:8e:29:d2'/>
-  <ip address='192.168.122.1' netmask='255.255.255.0'>
-    <dhcp>
-      <range start='192.168.122.11' end='192.168.122.100'/>
-      <host mac='00:1E:62:AA:AA:AA' name='n1' ip='192.168.122.11'/>
-      <host mac='00:1E:62:AA:AA:AB' name='n2' ip='192.168.122.12'/>
-      <host mac='00:1E:62:AA:AA:AC' name='n3' ip='192.168.122.13'/>
-      <host mac='00:1E:62:AA:AA:AD' name='n4' ip='192.168.122.14'/>
-      <host mac='00:1E:62:AA:AA:AE' name='n5' ip='192.168.122.15'/>
-    </dhcp>
-  </ip>
-</network>
-```
-
-Drop an entry in `/etc/resolv.conf` to read from the libvirt network dns:
+Add network configuration to each node. We assign each a sequential MAC
+address.
 
 ```
-nameserver 192.168.122.1  # Local libvirt dnsmasq
-nameserver 192.168.1.1    # Regular network resolver
+for i in {1..10}; do
+sudo cat >>/var/lib/lxc/n${i}/config <<EOF
+
+# Network config
+lxc.net.0.type = veth
+lxc.net.0.flags = up
+lxc.net.0.link = virbr0
+lxc.net.0.hwaddr = 00:1E:62:AA:AA:$(printf "%02x" $i)
+EOF
+done
 ```
 
-Kill the system default dnsmasq (if you have one), and start the network (which
-in turn will start a replacement dnsmasq with the LXC config. Then, start up
-all the nodes. I have this in a bash script called `jepsen-start`:
-
-```sh
-#!/bin/sh
-sudo service dnsmasq stop
-sudo virsh net-start default
-sudo lxc-start -d -n n1
-sudo lxc-start -d -n n2
-sudo lxc-start -d -n n3
-sudo lxc-start -d -n n4
-sudo lxc-start -d -n n5
-```
-
-Fire up each VM:
-
-```sh
-jepsen-start
-```
-
-Log into the containers, (may have to specify tty 0 to use console correctly) e.g.,:
-
-```sh
-lxc-console --name n1 -t 0
-```
-
-(Optional?) In the containers, update keys used by apt to verify packages:
-
-```sh
-apt-key update
-apt-get update
-```
-
-And set your root password--I use `root`/`root` by default in Jepsen.
-
-```sh
-passwd
-```
-
-Copy your SSH key (on host):
-
-```sh
-cat ~/.ssh/id_rsa.pub
-```
-
-and add it to root's `authorized_keys` (in containers):
-
-```sh
-apt-get install -y sudo vim
-mkdir ~/.ssh
-chmod 700 ~/.ssh
-touch ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-vim ~/.ssh/authorized_keys
-```
-
-Enable password-based login for root (used by jsch):
-```sh
-sed  -i 's,^PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config
-systemctl restart sshd
-apt install sudo
-```
-
-[Remove systemd](http://without-systemd.org/wiki/index.php/How_to_remove_systemd_from_a_Debian_jessie/sid_installation). After you install sysvinit-core and sysvinit-utils, you may have to restart the container with /lib/sysvinit/init argument to lxc-start before apt will allow you to remove systemd.
-
-Detach from the container with Control+a q, and repeat for the remaining nodes.
-
-On the control node, drop entries in `~/.ssh/config` for nodes:
+Set up the virsh network bindings mapping those MAC addresses to hostnames and
+IP addresses:
 
 ```
-Host n*
-User root
+for i in {1..10}; do
+  virsh net-update --current default add-last ip-dhcp-host "<host mac=\"00:1E:62:AA:AA:$(printf "%02x" $i)\" name=\"n${i}\" ip=\"192.168.122.1$(printf "%02d" $i)\"/>"
+done
+```
+
+Start the network, and set it to start at boot so the dnsmasq will be
+available.
+
+```
+virsh net-autostart default;
+virsh net-start default
+```
+
+If you configure resolv.conf by hand, add the libvirt local dnsmasq to
+resolv.conf:
+
+```
+echo -e "nameserver 192.168.122.1\n$(cat /etc/resolv.conf)" > /etc/resolv.conf
+```
+
+If you're letting dhclient manage it, then:
+
+```
+echo "prepend domain-name-servers 192.168.122.1;" >>/etc/dhcp/dhclient.conf
+sudo service networking restart
+```
+
+Slip your preferred SSH key into each node's `.authorized-keys`:
+
+```
+for i in {1..10}; do
+  mkdir -p /var/lib/lxc/n${i}/rootfs/root/.ssh
+  chmod 700 /var/lib/lxc/n${i}/rootfs/root/.ssh/
+  cp ~/.ssh/id_rsa.pub /var/lib/lxc/n${i}/rootfs/root/.ssh/authorized_keys
+  chmod 644 /var/lib/lxc/n${i}/rootfs/root/.ssh/authorized_keys
+done
+```
+
+And start the nodes:
+
+```
+for i in {1..10}; do
+  lxc-start -d -n n$i
+done
+```
+
+To stop them:
+
+```
+for i in {1..10}; do
+  lxc-stop -n n$i
+done
+```
+
+Reset the root passwords to whatever you like. Jepsen uses `root` by default,
+and allow root logins with passwords on each container. If you've got an SSH
+agent set up, Jepsen can use that instead.
+
+```
+for i in {1..10}; do
+  lxc-attach -n n${i} -- bash -c 'echo -e "root\nroot\n" | passwd root';
+  lxc-attach -n n${i} -- sed -i 's,^#\?PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config;
+  lxc-attach -n n${i} -- systemctl restart sshd;
+done
 ```
 
 Store the host keys unencrypted so that jsch can use them. If you already have
@@ -175,7 +111,15 @@ the host keys, they may be unreadable to Jepsen--remove them from .known_hosts
 and rescan.
 
 ```
-for n in $(seq 1 5); do ssh-keyscan -t rsa n$n; done >> ~/.ssh/known_hosts
+for n in {1..10}; do ssh-keyscan -t rsa n$n; done >> ~/.ssh/known_hosts
+```
+
+Install `sudo`:
+
+```sh
+for i in {1..10}; do
+  lxc-attach -n n${i} -- apt install -y sudo
+done
 ```
 
 And check that you can SSH to the nodes
@@ -183,8 +127,6 @@ And check that you can SSH to the nodes
 ```sh
 cssh n1 n2 n3 n4 n5
 ```
-
-And that should mostly do it, I think.
 
 ## Ubuntu 14.04 / trusty
 

@@ -1,0 +1,57 @@
+version: '3.7'
+x-node:
+  &default-node
+  build: ./node
+  env_file: ./secret/node.env
+  secrets:
+    - authorized_keys
+  privileged: true
+  tty: true
+  tmpfs:
+    - /run:size=100M
+    - /run/lock:size=100M
+  volumes:
+    # This now appears to break systemd, as of 2020/01/25, for reasons I don't
+    # understand?
+    # jepsen-n9  | Failed to create /init.scope control group: Read-only file system
+    # jepsen-n9  | Failed to allocate manager object: Read-only file system
+    # - "/sys/fs/cgroup:/sys/fs/cgroup:ro"
+    #
+    # Let's try it without ro
+    # - "/sys/fs/cgroup:/sys/fs/cgroup"
+    #
+    # OK, that ALSO breaks. But we can apparently leave out the cgroup mount
+    # entirely? I wonder what horrible things happen because of that...
+    - "jepsen-shared:/var/jepsen/shared"
+  networks:
+    - jepsen
+  ports:
+    - ${JEPSEN_PORT:-22}
+
+volumes:
+  jepsen-shared:
+
+secrets:
+  authorized_keys:
+    file: ./secret/authorized_keys
+
+networks:
+  jepsen:
+
+services:
+  control:
+    container_name: jepsen-control
+    hostname: control
+    depends_on:
+%%DEPS%%
+    build: ./control
+    env_file: ./secret/control.env
+    privileged: true
+    ports:
+      - "22"
+      - "8080"
+    networks:
+      - jepsen
+    volumes:
+      - "jepsen-shared:/var/jepsen/shared"
+%%DBS%%

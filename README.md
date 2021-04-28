@@ -180,3 +180,10 @@ this is because (I think) SSHJ tries to verify only the ed25519 key and
 ssh-keyscan -t ed25519 n1 >> ~/.ssh/known_hosts
 ...
 ```
+
+## Other Projects
+
+Additional projects that may be of interest:
+
+- [Jecci](https://github.com/michaelzenz/jecci): A wrapper framework around Jepsen
+- [Porcupine](https://github.com/anishathalye/porcupine): a linearizability checker written in Go.

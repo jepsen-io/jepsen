@@ -9,9 +9,12 @@ if [ ! -f ~/.ssh/known_hosts ]; then
     chmod 600 ~/.ssh/id_rsa
     echo $SSH_PUBLIC_KEY > ~/.ssh/id_rsa.pub
     echo > ~/.ssh/known_hosts
-    for f in $(seq 1 5); do
-      ssh-keyscan -t rsa n$f >> ~/.ssh/known_hosts
-    done
+    # Get nodes list
+    sort -V /var/jepsen/shared/nodes > ~/nodes
+    # Scan SSH keys
+    while read node; do
+      ssh-keyscan -t rsa $node >> ~/.ssh/known_hosts
+    done <~/nodes
 fi
 
 # TODO: assert that SSH_PRIVATE_KEY==~/.ssh/id_rsa

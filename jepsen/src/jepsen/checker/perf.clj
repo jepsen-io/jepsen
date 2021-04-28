@@ -299,7 +299,7 @@
   [plot nemeses]
   (->> nemeses
        (map (fn [n]
-              {:title     (:name n)
+              {:title     (str (:name n))
                :with      :lines
                :linecolor ['rgb (or (:fill-color n)
                                     (:color n)

@@ -17,9 +17,9 @@
             [clojure.stacktrace :as trace]
             [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
-            [clojure.pprint :refer [pprint]]
             [clojure.datafy :refer [datafy]]
             [dom-top.core :as dt :refer [assert+]]
+            [fipp.edn :refer [pprint]]
             [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
@@ -153,12 +153,14 @@
   logs in the event of JVM shutdown, so you can ctrl-c a test and get something
   useful."
   [test & body]
-  `(let [^Thread hook# (Thread.
-                         (bound-fn []
-                           (with-thread-name "Jepsen shutdown hook"
-                             (info "Downloading DB logs before JVM shutdown...")
-                             (snarf-logs! ~test)
-                             (store/update-symlinks! ~test))))]
+  `(let [^Runnable hook-fn#
+         (bound-fn []
+           (with-thread-name "Jepsen shutdown hook"
+             (info "Downloading DB logs before JVM shutdown...")
+             (snarf-logs! ~test)
+             (store/update-symlinks! ~test)))
+
+         ^Thread hook# (Thread. hook-fn#)]
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
        (let [res# (do ~@body)]
@@ -356,24 +358,23 @@
                          (let [test (->> sessions
                                          (map vector (:nodes test))
                                          (into {})
-                                         (assoc test :sessions))]
-                           ; Setup
-                           (with-os test
-                             (with-db test
-                               (util/with-relative-time
-                                 ; Run a single case
-                                 (let [test (assoc test :history
-                                                   (run-case! test))
-                                       ; Remove state
-                                       test (dissoc test
-                                                    :barrier
-                                                    :active-histories
-                                                    :sessions)]
-                                   ; TODO: move test analysis outside the
-                                   ; DB/ssh block.
-                                   (info "Run complete, writing")
-                                   (when (:name test) (store/save-1! test))
-                                   (analyze! test)))))))))]
+                                         (assoc test :sessions))
+                               ; Launch OS, DBs, evaluate test
+                               test (with-os test
+                                      (with-db test
+                                        (util/with-relative-time
+                                          ; Run a single case
+                                          (-> test
+                                              (assoc :history
+                                                     (run-case! test))
+                                              ; Remove state
+                                              (dissoc
+                                                :barrier
+                                                :active-histories
+                                                :sessions)))))]
+                           (info "Run complete, writing")
+                           (when (:name test) (store/save-1! test))
+                           (analyze! test)))))]
           (log-results test)))
       (catch Throwable t
         (warn t "Test crashed!")
