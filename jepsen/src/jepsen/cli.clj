@@ -495,13 +495,14 @@ Options:\n")
     :tests-fn     A function that receives the transformed option map and
                   constructs a sequence of tests to run."
   [opts]
-  (let [opt-fn  test-opt-fn
+  (let [opt-spec (merge-opt-specs test-opt-spec (:opt-spec opts))
+        opt-fn  test-opt-fn
         opt-fn  (if-let [f (:opt-fn opts)]
                   (comp f opt-fn)
                   opt-fn)
         opt-fn  (or (:opt-fn* opts) opt-fn)]
     {"test-all"
-     {:opt-spec (into test-opt-spec (:opt-spec opts))
+     {:opt-spec opt-spec
       :opt-fn   opt-fn
       :usage    "Runs all tests"
       :run      (fn run [{:keys [options]}]
