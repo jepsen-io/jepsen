@@ -78,11 +78,11 @@
 
 (defrecord K8sRemote [context namespace]
   Remote
-  (connect [this pod-name]
+  (connect [this conn-spec]
     (assoc this
-           :context (or-parameter "context" context)
+           :context   (or-parameter "context" context)
            :namespace (or-parameter "namespace" namespace)
-           :pod-name pod-name))
+           :pod-name  (:host conn-spec)))
   (disconnect! [this]
     (dissoc this :context :namespace :pod-name))
   (execute! [this action]

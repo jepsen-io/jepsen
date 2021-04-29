@@ -9,6 +9,12 @@
             [jepsen.util    :as util :refer [real-pmap with-thread-name]]
             [dom-top.core :refer [with-retry]]
             [jepsen.reconnect :as rc]
+            [jepsen.control [clj-ssh :as clj-ssh]
+                            [remote :refer [connect
+                                            disconnect!
+                                            execute!
+                                            upload!
+                                            download!]]]
             [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [warn info debug error]]
@@ -16,41 +22,9 @@
   (:import java.io.File
            (java.util.concurrent Semaphore)))
 
-(defprotocol Remote
-  (connect [this host]
-    "Set up the remote to work with a particular node. Returns a Remote which
-    is ready to accept actions via `execute!` and `upload!` and `download!`.")
-
-  (disconnect! [this]
-    "Disconnect a remote that has been connected to a host.")
-
-  (execute! [this action]
-    "Execute the specified action in a remote connected a host. Action is a map
-    with keys:
-
-      :cmd   A string command to execute.
-      :in    A string to provide for the command's stdin.
-
-    Should return the action map with additional keys:
-
-      :exit  The command's exit status.
-      :out   The stdout string.
-      :err   The stderr string.
-    ")
-
-  (upload! [this local-paths remote-path rest]
-    "Copy the specified local-path to the remote-path on the connected host.
-    The `rest` argument is a sequence of additional arguments to be
-    interpreted by the underlying implementation; for example, with a clj-ssh
-    remote, these args are the remainder args to `scp-to`.")
-
-  (download! [this remote-paths local-path rest]
-    "Copy the specified remote-paths to the local-path on the connected host.
-    The `rest` argument is a sequence of additional arguments to be
-    interpreted by the underlying implementation; for example, with a clj-ssh
-    remote, these args are the remainder args to `scp-from`."))
-
-(declare ssh)
+(def ssh
+  "The default SSH remote"
+  (clj-ssh/remote))
 
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
@@ -64,8 +38,25 @@
 (def ^:dynamic *port*     "SSH listening port"              22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
-(def ^:dynamic *remote* "The remote to use for remote control actions" ssh)
+(def ^:dynamic *remote*   "The remote to use for remote control actions" ssh)
 (def ^:dynamic *retries*  "How many times to retry conns"   5)
+
+(defn conn-spec
+  "jepsen.control originally stored everything--host, post, etc.--in separate
+  dynamic variables. Now, we store these things in a conn-spec map, which can
+  be passed to remotes without creating cyclic dependencies. This function
+  exists to support the transition from those variables to a conn-spec, and
+  constructs a conn spec from current var bindings."
+  []
+  {; TODO: pull this out of conn-spec and the clj-ssh remote, and create
+   ; a specialized remote for it.
+   :dummy                    *dummy*
+   :host                     *host*
+   :port                     *port*
+   :username                 *username*
+   :password                 *password*
+   :private-key-path         *private-key-path*
+   :strict-host-key-checking *strict-host-key-checking*})
 
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
@@ -329,83 +320,16 @@
   `(binding [*trace* true]
      ~@body))
 
-(def clj-ssh-agent
-  "Acquiring an SSH agent is expensive and involves a global lock; we save the
-  agent and re-use it to speed things up."
-  (delay (ssh/ssh-agent {})))
-
-(defn clj-ssh-session
-  "Opens a raw session to the given host."
-  [host]
-  (let [agent @clj-ssh-agent
-        _     (when *private-key-path*
-                (ssh/add-identity agent
-                                  {:private-key-path *private-key-path*}))]
-    (doto (ssh/session agent
-                       host
-                       {:username *username*
-                        :password *password*
-                        :port *port*
-                        :strict-host-key-checking *strict-host-key-checking*})
-      (ssh/connect))))
-
-
-(defrecord SSHRemote [concurrency-limit
-                      session
-                      semaphore]
-  Remote
-  (connect [this host]
-    (assoc this :session (if *dummy*
-                           {:dummy true}
-                           (try+
-                            (clj-ssh-session host)
-                            (catch com.jcraft.jsch.JSchException _
-                              (throw+ (merge (debug-data)
-                                             {:type ::session-error
-                                              :message "Error opening SSH session. Verify username, password, and node hostnames are correct."
-                                              :host host})))))
-           :semaphore (Semaphore. concurrency-limit true)))
-
-  (disconnect! [_]
-    (when-not (:dummy session) (ssh/disconnect session)))
-
-  (execute! [_ action]
-    (when-not (:dummy session)
-      (.acquire semaphore)
-      (try
-        (ssh/ssh session action)
-        (finally
-          (.release semaphore)))))
-
-  (upload! [_ local-paths remote-path rest]
-    (when-not (:dummy session)
-      (apply ssh/scp-to session local-paths remote-path rest)))
-
-  (download! [_ remote-paths local-path rest]
-    (when-not (:dummy session)
-      (apply ssh/scp-from session remote-paths local-path rest))))
-
-(def concurrency-limit
-  "OpenSSH has a standard limit of 10 concurrent channels per connection.
-  However, commands run in quick succession with 10 concurrent *also* seem to
-  blow out the channel limit--perhaps there's an asynchronous channel teardown
-  process. We set the limit a bit lower here. This is experimentally determined
-  for clj-ssh by running jepsen.control-test's integration test... <sigh>"
-  8)
-
-(def ssh
-  "A remote that does things via clj-ssh."
-  (SSHRemote. concurrency-limit nil nil))
-
 (defn session
   "Wraps control session in a wrapper for reconnection."
   [host]
-  (let [remote *remote*]
+  (let [remote *remote*
+        conn-spec (assoc (conn-spec) :host host)]
     (rc/open!
-     (rc/wrapper {:open  (fn [] (connect remote host))
-                  :name  [:control host]
-                  :close disconnect!
-                  :log?  true}))))
+      (rc/wrapper {:open  (fn [] (connect remote conn-spec))
+                   :name  [:control host]
+                   :close disconnect!
+                   :log?  true}))))
 
 (defn disconnect
   "Close a session"
@@ -427,6 +351,8 @@
   :private-key-path
   :strict-host-key-checking"
   [ssh & body]
+  ; TODO: move this into a single *conn-spec* variable. Some external code
+  ; reads *host*, so we're not doing this just yet.
   `(binding [*dummy*            (get ~ssh :dummy?           *dummy*)
              *username*         (get ~ssh :username         *username*)
              *password*         (get ~ssh :password         *password*)
@@ -438,9 +364,9 @@
 
 (defmacro with-session
   "Binds a host and session and evaluates body. Does not open or close session;
-  this is just for the namespace dynamics state."
+  this is just for the namespace dynamic state."
   [host session & body]
-  `(binding [*host*    (name ~host)
+  `(binding [*host*    ~host
              *session* ~session]
      ~@body))
 

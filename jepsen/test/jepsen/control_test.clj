@@ -6,7 +6,8 @@
             [jepsen [control :as c]
                     [common-test :refer [quiet-logging]]
                     [util :refer [contains-many? real-pmap]]]
-            [jepsen.control.sshj :as sshj]
+            [jepsen.control [sshj    :as sshj]
+                            [clj-ssh :as clj-ssh]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
@@ -95,7 +96,7 @@
 
 (deftest ^:integration ssh-remote-test
   (info :clj-ssh)
-  (test-remote c/ssh))
+  (test-remote (clj-ssh/remote)))
 
 (deftest ^:integration sshj-remote-test
   (info :sshj)

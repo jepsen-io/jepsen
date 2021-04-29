@@ -3,7 +3,7 @@
   jepsen.control's use of clj-ssh with this instead."
   (:require [byte-streams :as bs]
             [clojure.tools.logging :refer [info warn]]
-            [jepsen [control :as c]]
+            [jepsen.control.remote :as remote]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (com.jcraft.jsch.agentproxy AgentProxy
                                        ConnectorFactory)
@@ -35,47 +35,46 @@
   "Tries a bunch of ways to authenticate an SSHClient. We start with the given
   key file, if provided, then fall back to general public keys, then fall back
   to username/password."
-  [^SSHClient c]
+  [^SSHClient c {:keys [username password private-key-path] :as conn-spec}]
   (or ; Try given key
-      (when-let [k c/*private-key-path*]
-        (.authPublickey c c/*username* (into-array [k]))
+      (when-let [k private-key-path]
+        (.authPublickey c username (into-array [k]))
         true)
 
       ; Try agent
       (try
         (let [agent-proxy (agent-proxy)
               methods (auth-methods agent-proxy)]
-          (.auth c c/*username* methods)
+          (.auth c username methods)
           true)
         (catch UserAuthException e
           false))
 
       ; Fall back to standard id_rsa/id_dsa keys
-      (try (.authPublickey c ^String c/*username*)
+      (try (.authPublickey c ^String username)
            true
            (catch UserAuthException e
              false))
 
       ; OK, standard keys didn't work, try username+password
-      (.authPassword c c/*username* c/*password*)))
+      (.authPassword c username password)))
 
 (defrecord SSHJRemote [concurrency-limit
                        ^SSHClient client
                        ^Semaphore semaphore]
-  jepsen.control/Remote
-  (connect [this host]
+  remote/Remote
+  (connect [this conn-spec]
     (try+ (let [c (doto (SSHClient.)
                     (.loadKnownHosts)
-                    (.connect host c/*port*)
-                    auth!)]
+                    (.connect (:host conn-spec) (:port conn-spec))
+                    (auth! conn-spec))]
             (assoc this
                    :client c
                    :semaphore (Semaphore. concurrency-limit true)))
           (catch Exception e
-            (throw+ (assoc (c/debug-data)
+            (throw+ (assoc conn-spec
                            :type    :jepsen.control/session-error
-                           :message "Error opening SSH session. Verify username, password, and node hostnames are correct."
-                           :host    host)))))
+                           :message "Error opening SSH session. Verify username, password, and node hostnames are correct.")))))
 
   (disconnect! [this]
     (when-let [c client]

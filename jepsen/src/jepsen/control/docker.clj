@@ -1,8 +1,10 @@
 (ns jepsen.control.docker
-  "The recommended way is to use SSH to setup and teardown databases. It's however
-  sometimes conveniet to be able to setup and teardown the databases using
-  `docker exec` and `docker cp` instead, which is what this namespace helps you
-  do. Use at your own risk, this is an unsupported way of running Jepsen."
+  "The recommended way is to use SSH to setup and teardown databases. It's
+  however sometimes conveniet to be able to setup and teardown the databases
+  using `docker exec` and `docker cp` instead, which is what this namespace
+  helps you do.
+
+  Use at your own risk, this is an unsupported way of running Jepsen."
   (:require [clojure.string :as str]
             [clojure.java.shell :refer [sh]]
             [slingshot.slingshot :refer [throw+]]
@@ -11,9 +13,9 @@
 
 (defn resolve-container-id
   "Takes a host, e.g. `localhost:30404`, and resolves the Docker container id
-  exposing that port. Due to a bug in
-  Docker (https://github.com/moby/moby/pull/40442) this is more difficult than
-  it should be."
+  exposing that port. Due to a bug in Docker
+  (https://github.com/moby/moby/pull/40442) this is more difficult than it
+  should be."
   [host]
   (if-let [[_address port] (str/split host #":")]
     (let [ps (:out (sh "docker" "ps"))
@@ -74,8 +76,8 @@
 
 (defrecord DockerRemote [container-id]
   Remote
-  (connect [this host]
-    (assoc this :container-id (resolve-container-id host)))
+  (connect [this conn-spec]
+    (assoc this :container-id (resolve-container-id (:host conn-spec))))
   (disconnect! [this]
     (dissoc this :container-id))
   (execute! [this action]
