@@ -5,7 +5,6 @@
 
   Note that a whole bunch of this namespace refers to things as 'ssh',
   although they really can apply to any remote, not just SSH."
-  (:import java.io.File)
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap with-thread-name]]
             [dom-top.core :refer [with-retry]]
@@ -13,7 +12,9 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [warn info debug error]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import java.io.File
+           (java.util.concurrent Semaphore)))
 
 (defprotocol Remote
   (connect [this host]
@@ -349,7 +350,9 @@
       (ssh/connect))))
 
 
-(defrecord SSHRemote [session]
+(defrecord SSHRemote [concurrency-limit
+                      session
+                      semaphore]
   Remote
   (connect [this host]
     (assoc this :session (if *dummy*
@@ -360,13 +363,19 @@
                               (throw+ (merge (debug-data)
                                              {:type ::session-error
                                               :message "Error opening SSH session. Verify username, password, and node hostnames are correct."
-                                              :host host})))))))
+                                              :host host})))))
+           :semaphore (Semaphore. concurrency-limit true)))
 
   (disconnect! [_]
     (when-not (:dummy session) (ssh/disconnect session)))
 
   (execute! [_ action]
-    (when-not (:dummy session) (ssh/ssh session action)))
+    (when-not (:dummy session)
+      (.acquire semaphore)
+      (try
+        (ssh/ssh session action)
+        (finally
+          (.release semaphore)))))
 
   (upload! [_ local-paths remote-path rest]
     (when-not (:dummy session)
@@ -376,7 +385,17 @@
     (when-not (:dummy session)
       (apply ssh/scp-from session remote-paths local-path rest))))
 
-(def ssh "A remote that does things via clj-ssh." (SSHRemote. nil))
+(def concurrency-limit
+  "OpenSSH has a standard limit of 10 concurrent channels per connection.
+  However, commands run in quick succession with 10 concurrent *also* seem to
+  blow out the channel limit--perhaps there's an asynchronous channel teardown
+  process. We set the limit a bit lower here. This is experimentally determined
+  for clj-ssh by running jepsen.control-test's integration test... <sigh>"
+  8)
+
+(def ssh
+  "A remote that does things via clj-ssh."
+  (SSHRemote. concurrency-limit nil nil))
 
 (defn session
   "Wraps control session in a wrapper for reconnection."
