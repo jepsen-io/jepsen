@@ -84,7 +84,12 @@
     (if (exists? file)
       (recur)
       (do
-        (exec :touch file)
+        (try+
+          (exec :touch file)
+          (catch [:exit 1] _
+            ; Parent dir might not exist
+            (exec :mkdir :-p tmp-dir-base)
+            (exec :touch file)))
         file))))
 
 (defn tmp-dir!
