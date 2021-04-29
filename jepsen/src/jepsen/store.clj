@@ -418,11 +418,14 @@
 
 (def default-logging-overrides
   "Logging overrides that we apply by default"
-  {"clj-libssh2.session"         :warn
-   "clj-libssh2.authentication"  :warn
-   "clj-libssh2.known-hosts"     :warn
-   "clj-libssh2.ssh"             :warn
-   "clj-libssh2.channel"         :warn})
+  {"net.schmizz.sshj.transport.random.JCERandom"               :warn
+   "net.schmizz.sshj.transport.TransportImpl"                  :warn
+   "net.schmizz.sshj.connection.channel.direct.SessionChannel" :warn
+   "clj-libssh2.session"                                       :warn
+   "clj-libssh2.authentication"                                :warn
+   "clj-libssh2.known-hosts"                                   :warn
+   "clj-libssh2.ssh"                                           :warn
+   "clj-libssh2.channel"                                       :warn})
 
 (defn start-logging!
   "Starts logging to a file in the test's directory. Also updates current

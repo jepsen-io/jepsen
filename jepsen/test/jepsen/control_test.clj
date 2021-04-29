@@ -95,9 +95,9 @@
 
 
 (deftest ^:integration ssh-remote-test
-  (info :clj-ssh)
+  ;(info :clj-ssh)
   (test-remote (clj-ssh/remote)))
 
 (deftest ^:integration sshj-remote-test
-  (info :sshj)
+  ;(info :sshj)
   (test-remote (sshj/remote)))
