@@ -6,10 +6,10 @@
   of running Jepsen."
   (:require [clojure.java.shell :refer [sh]]
             [slingshot.slingshot :refer [throw+]]
+            [jepsen.control.remote :as remote]
             [jepsen.control :as c]
-            [clojure.string :refer [split-lines, trim]]
-            [clojure.tools.logging :refer [info]])
-  (:import (jepsen.control Remote)))
+            [clojure.string :refer [split-lines trim]]
+            [clojure.tools.logging :refer [info]]))
 
 (defn exec
   "Execute a shell command on a pod."
@@ -77,7 +77,7 @@
   (if v (str "--" p "=" (c/escape v)) ""))
 
 (defrecord K8sRemote [context namespace]
-  Remote
+  remote/Remote
   (connect [this conn-spec]
     (assoc this
            :context   (or-parameter "context" context)

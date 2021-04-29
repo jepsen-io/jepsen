@@ -8,8 +8,8 @@
   (:require [clojure.string :as str]
             [clojure.java.shell :refer [sh]]
             [slingshot.slingshot :refer [throw+]]
-            [jepsen.control :as c])
-  (:import (jepsen.control Remote)))
+            [jepsen.control.remote :as remote]
+            [jepsen.control :as c]))
 
 (defn resolve-container-id
   "Takes a host, e.g. `localhost:30404`, and resolves the Docker container id
@@ -75,7 +75,7 @@
          (unwrap-result ::copy-failed))))
 
 (defrecord DockerRemote [container-id]
-  Remote
+  remote/Remote
   (connect [this conn-spec]
     (assoc this :container-id (resolve-container-id (:host conn-spec))))
   (disconnect! [this]
