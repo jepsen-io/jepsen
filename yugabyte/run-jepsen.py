@@ -237,6 +237,10 @@ def parse_args():
         '--nemeses',
         default=','.join(NEMESES),
         help='Comma-seperated list of nemeses. Default: ' + ','.join(NEMESES))
+    parser.add_argument(
+        '--iterations',
+        type=int,
+        help='Run each workload repeatedly for this many iterations.')
     return parser.parse_args()
 
 
@@ -273,92 +277,106 @@ def main():
     num_non_zero_exit_code = 0
 
     not_good_tests = []
+    lein_cmd = " ".join(["lein run test",
+                         "--os debian",
+                         "--url " + args.url,
+                         "--nemesis " + nemeses,
+                         "--concurrency " + args.concurrency
+                        ])
+    if args.iterations:
+        lein_cmd += " --test-count 1"
+        iteration_cnt = args.iterations
+    else:
+        iteration_cnt = 1
 
     for test in args.workloads.split(','):
-        total_elapsed_time_sec = time.time() - start_time
-        if args.max_time_sec is not None and total_elapsed_time_sec > args.max_time_sec:
+        for iteration in range(iteration_cnt):
+            total_elapsed_time_sec = time.time() - start_time
+            if args.max_time_sec is not None and total_elapsed_time_sec > args.max_time_sec:
+                logging.info(
+                    "Elapsed time is %.1f seconds, it has exceeded the max allowed time %.1f, "
+                    "stopping", total_elapsed_time_sec, args.max_time_sec)
+                break
+
+            test_index += 1
+            test_description_str = "workload " + test + ", nemesis " + nemeses
             logging.info(
-                "Elapsed time is %.1f seconds, it has exceeded the max allowed time %.1f, "
-                "stopping", total_elapsed_time_sec, args.max_time_sec)
-            break
-
-        test_index += 1
-        test_description_str = "workload " + test + ", nemesis " + nemeses
-        logging.info(
-                "\n%s\nStarting test run #%d - %s\n%s",
-                "=" * 80,
-                test_index,
-                test_description_str,
-                "=" * 80)
-        test_start_time_sec = time.time()
-        if '/set' in test:
-            test_run_time_limit_no_analysis_sec = SINGLE_TEST_RUN_TIME_FOR_SET_TEST
-        else:
-            test_run_time_limit_no_analysis_sec = SINGLE_TEST_RUN_TIME
-        result = run_cmd(
-            " ".join([
-                "lein run test",
-                "--os debian",
-                "--url " + args.url,
-                "--workload " + test,
-                "--nemesis " + nemeses,
-                "--concurrency " + args.concurrency,
-                "--time-limit " + str(test_run_time_limit_no_analysis_sec)
-            ]),
-            timeout=TEST_AND_ANALYSIS_TIMEOUT_SEC,
-            exit_on_error=False,
-            log_name_prefix="{}_nemesis_{}".format(test.replace('/','-'), nemeses),
-            num_lines_to_show=30
-        )
-
-        test_elapsed_time_sec = time.time() - test_start_time_sec
-        if result.timed_out:
-            jepsen_log_file = os.path.join(STORE_DIR, 'current', 'jepsen.log')
-            num_timed_out_tests += 1
-            logging.info("Test timed out. Updating the log at %s", jepsen_log_file)
-            if os.path.exists(jepsen_log_file):
-                msg = "Test run timed out!"
-                logging.info(msg)
-                with open(jepsen_log_file, "a") as f:
-                    f.write(msg)
+                    "\n%s\nStarting test run #%d - %s\n%s",
+                    "=" * 80,
+                    test_index,
+                    test_description_str,
+                    "=" * 80)
+            test_start_time_sec = time.time()
+            if '/set' in test:
+                test_run_time_limit_no_analysis_sec = SINGLE_TEST_RUN_TIME_FOR_SET_TEST
             else:
-                logging.error("File %s does not exist!", jepsen_log_file)
+                test_run_time_limit_no_analysis_sec = SINGLE_TEST_RUN_TIME
+            full_cmd = lein_cmd + \
+                       " --time-limit " + str(test_run_time_limit_no_analysis_sec) + \
+                       " --workload " + test
+            result = run_cmd(
+                full_cmd,
+                timeout=TEST_AND_ANALYSIS_TIMEOUT_SEC,
+                exit_on_error=False,
+                log_name_prefix="{}_nemesis_{}_{}".format(test.replace('/','-'),
+                                                          nemeses, test_index),
+                num_lines_to_show=30
+            )
 
-        logging.info(
-                "Test run #%d: elapsed_time=%.1f, returncode=%d, everything_looks_good=%s",
-                test_index, test_elapsed_time_sec, result.returncode,
-                result.everything_looks_good)
-        if result.everything_looks_good:
-            num_everything_looks_good += 1
+            test_elapsed_time_sec = time.time() - test_start_time_sec
+            if result.timed_out:
+                jepsen_log_file = os.path.join(STORE_DIR, 'current', 'jepsen.log')
+                num_timed_out_tests += 1
+                logging.info("Test timed out. Updating the log at %s", jepsen_log_file)
+                if os.path.exists(jepsen_log_file):
+                    msg = "Test run timed out!"
+                    logging.info(msg)
+                    with open(jepsen_log_file, "a") as f:
+                        f.write(msg)
+                else:
+                    logging.error("File %s does not exist!", jepsen_log_file)
+
+            logging.info(
+                    "Test run #%d: elapsed_time=%.1f, returncode=%d, everything_looks_good=%s",
+                    test_index, test_elapsed_time_sec, result.returncode,
+                    result.everything_looks_good)
+            if result.everything_looks_good:
+                num_everything_looks_good += 1
+            else:
+                num_not_everything_looks_good += 1
+                not_good_tests.append(test_description_str)
+            if result.returncode == 0:
+                num_zero_exit_code += 1
+            else:
+                num_non_zero_exit_code += 1
+
+            run_cmd(SORT_RESULTS_SH + " " + nemeses)
+
+            logging.info(
+                    "\n%s\nFinished test run #%d (%s)\n%s",
+                    "=" * 80, test_index, test_description_str, "=" * 80)
+
+            num_tests_run += 1
+            total_test_time_sec += test_elapsed_time_sec
+
+            total_elapsed_time_sec = time.time() - start_time
+            logging.info("Finished running %d tests.", num_tests_run)
+            logging.info("    %d okay, %d problems (%d timed-out)",
+                num_everything_looks_good, num_not_everything_looks_good, num_timed_out_tests)
+            logging.info("    %d tests (out of %d total) returned non-zero exit code",
+                num_non_zero_exit_code, num_tests_run)
+            logging.info("Elapsed time: %.1f sec, test time: %.1f sec, avg test time: %.1f sec", 
+                total_elapsed_time_sec, total_test_time_sec,
+                total_test_time_sec / num_tests_run)
+            if not_good_tests:
+                logging.info("Tests where something does not look good:\n    %s",
+                             "\n    ".join(not_good_tests))
         else:
-            num_not_everything_looks_good += 1
-            not_good_tests.append(test_description_str)
-        if result.returncode == 0:
-            num_zero_exit_code += 1
-        else:
-            num_non_zero_exit_code += 1
+            # Next workload
+            continue
+        # Inner loop broken, skip remaining workloads
+        break
 
-        run_cmd(SORT_RESULTS_SH + " " + nemeses)
-
-        logging.info(
-                "\n%s\nFinished test run #%d (%s)\n%s",
-                "=" * 80, test_index, test_description_str, "=" * 80)
-
-        num_tests_run += 1
-        total_test_time_sec += test_elapsed_time_sec
-
-        total_elapsed_time_sec = time.time() - start_time
-        logging.info("Finished running %d tests.", num_tests_run)
-        logging.info("    %d okay, %d problems (%d timed-out)",
-            num_everything_looks_good, num_not_everything_looks_good, num_timed_out_tests)
-        logging.info("    %d tests (out of %d total) returned non-zero exit code",
-            num_non_zero_exit_code, num_tests_run)
-        logging.info("Elapsed time: %.1f sec, test time: %.1f sec, avg test time: %.1f sec", 
-            total_elapsed_time_sec, total_test_time_sec,
-            total_test_time_sec / num_tests_run)
-        if not_good_tests:
-            logging.info("Tests where something does not look good:\n    %s",
-                         "\n    ".join(not_good_tests))
     if not_good_tests:
         exit(1)
     else:
