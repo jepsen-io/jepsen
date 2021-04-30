@@ -9,7 +9,9 @@
                                        ConnectorFactory)
            (com.jcraft.jsch.agentproxy.sshj AuthAgent)
            (net.schmizz.sshj SSHClient)
-           (net.schmizz.sshj.common IOUtils)
+           (net.schmizz.sshj.common IOUtils
+                                    Message
+                                    SSHPacket)
            (net.schmizz.sshj.connection.channel.direct Session)
            (net.schmizz.sshj.userauth UserAuthException)
            (net.schmizz.sshj.userauth.method AuthMethod)
@@ -59,6 +61,17 @@
       ; OK, standard keys didn't work, try username+password
       (.authPassword c username password)))
 
+(defn send-eof!
+  "There's a bug in SSHJ where it doesn't send an EOF when you close the
+  session's outputstream, which causes the remote command to hang indefinitely.
+  To work around this, we send an EOF message ourselves. I'm not at all sure
+  this is threadsafe; it might cause issues later."
+  [^SSHClient client, ^Session session]
+  (.. client
+      getTransport
+      (write (.. (SSHPacket. Message/CHANNEL_EOF)
+                 (putUInt32 (.getRecipient session))))))
+
 (defrecord SSHJRemote [concurrency-limit
                        ^SSHClient client
                        ^Semaphore semaphore]
@@ -85,17 +98,22 @@
     (.acquire semaphore)
     (try
       (with-open [session (.startSession client)]
-        (let [cmd (.exec session (:cmd action))]
-          ; Feed it input
-          (when-let [input (:in action)]
-            (let [stream (.getOutputStream cmd)]
-              (bs/transfer input stream)))
-          ; Wait on command
-          (.join cmd)
+        (let [cmd (.exec session (:cmd action))
+              ; Feed it input
+              _ (when-let [input (:in action)]
+                  (let [stream (.getOutputStream cmd)]
+                    (bs/transfer input stream)
+                    (send-eof! client session)
+                    (.close stream)))
+              ; Read output
+              out (.toString (IOUtils/readFully (.getInputStream cmd)))
+              err (.toString (IOUtils/readFully (.getErrorStream cmd)))
+              ; Wait on command
+              _ (.join cmd)]
           ; Return completion
           (assoc action
-                 :out   (.toString (IOUtils/readFully (.getInputStream cmd)))
-                 :err   (.toString (IOUtils/readFully (.getErrorStream cmd)))
+                 :out   out
+                 :err   err
                  ; There's also a .getExitErrorMessage that might be interesting
                  ; here?
                  :exit  (.getExitStatus cmd))))

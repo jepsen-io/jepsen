@@ -7,7 +7,8 @@
                     [common-test :refer [quiet-logging]]
                     [util :refer [contains-many? real-pmap]]]
             [jepsen.control [sshj    :as sshj]
-                            [clj-ssh :as clj-ssh]]
+                            [clj-ssh :as clj-ssh]
+                            [util    :as cu]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
@@ -66,6 +67,21 @@
                   (.delete tmp)))))
 
           (c/exec :rm :-f remote-path))
+
+        (testing "very basic stdin"
+          (let [string "hi"
+                res (-> {:cmd "cat", :in string}
+                        c/ssh*
+                        c/throw-on-nonzero-exit
+                        :out)]
+            (is (= string res))))
+
+        ;(testing "writing to file"
+        ;  (let [file "/tmp/jepsen/test/write-file-test"
+        ;        string "foo\nbar"]
+        ;    (c/exec :mkdir :-p "/tmp/jepsen/test")
+        ;    (cu/write-file! string file)
+        ;    (is (= string (c/exec :cat file)))))
 
         (testing "thread safety"
           (let [; Which nodes are we going to act over?

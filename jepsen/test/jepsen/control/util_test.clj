@@ -1,7 +1,8 @@
 (ns jepsen.control.util-test
   (:require [jepsen.control :as c]
             [slingshot.slingshot :refer [try+ throw+]]
-            [jepsen.control.util :as util]
+            [jepsen.control [util :as util]
+                            [sshj :as sshj]]
             [clojure.test :refer :all]
             [clojure.java.io :as io]))
 
@@ -24,7 +25,7 @@
           (util/install-archive! (str url) dest {:force? true})
           (assert-file-exists dest "etcd")
           (assert-file-cached url)))))
-  
+
   (testing "install-archive works with auth credentials"
     (let [dest "/tmp/test"
           url "ftp://speedtest.tele2.net/1KB.zip"]

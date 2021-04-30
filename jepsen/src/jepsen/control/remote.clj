@@ -3,9 +3,18 @@
   uploading files to nodes.")
 
 (defprotocol Remote
-  (connect [this host]
+  (connect [this conn-spec]
     "Set up the remote to work with a particular node. Returns a Remote which
-    is ready to accept actions via `execute!` and `upload!` and `download!`.")
+    is ready to accept actions via `execute!` and `upload!` and `download!`.
+    conn-spec is a map of:
+
+     {:host
+      :post
+      :username
+      :password
+      :private-key-path
+      :strict-host-key-checking}
+    ")
 
   (disconnect! [this]
     "Disconnect a remote that has been connected to a host.")
