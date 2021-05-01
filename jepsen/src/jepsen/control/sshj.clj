@@ -121,7 +121,6 @@
           (let [cmd (.exec session (:cmd action))
                 ; Feed it input
                 _ (when-let [input (:in action)]
-                    (info :input (pr-str input))
                     (let [stream (.getOutputStream cmd)]
                       (bs/transfer input stream)
                       (send-eof! client session)

@@ -418,7 +418,8 @@
 
 (def default-logging-overrides
   "Logging overrides that we apply by default"
-  {"net.schmizz.sshj.transport.random.JCERandom"               :warn
+  {"net.schmizz.concurrent.Promise"                            :fatal
+   "net.schmizz.sshj.transport.random.JCERandom"               :warn
    "net.schmizz.sshj.transport.TransportImpl"                  :warn
    "net.schmizz.sshj.connection.channel.direct.SessionChannel" :warn
    "clj-libssh2.session"                                       :warn
