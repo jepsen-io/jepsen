@@ -3,7 +3,7 @@
   jepsen.control's use of clj-ssh with this instead."
   (:require [byte-streams :as bs]
             [clojure.tools.logging :refer [info warn]]
-            [jepsen.control [remote :as remote]
+            [jepsen.control [core :as core]
                             [scp :as scp]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (com.jcraft.jsch.agentproxy AgentProxy
@@ -76,7 +76,7 @@
 (defrecord SSHJRemote [concurrency-limit
                        ^SSHClient client
                        ^Semaphore semaphore]
-  remote/Remote
+  core/Remote 
   (connect [this conn-spec]
     (try+ (let [c (doto (SSHClient.)
                     (.loadKnownHosts)

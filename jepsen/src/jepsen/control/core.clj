@@ -1,4 +1,4 @@
-(ns jepsen.control.remote
+(ns jepsen.control.core
   "Provides the base protocol for running commands on remote nodes, as well as
   common functions for constructing and evaluating shell commands."
   (:require [clojure [string :as str]]

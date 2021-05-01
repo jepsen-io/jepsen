@@ -10,18 +10,28 @@
             [dom-top.core :refer [with-retry]]
             [jepsen.reconnect :as rc]
             [jepsen.control [clj-ssh :as clj-ssh]
-                            [remote :as remote
+                            [core :as core
                              :refer [connect
                                      disconnect!
                                      execute!
                                      upload!
                                      download!]]]
+            [potemkin :refer [import-vars]]
             [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [warn info debug error]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import java.io.File
            (java.util.concurrent Semaphore)))
+
+; These used to be in jepsen.control, but have been moved to
+; jepsen.control.core as a part of the polymorphic Remote protocol work. We
+; preserve them here for backwards compatibility.
+(import-vars
+  [jepsen.control.core
+   lit
+   escape
+   throw-on-nonzero-exit])
 
 (def ssh
   "The default SSH remote"
@@ -80,8 +90,6 @@
    :private-key-path         *private-key-path*
    :strict-host-key-checking *strict-host-key-checking*})
 
-(def lit remote/lit)
-
 (def |
   "A literal pipe character."
   (lit "|"))
@@ -89,10 +97,6 @@
 (def &&
   "A literal &&"
   (lit "&&"))
-
-(def escape remote/escape)
-
-(def throw-on-nonzero-exit remote/throw-on-nonzero-exit)
 
 (defn wrap-sudo
   "Wraps command in a sudo subshell."
@@ -156,7 +160,7 @@
        wrap-sudo
        wrap-trace
        ssh*
-       remote/throw-on-nonzero-exit
+       core/throw-on-nonzero-exit
        just-stdout))
 
 (defn exec

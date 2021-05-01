@@ -1,7 +1,7 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
-            [jepsen.control.remote :as remote]
+            [jepsen.control.core :as core]
             [jepsen.util :as util :refer [meh name+]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
@@ -116,7 +116,7 @@
         wrap-sudo
         wrap-trace
         ssh*
-        remote/throw-on-nonzero-exit)
+        core/throw-on-nonzero-exit)
     file))
 
 (def std-wget-opts

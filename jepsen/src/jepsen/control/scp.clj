@@ -5,7 +5,7 @@
   (:require [clojure.string :as str]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util]
-            [jepsen.control.remote :as remote]
+            [jepsen.control.core :as core]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def tmp-dir
@@ -19,11 +19,11 @@
   control.remote, and get rid of this."
   [remote ctx cmd-args]
   (->> cmd-args
-       (map remote/escape)
+       (map core/escape)
        (str/join " ")
        (hash-map :cmd)
-       (remote/execute! remote ctx)
-       remote/throw-on-nonzero-exit))
+       (core/execute! remote ctx)
+       core/throw-on-nonzero-exit))
 
 (defmacro with-tmp-dir
   "Evaluates body. If a nonzero exit status occurs, forces the tmp dir to
@@ -74,17 +74,17 @@
        host ":" path))
 
 (defrecord Remote [cmd-remote conn-spec]
-  remote/Remote
+  core/Remote
   (connect [this conn-spec]
     (-> this
         (assoc :conn-spec conn-spec)
-        (update :cmd-remote remote/connect conn-spec)))
+        (update :cmd-remote core/connect conn-spec)))
 
   (disconnect! [this]
-    (update this :cmd-remote remote/disconnect!))
+    (update this :cmd-remote core/disconnect!))
 
   (execute! [this ctx action]
-    (remote/execute! cmd-remote ctx action))
+    (core/execute! cmd-remote ctx action))
 
   (upload! [this ctx srcs dest _]
     (let [sudo (:sudo ctx)]
@@ -99,7 +99,7 @@
         (with-tmp-file cmd-remote [tmp]
           (doseq [src (util/coll srcs)]
             ; Upload to tmpfile
-            (remote/upload! this {} src tmp nil)
+            (core/upload! this {} src tmp nil)
             ; Chown and move to dest, as root
             (exec! cmd-remote {:sudo "root"} [:chown sudo tmp])
             (exec! cmd-remote {:sudo "root"} [:mv tmp dest]))))))
@@ -121,7 +121,7 @@
             (if (try+ (exec! cmd-remote {} [:head :-n 1 src]) true
                       (catch [:exit 1] _                      false))
               ; We can directly download this file.
-              (remote/download! this {} src dest nil)
+              (core/download! this {} src dest nil)
               ; Nope; gotta copy. Try a hardlink?
               (do (try+ (exec! cmd-remote {:sudo "root"} [:ln :-L src tmp])
                         (catch [:exit 1] _
@@ -131,7 +131,7 @@
                   ; Make the tmpfile readable to us
                   (exec! cmd-remote {:sudo "root"} [:chown sudo tmp])
                   ; Download it
-                  (remote/download! this {} tmp dest nil)))))))))
+                  (core/download! this {} tmp dest nil)))))))))
 
 (defn remote
   "Takes a remote which can execute commands, and wraps it in a remote which

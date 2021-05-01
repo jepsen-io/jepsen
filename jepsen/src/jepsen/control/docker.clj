@@ -8,7 +8,7 @@
   (:require [clojure.string :as str]
             [clojure.java.shell :refer [sh]]
             [slingshot.slingshot :refer [throw+]]
-            [jepsen.control.remote :as remote]
+            [jepsen.control.core :as core]
             [jepsen.control :as c]))
 
 (defn resolve-container-id
@@ -75,7 +75,7 @@
          (unwrap-result ::copy-failed))))
 
 (defrecord DockerRemote [container-id]
-  remote/Remote
+  core/Remote
   (connect [this conn-spec]
     (assoc this :container-id (resolve-container-id (:host conn-spec))))
   (disconnect! [this]

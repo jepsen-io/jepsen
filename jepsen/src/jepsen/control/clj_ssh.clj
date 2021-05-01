@@ -2,7 +2,7 @@
   "A CLJ-SSH powered implementation of the Remote protocol."
   (:require [clojure.tools.logging :refer [info warn]]
             [clj-ssh.ssh :as ssh]
-            [jepsen.control [remote :as remote]
+            [jepsen.control [core :as core]
                             [scp :as scp]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent Semaphore)))
@@ -31,7 +31,7 @@
 (defrecord Remote [concurrency-limit
                    session
                    semaphore]
-  remote/Remote
+  core/Remote
   (connect [this conn-spec]
     (assert (map? conn-spec)
             (str "Expected a map for conn-spec, not a hostname as a string. Received: "

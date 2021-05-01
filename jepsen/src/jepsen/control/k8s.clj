@@ -6,7 +6,7 @@
   of running Jepsen."
   (:require [clojure.java.shell :refer [sh]]
             [slingshot.slingshot :refer [throw+]]
-            [jepsen.control.remote :as remote]
+            [jepsen.control.core :as core]
             [jepsen.control :as c]
             [clojure.string :refer [split-lines trim]]
             [clojure.tools.logging :refer [info]]))
@@ -77,7 +77,7 @@
   (if v (str "--" p "=" (c/escape v)) ""))
 
 (defrecord K8sRemote [context namespace]
-  remote/Remote
+  core/Remote
   (connect [this conn-spec]
     (assoc this
            :context   (or-parameter "context" context)
