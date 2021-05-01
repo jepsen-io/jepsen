@@ -3,6 +3,7 @@
   (:require [clojure.tools.logging :refer [info warn]]
             [clj-ssh.ssh :as ssh]
             [jepsen.control [core :as core]
+                            [retry :as retry]
                             [scp :as scp]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent Semaphore)))
@@ -27,8 +28,21 @@
                                      :strict-host-key-checking]))
       (ssh/connect))))
 
+(defmacro with-errors
+  "Takes a conn spec, a context map, and a body. Evals body, remapping clj-ssh
+  exceptions to :type :jepsen.control/ssh-failed."
+  [conn context & body]
+  `(try
+     ~@body
+     (catch com.jcraft.jsch.JSchException e#
+       (if (or (= "session is down" (.getMessage e#))
+               (= "Packet corrupt" (.getMessage e#)))
+         (throw+ (merge ~conn ~context {:type :jepsen.control/ssh-failed}))
+         (throw e#)))))
+
 ; TODO: pull out dummy logic into its own remote
 (defrecord Remote [concurrency-limit
+                   conn-spec
                    session
                    semaphore]
   core/Remote
@@ -36,34 +50,39 @@
     (assert (map? conn-spec)
             (str "Expected a map for conn-spec, not a hostname as a string. Received: "
                  (pr-str conn-spec)))
-    (assoc this :session (if (:dummy conn-spec)
-                           {:dummy true}
-                           (try+
-                            (clj-ssh-session conn-spec)
-                            (catch com.jcraft.jsch.JSchException _
-                              (throw+ (merge conn-spec
-                                             {:type :jepsen.control/session-error
-                                              :message "Error opening SSH session. Verify username, password, and node hostnames are correct."})))))
+    (assoc this
+           :conn-spec conn-spec
+           :session (if (:dummy conn-spec)
+                      {:dummy true}
+                      (try+
+                        (clj-ssh-session conn-spec)
+                        (catch com.jcraft.jsch.JSchException _
+                          (throw+ (merge conn-spec
+                                         {:type :jepsen.control/session-error
+                                          :message "Error opening SSH session. Verify username, password, and node hostnames are correct."})))))
            :semaphore (Semaphore. concurrency-limit true)))
 
   (disconnect! [_]
     (when-not (:dummy session) (ssh/disconnect session)))
 
   (execute! [_ ctx action]
-    (when-not (:dummy session)
-      (.acquire semaphore)
-      (try
-        (ssh/ssh session action)
-        (finally
-          (.release semaphore)))))
+    (with-errors conn-spec ctx
+      (when-not (:dummy session)
+        (.acquire semaphore)
+        (try
+          (ssh/ssh session action)
+          (finally
+            (.release semaphore))))))
 
   (upload! [_ ctx local-paths remote-path rest]
-    (when-not (:dummy session)
-      (apply ssh/scp-to session local-paths remote-path rest)))
+    (with-errors conn-spec ctx
+      (when-not (:dummy session)
+        (apply ssh/scp-to session local-paths remote-path rest))))
 
   (download! [_ ctx remote-paths local-path rest]
-    (when-not (:dummy session)
-      (apply ssh/scp-from session remote-paths local-path rest))))
+    (with-errors conn-spec ctx
+      (when-not (:dummy session)
+        (apply ssh/scp-from session remote-paths local-path rest)))))
 
 (def concurrency-limit
   "OpenSSH has a standard limit of 10 concurrent channels per connection.
@@ -76,5 +95,7 @@
 (defn remote
   "A remote that does things via clj-ssh."
   []
-  (scp/remote
-    (Remote. concurrency-limit nil nil)))
+  (-> (Remote. concurrency-limit nil nil nil)
+      ; We *can* use our own SCP, but shelling out is faster.
+      scp/remote
+      retry/remote))

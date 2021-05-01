@@ -7,8 +7,6 @@
   although they really can apply to any remote, not just SSH."
   (:require [clj-ssh.ssh    :as ssh]
             [jepsen.util    :as util :refer [real-pmap with-thread-name]]
-            [dom-top.core :refer [with-retry]]
-            [jepsen.reconnect :as rc]
             [jepsen.control [clj-ssh :as clj-ssh]
                             [core :as core
                              :refer [connect
@@ -130,25 +128,13 @@
   "Evaluates an SSH action against the current host. Retries packet corrupt
   errors."
   [action]
-  (with-retry [tries *retries*]
-    (when (nil? *session*)
-      (throw+ (merge {:type ::no-session-available
-                      :message "Unable to perform a control action because no session for this host is available."}
-                     (debug-data))))
-
-    (rc/with-conn [s *session*]
-      (assoc (execute! s (cmd-context) action)
-             :host   *host*
-             :action action))
-    (catch com.jcraft.jsch.JSchException e
-      (if (and (pos? tries)
-               (or (= "session is down" (.getMessage e))
-                   (= "Packet corrupt" (.getMessage e))))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (merge {:type ::ssh-failed}
-                       (debug-data))
-                e)))))
+  (when (nil? *session*)
+    (throw+ (merge {:type ::no-session-available
+                    :message "Unable to perform a control action because no session for this host is available."}
+                   (debug-data))))
+  (assoc (execute! *session* (cmd-context) action)
+         :host   *host*
+         :action action))
 
 (defn exec*
   "Like exec, but does not escape."
@@ -180,22 +166,12 @@
     x))
 
 (defn upload
-  "Copies local path(s) to remote node and returns the remote path.
-  Takes arguments for clj-ssh/scp-to."
+  "Copies local path(s) to remote node and returns the remote path."
   [& [local-paths remote-path & remaining]]
-  (with-retry [tries *retries*]
-    (rc/with-conn [s *session*]
-      (let [local-paths (map file->path (util/coll local-paths))]
-        (upload! s (cmd-context) local-paths remote-path remaining)
-        remote-path))
-    (catch com.jcraft.jsch.JSchException e
-      (if (and (pos? tries)
-               (or (= "session is down" (.getMessage e))
-                   (= "Packet corrupt" (.getMessage e))))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (merge {:type ::upload-failed}
-                       (debug-data)))))))
+  (let [s *session*
+        local-paths (map file->path (util/coll local-paths))]
+    (upload! s (cmd-context) local-paths remote-path remaining)
+    remote-path))
 
 (defn upload-resource!
   "Uploads a local JVM resource (as a string) to the given remote path."
@@ -209,27 +185,9 @@
           (.delete tmp-file))))))
 
 (defn download
-  "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from.
-  Retres failures."
+  "Copies remote paths to local node."
   [& [remote-paths local-path & remaining]]
-  (with-retry [tries *retries*]
-    (rc/with-conn [s *session*]
-      (download! s (cmd-context) remote-paths local-path remaining))
-    (catch clojure.lang.ExceptionInfo e
-      (if (and (pos? tries)
-               (re-find #"disconnect error" (.getMessage e)))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (assoc (debug-data)
-                       :type ::download-failed))))
-    (catch com.jcraft.jsch.JSchException e
-      (if (and (pos? tries)
-               (or (= "session is down" (.getMessage e))
-                   (= "Packet corrupt" (.getMessage e))))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (merge {:type ::download-failed}
-                       (debug-data)))))))
+  (download! *session* (cmd-context) remote-paths local-path remaining))
 
 (defn expand-path
   "Expands path relative to the current directory."
@@ -267,20 +225,14 @@
      ~@body))
 
 (defn session
-  "Wraps control session in a wrapper for reconnection."
+  "Returns a Remote bound to the given host."
   [host]
-  (let [remote *remote*
-        conn-spec (assoc (conn-spec) :host host)]
-    (rc/open!
-      (rc/wrapper {:open  (fn [] (connect remote conn-spec))
-                   :name  [:control host]
-                   :close disconnect!
-                   :log?  true}))))
+  (connect *remote* (assoc (conn-spec) :host host)))
 
 (defn disconnect
-  "Close a session"
-  [session]
-  (rc/close! session))
+  "Close a Remote session."
+  [remote]
+  (core/disconnect! remote))
 
 (defmacro with-remote
   "Takes a remote and evaluates body with that remote in that scope."

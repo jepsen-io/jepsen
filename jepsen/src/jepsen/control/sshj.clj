@@ -4,6 +4,7 @@
   (:require [byte-streams :as bs]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.control [core :as core]
+                            [retry :as retry]
                             [scp :as scp]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (com.jcraft.jsch.agentproxy AgentProxy
@@ -13,6 +14,8 @@
            (net.schmizz.sshj.common IOUtils
                                     Message
                                     SSHPacket)
+           (net.schmizz.sshj.connection ConnectionException)
+           (net.schmizz.sshj.connection.channel OpenFailException)
            (net.schmizz.sshj.connection.channel.direct Session)
            (net.schmizz.sshj.userauth UserAuthException)
            (net.schmizz.sshj.userauth.method AuthMethod)
@@ -73,16 +76,31 @@
       (write (.. (SSHPacket. Message/CHANNEL_EOF)
                  (putUInt32 (.getRecipient session))))))
 
+(defmacro with-errors
+  "Takes a conn spec, a context map, and a body. Evals body, remapping SSHJ
+  exceptions to :type :jepsen.control/ssh-failed."
+  [conn context & body]
+  `(try
+     ~@body
+     (catch ConnectionException e#
+       (throw+ (merge ~conn ~context {:type :jepsen.control/ssh-failed})
+               e#))
+     (catch OpenFailException e#
+       (throw+ (merge ~conn ~context {:type :jepsen.control/ssh-failed})
+               e#))))
+
 (defrecord SSHJRemote [concurrency-limit
+                       conn-spec
                        ^SSHClient client
                        ^Semaphore semaphore]
-  core/Remote 
+  core/Remote
   (connect [this conn-spec]
     (try+ (let [c (doto (SSHClient.)
                     (.loadKnownHosts)
                     (.connect (:host conn-spec) (:port conn-spec))
                     (auth! conn-spec))]
             (assoc this
+                   :conn-spec conn-spec
                    :client c
                    :semaphore (Semaphore. concurrency-limit true)))
           (catch Exception e
@@ -95,39 +113,43 @@
       (.close c)))
 
   (execute! [this ctx action]
-  ;  (info :permits (.availablePermits semaphore))
+    ;  (info :permits (.availablePermits semaphore))
     (.acquire semaphore)
-    (try
-      (with-open [session (.startSession client)]
-        (let [cmd (.exec session (:cmd action))
-              ; Feed it input
-              _ (when-let [input (:in action)]
-                  (let [stream (.getOutputStream cmd)]
-                    (bs/transfer input stream)
-                    (send-eof! client session)
-                    (.close stream)))
-              ; Read output
-              out (.toString (IOUtils/readFully (.getInputStream cmd)))
-              err (.toString (IOUtils/readFully (.getErrorStream cmd)))
-              ; Wait on command
-              _ (.join cmd)]
-          ; Return completion
-          (assoc action
-                 :out   out
-                 :err   err
-                 ; There's also a .getExitErrorMessage that might be interesting
-                 ; here?
-                 :exit  (.getExitStatus cmd))))
-      (finally
-        (.release semaphore))))
+    (with-errors conn-spec ctx
+      (try
+        (with-open [session (.startSession client)]
+          (let [cmd (.exec session (:cmd action))
+                ; Feed it input
+                _ (when-let [input (:in action)]
+                    (info :input (pr-str input))
+                    (let [stream (.getOutputStream cmd)]
+                      (bs/transfer input stream)
+                      (send-eof! client session)
+                      (.close stream)))
+                ; Read output
+                out (.toString (IOUtils/readFully (.getInputStream cmd)))
+                err (.toString (IOUtils/readFully (.getErrorStream cmd)))
+                ; Wait on command
+                _ (.join cmd)]
+            ; Return completion
+            (assoc action
+                   :out   out
+                   :err   err
+                   ; There's also a .getExitErrorMessage that might be
+                   ; interesting here?
+                   :exit  (.getExitStatus cmd))))
+        (finally
+          (.release semaphore)))))
 
   (upload! [this ctx local-paths remote-path more]
-    (with-open [sftp (.newSFTPClient client)]
-      (.put sftp (FileSystemFile. local-paths) remote-path)))
+    (with-errors conn-spec ctx
+      (with-open [sftp (.newSFTPClient client)]
+        (.put sftp (FileSystemFile. local-paths) remote-path))))
 
   (download! [this ctx remote-paths local-path more]
-    (with-open [sftp (.newSFTPClient client)]
-      (.get sftp remote-paths (FileSystemFile. local-path)))))
+    (with-errors conn-spec ctx
+      (with-open [sftp (.newSFTPClient client)]
+        (.get sftp remote-paths (FileSystemFile. local-path))))))
 
 (def concurrency-limit
   "OpenSSH has a standard limit of 10 concurrent channels per connection.
@@ -140,6 +162,7 @@
 (defn remote
   "Constructs an SSHJ remote."
   []
-  ; We *can* use our own SCP, but shelling out is faster.
-  (scp/remote
-    (SSHJRemote. concurrency-limit nil nil)))
+  (-> (SSHJRemote. concurrency-limit nil nil nil)
+      ; We *can* use our own SCP, but shelling out is faster.
+      scp/remote
+      retry/remote))
