@@ -141,12 +141,12 @@
         (finally
           (.release semaphore)))))
 
-  (upload! [this ctx local-paths remote-path more]
+  (upload! [this ctx local-paths remote-path _opts]
     (with-errors conn-spec ctx
       (with-open [sftp (.newSFTPClient client)]
         (.put sftp (FileSystemFile. local-paths) remote-path))))
 
-  (download! [this ctx remote-paths local-path more]
+  (download! [this ctx remote-paths local-path _opts]
     (with-errors conn-spec ctx
       (with-open [sftp (.newSFTPClient client)]
         (.get sftp remote-paths (FileSystemFile. local-path))))))

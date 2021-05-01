@@ -74,12 +74,12 @@
           (finally
             (.release semaphore))))))
 
-  (upload! [_ ctx local-paths remote-path rest]
+  (upload! [_ ctx local-paths remote-path _opts]
     (with-errors conn-spec ctx
       (when-not (:dummy session)
         (apply ssh/scp-to session local-paths remote-path rest))))
 
-  (download! [_ ctx remote-paths local-path rest]
+  (download! [_ ctx remote-paths local-path _opts]
     (with-errors conn-spec ctx
       (when-not (:dummy session)
         (apply ssh/scp-from session remote-paths local-path rest)))))

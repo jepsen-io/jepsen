@@ -87,9 +87,9 @@
     (dissoc this :context :namespace :pod-name))
   (execute! [this ctx action]
     (exec context namespace (:pod-name this) action))
-  (upload! [this ctx local-paths remote-path _rest]
+  (upload! [this ctx local-paths remote-path _opts]
     (cp-to context namespace (:pod-name this) local-paths remote-path))
-  (download! [this ctx remote-paths local-path _rest]
+  (download! [this ctx remote-paths local-path _opts]
     (cp-from context namespace (:pod-name this) remote-paths local-path)))
 
 (defn k8s

@@ -167,10 +167,10 @@
 
 (defn upload
   "Copies local path(s) to remote node and returns the remote path."
-  [& [local-paths remote-path & remaining]]
+  [local-paths remote-path]
   (let [s *session*
         local-paths (map file->path (util/coll local-paths))]
-    (upload! s (cmd-context) local-paths remote-path remaining)
+    (upload! s (cmd-context) local-paths remote-path {})
     remote-path))
 
 (defn upload-resource!
@@ -186,8 +186,8 @@
 
 (defn download
   "Copies remote paths to local node."
-  [& [remote-paths local-path & remaining]]
-  (download! *session* (cmd-context) remote-paths local-path remaining))
+  [remote-paths local-path]
+  (download! *session* (cmd-context) remote-paths local-path {}))
 
 (defn expand-path
   "Expands path relative to the current directory."

@@ -42,17 +42,19 @@
       :err   The stderr string.
     ")
 
-  (upload! [this context local-paths remote-path rest]
+  (upload! [this context local-paths remote-path opts]
     "Copy the specified local-path to the remote-path on the connected host.
-    The `rest` argument is a sequence of additional arguments to be
-    interpreted by the underlying implementation; for example, with a clj-ssh
-    remote, these args are the remainder args to `scp-to`.")
 
-  (download! [this context remote-paths local-path rest]
+    Opts is an option map. There are no defined options right now, but later we
+    might introduce some for e.g. recursive uploads, compression, etc. This is
+    also a place for Remote implementations to offer custom semantics.")
+
+  (download! [this context remote-paths local-path opts]
     "Copy the specified remote-paths to the local-path on the connected host.
-    The `rest` argument is a sequence of additional arguments to be
-    interpreted by the underlying implementation; for example, with a clj-ssh
-    remote, these args are the remainder args to `scp-from`."))
+
+    Opts is an option map. There are no defined options right now, but later we
+    might introduce some for e.g. recursive uploads, compression, etc. This is
+    also a place for Remote implementations to offer custom semantics."))
 
 (defrecord Literal [string])
 

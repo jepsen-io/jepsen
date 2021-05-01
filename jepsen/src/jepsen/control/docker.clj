@@ -82,9 +82,9 @@
     (dissoc this :container-id))
   (execute! [this ctx action]
     (exec container-id action))
-  (upload! [this ctx local-paths remote-path _rest]
+  (upload! [this ctx local-paths remote-path _opts]
     (cp-to container-id local-paths remote-path))
-  (download! [this ctx remote-paths local-path _rest]
+  (download! [this ctx remote-paths local-path _opts]
     (cp-from container-id remote-paths local-path)))
 
 (def docker
