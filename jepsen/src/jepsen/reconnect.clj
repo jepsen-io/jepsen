@@ -19,7 +19,8 @@
   :name     An optional name for this wrapper (for debugging logs)
   :open     A function which generates a new conn
   :close    A function which closes a conn
-  :log?     Whether to log reconnect messages"
+  :log?     Whether to log reconnect messages. A special value, minimal
+            logs only a single line rather than a full stacktrace."
   [options]
   (assert (ifn? (:open options)))
   (assert (ifn? (:close options)))
@@ -113,10 +114,14 @@
                 (with-write-lock ~wrapper
                   (when (identical? ~c (conn ~wrapper))
                     ; This is the same conn that yielded the error
-                    (when (:log? ~wrapper)
-                      (warn e# (str "Encountered error with conn "
-                                 (pr-str (:name ~wrapper))
-                                 "; reopening")))
+                    (cond (= :minimal (:log? ~wrapper))
+                          (warn (str "Encountered error with conn "
+                                     (pr-str (:name ~wrapper))
+                                     "; reopening."))
+                          (:log? ~wrapper)
+                          (warn e# (str "Encountered error with conn "
+                                        (pr-str (:name ~wrapper))
+                                        "; reopening")))
                     (reopen! ~wrapper)))
                 (catch Exception e2#
                   ; We don't want to lose the original exception, but we will

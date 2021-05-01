@@ -41,7 +41,7 @@
                             (core/connect remote conn-spec))
                     :close core/disconnect!
                     :name  [:control (:host conn-spec)]
-                    :log?  true}
+                    :log?  :minimal}
                    rc/wrapper
                    rc/open!)]
       (assoc this :conn conn)))
