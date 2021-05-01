@@ -289,7 +289,8 @@
   :logging    Logging options; see jepsen.store/start-logging!
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
-  :remote     The remote to use for control actions: given by the Remote protocol
+  :remote     The remote to use for control actions. Try, for example,
+              (jepsen.control.sshj/remote).
   :client     A client for the database
   :nemesis    A client for failures
   :generator  A generator of operations to apply to the DB
