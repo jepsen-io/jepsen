@@ -3,7 +3,8 @@
   jepsen.control's use of clj-ssh with this instead."
   (:require [byte-streams :as bs]
             [clojure.tools.logging :refer [info warn]]
-            [jepsen.control.remote :as remote]
+            [jepsen.control [remote :as remote]
+                            [scp :as scp]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (com.jcraft.jsch.agentproxy AgentProxy
                                        ConnectorFactory)
@@ -93,7 +94,7 @@
     (when-let [c client]
       (.close c)))
 
-  (execute! [this action]
+  (execute! [this ctx action]
   ;  (info :permits (.availablePermits semaphore))
     (.acquire semaphore)
     (try
@@ -120,11 +121,11 @@
       (finally
         (.release semaphore))))
 
-  (upload! [this local-paths remote-path more]
+  (upload! [this ctx local-paths remote-path more]
     (with-open [sftp (.newSFTPClient client)]
       (.put sftp (FileSystemFile. local-paths) remote-path)))
 
-  (download! [this remote-paths local-path more]
+  (download! [this ctx remote-paths local-path more]
     (with-open [sftp (.newSFTPClient client)]
       (.get sftp remote-paths (FileSystemFile. local-path)))))
 
@@ -139,4 +140,6 @@
 (defn remote
   "Constructs an SSHJ remote."
   []
-  (SSHJRemote. concurrency-limit nil nil))
+  ; We *can* use our own SCP, but shelling out is faster.
+  (scp/remote
+    (SSHJRemote. concurrency-limit nil nil)))

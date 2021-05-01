@@ -2,7 +2,8 @@
   "A CLJ-SSH powered implementation of the Remote protocol."
   (:require [clojure.tools.logging :refer [info warn]]
             [clj-ssh.ssh :as ssh]
-            [jepsen.control.remote :as remote]
+            [jepsen.control [remote :as remote]
+                            [scp :as scp]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent Semaphore)))
 
@@ -48,7 +49,7 @@
   (disconnect! [_]
     (when-not (:dummy session) (ssh/disconnect session)))
 
-  (execute! [_ action]
+  (execute! [_ ctx action]
     (when-not (:dummy session)
       (.acquire semaphore)
       (try
@@ -56,11 +57,11 @@
         (finally
           (.release semaphore)))))
 
-  (upload! [_ local-paths remote-path rest]
+  (upload! [_ ctx local-paths remote-path rest]
     (when-not (:dummy session)
       (apply ssh/scp-to session local-paths remote-path rest)))
 
-  (download! [_ remote-paths local-path rest]
+  (download! [_ ctx remote-paths local-path rest]
     (when-not (:dummy session)
       (apply ssh/scp-from session remote-paths local-path rest))))
 
@@ -75,4 +76,5 @@
 (defn remote
   "A remote that does things via clj-ssh."
   []
-  (Remote. concurrency-limit nil nil))
+  (scp/remote
+    (Remote. concurrency-limit nil nil)))

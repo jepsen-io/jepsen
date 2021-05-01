@@ -49,20 +49,40 @@
                      (:err e)))
               (is (= 127 (:exit e))))))
 
-        (let [remote-path "/tmp/jepsen-upload-test"]
+        (let [remote-path "/tmp/jepsen-upload-test"
+              contents (slurp (io/resource test-resource))]
           (testing "upload"
             (c/exec :rm :-f remote-path)
             (c/upload-resource! test-resource remote-path)
-            (is (= (slurp (io/resource test-resource))
-                   (str (c/exec :cat remote-path) "\n"))))
+            (is (= contents (str (c/exec :cat remote-path) "\n"))))
+
+          (testing "upload as different user"
+            (c/exec :rm :-f remote-path)
+            (c/sudo "nobody"
+                    (c/upload-resource! test-resource remote-path)
+                    (is (= contents (str (c/exec :cat remote-path) "\n")))
+                    (is (= "nobody" (c/exec :stat :-c "%U" remote-path)))))
 
           (testing "download"
             (let [tmp (File/createTempFile "jepsen-download" ".test")]
               (try
                 (.delete tmp)
                 (c/download remote-path (.getCanonicalPath tmp))
-                (is (= (slurp (io/resource test-resource))
-                       (slurp tmp)))
+                (is (= contents (slurp tmp)))
+                (finally
+                  (.delete tmp)))))
+
+          (testing "download as different user"
+            (let [tmp (File/createTempFile "jepsen-download" ".test")]
+              (try
+                (.delete tmp)
+                ; What we should REALLY do here is show that we can log in as a
+                ; passwordless sudo user without privileges to read a file,
+                ; then download it anyway, but... that'd require extra setup
+                ; for the test env that I don't want to do yet.
+                (c/sudo "nobody"
+                        (c/download remote-path (.getCanonicalPath tmp)))
+                (is (= contents (slurp tmp)))
                 (finally
                   (.delete tmp)))))
 
@@ -110,7 +130,7 @@
             ))))))
 
 
-(deftest ^:integration ssh-remote-test
+(deftest ^:integration clj-ssh-remote-test
   ;(info :clj-ssh)
   (test-remote (clj-ssh/remote)))
 

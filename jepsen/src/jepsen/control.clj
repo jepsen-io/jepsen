@@ -10,11 +10,12 @@
             [dom-top.core :refer [with-retry]]
             [jepsen.reconnect :as rc]
             [jepsen.control [clj-ssh :as clj-ssh]
-                            [remote :refer [connect
-                                            disconnect!
-                                            execute!
-                                            upload!
-                                            download!]]]
+                            [remote :as remote
+                             :refer [connect
+                                     disconnect!
+                                     execute!
+                                     upload!
+                                     download!]]]
             [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [warn info debug error]]
@@ -58,6 +59,13 @@
    :private-key-path         *private-key-path*
    :strict-host-key-checking *strict-host-key-checking*})
 
+(defn cmd-context
+  "Constructs a context map for a command's execution from dynamically bound
+  vars."
+  []
+  {:dir  *dir*
+   :sudo *sudo*})
+
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
   []
@@ -72,12 +80,7 @@
    :private-key-path         *private-key-path*
    :strict-host-key-checking *strict-host-key-checking*})
 
-(defrecord Literal [string])
-
-(defn lit
-  "A literal string to be passed, unescaped, to the shell."
-  [s]
-  (Literal. s))
+(def lit remote/lit)
 
 (def |
   "A literal pipe character."
@@ -87,50 +90,9 @@
   "A literal &&"
   (lit "&&"))
 
-(defn escape
-  "Escapes a thing for the shell.
+(def escape remote/escape)
 
-  Nils are empty strings.
-
-  Literal wrappers are passed through directly.
-
-  The special keywords :>, :>>, and :< map to their corresponding shell I/O
-  redirection operators.
-
-  Named things like keywords and symbols use their name, escaped. Strings are
-  escaped like normal.
-
-  Sequential collections and sets have each element escaped and
-  space-separated."
-  [s]
-  (cond
-    (nil? s)
-    ""
-
-    (instance? Literal s)
-    (:string s)
-
-    (#{:> :>> :<} s)
-    (name s)
-
-    (or (sequential? s) (set? s))
-    (str/join " " (map escape s))
-
-    :else
-    (let [s (if (instance? clojure.lang.Named s)
-              (name s)
-              (str s))]
-      (cond
-        ; Empty string
-        (= "" s)
-        "\"\""
-
-        (re-find #"[\\\$`\"\s\(\)\{\}\[\]\*\?<>&;]" s)
-        (str "\""
-             (str/replace s #"([\\\$`\"])" "\\\\$1")
-             "\"")
-
-        :else s))))
+(def throw-on-nonzero-exit remote/throw-on-nonzero-exit)
 
 (defn wrap-sudo
   "Wraps command in a sudo subshell."
@@ -155,24 +117,6 @@
   (do (when *trace* (info "Host:" *host* "arg:" arg))
       arg))
 
-(defn throw-on-nonzero-exit
-  "Throws when an SSH result has nonzero exit status."
-  [{:keys [exit action] :as result}]
-  (if (zero? exit)
-    result
-    (throw+
-      (merge {:type ::nonzero-exit
-              :cmd (:cmd action)}
-             result)
-      nil ; cause
-      "Command exited with non-zero status %d on node %s:\n%s\n\nSTDIN:\n%s\n\nSTDOUT:\n%s\n\nSTDERR:\n%s"
-      exit
-      (:host result)
-      (:cmd action)
-      (:in result)
-      (:out result)
-      (:err result))))
-
 (defn just-stdout
   "Returns the stdout from an ssh result, trimming any newlines at the end."
   [result]
@@ -189,7 +133,7 @@
                      (debug-data))))
 
     (rc/with-conn [s *session*]
-      (assoc (execute! s action)
+      (assoc (execute! s (cmd-context) action)
              :host   *host*
              :action action))
     (catch com.jcraft.jsch.JSchException e
@@ -212,7 +156,7 @@
        wrap-sudo
        wrap-trace
        ssh*
-       throw-on-nonzero-exit
+       remote/throw-on-nonzero-exit
        just-stdout))
 
 (defn exec
@@ -237,10 +181,8 @@
   [& [local-paths remote-path & remaining]]
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
-      (let [local-paths (if (sequential? local-paths)
-                          (map file->path local-paths)
-                          (file->path local-paths))]
-        (upload! s local-paths remote-path remaining)
+      (let [local-paths (map file->path (util/coll local-paths))]
+        (upload! s (cmd-context) local-paths remote-path remaining)
         remote-path))
     (catch com.jcraft.jsch.JSchException e
       (if (and (pos? tries)
@@ -268,7 +210,7 @@
   [& [remote-paths local-path & remaining]]
   (with-retry [tries *retries*]
     (rc/with-conn [s *session*]
-      (download! s remote-paths local-path remaining))
+      (download! s (cmd-context) remote-paths local-path remaining))
     (catch clojure.lang.ExceptionInfo e
       (if (and (pos? tries)
                (re-find #"disconnect error" (.getMessage e)))

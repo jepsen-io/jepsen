@@ -80,11 +80,11 @@
     (assoc this :container-id (resolve-container-id (:host conn-spec))))
   (disconnect! [this]
     (dissoc this :container-id))
-  (execute! [this action]
+  (execute! [this ctx action]
     (exec container-id action))
-  (upload! [this local-paths remote-path _rest]
+  (upload! [this ctx local-paths remote-path _rest]
     (cp-to container-id local-paths remote-path))
-  (download! [this remote-paths local-path _rest]
+  (download! [this ctx remote-paths local-path _rest]
     (cp-from container-id remote-paths local-path)))
 
 (def docker

@@ -85,11 +85,11 @@
            :pod-name  (:host conn-spec)))
   (disconnect! [this]
     (dissoc this :context :namespace :pod-name))
-  (execute! [this action]
+  (execute! [this ctx action]
     (exec context namespace (:pod-name this) action))
-  (upload! [this local-paths remote-path _rest]
+  (upload! [this ctx local-paths remote-path _rest]
     (cp-to context namespace (:pod-name this) local-paths remote-path))
-  (download! [this remote-paths local-path _rest]
+  (download! [this ctx remote-paths local-path _rest]
     (cp-from context namespace (:pod-name this) remote-paths local-path)))
 
 (defn k8s
