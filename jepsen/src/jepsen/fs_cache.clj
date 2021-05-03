@@ -10,7 +10,7 @@
   cluster join.
 
   This namespace provides a persistent cache, stored on the control node's
-  filesystem, which is suitable for strings, data, or files. It also provides
+  filesystem, which is suitable for strings, data, or files. It also provides a
   basic locking mechanism.
 
   Cached values are referred to by logical *paths*: a vector of strings,
@@ -36,6 +36,9 @@
   Readers are `(load-format path)`, and return `nil` if the value is uncached.
   You can use `(cached? path)` to distinguish between a missing cache value and
   a present `nil`.
+
+  Writes to cache are atomic: a temporary file will be written to first, then
+  renamed into its final cache location.
 
   You can acquire locks on any cache path, whether it exists or not, using
   `(locking path ...)`."
