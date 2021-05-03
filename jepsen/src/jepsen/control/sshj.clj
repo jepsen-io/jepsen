@@ -3,6 +3,7 @@
   jepsen.control's use of clj-ssh with this instead."
   (:require [byte-streams :as bs]
             [clojure.tools.logging :refer [info warn]]
+            [jepsen [util :as util]]
             [jepsen.control [core :as core]
                             [retry :as retry]
                             [scp :as scp]]
@@ -76,18 +77,27 @@
       (write (.. (SSHPacket. Message/CHANNEL_EOF)
                  (putUInt32 (.getRecipient session))))))
 
+(defn handle-error
+  "Takes an connection, a context map, and an SSHJ exception. Throws if it was
+  caused by an InterruptedException. Otherwise, wraps it in a :ssh-failed
+  exception map."
+  [conn context e]
+  ; SSHJ wraps InterruptedExceptions in its own exceptions, and we need
+  ; those to bubble up properly.
+  (let [cause (util/ex-root-cause e)]
+    (when (instance? InterruptedException cause)
+      (throw cause)))
+  (throw+ (merge conn context {:type :jepsen.control/ssh-failed})
+          e))
+
 (defmacro with-errors
   "Takes a conn spec, a context map, and a body. Evals body, remapping SSHJ
   exceptions to :type :jepsen.control/ssh-failed."
   [conn context & body]
   `(try
      ~@body
-     (catch ConnectionException e#
-       (throw+ (merge ~conn ~context {:type :jepsen.control/ssh-failed})
-               e#))
-     (catch OpenFailException e#
-       (throw+ (merge ~conn ~context {:type :jepsen.control/ssh-failed})
-               e#))))
+     (catch ConnectionException e# (handle-error ~conn ~context e#))
+     (catch OpenFailException   e# (handle-error ~conn ~context e#))))
 
 (defrecord SSHJRemote [concurrency-limit
                        conn-spec

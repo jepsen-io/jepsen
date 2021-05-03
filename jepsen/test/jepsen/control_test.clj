@@ -104,10 +104,8 @@
         ;    (is (= string (c/exec :cat file)))))
 
         (testing "thread safety"
-          (let [; Which nodes are we going to act over?
-                nodes ["n1" "n2" "n3" "n4" "n5"]
-                ; Concurrency per node
-                concurrency 10
+          (let [; Concurrency
+                concurrency 20
                 ; Makes the string we echo bigger or smaller
                 str-count 10
                 ; How many times do we run each command?
@@ -117,9 +115,9 @@
                          (map (fn [i]
                                 (str/join "," (repeat str-count i)))))
                 t0 (System/nanoTime)]
-            ; On each each node, and on concurrency channels, that string
-            ; several times, making sure it comes back properly.
-            (->> (for [node nodes, x xs]
+            ; On concurrency channels, echo that string several times, making
+            ; sure it comes back properly.
+            (->> (for [x xs]
                    (future
                      (dotimes [i rep-count]
                        ;(info :call node :i i :x x)
@@ -127,8 +125,18 @@
                  vec
                  (mapv deref))
             ;(info :time (-> (System/nanoTime) (- t0) (/ 1e6)) "ms")
-            ))))))
+            ))
 
+        (testing "handles interrupts correctly"
+          (let [thread (Thread/currentThread)
+                ; Interrupt ourselves during exec
+                killer (future
+                         (Thread/sleep 20)
+                         (.interrupt thread))]
+            (is (thrown? InterruptedException
+                         (c/exec :sleep 1)
+                         ; Should be unreachable
+                         (is false)))))))))
 
 (deftest ^:integration clj-ssh-remote-test
   ;(info :clj-ssh)
