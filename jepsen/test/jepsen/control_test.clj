@@ -21,7 +21,7 @@
 (defn test-remote
   [remote]
   (c/with-ssh {}
-    (binding [jepsen.control/*remote* remote]
+    (c/with-remote remote
       (testing "on failure, session throws debug data"
         (try+
           (c/on "thishostshouldnotresolve"
