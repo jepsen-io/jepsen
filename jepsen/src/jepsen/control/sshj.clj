@@ -114,6 +114,11 @@
                    :client c
                    :semaphore (Semaphore. concurrency-limit true)))
           (catch Exception e
+            ; SSHJ wraps InterruptedException in its own exceptions, so we
+            ; have to see through that and rethrow properly.
+            (let [cause (util/ex-root-cause e)]
+              (when (instance? InterruptedException cause)
+                (throw cause)))
             (throw+ (assoc conn-spec
                            :type    :jepsen.control/session-error
                            :message "Error opening SSH session. Verify username, password, and node hostnames are correct.")))))
