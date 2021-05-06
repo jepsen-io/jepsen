@@ -115,7 +115,8 @@
                   (when (identical? ~c (conn ~wrapper))
                     ; This is the same conn that yielded the error
                     (cond (= :minimal (:log? ~wrapper))
-                          (warn (str "Encountered error with conn "
+                          (warn (str (.getName (class e#))
+                                     " with conn "
                                      (pr-str (:name ~wrapper))
                                      "; reopening."))
                           (:log? ~wrapper)
@@ -123,13 +124,20 @@
                                         (pr-str (:name ~wrapper))
                                         "; reopening")))
                     (reopen! ~wrapper)))
+                (catch InterruptedException e#
+                  ; Same here
+                  (throw e#))
                 (catch Exception e2#
                   ; We don't want to lose the original exception, but we will
                   ; log the reconnect error here. If we don't throw the
                   ; original exception, our caller might not know what kind of
                   ; error occurred in their transaction logic!
-                  (when (:log? ~wrapper)
-                    (warn e2# "Error reopening" (pr-str (:name ~wrapper)))))
+                  (cond (= :minimal (:log? ~wrapper))
+                        (warn (str (.getName (class e2#))
+                                   " reopening " (pr-str (:name ~wrapper))))
+
+                        (:log? ~wrapper)
+                        (warn e2# "Error reopening" (pr-str (:name ~wrapper)))))
                 (finally
                   (.lock read-lock#)))
               ; Right, that's done with, now we can propagate the exception
