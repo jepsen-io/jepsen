@@ -9,8 +9,9 @@
   files. They use a *context map*, which encodes the current user, directory,
   etc:
 
-    :dir   - The directory to execute remote commands in
-    :sudo  - The user we want to execute a command as"
+    :dir      - The directory to execute remote commands in
+    :sudo     - The user we want to execute a command as
+    :password - The user's password, for sudo, if necessary."
 
   (connect [this conn-spec]
     "Set up the remote to work with a particular node. Returns a Remote which
@@ -107,6 +108,19 @@
              "\"")
 
         :else s))))
+
+(defn wrap-sudo
+  "Takes a context map and a command action, and returns the command action,
+  modified to wrap it in a sudo command, if necessary. Uses the context map's
+  :sudo and :password fields."
+  [{:keys [sudo password]} cmd]
+  (if sudo
+    (cond-> (assoc cmd :cmd (str "sudo -S -u " sudo " bash -c "
+                                 (escape (:cmd cmd))))
+      ; If we have a password, provide it in the input so sudo sees it.
+      password (assoc :in (str password "\n" (:in cmd))))
+    ; Not a sudo context!
+    cmd))
 
 (defn throw-on-nonzero-exit
   "Throws when an SSH result has nonzero exit status."

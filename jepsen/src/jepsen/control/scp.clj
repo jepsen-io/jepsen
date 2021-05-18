@@ -22,6 +22,7 @@
        (map core/escape)
        (str/join " ")
        (hash-map :cmd)
+       (core/wrap-sudo ctx)
        (core/execute! remote ctx)
        core/throw-on-nonzero-exit))
 
@@ -29,13 +30,13 @@
   "Evaluates body. If a nonzero exit status occurs, forces the tmp dir to
   exist, and re-evals body. We do this to avoid the overhead of checking for
   existence every time someone wants to upload/download a file."
-  [remote & body]
+  [remote ctx & body]
   `(try+ ~@body
         (catch (#{:jepsen.control/nonzero-exit
                   :jepsen.util/nonzero-exit}
                  (:type ~'%)) e#
-          (exec! ~remote {} [:mkdir :-p tmp-dir])
-          (exec! ~remote {} [:chmod "a+rwx" tmp-dir])
+          (exec! ~remote ~ctx [:mkdir :-p tmp-dir])
+          (exec! ~remote ~ctx [:chmod "a+rwx" tmp-dir])
           ~@body)))
 
 (defn tmp-file
@@ -46,11 +47,14 @@
 (defmacro with-tmp-file
   "Evaluates body with tmp-file-sym bound to the remote path of a temporary
   file. Cleans up file at exit."
-  [remote [tmp-file-sym] & body]
-  `(let [~tmp-file-sym (tmp-file)]
-     (try (with-tmp-dir ~remote ~@body)
+  [remote ctx [tmp-file-sym] & body]
+  `(let [~tmp-file-sym (tmp-file)
+         ; We're going to want to do our tmpfile management as root in case
+         ; /tmp/jepsen already exists and we don't own it. Blegh.
+         ctx# (assoc ~ctx :sudo "root")]
+     (try (with-tmp-dir ~remote ctx# ~@body)
           (finally
-            (exec! ~remote {:sudo "root"} [:rm :-f ~tmp-file-sym])))))
+            (exec! ~remote ctx# [:rm :-f ~tmp-file-sym])))))
 
 (defn scp!
   "Runs an SCP command by shelling out. Takes a conn-spec (used for port, key,
@@ -96,7 +100,7 @@
 
         ; We need to become a different user for this. Upload each source to a
         ; tmpfile and rename.
-        (with-tmp-file cmd-remote [tmp]
+        (with-tmp-file cmd-remote ctx [tmp]
           (doseq [src (util/coll srcs)]
             ; Upload to tmpfile
             (core/upload! this {} src tmp nil)
@@ -115,7 +119,7 @@
         ; We need to copy each file to a tmpfile we CAN read before downloading
         ; it.
         (doseq [src (util/coll srcs)]
-          (with-tmp-file cmd-remote [tmp]
+          (with-tmp-file cmd-remote ctx [tmp]
             ; See if we can read this source as the current user, even if
             ; it's not our own file
             (if (try+ (exec! cmd-remote {} [:head :-n 1 src]) true

@@ -71,8 +71,9 @@
   "Constructs a context map for a command's execution from dynamically bound
   vars."
   []
-  {:dir  *dir*
-   :sudo *sudo*})
+  {:dir      *dir*
+   :sudo     *sudo*
+   :password *password*})
 
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
@@ -99,12 +100,7 @@
 (defn wrap-sudo
   "Wraps command in a sudo subshell."
   [cmd]
-  (if *sudo*
-    (merge cmd {:cmd (str "sudo -S -u " *sudo* " bash -c " (escape (:cmd cmd)))
-                :in  (if *password*
-                       (str *password* "\n" (:in cmd))
-                       (:in cmd))})
-    cmd))
+  (core/wrap-sudo (cmd-context) cmd))
 
 (defn wrap-cd
   "Wraps command by changing to the current bound directory first."
