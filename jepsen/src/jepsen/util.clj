@@ -58,6 +58,7 @@
 (def uninteresting-exceptions
   "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
   #{java.util.concurrent.BrokenBarrierException
+    java.util.concurrent.TimeoutException
     InterruptedException})
 
 (defn real-pmap
