@@ -275,6 +275,28 @@
   (info (str "Running test:\n"
              (util/test->str test))))
 
+(defmacro with-sessions
+  "Takes a [test' test] binding form and a body. Starts with test-expr as
+  the test, and sets up the jepsen.control state required to run this test--the
+  remote, SSH options, etc. Opens SSH sessions to each node. Saves those
+  sessions in the :sessions map of the test, binds that to the `test'` symbol in
+  the binding expression, and evaluates body."
+  [[test' test] & body]
+  `(let [test# ~test]
+     (control/with-remote (:remote test#)
+       (control/with-ssh (:ssh test#)
+         (with-resources [sessions#
+                          (bound-fn* control/session)
+                          control/disconnect
+                          (:nodes test#)]
+           ; Index sessions by node name and add to test
+           (let [~test' (->> sessions#
+                             (map vector (:nodes test#))
+                             (into {})
+                             (assoc test# :sessions))]
+                 ; And evaluate body.
+                 ~@body))))))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -346,32 +368,19 @@
                                        ::no-barrier)))
               _    (store/start-logging! test)
               _    (log-test-start! test)
-              test (control/with-remote (:remote test)
-                     (control/with-ssh (:ssh test)
-                       (with-resources [sessions
-                                        (bound-fn* control/session)
-                                        control/disconnect
-                                        (:nodes test)]
-                         ; Index sessions by node name and add to test
-                         (let [test (->> sessions
-                                         (map vector (:nodes test))
-                                         (into {})
-                                         (assoc test :sessions))
-                               ; Launch OS, DBs, evaluate test
-                               test (with-os test
-                                      (with-db test
-                                        (util/with-relative-time
-                                          ; Run a single case
-                                          (-> test
-                                              (assoc :history
-                                                     (run-case! test))
-                                              ; Remove state
-                                              (dissoc
-                                                :barrier
-                                                :sessions)))))]
-                           (info "Run complete, writing")
-                           (when (:name test) (store/save-1! test))
-                           (analyze! test)))))]
+              test (with-sessions [test test]
+                     ; Launch OS, DBs, evaluate test
+                     (let [test (with-os test
+                                  (with-db test
+                                    (util/with-relative-time
+                                      ; Run a single case
+                                      (-> test
+                                          (assoc :history (run-case! test))
+                                          ; Remove state
+                                          (dissoc :barrier :sessions)))))]
+                       (info "Run complete, writing")
+                       (when (:name test) (store/save-1! test))
+                       (analyze! test)))]
           (log-results test)))
       (catch Throwable t
         (warn t "Test crashed!")
