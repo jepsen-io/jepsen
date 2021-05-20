@@ -36,7 +36,6 @@
             [jepsen.store :as store]
             [jepsen.control.util :as cu]
             [jepsen.generator [interpreter :as gen.interpreter]]
-            [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
                                  CountDownLatch
@@ -350,40 +349,39 @@
   9. When the generator is finished, invoke the checker with the history
     - This generates the final report"
   [test]
-  (tt/with-threadpool
-    (try
-      (with-thread-name "jepsen test runner"
-        (let [test (assoc test
-                          ; Initialization time
-                          :start-time (util/local-time)
+  (try
+    (with-thread-name "jepsen test runner"
+      (let [test (assoc test
+                        ; Initialization time
+                        :start-time (util/local-time)
 
-                          ; Number of concurrent workers
-                          :concurrency (or (:concurrency test)
-                                           (count (:nodes test)))
+                        ; Number of concurrent workers
+                        :concurrency (or (:concurrency test)
+                                         (count (:nodes test)))
 
-                          ; Synchronization point for nodes
-                          :barrier (let [c (count (:nodes test))]
-                                     (if (pos? c)
-                                       (CyclicBarrier. (count (:nodes test)))
-                                       ::no-barrier)))
-              _    (store/start-logging! test)
-              _    (log-test-start! test)
-              test (with-sessions [test test]
-                     ; Launch OS, DBs, evaluate test
-                     (let [test (with-os test
-                                  (with-db test
-                                    (util/with-relative-time
-                                      ; Run a single case
-                                      (-> test
-                                          (assoc :history (run-case! test))
-                                          ; Remove state
-                                          (dissoc :barrier :sessions)))))]
-                       (info "Run complete, writing")
-                       (when (:name test) (store/save-1! test))
-                       (analyze! test)))]
-          (log-results test)))
-      (catch Throwable t
-        (warn t "Test crashed!")
-        (throw t))
+                        ; Synchronization point for nodes
+                        :barrier (let [c (count (:nodes test))]
+                                   (if (pos? c)
+                                     (CyclicBarrier. (count (:nodes test)))
+                                     ::no-barrier)))
+            _    (store/start-logging! test)
+            _    (log-test-start! test)
+            test (with-sessions [test test]
+                   ; Launch OS, DBs, evaluate test
+                   (let [test (with-os test
+                                (with-db test
+                                  (util/with-relative-time
+                                    ; Run a single case
+                                    (-> test
+                                        (assoc :history (run-case! test))
+                                        ; Remove state
+                                        (dissoc :barrier :sessions)))))]
+                     (info "Run complete, writing")
+                     (when (:name test) (store/save-1! test))
+                     (analyze! test)))]
+        (log-results test)))
+    (catch Throwable t
+      (warn t "Test crashed!")
+      (throw t))
     (finally
-      (store/stop-logging!)))))
+      (store/stop-logging!))))

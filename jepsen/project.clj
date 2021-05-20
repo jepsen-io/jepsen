@@ -12,7 +12,6 @@
                  [clj-time "0.15.2"]
                  [jepsen.txn "0.1.2"]
                  [knossos "0.3.7"]
-                 [tea-time "1.0.1"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.3.0"]
