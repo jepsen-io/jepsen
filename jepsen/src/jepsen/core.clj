@@ -296,6 +296,20 @@
                  ; And evaluate body.
                  ~@body))))))
 
+(defmacro with-logging
+  "Sets up logging for this test run, logs the start of the test, evaluates
+  body, and stops logging at the end. Also logs test crashes, so they appear in
+  the log files for this test run."
+  [test & body]
+  `(try (store/start-logging! ~test)
+        (log-test-start! ~test)
+        ~@body
+        (catch Throwable t#
+          (warn t# "Test crashed!")
+          (throw t#))
+        (finally
+          (store/stop-logging!))))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -363,25 +377,19 @@
                         :barrier (let [c (count (:nodes test))]
                                    (if (pos? c)
                                      (CyclicBarrier. (count (:nodes test)))
-                                     ::no-barrier)))
-            _    (store/start-logging! test)
-            _    (log-test-start! test)
-            test (with-sessions [test test]
-                   ; Launch OS, DBs, evaluate test
-                   (let [test (with-os test
-                                (with-db test
-                                  (util/with-relative-time
-                                    ; Run a single case
-                                    (-> test
-                                        (assoc :history (run-case! test))
-                                        ; Remove state
-                                        (dissoc :barrier :sessions)))))]
-                     (info "Run complete, writing")
-                     (when (:name test) (store/save-1! test))
-                     (analyze! test)))]
-        (log-results test)))
-    (catch Throwable t
-      (warn t "Test crashed!")
-      (throw t))
-    (finally
-      (store/stop-logging!))))
+                                     ::no-barrier)))]
+        (with-logging test
+          (let [test (with-sessions [test test]
+                       ; Launch OS, DBs, evaluate test
+                       (let [test (with-os test
+                                    (with-db test
+                                      (util/with-relative-time
+                                        ; Run a single case
+                                        (-> test
+                                            (assoc :history (run-case! test))
+                                            ; Remove state
+                                            (dissoc :barrier :sessions)))))]
+                         (info "Run complete, writing")
+                         (when (:name test) (store/save-1! test))
+                         (analyze! test)))]
+            (log-results test)))))))
