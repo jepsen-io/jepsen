@@ -21,7 +21,8 @@
            (net.schmizz.sshj.userauth UserAuthException)
            (net.schmizz.sshj.userauth.method AuthMethod)
            (net.schmizz.sshj.xfer FileSystemFile)
-           (java.io IOException)
+           (java.io IOException
+                    InterruptedIOException)
            (java.util.concurrent Semaphore
                                  TimeUnit)))
 
@@ -79,13 +80,14 @@
 
 (defn handle-error
   "Takes an connection, a context map, and an SSHJ exception. Throws if it was
-  caused by an InterruptedException. Otherwise, wraps it in a :ssh-failed
-  exception map."
+  caused by an InterruptedException or InterruptedIOException. Otherwise, wraps
+  it in a :ssh-failed exception map, and throws that."
   [conn context e]
   ; SSHJ wraps InterruptedExceptions in its own exceptions, and we need
   ; those to bubble up properly.
   (let [cause (util/ex-root-cause e)]
-    (when (instance? InterruptedException cause)
+    (when (or (instance? InterruptedException cause)
+              (instance? InterruptedIOException cause))
       (throw cause)))
   (throw+ (merge conn context {:type :jepsen.control/ssh-failed})
           e))

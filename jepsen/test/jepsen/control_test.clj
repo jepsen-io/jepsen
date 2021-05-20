@@ -132,11 +132,14 @@
                 ; Interrupt ourselves during exec
                 killer (future
                          (Thread/sleep 20)
-                         (.interrupt thread))]
-            (is (thrown? InterruptedException
-                         (c/exec :sleep 1)
-                         ; Should be unreachable
-                         (is false)))))))))
+                         (.interrupt thread))
+                res (try (c/exec :sleep 1)
+                         :unreachable
+                         (catch InterruptedException ee
+                           :interrupted)
+                         (catch java.io.InterruptedIOException e
+                           :interrupted-io))]
+            (is #{:interrupted :interrupted-io} res)))))))
 
 (deftest ^:integration clj-ssh-remote-test
   ;(info :clj-ssh)
