@@ -343,10 +343,7 @@
                           :barrier (let [c (count (:nodes test))]
                                      (if (pos? c)
                                        (CyclicBarrier. (count (:nodes test)))
-                                       ::no-barrier))
-
-                          ; Currently running histories
-                          :active-histories (atom #{}))
+                                       ::no-barrier)))
               _    (store/start-logging! test)
               _    (log-test-start! test)
               test (control/with-remote (:remote test)
@@ -371,7 +368,6 @@
                                               ; Remove state
                                               (dissoc
                                                 :barrier
-                                                :active-histories
                                                 :sessions)))))]
                            (info "Run complete, writing")
                            (when (:name test) (store/save-1! test))
