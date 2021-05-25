@@ -433,13 +433,14 @@ Options:\n")
   (->> tests
        (map-indexed
          (fn [i test]
-           (try
-             (let [test' (jepsen/run! test)]
-               [(:valid? (:results test'))
-                (.getPath (store/path test'))])
-             (catch Exception e
-               (warn e "Test crashed")
-               [:crashed (:name test)]))))
+           (let [test' (jepsen/prepare-test test)]
+             (try
+               (let [test' (jepsen/run! test')]
+                 [(:valid? (:results test'))
+                  (.getPath (store/path test'))])
+               (catch Exception e
+                 (warn e "Test crashed")
+                 [:crashed (.getPath (store/path test'))])))))
        (group-by first)
        (map-vals (partial map second))))
 

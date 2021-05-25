@@ -310,6 +310,22 @@
         (finally
           (store/stop-logging!))))
 
+(defn prepare-test
+  "Takes a test and ensures it has a :start-time, :concurrency, and :barrier
+  field. This operation always succeeds, and is necessary for accessing a
+  test's store directory, which depends on :start-time. You may call this
+  yourself before calling run!, if you need access to the store directory
+  outside the run! context."
+  [test]
+  (cond-> test
+    (not (:start-time test)) (assoc :start-time (util/local-time))
+    (not (:concurrency test)) (assoc :concurrency (count (:nodes test)))
+    (not (:barrier test)) (assoc :barrier
+                                 (let [c (count (:nodes test))]
+                                   (if (pos? c)
+                                     (CyclicBarrier. (count (:nodes test)))
+                                     ::no-barrier)))))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -365,19 +381,7 @@
   [test]
   (try
     (with-thread-name "jepsen test runner"
-      (let [test (assoc test
-                        ; Initialization time
-                        :start-time (util/local-time)
-
-                        ; Number of concurrent workers
-                        :concurrency (or (:concurrency test)
-                                         (count (:nodes test)))
-
-                        ; Synchronization point for nodes
-                        :barrier (let [c (count (:nodes test))]
-                                   (if (pos? c)
-                                     (CyclicBarrier. (count (:nodes test)))
-                                     ::no-barrier)))]
+      (let [test (prepare-test test)]
         (with-logging test
           (let [test (with-sessions [test test]
                        ; Launch OS, DBs, evaluate test
