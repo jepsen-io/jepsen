@@ -98,8 +98,11 @@
   [conn context & body]
   `(try
      ~@body
-     (catch ConnectionException e# (handle-error ~conn ~context e#))
-     (catch OpenFailException   e# (handle-error ~conn ~context e#))))
+     ; This gets thrown when the underlying transport is not connected during
+     ; session initiation
+     (catch IllegalStateException e# (handle-error ~conn ~context e#))
+     (catch ConnectionException   e# (handle-error ~conn ~context e#))
+     (catch OpenFailException     e# (handle-error ~conn ~context e#))))
 
 (defrecord SSHJRemote [concurrency-limit
                        conn-spec
