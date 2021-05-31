@@ -42,8 +42,9 @@
 (def ^:dynamic *trace*    "Shall we trace commands?"        false)
 (def ^:dynamic *dir*      "Working directory"               "/")
 (def ^:dynamic *sudo*     "User to sudo to"                 nil)
+(def ^:dynamic *sudo-password* "Password for sudo, if needed" nil)
 (def ^:dynamic *username* "Username"                        "root")
-(def ^:dynamic *password* "Password (for login and sudo)"   "root")
+(def ^:dynamic *password* "Password (for login)"            "root")
 (def ^:dynamic *port*     "SSH listening port"              22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
@@ -71,9 +72,9 @@
   "Constructs a context map for a command's execution from dynamically bound
   vars."
   []
-  {:dir      *dir*
-   :sudo     *sudo*
-   :password *password*})
+  {:dir           *dir*
+   :sudo          *sudo*
+   :sudo-password *sudo-password*})
 
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
@@ -83,6 +84,7 @@
    :session                  *session*
    :dir                      *dir*
    :sudo                     *sudo*
+   :sudo-password            *sudo-password*
    :username                 *username*
    :password                 *password*
    :port                     *port*
@@ -239,16 +241,18 @@
   "Takes a map of SSH configuration and evaluates body in that scope. Catches
   JSchExceptions and re-throws with all available debugging context. Options:
 
-  :dummy?
-  :username
-  :password
-  :private-key-path
-  :strict-host-key-checking"
+    :dummy?
+    :username
+    :password
+    :sudo-password
+    :private-key-path
+    :strict-host-key-checking"
   [ssh & body]
   ; TODO: move this into a single *conn-spec* variable. Some external code
   ; reads *host*, so we're not doing this just yet.
   `(binding [*dummy*            (get ~ssh :dummy?           *dummy*)
              *username*         (get ~ssh :username         *username*)
+             *sudo-password*    (get ~ssh :sudo-password    *sudo-password*)
              *password*         (get ~ssh :password         *password*)
              *port*             (get ~ssh :port             *port*)
              *private-key-path* (get ~ssh :private-key-path *private-key-path*)

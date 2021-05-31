@@ -112,13 +112,13 @@
 (defn wrap-sudo
   "Takes a context map and a command action, and returns the command action,
   modified to wrap it in a sudo command, if necessary. Uses the context map's
-  :sudo and :password fields."
-  [{:keys [sudo password]} cmd]
+  :sudo and :sudo-password fields."
+  [{:keys [sudo sudo-password]} cmd]
   (if sudo
-    (cond-> (assoc cmd :cmd (str "sudo -S -u " sudo " bash -c "
+    (cond-> (assoc cmd :cmd (str "sudo -k -S -u " sudo " bash -c "
                                  (escape (:cmd cmd))))
       ; If we have a password, provide it in the input so sudo sees it.
-      password (assoc :in (str password "\n" (:in cmd))))
+      sudo-password (assoc :in (str sudo-password "\n" (:in cmd))))
     ; Not a sudo context!
     cmd))
 

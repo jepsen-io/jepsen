@@ -334,6 +334,7 @@
   :ssh        SSH credential information: a map containing...
     :username           The username to connect with   (root)
     :password           The password to use
+    :sudo-password      The password to use for sudo, if needed
     :port               SSH listening port (22)
     :private-key-path   A path to an SSH identity file (~/.ssh/id_rsa)
     :strict-host-key-checking  Whether or not to verify host keys

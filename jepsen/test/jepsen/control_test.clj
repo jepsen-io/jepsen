@@ -98,9 +98,8 @@
 
         (testing "write file as different user"
           ; This uses stdin to write the file contents, and wrapping it in a
-          ; sudo requires that we detect whether or not the sudo password is
-          ; needed; if we include it when it's not asked for, it'll show up in
-          ; the file.
+          ; sudo requires that we *not* provide a password for sudo here, lest
+          ; it be passed in to cat and show up in the file.
           (c/su "nobody"
                 (let [tmp    (cu/tmp-file!)
                       string "bark\narf"]
