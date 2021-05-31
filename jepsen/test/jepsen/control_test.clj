@@ -96,6 +96,20 @@
                         :out)]
             (is (= string res))))
 
+        (testing "write file as different user"
+          ; This uses stdin to write the file contents, and wrapping it in a
+          ; sudo requires that we detect whether or not the sudo password is
+          ; needed; if we include it when it's not asked for, it'll show up in
+          ; the file.
+          (c/su "nobody"
+                (let [tmp    (cu/tmp-file!)
+                      string "bark\narf"]
+                  (try
+                    (cu/write-file! string tmp)
+                    (is (= string (c/exec :cat tmp)))
+                    (finally
+                      (c/exec :rm :-f tmp))))))
+
         ;(testing "writing to file"
         ;  (let [file "/tmp/jepsen/test/write-file-test"
         ;        string "foo\nbar"]
