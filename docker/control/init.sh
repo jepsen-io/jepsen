@@ -14,6 +14,7 @@ if [ ! -f ~/.ssh/known_hosts ]; then
     # Scan SSH keys
     while read node; do
       ssh-keyscan -t rsa $node >> ~/.ssh/known_hosts
+      ssh-keyscan -t ed25519 $node >> ~/.ssh/known_hosts
     done <~/nodes
 fi
 
@@ -23,7 +24,7 @@ cat <<EOF
 Welcome to Jepsen on Docker
 ===========================
 
-Please run \`docker exec -it jepsen-control bash\` in another terminal to proceed.
+Please run \`bin/console\` in another terminal to proceed.
 EOF
 
 # hack for keep this container running
