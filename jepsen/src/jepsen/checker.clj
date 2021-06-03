@@ -860,7 +860,7 @@
                          (let [{:keys [exit out err]}
                                (->> (store/path test node filename)
                                     .getCanonicalPath
-                                    (sh "grep" "-P" (str pattern)))]
+                                    (sh "grep" "--text" "-P" (str pattern)))]
                            (case exit
                              0 (->> out
                                     str/split-lines
