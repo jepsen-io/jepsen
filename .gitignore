@@ -33,3 +33,4 @@ bench/**
 *.iml
 jepsen/doc
 .eastwood
+docker/docker-compose.yml
