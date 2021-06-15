@@ -215,9 +215,6 @@
   "Takes a test, spawns nemesis and clients, runs the generator, and returns
   the history."
   [test]
-  (assert+ (:pure-generators test)
-           IllegalStateException
-           "Jepsen 0.2.0 introduced significant changes to the generator system, and the semantics of your test may have changed. See jepsen.generator's docs for an extensive migration guide, and when you're ready to proceed, set `:pure-generators true` on your test map.")
   (with-client+nemesis-setup-teardown test
     (gen.interpreter/run! test)))
 
