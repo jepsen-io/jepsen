@@ -341,7 +341,7 @@
   [opts bin & args]
   (info "starting" (.getName (file (name bin))))
   (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
-        "Jepsen starting" (:env opts) bin (escape args)
+        (str "Jepsen starting " (escape (:env opts)) " " bin " " (escape args))
         :>> (:logfile opts))
   (apply exec
          (:env opts)
