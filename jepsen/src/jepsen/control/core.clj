@@ -109,6 +109,36 @@
 
         :else s))))
 
+(defn env
+  "We often want to construct env vars for a process. This function takes a map
+  of environment variable names (any Named type, e.g. :HOME, \"HOME\") to
+  values (which are coerced using `(str value)`), and constructs a Literal
+  string, suitable for passing to exec, which binds those environment
+  variables.
+
+  Callers of this function (especially indirectly, as with start-stop-daemon),
+  may wish to construct env var strings themselves. Passing a string `s` to this
+  function simply returns `(lit s)`. Passing a Literal `l` to this function
+  returns `l`. nil is passed through unchanged."
+  [env]
+  (cond (map? env) (->> env
+                        (map (fn [[k v]]
+                               (str (name k) "=" (escape v))))
+                        (str/join " ")
+                        lit)
+
+        (instance? Literal env)
+        env
+
+        (instance? String env)
+        (lit env)
+
+        (nil? env) nil
+
+        :else
+        (throw (IllegalArgumentException.
+                 (str "Unsure how to construct an environment variable mapping from " (pr-str env))))))
+
 (defn wrap-sudo
   "Takes a context map and a command action, and returns the command action,
   modified to wrap it in a sudo command, if necessary. Uses the context map's

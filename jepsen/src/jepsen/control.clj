@@ -27,8 +27,9 @@
 ; preserve them here for backwards compatibility.
 (import-vars
   [jepsen.control.core
-   lit
+   env
    escape
+   lit
    throw-on-nonzero-exit])
 
 (def ssh

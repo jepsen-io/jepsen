@@ -328,8 +328,10 @@
   "Starts a daemon process, logging stdout and stderr to the given file.
   Invokes `bin` with `args`. Options are:
 
-  :env                  A string (or collection of strings) like
-                        \"FOO=4 BAZ=xyzzy\", which controls the daemon's env
+  :env                  Environment variables for the invocation of
+                        start-stop-daemon. Should be a Map of env var names to
+                        string values, like {:SEEDS \"flax, cornflower\"}. See
+                        jepsen.control/env for alternative forms.
   :background?
   :chdir
   :logfile
@@ -339,24 +341,25 @@
   :pidfile
   :process-name"
   [opts bin & args]
-  (info "starting" (.getName (file (name bin))))
-  (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
-        (str "Jepsen starting " (escape (:env opts)) " " bin " " (escape args))
-        :>> (:logfile opts))
-  (apply exec
-         (:env opts)
-         :start-stop-daemon :--start
-         (when (:background? opts true) [:--background :--no-close])
-         (when (:make-pidfile? opts true) :--make-pidfile)
-         (when (:match-executable? opts true) [:--exec bin])
-         (when (:match-process-name? opts false)
-           [:--name (:process-name opts (.getName (file bin)))])
-         :--pidfile  (:pidfile opts)
-         :--chdir    (:chdir opts)
-         :--oknodo
-         :--startas  bin
-         :--
-         (concat args [:>> (:logfile opts) (lit "2>&1")])))
+  (let [env (env (:env opts))]
+    (info "Starting" (.getName (file (name bin))))
+    (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
+          (str "Jepsen starting " (escape env) " " bin " " (escape args))
+          :>> (:logfile opts))
+    (apply exec
+           env
+           :start-stop-daemon :--start
+           (when (:background? opts true) [:--background :--no-close])
+           (when (:make-pidfile? opts true) :--make-pidfile)
+           (when (:match-executable? opts true) [:--exec bin])
+           (when (:match-process-name? opts false)
+             [:--name (:process-name opts (.getName (file bin)))])
+           :--pidfile  (:pidfile opts)
+           :--chdir    (:chdir opts)
+           :--oknodo
+           :--startas  bin
+           :--
+           (concat args [:>> (:logfile opts) (lit "2>&1")]))))
 
 (defn stop-daemon!
   "Kills a daemon process by pidfile, or, if given a command name, kills all
