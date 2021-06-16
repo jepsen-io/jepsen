@@ -46,7 +46,6 @@
                   true
                   (catch [:exit 1] _ false))))
 
-      (info :log lines)
       (testing "log starts with Jepsen debug line"
         (is (re-find #"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} Jepsen starting DOG=bark CAT=\"meow mix\" /usr/bin/perl -e \""
                      (first lines))))
