@@ -22,30 +22,12 @@
   ([port]
    (await-tcp-port port {}))
   ([port opts]
-   (let [retry-interval (:retry-interval opts 1000)
-         log-interval   (:log-interval opts retry-interval)
-         timeout        (:timeout opts 60000)
-         t0             (util/linear-time-nanos)
-         log-deadline   (atom (+ t0 (* 1e6 log-interval)))
-         deadline       (+ t0 (* 1e6 timeout))]
-     (while (try+
-              (exec :nc :-z :localhost port)
-              nil
-              (catch [:type :jepsen.control/nonzero-exit, :exit 1] _
-                (let [now (util/linear-time-nanos)]
-                  ; Are we out of time?
-                  (when (<= deadline now)
-                    (throw+ {:type :timeout
-                             :port port}))
-
-                  ; Should we log something?
-                  (when (<= @log-deadline now)
-                    (info "Waiting for port" port "...")
-                    (swap! log-deadline + (* log-interval 1e6)))
-
-                  ; Right, sleep and retry
-                  (Thread/sleep retry-interval)
-                  true)))))))
+   (util/await-fn
+     (fn check-port []
+       (exec :nc :-z :localhost port)
+       nil)
+     (merge {:log-message "Waiting for port " port " ..."}
+            opts))))
 
 (defn file?
   [filename]
