@@ -208,7 +208,7 @@
   foolib-1.2.3-amd64/my.file becomes dest/my.file. If the tarball includes
   multiple files, those files are moved to dest, so my.file becomes
   dest/my.file.
-  
+
   Options:
 
     :force?      Even if we have this cached, download the tarball again anyway.
@@ -253,7 +253,8 @@
        (catch [:type :jepsen.control/nonzero-exit] e
          (let [err (:err e)]
            (if (or (re-find #"tar: Unexpected EOF" err)
-                   (re-find #"This does not look like a tar archive" err))
+                   (re-find #"This does not look like a tar archive" err)
+                   (re-find #"cannot find zipfile directory" err))
              (if local-file
                ; Nothing we can do to recover here
                (throw (RuntimeException.
