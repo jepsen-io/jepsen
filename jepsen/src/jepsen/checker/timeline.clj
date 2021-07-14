@@ -182,7 +182,9 @@
   (reify checker/Checker
     (check [this test history opts]
       (let [pairs (->> history
-                       history/complete
+                       ; I'm not sure we actually need to complete operations
+                       ; any more.
+                       ;history/complete
                        sub-index
                        pairs)
             pair-count (count pairs)
