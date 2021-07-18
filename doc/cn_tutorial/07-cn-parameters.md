@@ -1,8 +1,5 @@
-# Tuning with Parameters
-
-
-
-我们通过在读操作的时候包含了一个`quorm`参数，允许我们上一个测试通过，但是为了看到原始的脏读的bug，我们不得不再次编辑源码，设置标志为`false`。如果我们能从命令行调整该参数，那将会比较好。jepsen提供了一些默认的命令行选项[jepsen.cli](https://github.com/jepsen-io/jepsen/blob/0.1.7/jepsen/src/jepsen/cli.clj#L52-L87),但是我们可以通过`:opt-spec`给`cli/single-test-cmd`添加我们自己的选项。
+# 使用参数来调整
+我们通过在读操作的时候包含了一个`quorm`参数，让我们上一个测试能够通过。但是为了看到原始的脏读bug，我们不得不再次编辑源码，设置标志为`false`。如果我们能从命令行调整该参数，那就太好了。Jepsen提供了一些默认的命令行选项[jepsen.cli](https://github.com/jepsen-io/jepsen/blob/0.1.7/jepsen/src/jepsen/cli.clj#L52-L87)，但是我们可以通过`:opt-spec`给`cli/single-test-cmd`添加我们自己的选项。
 
 ```clj
 (def cli-opts
@@ -10,7 +7,7 @@
     [["-q" "--quorum" "Use quorum reads, instead of reading from any primary."]])
 ```
 
-CLI选项是一个vector集合，给定一个简短的名称，一个全名，一个文档描述，并且选项影响着如何解析它们的默认值等。这些信息将传递给[tools.cli](https://github.com/clojure/tools.cli)，标准的处理option的clojure库
+CLI选项是一个vector集合，给定一个简短的名称，一个全名，一个文档描述和一些决定着如何解析这些选项的选项，比如将这些选项解析为它们的默认值等等。这些信息将传递给[tools.cli](https://github.com/clojure/tools.cli)，一个标准的处理option的clojure库。
 
 现在，让我们那个选项规范给传递CLI。
 
@@ -26,7 +23,7 @@ CLI选项是一个vector集合，给定一个简短的名称，一个全名，�
 ```
 
 
-如果我们再次通过`lein run test -q ...`运行我们的测试,我们将在我们的测试map中看到一个新的`:quorum`选项
+如果我们再次通过`lein run test -q ...`运行我们的测试,我们将在我们的测试map中看到一个新的`:quorum`选项。
 
 ```clj
 10:02:42.532 [main] INFO  jepsen.cli - Test options:
@@ -37,7 +34,7 @@ CLI选项是一个vector集合，给定一个简短的名称，一个全名，�
  ...
 ```
 
-Jepsen解析我们的`-q`选项，发现该选项是我们提供的，并且添加`:quorum true`键值对到选项map中，该选项map会传给`etcd-test`，`etcd-test`将会`merge(合并)`选项map到测试 map中。Viola! 我们有了一个`:quorum` 的key在我们的测试中。
+Jepsen解析我们的`-q`选项，发现该选项是我们提供的，并且添加`:quorum true`键值对到选项map中，该选项map会传给`etcd-test`，`etcd-test`将会`merge(合并)`选项map到测试map中。Viola! 我们有了一个`:quorum`键在我们的测试中。
 
 现在，让我们使用quorum选项来控制是否客户端达到法定人数读，在客户端的`invoke`函数如下：
 
@@ -50,7 +47,7 @@ Jepsen解析我们的`-q`选项，发现该选项是我们提供的，并且添�
 ```
 
 
-让我们尝试用携带 `-q` 和不携带 `-q` 参数执行`lein run`，我们将会观察到是否它能让我们再次看到脏读的bug。
+让我们尝试用携带`-q`和不携带 `-q` 参数执行`lein run`，我们将会观察到是否它能让我们再次看到脏读的bug。
 
 ```bash
 $ lein run test -q ...
@@ -62,7 +59,7 @@ clojure.lang.ExceptionInfo: throw+: {:errorCode 209, :message "Invalid field", :
 ...
 ```
 
-Huh。让我们再次检查在测试map中`:quorum`的值是什么，它在每个jepsen开始运行时，会打印在日志中
+Huh。让我们再次检查在测试map中`:quorum`的值是什么，它在每个jepsen开始运行时，会打印在日志中：
 
 ```clj
 2018-02-04 09:53:24,867{GMT}	INFO	[jepsen test runner] jepsen.core: Running test:
@@ -97,9 +94,9 @@ Huh。让我们再次检查在测试map中`:quorum`的值是什么，它在每�
  :model {:value nil}}
 ```
 
-真奇怪，上面没有打印出 `:quorum`这个key，如果选项标志出现在命令行中，则他们只会出现在选项map中；如果他们排除在命令行之外，则他们也排除在选项map外。当我们访问 `(:quorum test)`时， `test` 没有 `:quorum`选项，我们将会得到`nil`。
+真奇怪，上面没有打印出`:quorum`这个键，如果选项标志出现在命令行中，则他们只会出现在选项map中；如果他们排除在命令行之外，则他们也排除在选项map外。当我们访问`(:quorum test)`时，`test`没有`:quorum`选项，我们将会得到`nil`。
 
-有一些简单的方式来修复这个问题。,在客户端或者在 `etcd-test`中，我们可以强迫`nil` 为 `false`通过使用`(boolean (:quorum test))`。或者我们可以强迫在该选项省略时，为该选项通过添加`:default false`指定一个默认值。我们将使用`boolean`在`etcd-test`。以防有人直接调用它，而不是通过CLI。
+有一些简单的方式来修复这个问题。在客户端或者在 `etcd-test`中，通过使用`(boolean (:quorum test))`，我们可以强迫`nil`为`false`。或者我们可以强迫在该选项省略时，为该选项通过添加`:default false`指定一个默认值。我们将使用`boolean`在`etcd-test`。以防有人直接调用它，而不是通过CLI。
 
 ```clj
 (defn etcd-test
@@ -130,13 +127,13 @@ $ lein run test --time-limit 60 --concurrency 100
 Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
 ```
 
-## Tunable difficulty
+## 可调整的复杂度
 
-你将会注意到一些测试卡在痛苦缓慢的分析上，这依赖于你的计算机性能。很难预先控制这个测试难度，就像`~n!`，这儿的n表示并发数。大量的crash的进程会使得秒和天的检查差异。
+你将会注意到一些测试卡在痛苦缓慢的分析上，这依赖于你的计算机性能。很难预先控制这个测试复杂度，就像`~n!`，这儿的n表示并发数。大量的crash的进程会使得秒和天的检查差异。
 
-为了帮助解决这个问题，让我们在我们的测试中添加一些可调度的选项，这些选项可以控制你在单个key上执行的操作数，以及生成操作的快慢。
+为了帮助解决这个问题，让我们在我们的测试中添加一些调整选项，这些选项可以控制你在单个键上执行的操作数，以及生成操作的快慢。
 
-在generator中，让我们将写死的1/10 延时 变成一个参数，通过每秒的速率来给定。同时将每个key的generator上硬编码的limit也变成一个可配置的参数。
+在生成器中，让我们将写死的1/10秒的延迟变成一个参数，通过每秒的速率来给定。同时将每个键的生成器上硬编码的limit也变成一个可配置的参数。
 
 ```clj
 (defn etcd-test
@@ -177,7 +174,7 @@ Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
                                   (gen/time-limit (:time-limit opts)))})))
 ```
 
-同时添加响应的命令行选项
+同时添加相应的命令行选项。
 
 ```clj
 (def cli-opts
@@ -195,7 +192,7 @@ Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
 
 我们没必要为每个选项参数都提供一个简短的名称：我们使用`nil`来表明`--ops-per-key`没有缩写。每个标志后面的大写首字母(例如：“HZ” & "NUM")是你要传递的值的任意占位符。他们将会作为使用文档的一部分被打印。我们为这两选项都提供了`:default`，如果没有通过命令行指定，它的默认值将会被使用。对rates而言，我们希望允许一个整数，浮点数和分数，因此...，我们将使用Clojure内置的`read-string`函数来解析上述三类。然后我们将校验它是一个正整数。以阻止人们传递字符串，负数，0等。
 
-现在，如果我们想运行一个小的测试，我们可以执行如下命令。
+现在，如果我们想运行一个稍微不那么激进的测试，我们可以执行如下命令。
 
 ```bash
 $ lein run test --time-limit 10 --concurrency 10 --ops-per-key 10 -r 1
@@ -203,7 +200,6 @@ $ lein run test --time-limit 10 --concurrency 10 --ops-per-key 10 -r 1
 Everything looks good! ヽ(‘ー`)ノ
 ```
 
-浏览每个key的历史记录，我们可以看到操作处理的很慢，同时每个键只有10个，这个测试更容易检查。然而，它也不能发现bug！这是jepsen中的原有的tension：
-我们必须积极的发现错误，但是积极地验证这些历史记录更加困难，---甚至的不可能的事情。
+浏览每个键的历史记录，我们可以看到操作处理的很慢，同时每个键只有10个操作。这个测试更容易检查。然而，它也不能发现bug！这是jepsen中的固有的矛盾之处：我们必须积极地发现错误，但是验证这些激进的历史记录更加困难---甚至是不可能的事情。
 
-线性一直读检查是NP难问题；现在还没有办法能够解决。我们会设计一些更有效的检查器，但是最终，指数级的困难将使我们寸步难行。或许，我们可以验证一个 *weaker(稍弱)*的属性，线性或者对数时间。让我们[add a commutative test](08-set.md)
+线性一直读检查是NP难问题；现在还没有办法能够解决。我们会设计一些更有效的检查器，但是最终，指数级的困难将使我们寸步难行。或许，我们可以验证一个 *weaker(稍弱)*的属性，线性或者对数时间。让我们[添加一个commutative test](08-set.md)

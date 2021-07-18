@@ -1,6 +1,6 @@
 # 编写一个客户端
 
-一个Jepsen*客户端*接收*调用操作*（英文术语invocation operations），然后将其应用于要测试的系统，并返回相应的执行完成结果（这一阶段称为completion operation）。 对于我们的etcd测试，我们可以将系统建模为单个寄存器：一个持有整数的特定键。针对该寄存器的操作可能是`read`、`write`和`compare-and-set`，我们可以像这样建模：
+一个Jepsen *client*接收*调用操作*（英文术语invocation operations），然后将其应用于要测试的系统，并返回相应的执行完成结果（这一阶段称为completion operation）。 对于我们的etcd测试，我们可以将系统建模为单个寄存器：一个持有整数的特定键。针对该寄存器的操作可能是`read`、`write`和`compare-and-set`，我们可以像这样建模：
 
 ```clj
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
