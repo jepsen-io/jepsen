@@ -75,16 +75,12 @@ INFO [2017-03-30 10:08:52,386] jepsen node n5 - jepsen.etcdemo :n5 installing et
 ```
 
 看到了版本字符串`"v3.1.5"`是怎么从`etcd-test`传递到`db`，最终被reify表达式获取使用的吗？这就是我们*参数化*Jepsen测试的方式，因此相同的代码可以测试多个版本或选项。另请注意对象`reify`返回的结果在其词法范围内关闭，*记住*`version`的值。
-where it was captured by the `reify` expression? This is how we *parameterize*
-Jepsen tests, so the same code can test multiple versions or options. Note also
-that the object `reify` returns closes over its lexical scope, *remembering*
-the value of `version`.
 
 ## 安装数据库
 
 有了已经准备好的DB函数框架，就该实际安装一些东西了。让我们快速看一下[etcd的安装说明](https://github.com/coreos/etcd/releases/tag/v3.1.5)。 看来我们需要下载一个tarball，将其解压缩到目录中，为API版本设置一个环境变量，然后使用它运行`etcd`二进制文件。
 
-欲安装这些包，必须先获取root权限。因此我们将使用`jepsen.control/su`来获取root特权。请注意，`su`（及其伴随的`sudo`、`cd`等等）确立的是*动态*而非*词法*范围，他们的范围不仅作用于包起来部分的代码，还包括所有函数的调用栈。然后，我们将使用`jepsen.control.util/install-archive!`来下载etcd安装文件，并将其安装到`/opt/etcd`目录下。
+想要安装这些包，必须先获取root权限。因此我们将使用`jepsen.control/su`来获取root特权。请注意，`su`（及其伴随的`sudo`、`cd`等等）确立的是*动态*而非*词法*范围，他们的范围不仅作用于包起来部分的代码，还包括所有函数的调用栈。然后，我们将使用`jepsen.control.util/install-archive!`来下载etcd安装文件，并将其安装到`/opt/etcd`目录下。
 
 ```clj
 (def dir "/opt/etcd")

@@ -89,7 +89,7 @@ Usage: lein run -- COMMAND [OPTIONS ...]
 Commands: test
 ```
 
-如上代码代码块所示，没有参数的话，`cli/run!`会输出一个基本的帮助信息，提醒我们它接收一个命令作为其第一个参数。现在让我们尝试添加一下test命令吧！
+如上述代码块所示，没有参数的话，`cli/run!`会输出一个基本的帮助信息，提醒我们它接收一个命令作为其第一个参数。现在让我们尝试添加一下test命令吧！
 
 ```bash
 $ lein run test
