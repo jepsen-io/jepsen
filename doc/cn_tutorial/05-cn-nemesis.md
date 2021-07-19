@@ -1,6 +1,6 @@
 # 故障引入
 
-nemesis是一个特殊的客户端，没有绑定到任何特定的节点，它引入了整个集群内运行过程中可能遇到的故障。我们需要使用`jepsen.nemesis`提供几个自带的故障模式。
+nemesis是一个不绑定到任何特定节点的特殊客户端，用于引入整个集群内运行过程中可能遇到的故障。我们需要导入`jepsen.nemesis`来提供数个内置的故障模式。
 
 ```clojure
 (ns jepsen.etcdemo
@@ -22,7 +22,7 @@ nemesis是一个特殊的客户端，没有绑定到任何特定的节点，它�
             [verschlimmbesserung.core :as v]))
 ```
 
-我们将选取一个简单的nemesis进行介绍，并在测试中添加`:nemesis`。当它收到`:start`操作指令时，它会将网络分成两部分并随机选择其中一部分；当收到`:stop`指令时则恢复网络分区。
+我们将选取一个简单的nemesis进行介绍，并在测试中添加名为`:nemesis`的主键。当它收到`:start`操作指令时，它会将网络分成两部分并随机选择其中一个。当收到`:stop`指令时则恢复网络分区。
 
 ```clojure
 (defn etcd-test
@@ -75,7 +75,7 @@ java.net.SocketTimeoutException: Read timed out
 
 # 发现bug
 
-我们已经在测试中写死了超时时间30s，但是如果能够在命令行中控制它就好了。Jepsen的cli工具箱提供了一个`--time-limit`开关，在参数列表中，它作为`:time-limit`传给`etcd-test`。现在我们把它的使用方法展示出来。
+我们已经在测试中写死了超时时间为30s，但是如果能够在命令行中控制它就好了。Jepsen的cli工具箱提供了一个`--time-limit`开关，在参数列表中，它作为`:time-limit`传给`etcd-test`。现在我们把它的使用方法展示出来。
 
 ```clojure
           :generator (->> (gen/mix [r w cas])
@@ -126,8 +126,8 @@ $ open store/latest/history.txt
 
 # 线性一致读
 
-etcd文档宣称“默认情况下etcd确保所有的操作都是线性一致性”，但是显然事实并非如此，在[第二版api文档](https://coreos.com/etcd/docs/latest/v2/api.html)隐藏着这么一条不引人注意的注释：
-> 如果你想让一次读取是完全的线性一致，可以使用quorm=true。读取和写入的操作路径会因而变得非常相似，并且具有相近的速度（译者注：暗指速率变慢）。如果不确定是否需要此功能，请随时向etcd开发者发送电子邮件以获取建议。
+etcd文档宣称"默认情况下etcd确保所有的操作都是线性一致性"，但是显然事实并非如此，在[第二版api文档](https://coreos.com/etcd/docs/latest/v2/api.html)隐藏着这么一条不引人注意的注释：
+> 如果你想让一次读取是完全的线性一致，可以使用quorum=true。读取和写入的操作路径会因而变得非常相似，并且具有相近的速度（译者注：暗指速率变慢）。如果不确定是否需要此功能，请随时向etcd开发者发送电子邮件以获取建议。
 
 啊哈！所以我们需要使用*quorum*读取，Verschlimmbesserung中有这样的案例：
 
@@ -151,4 +151,4 @@ Everything looks good! ヽ(‘ー`)ノ
 
 恭喜！你已经成功写完了第一个Jepsen测试，我在[2014](https://aphyr.com/posts/316-jepsen-etcd-and-consul)年提出了这个issue，并且联系了etcd开发团队请他们介绍*quorum*读机制。
 
-休息一下吧，你太棒了！如果你喜欢的话，可以继续[完善Jepsen测试](https://github.com/jaydenwen123/jepsen/blob/main/doc/cn_tutorial/06-cn-refining.md)
+休息一下吧，这是你应得的！如果你喜欢的话，可以继续[完善Jepsen测试](https://github.com/jaydenwen123/jepsen/blob/main/doc/cn_tutorial/06-cn-refining.md)
