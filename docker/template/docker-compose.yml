@@ -5,59 +5,44 @@ x-node:
   env_file: ./secret/node.env
   secrets:
     - authorized_keys
-  privileged: true
   tty: true
   tmpfs:
-    #- /run:size=100M
+    - /run:size=100M
     - /run/lock:size=100M
   volumes:
     - "/sys/fs/cgroup:/sys/fs/cgroup:ro"
+    - "jepsen-shared:/var/jepsen/shared"
   networks:
     - jepsen
+  cap_add:
+    - ALL
   ports:
     - ${JEPSEN_PORT:-22}
+
+volumes:
+  jepsen-shared:
 
 secrets:
   authorized_keys:
     file: ./secret/authorized_keys
+
+networks:
+  jepsen:
 
 services:
   control:
     container_name: jepsen-control
     hostname: control
     depends_on:
-      - n1
-      - n2
-      - n3
-      - n4
-      - n5
+%%DEPS%%
     build: ./control
     env_file: ./secret/control.env
     privileged: true
     ports:
+      - "22"
       - "8080"
     networks:
       - jepsen
-  n1:
-    << : *default-node
-    container_name: jepsen-n1
-    hostname: n1
-  n2:
-    << : *default-node
-    container_name: jepsen-n2
-    hostname: n2
-  n3:
-    << : *default-node
-    container_name: jepsen-n3
-    hostname: n3
-  n4:
-    << : *default-node
-    container_name: jepsen-n4
-    hostname: n4
-  n5:
-    << : *default-node
-    container_name: jepsen-n5
-    hostname: n5
-
-networks:
-  jepsen:
+    volumes:
+      - "jepsen-shared:/var/jepsen/shared"
+%%DBS%%

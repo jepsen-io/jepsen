@@ -3,6 +3,7 @@
   (:use clojure.test)
   (:require [clojure.data.fressian :as fress]
             [clojure.string :as str]
+            [fipp.edn :refer [pprint]]
             [jepsen.store :refer :all]
             [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.core-test :as core-test]
@@ -28,6 +29,7 @@
                       :rational 5/7
                       :bignum   123M
                       :string   "foo"
+                      :atom     ["blah"]
                       :vec      [1 2 3]
                       :seq      (map inc [1 2 3])
                       :cons     (cons 1 (cons 2 nil))

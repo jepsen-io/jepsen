@@ -18,7 +18,7 @@
      (check [this test history checker-opts]
        (la/check (assoc opts :directory
                         (.getCanonicalPath
-                          (store/path! test (:subdirectory opts) "elle")))
+                          (store/path! test (:subdirectory checker-opts) "elle")))
                  history)))))
 
 (defn gen

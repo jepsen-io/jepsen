@@ -9,6 +9,10 @@
             [jepsen.store :as store]
             [jepsen.checker :as checker]))
 
+(def op-limit
+  "Maximum number of operations to render. Helps make timeline usable on massive histories."
+  10000)
+
 (defn style
   "Generate a CSS style fragment from a map."
   [m]
@@ -23,7 +27,7 @@
 
 (def stylesheet
   (str ".ops        { position: absolute; }\n"
-       ".op         { position: absolute; padding: 2px; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); transition: all 0.3s cubic-bezier(.25,.8,.25,1); }\n"
+       ".op         { position: absolute; padding: 2px; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); transition: all 0.3s cubic-bezier(.25,.8,.25,1); overflow: hidden; }\n"
        ".op.invoke  { background: #eeeeee; }\n"
        ".op.ok      { background: #6DB6FE; }\n"
        ".op.info    { background: #FFAA26; }\n"
@@ -54,7 +58,24 @@
 
 (defn nemesis? [op] (= :nemesis (:process op)))
 
-(defn render-op    [op] (str "Op:\n" (pprint-str op)))
+(defn render-op-extra-keys
+  "Helper for render-op which renders keys we didn't explicitly print"
+  [op]
+  (->> (dissoc op :process :type :f :index :sub-index :value :time)
+       (map (fn [[k v]]
+              (str "\n " k " " (pr-str v))))
+       (str/join "")))
+
+(defn render-op
+  [op]
+  (str "Op:\n"
+       "{:process " (:process op)
+       "\n :type "  (:type op)
+       "\n :f "     (:f op)
+       "\n :index " (:index op)
+       (render-op-extra-keys op)
+       "\n :value " (:value op) "}"))
+
 (defn render-msg   [op] (str "Msg: " (pr-str (:value op))))
 (defn render-error [op] (str "Err: " (pr-str (:error op))))
 
@@ -160,20 +181,29 @@
   []
   (reify checker/Checker
     (check [this test history opts]
+      (let [pairs (->> history
+                       ; I'm not sure we actually need to complete operations
+                       ; any more.
+                       ;history/complete
+                       sub-index
+                       pairs)
+            pair-count (count pairs)
+            truncated? (< op-limit pair-count)
+            pairs      (take op-limit pairs)]
       (->> (h/html [:html
                     [:head
                      [:style stylesheet]]
                     [:body
                      (breadcrumbs test (:history-key opts))
                      [:h1 (str (:name test) " key " (:history-key opts))]
+                     (when truncated?
+                       [:div {:class "truncation-warning"}
+                        (str "Showing only " op-limit " of " pair-count " operations in this history.")])
                      [:div {:class "ops"}
-                      (->> history
-                           history/complete
-                           sub-index
-                           pairs
+                      (->> pairs
                            (map (partial pair->div
                                          history
                                          test
                                          (process-index history))))]]])
            (spit (store/path! test (:subdirectory opts) "timeline.html")))
-      {:valid? true})))
+      {:valid? true}))))

@@ -17,9 +17,9 @@
             [clojure.stacktrace :as trace]
             [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
-            [clojure.pprint :refer [pprint]]
             [clojure.datafy :refer [datafy]]
             [dom-top.core :as dt :refer [assert+]]
+            [fipp.edn :refer [pprint]]
             [knossos.op :as op]
             [knossos.history :as history]
             [jepsen.util :as util :refer [with-thread-name
@@ -36,7 +36,6 @@
             [jepsen.store :as store]
             [jepsen.control.util :as cu]
             [jepsen.generator [interpreter :as gen.interpreter]]
-            [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
                                  CountDownLatch
@@ -153,12 +152,14 @@
   logs in the event of JVM shutdown, so you can ctrl-c a test and get something
   useful."
   [test & body]
-  `(let [^Thread hook# (Thread.
-                         (bound-fn []
-                           (with-thread-name "Jepsen shutdown hook"
-                             (info "Downloading DB logs before JVM shutdown...")
-                             (snarf-logs! ~test)
-                             (store/update-symlinks! ~test))))]
+  `(let [^Runnable hook-fn#
+         (bound-fn []
+           (with-thread-name "Jepsen shutdown hook"
+             (info "Downloading DB logs before JVM shutdown...")
+             (snarf-logs! ~test)
+             (store/update-symlinks! ~test)))
+
+         ^Thread hook# (Thread. hook-fn#)]
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
        (let [res# (do ~@body)]
@@ -214,9 +215,6 @@
   "Takes a test, spawns nemesis and clients, runs the generator, and returns
   the history."
   [test]
-  (assert+ (:pure-generators test)
-           IllegalStateException
-           "Jepsen 0.2.0 introduced significant changes to the generator system, and the semantics of your test may have changed. See jepsen.generator's docs for an extensive migration guide, and when you're ready to proceed, set `:pure-generators true` on your test map.")
   (with-client+nemesis-setup-teardown test
     (gen.interpreter/run! test)))
 
@@ -273,6 +271,58 @@
   (info (str "Running test:\n"
              (util/test->str test))))
 
+(defmacro with-sessions
+  "Takes a [test' test] binding form and a body. Starts with test-expr as
+  the test, and sets up the jepsen.control state required to run this test--the
+  remote, SSH options, etc. Opens SSH sessions to each node. Saves those
+  sessions in the :sessions map of the test, binds that to the `test'` symbol in
+  the binding expression, and evaluates body."
+  [[test' test] & body]
+  `(let [test# ~test]
+     (control/with-remote (:remote test#)
+       (control/with-ssh (:ssh test#)
+         (with-resources [sessions#
+                          (bound-fn* control/session)
+                          control/disconnect
+                          (:nodes test#)]
+           ; Index sessions by node name and add to test
+           (let [~test' (->> sessions#
+                             (map vector (:nodes test#))
+                             (into {})
+                             (assoc test# :sessions))]
+                 ; And evaluate body.
+                 ~@body))))))
+
+(defmacro with-logging
+  "Sets up logging for this test run, logs the start of the test, evaluates
+  body, and stops logging at the end. Also logs test crashes, so they appear in
+  the log files for this test run."
+  [test & body]
+  `(try (store/start-logging! ~test)
+        (log-test-start! ~test)
+        ~@body
+        (catch Throwable t#
+          (warn t# "Test crashed!")
+          (throw t#))
+        (finally
+          (store/stop-logging!))))
+
+(defn prepare-test
+  "Takes a test and ensures it has a :start-time, :concurrency, and :barrier
+  field. This operation always succeeds, and is necessary for accessing a
+  test's store directory, which depends on :start-time. You may call this
+  yourself before calling run!, if you need access to the store directory
+  outside the run! context."
+  [test]
+  (cond-> test
+    (not (:start-time test)) (assoc :start-time (util/local-time))
+    (not (:concurrency test)) (assoc :concurrency (count (:nodes test)))
+    (not (:barrier test)) (assoc :barrier
+                                 (let [c (count (:nodes test))]
+                                   (if (pos? c)
+                                     (CyclicBarrier. (count (:nodes test)))
+                                     ::no-barrier)))))
+
 (defn run!
   "Runs a test. Tests are maps containing
 
@@ -281,13 +331,15 @@
   :ssh        SSH credential information: a map containing...
     :username           The username to connect with   (root)
     :password           The password to use
+    :sudo-password      The password to use for sudo, if needed
     :port               SSH listening port (22)
     :private-key-path   A path to an SSH identity file (~/.ssh/id_rsa)
     :strict-host-key-checking  Whether or not to verify host keys
   :logging    Logging options; see jepsen.store/start-logging!
   :os         The operating system; given by the OS protocol
   :db         The database to configure: given by the DB protocol
-  :remote     The remote to use for control actions: given by the Remote protocol
+  :remote     The remote to use for control actions. Try, for example,
+              (jepsen.control.sshj/remote).
   :client     A client for the database
   :nemesis    A client for failures
   :generator  A generator of operations to apply to the DB
@@ -325,58 +377,21 @@
   9. When the generator is finished, invoke the checker with the history
     - This generates the final report"
   [test]
-  (tt/with-threadpool
-    (try
-      (with-thread-name "jepsen test runner"
-        (let [test (assoc test
-                          ; Initialization time
-                          :start-time (util/local-time)
-
-                          ; Number of concurrent workers
-                          :concurrency (or (:concurrency test)
-                                           (count (:nodes test)))
-
-                          ; Synchronization point for nodes
-                          :barrier (let [c (count (:nodes test))]
-                                     (if (pos? c)
-                                       (CyclicBarrier. (count (:nodes test)))
-                                       ::no-barrier))
-
-                          ; Currently running histories
-                          :active-histories (atom #{}))
-              _    (store/start-logging! test)
-              _    (log-test-start! test)
-              test (control/with-remote (:remote test)
-                     (control/with-ssh (:ssh test)
-                       (with-resources [sessions
-                                        (bound-fn* control/session)
-                                        control/disconnect
-                                        (:nodes test)]
-                         ; Index sessions by node name and add to test
-                         (let [test (->> sessions
-                                         (map vector (:nodes test))
-                                         (into {})
-                                         (assoc test :sessions))]
-                           ; Setup
-                           (with-os test
-                             (with-db test
-                               (util/with-relative-time
-                                 ; Run a single case
-                                 (let [test (assoc test :history
-                                                   (run-case! test))
-                                       ; Remove state
-                                       test (dissoc test
-                                                    :barrier
-                                                    :active-histories
-                                                    :sessions)]
-                                   ; TODO: move test analysis outside the
-                                   ; DB/ssh block.
-                                   (info "Run complete, writing")
-                                   (when (:name test) (store/save-1! test))
-                                   (analyze! test)))))))))]
-          (log-results test)))
-      (catch Throwable t
-        (warn t "Test crashed!")
-        (throw t))
-    (finally
-      (store/stop-logging!)))))
+  (try
+    (with-thread-name "jepsen test runner"
+      (let [test (prepare-test test)]
+        (with-logging test
+          (let [test (with-sessions [test test]
+                       ; Launch OS, DBs, evaluate test
+                       (let [test (with-os test
+                                    (with-db test
+                                      (util/with-relative-time
+                                        ; Run a single case
+                                        (-> test
+                                            (assoc :history (run-case! test))
+                                            ; Remove state
+                                            (dissoc :barrier :sessions)))))]
+                         (info "Run complete, writing")
+                         (when (:name test) (store/save-1! test))
+                         (analyze! test)))]
+            (log-results test)))))))

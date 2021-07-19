@@ -329,17 +329,19 @@
 (declare compose)
 
 ; This version of a composed nemesis uses the Reflection protocol to identify
-; which fs map to which nemeses.
+; which fs map to which nemeses. fm is a map of fs to indices in the nemesis
+; vector--this cuts down on pprint amplification.
 (defrecord ReflCompose [fm nemeses]
   Nemesis
   (setup! [this test]
     (compose (map #(setup! % test) nemeses)))
 
   (invoke! [this test op]
-    (if-let [n (get fm (:f op))]
+    (if-let [n (nth nemeses (get fm (:f op)))]
       (invoke! n test op)
       (throw (IllegalArgumentException.
-               (str "No nemesis can handle " (pr-str (:f op)))))))
+               (str "No nemesis can handle :f " (pr-str (:f op))
+                    " (expected one of " (pr-str (keys fm)) ")")))))
 
   (teardown! [this test]
     (mapv #(teardown! % test) nemeses))
@@ -407,18 +409,22 @@
   (if (map? nemeses)
     (MapCompose. nemeses)
     ; A collection; use reflection to compute a map of :fs to nemeses.
-    (let [fm (reduce (fn [fm n]
-                       (reduce (fn [fm f]
-                                 (assert (not (get fm f))
-                                         (str "Nemeses " (pr-str n) " and "
-                                              (pr-str (get fm f))
-                                              " are mutually incompatible; both"
-                                              " use :f " (pr-str f)))
-                                 (assoc fm f n))
-                               fm
-                               (fs n)))
-                     {}
-                     nemeses)]
+    (let [nemeses (vec nemeses)
+          [_ fm]
+          (reduce (fn [[i fm] n]
+                    ; For the i'th nemesis, our fmap is...
+                    [(inc i)
+                     (reduce (fn [fm f]
+                               (assert (not (get fm f))
+                                       (str "Nemeses " (pr-str n) " and "
+                                            (pr-str (get fm f))
+                                            " are mutually incompatible;"
+                                            " both use :f " (pr-str f)))
+                               (assoc fm f i))
+                             fm
+                             (fs n))])
+                  [0 {}]
+                  nemeses)]
       (ReflCompose. fm nemeses))))
 
 (defn set-time!
@@ -522,7 +528,7 @@
       (let [plan (:value op)]
         (c/on-nodes test
                     (keys plan)
-                    (fn [node]
+                    (fn [_ node]
                       (let [{:keys [file drop]} (plan node)]
                         (assert (string? file))
                         (assert (integer? drop))

@@ -967,10 +967,11 @@
                             process (get (:workers ctx) thread)
                             ; Give this generator a context *just* for one
                             ; thread
+                            threads (.. (Set.)
+                                        (add thread))
                             ctx (assoc ctx
-                                       :free-threads (Set/from ^Iterable
-                                                               [thread])
-                                       :workers {thread process})]
+                                       :free-threads threads
+                                       :workers      {thread process})]
                         (when-let [[op gen'] (op gen test ctx)]
                           {:op      op
                            :gen'    gen'

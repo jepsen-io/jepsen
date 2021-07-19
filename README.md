@@ -167,3 +167,23 @@ ssh-keyscan -t rsa n5 >> ~/.ssh/known_hosts
 ```
 
 to add unhashed versions of each node's hostkey to your `~/.ssh/known_hosts`.
+
+### SSHJ auth errors
+
+If you get an exception like `net.schmizz.sshj.transport.TransportException:
+Could not verify 'ssh-ed25519' host key with fingerprint 'bf:4a:...' for 'n1'
+on port 22`, but you're sure you've got the keys in your `~/.ssh/known-hosts`,
+this is because (I think) SSHJ tries to verify only the ed25519 key and
+*ignores* the RSA key. You can add the ed25519 keys explicitly via:
+
+```sh
+ssh-keyscan -t ed25519 n1 >> ~/.ssh/known_hosts
+...
+```
+
+## Other Projects
+
+Additional projects that may be of interest:
+
+- [Jecci](https://github.com/michaelzenz/jecci): A wrapper framework around Jepsen
+- [Porcupine](https://github.com/anishathalye/porcupine): a linearizability checker written in Go.

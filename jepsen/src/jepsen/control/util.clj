@@ -1,6 +1,7 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
+            [jepsen.control.core :as core]
             [jepsen.util :as util :refer [meh name+]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
@@ -14,24 +15,19 @@
   "Blocks until a local TCP port is bound. Options:
 
   :retry-interval   How long between retries, in ms. Default 1s.
+  :log-interval     How long between logging that we're still waiting, in ms.
+                    Default `retry-interval.
   :timeout          How long until giving up and throwing :type :timeout, in
                     ms. Default 60 seconds."
   ([port]
    (await-tcp-port port {}))
   ([port opts]
-   (let [deadline (+ (util/linear-time-nanos)
-                     (* 1e6 (:timeout opts 60000)))]
-     (while (try+
-              (exec :nc :-z :localhost port)
-              nil
-              (catch [:type :jepsen.control/nonzero-exit
-                      :exit 1] _
-                (when (<= deadline (util/linear-time-nanos))
-                  (throw+ {:type :timeout
-                           :port port}))
-                (info "Waiting for port" port "...")
-                (Thread/sleep (:retry-interval opts 1000))
-                true))))))
+   (util/await-fn
+     (fn check-port []
+       (exec :nc :-z :localhost port)
+       nil)
+     (merge {:log-message "Waiting for port " port " ..."}
+            opts))))
 
 (defn file?
   [filename]
@@ -64,6 +60,21 @@
          ls
          (map (partial str dir)))))
 
+(defn tmp-file!
+  "Creates a random, temporary file under tmp-dir-base, and returns its path."
+  []
+  (let [file (str tmp-dir-base "/" (rand-int Integer/MAX_VALUE))]
+    (if (exists? file)
+      (recur)
+      (do
+        (try+
+          (exec :touch file)
+          (catch [:exit 1] _
+            ; Parent dir might not exist
+            (exec :mkdir :-p tmp-dir-base)
+            (exec :touch file)))
+        file))))
+
 (defn tmp-dir!
   "Creates a temporary directory under /tmp/jepsen and returns its path."
   []
@@ -73,6 +84,22 @@
       (do
         (exec :mkdir :-p dir)
         dir))))
+
+(defn write-file!
+  "Writes a string to a filename."
+  [string file]
+  (let [cmd (->> [:cat :> file]
+                 (map escape)
+                 (str/join " "))
+        action {:cmd cmd
+                :in  string}]
+    (-> action
+        wrap-cd
+        wrap-sudo
+        wrap-trace
+        ssh*
+        core/throw-on-nonzero-exit)
+    file))
 
 (def std-wget-opts
   "A list of standard options we pass to wget"
@@ -181,7 +208,7 @@
   foolib-1.2.3-amd64/my.file becomes dest/my.file. If the tarball includes
   multiple files, those files are moved to dest, so my.file becomes
   dest/my.file.
-  
+
   Options:
 
     :force?      Even if we have this cached, download the tarball again anyway.
@@ -226,7 +253,8 @@
        (catch [:type :jepsen.control/nonzero-exit] e
          (let [err (:err e)]
            (if (or (re-find #"tar: Unexpected EOF" err)
-                   (re-find #"This does not look like a tar archive" err))
+                   (re-find #"This does not look like a tar archive" err)
+                   (re-find #"cannot find zipfile directory" err))
              (if local-file
                ; Nothing we can do to recover here
                (throw (RuntimeException.
@@ -283,8 +311,10 @@
   "Starts a daemon process, logging stdout and stderr to the given file.
   Invokes `bin` with `args`. Options are:
 
-  :env                  A string (or collection of strings) like
-                        \"FOO=4 BAZ=xyzzy\", which controls the daemon's env
+  :env                  Environment variables for the invocation of
+                        start-stop-daemon. Should be a Map of env var names to
+                        string values, like {:SEEDS \"flax, cornflower\"}. See
+                        jepsen.control/env for alternative forms.
   :background?
   :chdir
   :logfile
@@ -294,24 +324,25 @@
   :pidfile
   :process-name"
   [opts bin & args]
-  (info "starting" (.getName (file (name bin))))
-  (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
-        "Jepsen starting" (:env opts) bin (escape args)
-        :>> (:logfile opts))
-  (apply exec
-         (:env opts)
-         :start-stop-daemon :--start
-         (when (:background? opts true) [:--background :--no-close])
-         (when (:make-pidfile? opts true) :--make-pidfile)
-         (when (:match-executable? opts true) [:--exec bin])
-         (when (:match-process-name? opts false)
-           [:--name (:process-name opts (.getName (file bin)))])
-         :--pidfile  (:pidfile opts)
-         :--chdir    (:chdir opts)
-         :--oknodo
-         :--startas  bin
-         :--
-         (concat args [:>> (:logfile opts) (lit "2>&1")])))
+  (let [env (env (:env opts))]
+    (info "Starting" (.getName (file (name bin))))
+    (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
+          (str "Jepsen starting " (escape env) " " bin " " (escape args))
+          :>> (:logfile opts))
+    (apply exec
+           env
+           :start-stop-daemon :--start
+           (when (:background? opts true) [:--background :--no-close])
+           (when (:make-pidfile? opts true) :--make-pidfile)
+           (when (:match-executable? opts true) [:--exec bin])
+           (when (:match-process-name? opts false)
+             [:--name (:process-name opts (.getName (file bin)))])
+           :--pidfile  (:pidfile opts)
+           :--chdir    (:chdir opts)
+           :--oknodo
+           :--startas  bin
+           :--
+           (concat args [:>> (:logfile opts) (lit "2>&1")]))))
 
 (defn stop-daemon!
   "Kills a daemon process by pidfile, or, if given a command name, kills all

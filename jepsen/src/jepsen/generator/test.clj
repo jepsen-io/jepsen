@@ -6,7 +6,8 @@
   NOTE: While the `simulate` function is considered stable at this point, the
   others might still be subject to change -- use with care and expect possible
   breakage in future releases."
-  (:require [jepsen.generator :as gen]))
+  (:require [jepsen.generator :as gen])
+  (:import (io.lacuna.bifurcan Set)))
 
 (def default-test
   "A default test map."
@@ -77,7 +78,7 @@
                    ctx       (-> ctx
                                  (update :time max (:time invoke))
                                  (assoc :free-threads
-                                        (.remove (:free-threads ctx) thread)))
+                                        (.remove ^Set (:free-threads ctx) thread)))
                    ; Update the generator with this invocation
                    gen'      (gen/update gen' default-test ctx invoke)
                    ; Add the completion to the in-flight set
@@ -94,8 +95,9 @@
                    ; Advance clock, mark thread as free
                    ctx    (-> ctx
                               (update :time max (:time op))
-                              (assoc :free-threads (.add (:free-threads ctx)
-                                                         thread)))
+                              (assoc :free-threads
+                                     (.add ^Set (:free-threads ctx)
+                                           thread)))
                    ; Update generator with completion
                    gen'   (gen/update gen default-test ctx op)
                    ; Update worker mapping if this op crashed

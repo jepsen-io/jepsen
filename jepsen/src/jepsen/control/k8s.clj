@@ -6,10 +6,10 @@
   of running Jepsen."
   (:require [clojure.java.shell :refer [sh]]
             [slingshot.slingshot :refer [throw+]]
+            [jepsen.control.core :as core]
             [jepsen.control :as c]
-            [clojure.string :refer [split-lines, trim]]
-            [clojure.tools.logging :refer [info]])
-  (:import (jepsen.control Remote)))
+            [clojure.string :refer [split-lines trim]]
+            [clojure.tools.logging :refer [info]]))
 
 (defn exec
   "Execute a shell command on a pod."
@@ -77,19 +77,19 @@
   (if v (str "--" p "=" (c/escape v)) ""))
 
 (defrecord K8sRemote [context namespace]
-  Remote
-  (connect [this pod-name]
+  core/Remote
+  (connect [this conn-spec]
     (assoc this
-           :context (or-parameter "context" context)
+           :context   (or-parameter "context" context)
            :namespace (or-parameter "namespace" namespace)
-           :pod-name pod-name))
+           :pod-name  (:host conn-spec)))
   (disconnect! [this]
     (dissoc this :context :namespace :pod-name))
-  (execute! [this action]
+  (execute! [this ctx action]
     (exec context namespace (:pod-name this) action))
-  (upload! [this local-paths remote-path _rest]
+  (upload! [this ctx local-paths remote-path _opts]
     (cp-to context namespace (:pod-name this) local-paths remote-path))
-  (download! [this remote-paths local-path _rest]
+  (download! [this ctx remote-paths local-path _opts]
     (cp-from context namespace (:pod-name this) remote-paths local-path)))
 
 (defn k8s

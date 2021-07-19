@@ -1,19 +1,21 @@
 (ns jepsen.control.docker
-  "The recommended way is to use SSH to setup and teardown databases. It's however
-  sometimes conveniet to be able to setup and teardown the databases using
-  `docker exec` and `docker cp` instead, which is what this namespace helps you
-  do. Use at your own risk, this is an unsupported way of running Jepsen."
+  "The recommended way is to use SSH to setup and teardown databases. It's
+  however sometimes conveniet to be able to setup and teardown the databases
+  using `docker exec` and `docker cp` instead, which is what this namespace
+  helps you do.
+
+  Use at your own risk, this is an unsupported way of running Jepsen."
   (:require [clojure.string :as str]
             [clojure.java.shell :refer [sh]]
             [slingshot.slingshot :refer [throw+]]
-            [jepsen.control :as c])
-  (:import (jepsen.control Remote)))
+            [jepsen.control.core :as core]
+            [jepsen.control :as c]))
 
 (defn resolve-container-id
   "Takes a host, e.g. `localhost:30404`, and resolves the Docker container id
-  exposing that port. Due to a bug in
-  Docker (https://github.com/moby/moby/pull/40442) this is more difficult than
-  it should be."
+  exposing that port. Due to a bug in Docker
+  (https://github.com/moby/moby/pull/40442) this is more difficult than it
+  should be."
   [host]
   (if-let [[_address port] (str/split host #":")]
     (let [ps (:out (sh "docker" "ps"))
@@ -73,16 +75,16 @@
          (unwrap-result ::copy-failed))))
 
 (defrecord DockerRemote [container-id]
-  Remote
-  (connect [this host]
-    (assoc this :container-id (resolve-container-id host)))
+  core/Remote
+  (connect [this conn-spec]
+    (assoc this :container-id (resolve-container-id (:host conn-spec))))
   (disconnect! [this]
     (dissoc this :container-id))
-  (execute! [this action]
+  (execute! [this ctx action]
     (exec container-id action))
-  (upload! [this local-paths remote-path _rest]
+  (upload! [this ctx local-paths remote-path _opts]
     (cp-to container-id local-paths remote-path))
-  (download! [this remote-paths local-path _rest]
+  (download! [this ctx remote-paths local-path _opts]
     (cp-from container-id remote-paths local-path)))
 
 (def docker

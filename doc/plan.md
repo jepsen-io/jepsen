@@ -4,6 +4,7 @@
 
 - Knossos: Better error messages when users pass models that fail on the
   first op (I think there's a ticket about this? Null pointer exception for i?)
+- When users enter a node multiple times into :nodes, complain early
 
 ## Visualizations
 

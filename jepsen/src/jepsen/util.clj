@@ -5,19 +5,22 @@
             [clojure [string :as str]]
             [clojure.pprint :refer [pprint]]
             [clojure.walk :as walk]
-            [clojure.java.io :as io]
+            [clojure.java [io :as io]
+                          [shell :as shell]]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [bounded-future]]
             [fipp [edn :as fipp]
                   [engine :as fipp.engine]]
-            [knossos.history :as history])
+            [knossos.history :as history]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.lang.reflect Method)
            (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
            (java.io File
                     RandomAccessFile)))
+
 
 (defn default
   "Like assoc, but only fills in values which are NOT present in the map."
@@ -56,6 +59,7 @@
 (def uninteresting-exceptions
   "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
   #{java.util.concurrent.BrokenBarrierException
+    java.util.concurrent.TimeoutException
     InterruptedException})
 
 (defn real-pmap
@@ -327,7 +331,8 @@
   (System/nanoTime))
 
 (def ^:dynamic ^Long *relative-time-origin*
-  "A reference point for measuring time in a test run.")
+  "A reference point for measuring time in a test run."
+  nil)
 
 (defmacro with-relative-time
   "Binds *relative-time-origin* at the start of body."
@@ -374,6 +379,48 @@
        (do (future-cancel worker#)
            ~timeout-val)
        retval#)))
+
+(defn await-fn
+  "Invokes a function (f) repeatedly. Blocks until (f) returns, rather than
+  throwing. Returns that return value. Catches RuntimeExceptions and retries
+  them automatically. Options:
+
+    :retry-interval   How long between retries, in ms. Default 1s.
+    :log-interval     How long between logging that we're still waiting, in ms.
+                      Default `retry-interval.
+    :log-message      What should we log to the console while waiting?
+    :timeout          How long until giving up and throwing :type :timeout, in
+                      ms. Default 60 seconds."
+  ([f]
+   (await-fn f {}))
+  ([f opts]
+   (let [log-message    (:log-message opts (str "Waiting for " f "..."))
+         retry-interval (:retry-interval opts 1000)
+         log-interval   (:log-interval opts retry-interval)
+         timeout        (:timeout opts 60000)
+         t0             (linear-time-nanos)
+         log-deadline   (atom (+ t0 (* 1e6 log-interval)))
+         deadline       (+ t0 (* 1e6 timeout))]
+     (loop []
+       (let [res (try
+                   (f)
+                   (catch RuntimeException e
+                     (let [now (linear-time-nanos)]
+                       ; Are we out of time?
+                       (when (<= deadline now)
+                         (throw+ {:type :timeout}))
+
+                       ; Should we log something?
+                       (when (<= @log-deadline now)
+                         (info log-message)
+                         (swap! log-deadline + (* log-interval 1e6)))
+
+                       ; Right, sleep and retry
+                       (Thread/sleep retry-interval)
+                       ::retry)))]
+         (if (= ::retry res)
+           (recur)
+           res))))))
 
 (defmacro retry
   "Evals body repeatedly until it doesn't throw, sleeping dt seconds."
@@ -884,3 +931,15 @@
     (if (= x x')
       x
       (recur f x'))))
+
+(defn sh
+  "A wrapper around clojure.java.shell's sh which throws on nonzero exit."
+  [& args]
+  (let [res (apply shell/sh args)]
+    (when-not (zero? (:exit res))
+      (throw+ (assoc res :type ::nonzero-exit)
+              (str "Shell command " (pr-str args)
+                   " returned exit status " (:exit res) "\n"
+                   (:out res) "\n"
+                   (:err res))))
+    res))

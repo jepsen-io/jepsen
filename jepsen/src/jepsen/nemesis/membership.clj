@@ -170,6 +170,8 @@
   (setup! [this test]
     ; Initialize our state
     (swap! state into (initial-state test))
+    (swap! state state/setup! test)
+
     (let [; We'll use this atom to track whether to shut down.
           running? (atom true)
           ; Spawn futures to update nodes.
@@ -199,7 +201,9 @@
     (when running?
       (reset! running? false)
       ; Ungraceful shutdown
-      (mapv future-cancel node-view-futures)))
+      (mapv future-cancel node-view-futures)
+      ; Shut down state
+      (state/teardown! @state test)))
 
   nem/Reflection
   (fs [this]
@@ -219,38 +223,18 @@
 
 (defn package
   "Constructs a nemesis and generator for membership operations. Options
-  include are a map like {:faults #{:membership ...} :membership
-  membership-opts}. Membership opts are:
+  include are a map like
 
-  :node-view
+    {:faults #{:membership ...}
+     :membership membership-opts}.
 
-    A function which takes (f test node) and returns that node's current view
-    of the cluster. Bound to node via jepsen.control.
+  Membership opts are:
 
-  :node-view-interval
-
-    How many seconds to wait between refreshing node views. Default: 5.
-
-  :merge-views
-
-    A function which takes (f test state node-views), where node-views is a
-    collection of individual node views, and returns a merged view.
-
-  :next-op
-
-    Returns the next operation to perform on the given state, via (next-op test
-    state). If no ops are presently ready, return :pending. If no more ops can
-    ever be performed, return `nil`.
-
-  :apply-op!
-
-    Actually applies an operation, e.g. by submitting a network request.
-    (apply-op! test state op)
-
-  :resolved? [test state op]
-
-    A function which indicates if the given pending operation can be considered
-    resolved, and removed from the pending set."
+    {:state           A record satisfying the State protocol
+     :log-resolve-op? Whether to log the resolution of operations
+     :log-resolve?    Whether to log each resolve step
+     :log-node-views? Whether to log changing node views
+     :log-view?       Whether to log the entire cluster view."
   [opts]
   (when (contains? (:faults opts) :membership)
     (let [mopts    (:membership opts)

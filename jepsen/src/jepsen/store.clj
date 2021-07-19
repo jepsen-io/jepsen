@@ -173,19 +173,28 @@
   [obj]
   (walk/prewalk (fn transform [x]
                   ; (prn :x (class x) (instance? AbstractList x))
-                  (if (instance? AbstractList x)
-                    (vec x)
-                    x))
+                  (cond (instance? clojure.lang.Atom x)
+                        (atom (postprocess-fressian @x))
+
+                        (instance? AbstractList x)
+                        (vec x)
+
+                        :else x))
                 obj))
+
+(defn load-fressian-file
+  "Loads an arbitrary Fressian file."
+  [file]
+  (with-open [is (io/input-stream file)]
+    (let [in (fress/create-reader is :handlers read-handlers)]
+      (-> (fress/read-object in)
+          postprocess-fressian))))
 
 (defn load
   "Loads a specific test by name and time."
   [test-name test-time]
-  (with-open [file (io/input-stream (fressian-file {:name       test-name
-                                                    :start-time test-time}))]
-    (let [in (fress/create-reader file :handlers read-handlers)]
-      (-> (fress/read-object in)
-          postprocess-fressian))))
+  (load-fressian-file (fressian-file {:name       test-name
+                                      :start-time test-time})))
 
 (defn class-name->ns-str
   "Turns a class string into a namespace string (by translating _ to -)"
@@ -361,13 +370,20 @@
        (map deref)
        dorun))
 
+(defn write-fressian-file!
+  "Writes a data structure to the given file, as Fressian. For instance:
+
+      (write-fressian-file! {:foo 2} (path! test \"foo.fressian\"))."
+  [data file]
+  (with-open [os (io/output-stream file)]
+    (let [out (fress/create-writer os :handlers write-handlers)]
+      (fress/write-object out data))))
+
 (defn write-fressian!
-  "Write the entire test as a .fressian file"
+  "Write the entire test as a .fressian file."
   [test]
   (let [test (apply dissoc test (nonserializable-keys test))]
-    (with-open [file   (io/output-stream (fressian-file! test))]
-      (let [out (fress/create-writer file :handlers write-handlers)]
-        (fress/write-object out test)))))
+    (write-fressian-file! test (fressian-file! test))))
 
 (defn save-1!
   "Writes a history and fressian file to disk and updates latest symlinks.
@@ -402,11 +418,15 @@
 
 (def default-logging-overrides
   "Logging overrides that we apply by default"
-  {"clj-libssh2.session"         :warn
-   "clj-libssh2.authentication"  :warn
-   "clj-libssh2.known-hosts"     :warn
-   "clj-libssh2.ssh"             :warn
-   "clj-libssh2.channel"         :warn})
+  {"net.schmizz.concurrent.Promise"                            :fatal
+   "net.schmizz.sshj.transport.random.JCERandom"               :warn
+   "net.schmizz.sshj.transport.TransportImpl"                  :warn
+   "net.schmizz.sshj.connection.channel.direct.SessionChannel" :warn
+   "clj-libssh2.session"                                       :warn
+   "clj-libssh2.authentication"                                :warn
+   "clj-libssh2.known-hosts"                                   :warn
+   "clj-libssh2.ssh"                                           :warn
+   "clj-libssh2.channel"                                       :warn})
 
 (defn start-logging!
   "Starts logging to a file in the test's directory. Also updates current
