@@ -408,7 +408,7 @@
                      (let [now (linear-time-nanos)]
                        ; Are we out of time?
                        (when (<= deadline now)
-                         (throw+ {:type :timeout}))
+                         (throw+ {:type :timeout} e))
 
                        ; Should we log something?
                        (when (<= @log-deadline now)
