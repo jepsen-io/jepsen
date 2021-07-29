@@ -223,7 +223,7 @@
 
 (defn package
   "Constructs a nemesis and generator for membership operations. Options
-  include are a map like
+  are a map like
 
     {:faults #{:membership ...}
      :membership membership-opts}.
@@ -234,7 +234,11 @@
      :log-resolve-op? Whether to log the resolution of operations
      :log-resolve?    Whether to log each resolve step
      :log-node-views? Whether to log changing node views
-     :log-view?       Whether to log the entire cluster view."
+     :log-view?       Whether to log the entire cluster view.
+
+  The package includes a :state field, which is an atom of the current cluster
+  state. You can use this (for example) to have generators which inspect the
+  current cluster state and use it to target faults."
   [opts]
   (when (contains? (:faults opts) :membership)
     (let [mopts    (:membership opts)
@@ -246,5 +250,6 @@
                                                            :log-resolve-op?])})
           gen     (->> (Generator. state)
                        (gen/stagger (:interval opts 10)))]
-      {:nemesis   nem
+      {:state     state
+       :nemesis   nem
        :generator gen})))
