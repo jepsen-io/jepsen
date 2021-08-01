@@ -41,6 +41,8 @@ from scratch.
 
 For reference, see the [API documentation](http://jepsen-io.github.io/jepsen/).
 
+An independent translation is available in [Chinese](https://jaydenwen123.gitbook.io/zh_jepsen_doc/).
+
 ## Setting up a Jepsen Environment
 
 So, you've got a Jepsen test, and you'd like to run it! Or maybe you'd like to start learning how to write tests. You've got several options:
