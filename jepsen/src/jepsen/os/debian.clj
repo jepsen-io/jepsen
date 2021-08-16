@@ -34,7 +34,7 @@
 (defn update!
   "Apt-get update."
   []
-  (c/su (c/exec :apt-get :update)))
+  (c/su (c/exec :apt-get :--allow-releaseinfo-change :update)))
 
 (defn maybe-update!
   "Apt-get update if we haven't done so recently."
