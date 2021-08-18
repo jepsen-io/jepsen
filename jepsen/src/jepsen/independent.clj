@@ -92,10 +92,12 @@
           [thread group])))
 
 (defn tuple-gen
-  "Wraps a generator so that it returns :value [k v] tuples."
+  "Wraps a generator so that it returns :value [k v] tuples for :invoke ops."
   [k gen]
   (gen/map (fn [op]
-              (assoc op :value (tuple k (:value op))))
+             (if (= :invoke (:type op))
+               (assoc op :value (tuple k (:value op)))
+               op))
             gen))
 
 (defrecord ConcurrentGenerator [n
