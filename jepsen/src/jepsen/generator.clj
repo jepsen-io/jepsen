@@ -1415,25 +1415,37 @@
   [a b]
   [b (synchronize a)])
 
-(defrecord UntilOk [gen done?]
+(defrecord UntilOk [gen done? active-processes]
   Generator
   (op [this test ctx]
     (when-not done?
       (when-let [[op gen'] (op gen test ctx)]
-        [op (UntilOk. gen' done?)])))
+        (if (= :pending op)
+          [op (assoc this :gen gen')]
+          [op (UntilOk. gen' done? (conj active-processes (:process op)))]))))
 
   (update [this test ctx event]
-    (if (= :ok (:type event))
-      ; We're finished; no need to update any more!
-      (assoc this :done? true)
-      ; Propagate update down
-      (c/update this :gen update test ctx event))))
+    (let [gen' (update gen test ctx event)
+          p    (:process event)]
+      (if (contains? active-processes p)
+        ; This is an update related to one of our operations.
+        (case (:type event)
+          ; We're finished; no need to update any more!
+          :ok (UntilOk. gen' true (disj active-processes p))
+
+          ; Crashed or failed; process no longer active, but we're not done.
+          (:info, :fail) (UntilOk. gen' done? (disj active-processes p))
+
+          ; Pass through
+          (UntilOk. gen' done? active-processes))
+        ; Some unrelated update
+        (UntilOk. gen' done? active-processes)))))
 
 (defn until-ok
-  "Wraps a generator, yielding operations from it until one operation completes
-  with :type :ok."
+  "Wraps a generator, yielding operations from it until one of those operations
+  completes with :type :ok."
   [gen]
-  (UntilOk. gen false))
+  (UntilOk. gen false #{}))
 
 (defrecord FlipFlop [gens i]
   Generator
