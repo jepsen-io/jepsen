@@ -4,7 +4,8 @@
   the entire list) or appends (adding a single number to whatever the present
   value of the given list is). We detect cycles in these transactions using
   Jepsen's cycle-detection system."
-  (:require [jepsen.generator :as gen]
+  (:require [elle.core :as elle]
+            [jepsen.generator :as gen]
             [jepsen.tests.cycle :as cycle]
             [jepsen.tests.cycle.append :as append]))
 
@@ -14,5 +15,5 @@
                     :max-txn-length     4
                     :max-writes-per-key 1024
                     :anomalies         [:G1 :G2]
-                    :additional-graphs [cycle/realtime-graph]})))
+                    :additional-graphs [elle/realtime-graph]})))
 ;     (update :generator (partial gen/stagger 1/5)))
