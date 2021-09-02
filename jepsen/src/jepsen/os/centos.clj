@@ -1,8 +1,8 @@
 (ns jepsen.os.centos
   "Common tasks for CentOS boxes."
-  (:use clojure.tools.logging)
   (:require [clojure.set :as set]
-            [jepsen.util :refer [meh]]
+            [clojure.tools.logging :refer [info]]
+            [jepsen.util :as u]
             [jepsen.os :as os]
             [jepsen.control :as c]
             [jepsen.control.util :as cu]
@@ -43,10 +43,6 @@
        (catch Exception e
          (update!))))
 
-(defmacro dprint [x]
-  `((fn [x#] do
-      x#) ~x))
-
 (defn installed
   "Given a list of centos packages (strings, symbols, keywords, etc), returns
   the set of packages which are installed, as strings."
@@ -58,7 +54,7 @@
          (map (comp second (partial re-find #"(.*)\.[^\-]+")))
          set
          ((partial clojure.set/intersection pkgs))
-         dprint)))
+         u/spy)))
 
 (defn uninstall!
   "Removes a package or packages."
@@ -116,17 +112,17 @@
   []
   (info "Installing start-stop-daemon")
   (c/su
-    (c/exec :wget "http://ftp.de.debian.org/debian/pool/main/d/dpkg/dpkg_1.17.25.tar.xz")
-    (c/exec :tar :-xf :dpkg_1.17.25.tar.xz)
-    (c/exec "bash" "-c" "cd dpkg-1.17.25 && ./configure")
-    (c/exec "bash" "-c" "cd dpkg-1.17.25 && make")
-    (c/exec "bash" "-c" "cp /dpkg-1.17.25/utils/start-stop-daemon /usr/bin/start-stop-daemon")
-    (c/exec "bash" "-c" "rm -f dpkg_1.17.25.tar.xz")))
+    (c/exec :wget "http://ftp.de.debian.org/debian/pool/main/d/dpkg/dpkg_1.17.27.tar.xz")
+    (c/exec :tar :-xf :dpkg_1.17.27.tar.xz)
+    (c/exec "bash" "-c" "cd dpkg-1.17.27 && ./configure")
+    (c/exec "bash" "-c" "cd dpkg-1.17.27 && make")
+    (c/exec "bash" "-c" "cp /dpkg-1.17.27/utils/start-stop-daemon /usr/bin/start-stop-daemon")
+    (c/exec "bash" "-c" "rm -f dpkg_1.17.27.tar.xz")))
 
 (defn installed-start-stop-daemon?
   "Is start-stop-daemon Installed?"
   []
-  (->> (c/exec :ls :/usr/bin)
+  (->> (c/exec :ls "/usr/bin")
        str/split-lines
        (some #(if (re-find #"start-stop-daemon" %) true))))
 
@@ -155,7 +151,7 @@
 
     (if (not= true (installed-start-stop-daemon?)) (install-start-stop-daemon!) (info "start-stop-daemon already installed"))
 
-    (meh (net/heal! (:net test) test)))
+    (u/meh (net/heal! (:net test) test)))
 
   (teardown! [_ test node]))
 

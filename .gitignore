@@ -32,4 +32,5 @@ bench/**
 .idea
 *.iml
 jepsen/doc
+.eastwood
 .session.vim

@@ -7,6 +7,7 @@
                     [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]]
+            [jepsen.generator.pure :as gen.pure]
             [clojure.string :as str]
             [clojure.java.io :as io])
   (:import (java.io File)))
@@ -87,14 +88,16 @@
   (c/su (c/exec "/opt/jepsen/strobe-time" delta period duration)))
 
 (defn clock-nemesis
-  "Generates a nemesis which manipulates clocks. Accepts three types of
+  "Generates a nemesis which manipulates clocks. Accepts four types of
   operations:
 
       {:f :reset, :value [node1 ...]}
 
       {:f :strobe, :value {node1 {:delta ms, :period ms, :duration s} ...}}
 
-      {:f :bump, :value {node1 delta-ms ...}}"
+      {:f :bump, :value {node1 delta-ms ...}}
+
+      {:f :check-offsets}"
   []
   (reify nemesis/Nemesis
     (setup! [nem test]
@@ -136,40 +139,65 @@
     (teardown! [_ test]
       (reset-time! test))))
 
-(defn reset-gen
-  "Randomized reset generator. Performs resets on random subsets of the tests'
+(defn reset-gen-select
+  "A function which returns a reset generator. The parameter of this function is
+  used to select which subset of the test's nodes to use as targets in the
+  generator."
+  [select]
+  (fn [test process]
+    {:type :info, :f :reset, :value (select test)}))
+
+(def reset-gen
+  "Randomized reset generator. Performs resets on random subsets of the test's
   nodes."
-  [test process]
-  {:type :info, :f :reset, :value (util/random-nonempty-subset (:nodes test))})
+  (reset-gen-select (comp util/random-nonempty-subset :nodes)))
 
-(defn bump-gen
-  "Randomized clock bump generator. On random subsets of nodes, bumps the clock
-  from -262 to +262 seconds, exponentially distributed."
-  [test process]
-  {:type  :info
-   :f     :bump
-   :value (zipmap (util/random-nonempty-subset (:nodes test))
-                  (repeatedly (fn []
-                                (long (* (rand-nth [-1 1])
-                                         (Math/pow 2 (+ 2 (rand 16))))))))})
+(defn bump-gen-select
+  "A function which returns a clock bump generator that bumps the clock from -262
+  to +262 seconds, exponentially distributed. The parameter of this function is
+  used to select which subset of the test's nodes to use as targets in the
+  generator."
+  [select]
+  (fn [test process]
+    {:type  :info
+     :f     :bump
+     :value (zipmap (select test)
+                    (repeatedly (fn []
+                                  (long (* (rand-nth [-1 1])
+                                           (Math/pow 2 (+ 2 (rand 16))))))))}))
 
-(defn strobe-gen
-  "Randomized clock strobe generator. On random subsets of the test's nodes,
-  introduces clock strobes from 4 ms to 262 seconds, with a period of 1 ms to
-  1 second, for a duration of 0-32 seconds."
-  [test process]
-  {:type  :info
-   :f     :strobe
-   :value (zipmap (util/random-nonempty-subset (:nodes test))
-                  (repeatedly (fn []
-                                {:delta (long (Math/pow 2 (+ 2 (rand 16))))
-                                 :period (long (Math/pow 2 (rand 10)))
-                                 :duration (rand 32)})))})
+(def bump-gen
+  "Randomized clock bump generator targeting a random subsets of nodes."
+  (bump-gen-select (comp util/random-nonempty-subset :nodes)))
+
+(defn strobe-gen-select
+  "A function which returns a clock strobe generator that introduces clock strobes
+  from 4 ms to 262 seconds, with a period of 1 ms to 1 second, for a duration of
+  0-32 seconds. The parameter of this function is used to select which subset of
+  the test's nodes to use as targets in the generator."
+  [select]
+  (fn [test process]
+    {:type  :info
+     :f     :strobe
+     :value (zipmap (select test)
+                    (repeatedly (fn []
+                                  {:delta (long (Math/pow 2 (+ 2 (rand 16))))
+                                   :period (long (Math/pow 2 (rand 10)))
+                                   :duration (rand 32)})))}))
+
+(def strobe-gen
+  "Randomized clock strobe generator targeting a random subsets of the test's
+  nodes."
+  (strobe-gen-select (comp util/random-nonempty-subset :nodes)))
 
 (defn clock-gen
   "Emits a random schedule of clock skew operations. Always starts by checking
   the clock offsets to establish an initial bound."
   []
-  (gen/phases
-    (gen/once {:type :info, :f :check-offsets})
-    (gen/mix [reset-gen bump-gen strobe-gen])))
+  (gen/stateful+pure
+    (gen/phases
+      (gen/once {:type :info, :f :check-offsets})
+      (gen/mix [reset-gen bump-gen strobe-gen]))
+    (gen.pure/phases
+      {:type :info, :f :check-offsets}
+      (gen.pure/mix [reset-gen bump-gen strobe-gen]))))

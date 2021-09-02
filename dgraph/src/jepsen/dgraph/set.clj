@@ -1,14 +1,14 @@
 (ns jepsen.dgraph.set
   "Does a bunch of inserts; verifies that all inserted triples are present in a
   final read."
-  (:require [clojure.tools.logging :refer [info]]
+  (:require [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [with-retry]]
             [knossos.op :as op]
             [jepsen.dgraph [client :as c]
                            [trace :as t]]
             [jepsen [client :as client]
-                    [checker :as checker]
-                    [generator :as gen]]))
+                    [checker :as checker]]
+            [jepsen.generator.pure :as gen]))
 
 (defrecord Client [conn]
   client/Client
@@ -16,10 +16,14 @@
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
-    (c/alter-schema! conn (str "jepsen-type: string @index(exact)"
-                               (when (:upsert-schema test) " @upsert")
-                               " .\n"
-                               "value: int .\n")))
+    (try
+      (c/alter-schema! conn (str "jepsen-type: string @index(exact)"
+                                 (when (:upsert-schema test) " @upsert")
+                                 " .\n"
+                                 "value: int .\n"))
+      (catch Throwable t
+        (warn t "caught during alter-schema")
+        (throw t))))
 
   (invoke! [this test op]
     (c/with-conflict-as-fail op
@@ -48,28 +52,21 @@
    :checker   (checker/set)
    :generator (->> (range)
                    (map (fn [i] {:type :invoke, :f :add, :value i}))
-                   gen/seq
                    (gen/stagger 1/10))
-   :final-generator (gen/each (gen/once {:type :invoke, :f :read}))})
+   :final-generator (gen/each-thread {:type :invoke, :f :read})})
 
 
-; This variant uses a single UID to store all values, and keeps a set of
-; successfully written elements which we use to force a strong read.
-(defrecord UidClient [conn uid written successfully-read?]
+; This variant uses a single UID to store all values.
+(defrecord UidClient [conn uid successfully-read?]
   client/Client
   (open! [this test node]
     (assoc this :conn (c/open node)))
 
   (setup! [this test]
     (c/alter-schema! conn (str "value: [int] .\n"))
-    (with-retry [attempts 5]
+    (c/retry-conflicts
       (c/with-txn [t conn]
-        (deliver uid (first (vals (c/mutate! t {:value -1})))))
-
-      (catch io.grpc.StatusRuntimeException e
-        (if (re-find #"ABORTED" (.getMessage e))
-          (retry (dec attempts))
-          (throw e))))
+        (deliver uid (first (vals (c/mutate! t {:value -1}))))))
     (info "UID is" @uid))
 
   (invoke! [this test op]
@@ -80,14 +77,15 @@
                               (t/attribute! "value" (str (:value op)))
                               (c/mutate! t {:uid @uid
                                             :value (:value op)}))]
-                (swap! written conj (:value op))
                 (assoc op :type :ok, :uid @uid)))
 
         :read (let [r (c/with-txn [t conn]
                         (let [found (->> (c/query t
                                                   (str "{ q(func: uid($u)) { "
                                                        "uid, value } }")
-                                                  {:u @uid})
+                                                  {:u @uid}))
+                              _     (info :found found)
+                              found (->> found
                                          :q
                                          (mapcat :value)
                                          (remove #{-1}) ; Our sentinel
@@ -107,7 +105,7 @@
   [opts]
   (let [successfully-read? (promise)]
     (assoc (workload opts)
-           :client (UidClient. nil (promise) (atom #{}) successfully-read?)
+           :client (UidClient. nil (promise) successfully-read?)
            :final-generator (->> (fn [_ _]
                                    (when-not (realized? successfully-read?)
                                      {:type :invoke, :f :read}))

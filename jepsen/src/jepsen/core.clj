@@ -13,8 +13,8 @@
   Jepsen automates the setup and teardown of the environment and distributed
   system by using an *OS* and *client* respectively. See `run!` for details."
   (:refer-clojure :exclude [run!])
-  (:use     clojure.tools.logging)
   (:require [clojure.stacktrace :as trace]
+            [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [clojure.datafy :refer [datafy]]
@@ -33,6 +33,9 @@
             [jepsen.client :as client]
             [jepsen.nemesis :as nemesis]
             [jepsen.store :as store]
+            [jepsen.control.util :as cu]
+            [jepsen.generator [pure :as gen.pure]
+                              [interpreter :as gen.interpreter]]
             [tea-time.core :as tt]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
@@ -114,22 +117,23 @@
                                 (map (partial str/join "/"))
                                 (zipmap full-paths))]
             (doseq [[remote local] paths]
-              (info "downloading" remote "to" local)
-              (try
-                (control/download
-                  remote
-                  (.getCanonicalPath
-                    (store/path! test (name node)
-                                 ; strip leading /
-                                 (str/replace local #"^/" ""))))
-                (catch java.io.IOException e
-                  (if (= "Pipe closed" (.getMessage e))
-                    (info remote "pipe closed")
-                    (throw e)))
-                (catch java.lang.IllegalArgumentException e
-                  ; This is a jsch bug where the file is just being
-                  ; created
-                  (info remote "doesn't exist"))))))))
+              (when (cu/exists? remote)
+                (info "downloading" remote "to" local)
+                (try
+                  (control/download
+                    remote
+                    (.getCanonicalPath
+                      (store/path! test (name node)
+                                   ; strip leading /
+                                   (str/replace local #"^/" ""))))
+                  (catch java.io.IOException e
+                    (if (= "Pipe closed" (.getMessage e))
+                      (info remote "pipe closed")
+                      (throw e)))
+                  (catch java.lang.IllegalArgumentException e
+                    ; This is a jsch bug where the file is just being
+                    ; created
+                    (info remote "doesn't exist")))))))))
     (store/update-symlinks! test)))
 
 (defn maybe-snarf-logs!
@@ -172,7 +176,8 @@
        (db/cycle! ~test)
        ~@body)
      (finally
-       (control/on-nodes ~test (partial db/teardown! (:db ~test))))))
+       (when-not (:leave-db-running? ~test)
+         (control/on-nodes ~test (partial db/teardown! (:db ~test)))))))
 
 (defprotocol Worker
   "Polymorphic lifecycle for worker threads; synchronized setup, run, and
@@ -272,7 +277,7 @@
                                                (.getMessage e))))))]
     ; Validate completion
     (assert (= (:type completion) :info)
-            (str "Expected nemesis/invoke! to return a map with :type :ok, :fail, or :info, but received "
+            (str "Expected nemesis/invoke! to return a map with :type :info, but received "
                  (pr-str completion) " instead"))
     (assert (= (:process op) (:process completion)))
     (assert (= (:f op)       (:f completion)))
@@ -417,10 +422,11 @@
   [test]
   (NemesisWorker. test nil (atom false)))
 
-(defn run-case!
-  "Spawns nemesis and clients, runs a single test case, and
-  returns that case's history."
+(defn run-case-classic-generator!
+  "For a classic generator, spawns nemesis and clients, runs a single test
+  case, and returns that case's history."
   [test]
+  (warn "Using impure generator")
   (let [history (atom [])
         test    (assoc test :history history)]
 
@@ -447,6 +453,46 @@
     (swap! (:active-histories test) disj history)
 
     @history))
+
+(defmacro with-client+nemesis-setup-teardown
+  "Evaluates body, setting up clients and nemesis before, and tearing them down
+  at the end of the test."
+  [test & body]
+  `(let [client#  (:client ~test)
+         nemesis# (:nemesis ~test)]
+    ; Setup
+    (try (let [nf# (future (nemesis/setup-compat! nemesis# ~test nil))]
+           (real-pmap (fn [node#]
+                        (client/with-client [c# (client/open! client# ~test node#)]
+                          (client/setup! c# ~test)))
+                      (:nodes ~test))
+           @nf#)
+         ~@body
+         (finally
+           ; Teardown
+           (let [nf# (future (nemesis/teardown-compat! nemesis# ~test))]
+             (real-pmap (fn [node#]
+                          (client/with-client [c# (client/open! client# ~test node#)]
+                            (client/teardown! c# ~test)))
+                        (:nodes ~test))
+             @nf#)))))
+
+(defn run-case-pure-generator!
+  "For a pure generator, uses generator/run! to run a test case, and returns
+  that case's history."
+  [test]
+  (info "Using pure generator")
+  (with-client+nemesis-setup-teardown test
+    (gen.interpreter/run! test)))
+
+(defn run-case!
+  "Takes a test, spawns nemesis and clients, runs the generator, and returns
+  the history."
+  [test]
+  (let [gen (:generator test)]
+    (if (satisfies? gen.pure/Generator gen)
+      (run-case-pure-generator! test)
+      (run-case-classic-generator! test))))
 
 (defn analyze!
   "After running the test and obtaining a history, we perform some
@@ -505,6 +551,7 @@
               the end of the test.
   :nonserializable-keys   A collection of top-level keys in the test which
                           shouldn't be serialized to disk.
+  :leave-db-running? Whether to leave the DB running at the end of the test.
 
   Tests proceed like so:
 
@@ -553,7 +600,8 @@
                           ; Currently running histories
                           :active-histories (atom #{}))
               _    (store/start-logging! test)
-              _    (info "Running test:\n" (with-out-str (pprint test)))
+              _    (info "Running test:\n" (binding [*print-length* 32]
+                                             (with-out-str (pprint test))))
               test (control/with-remote (:remote test)
                      (control/with-ssh (:ssh test)
                        (with-resources [sessions
@@ -579,6 +627,8 @@
                                                       :barrier
                                                       :active-histories
                                                       :sessions)]
+                                     ; TODO: move test analysis outside the
+                                     ; DB/ssh block.
                                      (info "Run complete, writing")
                                      (when (:name test) (store/save-1! test))
                                      (analyze! test))))))))))]

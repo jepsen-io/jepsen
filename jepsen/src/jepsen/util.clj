@@ -2,7 +2,7 @@
   "Kitchen sink"
   (:require [clojure.tools.logging :refer [info]]
             [clojure.core.reducers :as r]
-            [clojure.string :as str]
+            [clojure [string :as str]]
             [clojure.pprint :refer [pprint]]
             [clojure.walk :as walk]
             [clojure.java.io :as io]
@@ -12,7 +12,8 @@
             [dom-top.core :as dt :refer [bounded-future]]
             [fipp.edn :as fipp]
             [knossos.history :as history])
-  (:import (java.util.concurrent.locks LockSupport)
+  (:import (java.lang.reflect Method)
+           (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
            (java.io File
                     RandomAccessFile)))
@@ -39,16 +40,17 @@
 
 (defn random-nonempty-subset
   "A randomly selected, randomly ordered, non-empty subset of the given
-  collection."
-  [nodes]
-  (take (inc (rand-int (count nodes))) (shuffle nodes)))
+  collection. Returns nil if collection is empty."
+  [coll]
+  (when (seq coll)
+    (take (inc (rand-int (count coll))) (shuffle coll))))
 
 (defn name+
   "Tries name, falls back to pr-str."
   [x]
   (if (instance? clojure.lang.Named x)
-    (name x))
-    (pr-str x))
+    (name x)
+    (pr-str x)))
 
 (def uninteresting-exceptions
   "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
@@ -240,7 +242,7 @@
 ;(defn all-loggers []
 ;  (->> (org.apache.log4j.LogManager/getCurrentLoggers)
 ;       (java.util.Collections/list)
-;       (cons (org.apache.log4j.LogManager/getRootLogger)))) 
+;       (cons (org.apache.log4j.LogManager/getRootLogger))))
 
 (defn all-jdk-loggers []
   (let [manager (java.util.logging.LogManager/getLogManager)]
@@ -598,8 +600,9 @@
                   s))))))
 
 (defn coll
-  "Wraps non-coll things into singleton lists, and leaves colls as themselves.
-  Useful when you can take either a single thing or a sequence of things."
+  "Wraps non-collection things into singleton lists, and leaves colls as
+  themselves. Useful when you can take either a single thing or a sequence of
+  things."
   [thing-or-things]
   (cond (nil? thing-or-things)  nil
         (coll? thing-or-things) thing-or-things
@@ -820,3 +823,23 @@
   present. Ex. (contains-many? {:a 1 :b 2 :c 3} :a :b :c) => true"
   [m & ks]
   (every? #(contains? m %) ks))
+
+(defn parse-long
+  "Parses a string to a Long. Look, we use this a lot, okay?"
+  [s]
+  (Long/parseLong s))
+
+(defn ex-root-cause
+  "Unwraps throwables to return their original cause."
+  [^Throwable t]
+  (if-let [cause (.getCause t)]
+    (recur cause)
+    t))
+
+(defn arities
+  "The arities of a function class."
+  [^Class c]
+  (keep (fn [^Method method]
+          (when (re-find #"invoke" (.getName method))
+            (alength (.getParameterTypes method))))
+        (-> c .getDeclaredMethods)))

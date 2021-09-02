@@ -6,8 +6,8 @@
   (:require [clojure.tools.logging :refer [info]]
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
-                    [generator :as gen]
                     [independent :as independent]]
+            [jepsen.generator.pure :as gen]
             [jepsen.tests.linearizable-register :as lr]))
 
 (defn read

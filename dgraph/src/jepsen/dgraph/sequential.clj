@@ -54,9 +54,9 @@
             [jepsen [client :as client]
                     [checker :as checker]
                     [independent :as independent]
-                    [generator :as gen]
                     [util :as util]
                     [store :as store]]
+            [jepsen.generator.pure :as gen]
             [jepsen.checker.timeline :as timeline]
             [jepsen.checker.perf :as perf]
             [gnuplot.core :as g]))

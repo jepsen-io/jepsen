@@ -1,7 +1,7 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
-            [jepsen.util :refer [meh]]
+            [jepsen.util :refer [meh name+]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
@@ -76,22 +76,43 @@
         (recur (dec tries))
         res))))
 
+
+; TODO: only force? should have a ?, because it's a boolean. User and pw
+; should be renamed without ?, and probably use whatever username/password
+; naming convention we use in jepsen.control etc.
 (defn wget!
   "Downloads a string URL and returns the filename as a string. Skips if the
-  file already exists."
+  file already exists.
+
+  Options:
+
+    :force?      Even if we have this cached, download the tarball again anyway.
+    :user?       User for wget authentication. If provided, valid pw must also be provided.
+    :pw?         Password for wget authentication."
   ([url]
-   (wget! url false))
-  ([url force?]
-   (let [filename (.getName (file url))]
-     (when force?
-       (exec :rm :-f filename))
+   (wget! url {:force? false}))
+  ([url opts]
+   (let [filename (.getName (file url))
+         wget-opts std-wget-opts
+         ; second parameter was changed from a boolean flag (force?) to an options map
+         ; this check is here for backwards compatibility
+         opts (if (map? opts) opts {:force? opts})]
+     (when (:force? opts)
+      (exec :rm :-f filename))
+     (when-not (empty? (:user? opts))
+      (concat wget-opts [:--user (:user? opts) :--password (:pw? opts)])) 
      (when (not (exists? filename))
-       (wget-helper! std-wget-opts url))
+      (wget-helper! wget-opts url))
      filename)))
 
 (def wget-cache-dir
   "Directory for caching files from the web."
   (str tmp-dir-base "/wget-cache"))
+
+(defn encode
+  "base64 encode a given string and return the encoded string in utf8"
+  [s]
+  (String. (b64/encode (.getBytes s)) "UTF-8"))
 
 (defn cached-wget!
   "Downloads a string URL to the Jepsen wget cache directory, and returns the
@@ -104,12 +125,17 @@
 
   Options:
 
-    :force?     Even if we have this cached, download the tarball again anyway."
+    :force?      Even if we have this cached, download the tarball again anyway.
+    :user?       User for wget authentication. If provided, valid pw must also be provided.
+    :pw?         Password for wget authentication."
   ([url]
-   (wget! url {:force? false}))
+   (cached-wget! url {:force? false}))
   ([url opts]
-   (let [encoded-url (String. (b64/encode (.getBytes url)) "UTF-8")
-         dest-file   (str wget-cache-dir "/" encoded-url)]
+   (let [encoded-url (encode url)
+         dest-file   (str wget-cache-dir "/" encoded-url)
+         wget-opts   (if (empty? (:user? opts)) 
+                       (concat std-wget-opts [:-O dest-file])
+                       (concat std-wget-opts [:-O dest-file :--user (:user? opts) :--password (:pw? opts)]))]
      (when (:force? opts)
        (info "Clearing cached copy of" url)
        (exec :rm :-rf dest-file))
@@ -117,7 +143,7 @@
        (info "Downloading" url)
        (do (exec :mkdir :-p wget-cache-dir)
            (cd wget-cache-dir
-               (wget-helper! std-wget-opts :-O dest-file url))))
+               (wget-helper! wget-opts url))))
      dest-file)))
 
 (defn install-archive!
@@ -131,12 +157,18 @@
   a single directory is present, its *contents* will be moved to dest, so
   foolib-1.2.3-amd64/my.file becomes dest/my.file. If the tarball includes
   multiple files, those files are moved to dest, so my.file becomes
-  dest/my.file."
+  dest/my.file.
+  
+  Options:
+
+    :force?      Even if we have this cached, download the tarball again anyway.
+    :user?       User for wget authentication. If provided, valid pw must also be provided.
+    :pw?         Password for wget authentication."
   ([url dest]
-   (install-archive! url dest false))
-  ([url dest force?]
+   (install-archive! url dest {:force? false}))
+  ([url dest opts]
    (let [local-file (nth (re-find #"file://(.+)" url) 1)
-         file       (or local-file (cached-wget! url {:force? force?}))
+         file       (or local-file (cached-wget! url opts))
          tmpdir     (tmp-dir!)
          dest       (expand-path dest)]
 
@@ -181,7 +213,7 @@
                ; Retry download once; maybe it was abnormally terminated
                (do (info "Retrying corrupt archive download")
                    (exec :rm :-rf file)
-                   (install-archive! url dest force?)))
+                   (install-archive! url dest opts)))
 
              ; Throw by default
              (throw+ e))))
@@ -208,7 +240,9 @@
   username)
 
 (defn grepkill!
-  "Kills processes by grepping for the given string."
+  "Kills processes by grepping for the given string. If a signal is given,
+  sends that signal instead. Signals may be either numbers or names, e.g.
+  :term, :hup, ..."
   ([pattern]
    (grepkill! 9 pattern))
   ([signal pattern]
@@ -220,7 +254,7 @@
                | :grep pattern
                | :grep :-v "grep"
                | :awk "{print $2}"
-               | :xargs :--no-run-if-empty :kill (str "-" signal))
+               | :xargs :--no-run-if-empty :kill (str "-" (name+ signal)))
          (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
            nil)
          (catch [:type :jepsen.control/nonzero-exit, :exit 123] e

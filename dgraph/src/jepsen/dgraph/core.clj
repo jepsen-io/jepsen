@@ -2,13 +2,14 @@
   (:gen-class)
   (:require [clojure.string :as str]
             [clojure.tools.logging :refer [info warn error]]
+            [clojure.java.io :as io]
             [clojure.java.shell :refer [sh]]
             [clojure.pprint :refer [pprint]]
             [jepsen [cli :as cli]
                     [core :as jepsen]
                     [checker :as checker]
-                    [generator :as gen]
                     [tests :as tests]]
+            [jepsen.generator.pure :as gen]
             [jepsen.checker.timeline :as timeline]
             [jepsen.os.debian :as debian]
             [jepsen.dgraph [bank :as bank]
@@ -21,7 +22,8 @@
                            [support :as s]
                            [types :as types]
                            [upsert :as upsert]
-                           [trace  :as t]]))
+                           [trace  :as t]
+                           [wr :as wr]]))
 
 (def workloads
   "A map of workload names to functions that can take opts and construct
@@ -35,7 +37,12 @@
    :set                       set/workload
    :uid-set                   set/uid-workload
    :sequential                sequential/workload
-   :types                     types/workload})
+   :types                     types/workload
+   :wr                        wr/workload})
+
+(def standard-workloads
+  "The workloads we run for test-all"
+  (remove #{:types} (keys workloads)))
 
 (def nemesis-specs
   "These are the types of failures that the nemesis can perform"
@@ -47,6 +54,32 @@
     :move-tablet?
     :skew-clock?})
 
+(defn default-nemesis?
+  "Is this nemesis option map, as produced by the CLI, the default?"
+  [nemesis-opts]
+  (= {} (dissoc nemesis-opts :interval)))
+
+(def standard-nemeses
+  "A set of prepackaged nemeses"
+  [; Nothing
+   {:interval         1}
+   ; Predicate migrations
+   {:interval         15
+    :move-tablet?     true}
+   ; Partitions
+   {:interval         30
+    :partition-ring?  true}
+   ; Process kills
+   {:interval         30
+    :kill-alpha?      true
+    :kill-zero?       true}
+   ; Everything
+   {:interval         30
+    :move-tablet?     true
+    :partition-ring?  true
+    :kill-alpha?      true
+    :kill-zero?       true}])
+
 (def skew-specs
   #{:tiny
     :small
@@ -56,8 +89,11 @@
 (defn dgraph-test
   "Builds up a dgraph test map from CLI options."
   [opts]
-  (let [version  (if (:local-binary opts)
-                   (let [v (:out (sh (:local-binary opts) "version"))]
+  (let [version  (if-let [bin (:local-binary opts)]
+                   ; We can't pass local filenames directly to sh, or it'll
+                   ; look for them in $PATH, not the working directory
+                   (let [bin (.getCanonicalPath (io/file bin))
+                         v   (:out (sh bin "version"))]
                      (if-let [m (re-find #"Dgraph version   : (v[0-9a-z\.-]+)" v)]
                        (m 1)
                        "unknown"))
@@ -97,8 +133,10 @@
             :client     (:client workload)
             :nemesis    (:nemesis nemesis)
             :checker    (checker/compose
-                          {:perf     (checker/perf)
-                           :workload (:checker workload)})
+                          {:perf        (checker/perf)
+                           :exceptions  (checker/unhandled-exceptions)
+                           :stats       (checker/stats)
+                           :workload    (:checker workload)})
             :tracing tracing})))
 
 (defn parse-long [x] (Long/parseLong x))
@@ -116,7 +154,7 @@
 (def cli-opts
   "Options for single and multiple tests"
   [["-v" "--version VERSION" "What version number of dgraph should we test?"
-    :default "1.0.3"]
+    :default "1.1.1"]
    [nil "--package-url URL" "Ignore version; install this tarball instead"
     :validate [(partial re-find #"\A(file)|(https?)://")
                "Should be an HTTP url"]]
@@ -136,14 +174,14 @@
     :default false]
    [nil "--tracing URL" "Enables tracing by providing an endpoint to export traces. Jaeger example: http://host.docker.internal:14268/api/traces"]
    [nil "--dgraph-jaeger-collector COLLECTOR" "Jaeger collector URL to pass to dgraph on startup."]
-   [nil "--dgraph-jaeger-agent AGENT" "Jaeger agent URL to pass to dgraph on startup."]])
-
-(def single-test-opts
-  "Additional command line options for single tests"
-  [["-w" "--workload NAME" "Test workload to run"
+   [nil "--dgraph-jaeger-agent AGENT" "Jaeger agent URL to pass to dgraph on startup."]
+   ["-f" "--force-download" "Ignore the package cache; download again."
+    :default false]
+  ["-w" "--workload NAME" "Test workload to run"
     :parse-fn keyword
-    :missing (str "--workload " (cli/one-of workloads))
     :validate [workloads (cli/one-of workloads)]]
+  ; TODO: rewrite nemesis-interval and nemesis so that we can detect the
+  ; absence of these options at the CLI during test-all
    [nil "--nemesis-interval SECONDS"
     "Roughly how long to wait between nemesis operations."
     :default  10
@@ -166,8 +204,6 @@
     :default :small
     :assoc-fn (fn [m k v] (update m :nemesis assoc :skew v))
     :validate [skew-specs (.toLowerCase (cli/one-of skew-specs))]]
-   ["-f" "--force-download" "Ignore the package cache; download again."
-    :default false]
    [nil "--upsert-schema"
     "If present, tests will use @upsert schema directives. To disable, provide false"
     :parse-fn (complement #{"false"})
@@ -176,65 +212,30 @@
    [nil "--defer-db-teardown" "Wait until user input to tear down DB nodes"
     :default false]])
 
-(defn test-all-cmd
-  "A command to run a whole suite of tests in one go."
-  []
-  (let [opt-spec (into cli/test-opt-spec cli-opts)]
-    {"test-all"
-     {:opt-spec opt-spec
-      :opt-fn   cli/test-opt-fn
-      :usage    "TODO"
-      :run       (fn [{:keys [options]}]
-                   (info "CLI options:\n" (with-out-str (pprint options)))
-                   (let [force-download? (atom true)
-                         tests (for [i          (range (:test-count options))
-                                     workload   (remove #{:types :uid-set}
-                                                        (keys workloads))
-                                     upsert     [true]
-                                     nemesis    [; Nothing
-                                                 {:interval         1}
-                                                 ; Predicate migrations
-                                                 {:interval         15
-                                                  :move-tablet?     true}
-                                                 ; Partitions
-                                                 {:interval         30
-                                                  :partition-ring?  true}
-                                                 ; Process kills
-                                                 {:interval         30
-                                                  :kill-alpha?      true
-                                                  :kill-zero?       true}
-                                                 ; Everything
-                                                 {:interval         30
-                                                  :move-tablet?     true
-                                                  :partition-ring?  true
-                                                  :kill-alpha?      true
-                                                  :kill-zero?       true}]]
-                                 (assoc options
-                                        :workload       workload
-                                        :upsert-schema  upsert
-                                        :nemesis        nemesis
-                                        :force-download @force-download?))]
-                     (->> tests
-                          (map-indexed
-                            (fn [i test-opts]
-                              (try
-                                (info "\n\n\nTest" (inc i) "/" (count tests))
-                                ; Run test
-                                (jepsen/run! (dgraph-test test-opts))
-                                ; We've run once, no need to download
-                                ; again
-                                (reset! force-download? false)
-                                (catch Exception e
-                                  (warn e "Test crashed; moving on...")))))
-                          dorun)))}}))
-
+(defn all-tests
+  "Takes base CLI options and constructs a sequence of test options."
+  [opts]
+  (let [nemeses   (if-let [n (:nemesis opts)]
+                    (if (default-nemesis? n) standard-nemeses [n])
+                    standard-nemeses)
+        workloads (if-let [w (:workload opts)] [w] standard-workloads)
+        counts    (range (:test-count opts))
+        test-opts (for [i counts, n nemeses, w workloads]
+                    (assoc opts
+                           :nemesis n
+                           :workload w))
+        ; Only the first test should force a re-download.
+        test-opts (cons (first test-opts)
+                        (map #(assoc % :force-download false) (rest test-opts)))]
+    ; (pprint test-opts)
+    (map dgraph-test test-opts)))
 
 (defn -main
   "Handles command line arguments; running tests or the web server."
   [& args]
-  (cli/run! (merge (test-all-cmd)
+  (cli/run! (merge (cli/test-all-cmd {:tests-fn all-tests
+                                       :opt-spec cli-opts})
                    (cli/single-test-cmd {:test-fn   dgraph-test
-                                         :opt-spec  (concat cli-opts
-                                                            single-test-opts)})
+                                         :opt-spec  cli-opts})
                    (cli/serve-cmd))
             args))

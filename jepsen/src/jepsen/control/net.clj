@@ -1,19 +1,20 @@
 (ns jepsen.control.net
   "Network control functions."
   (:refer-clojure :exclude [partition])
-  (:use jepsen.control)
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [jepsen.control :as c]
+            [slingshot.slingshot :refer [throw+]]))
 
 (defn reachable?
   "Can the current node ping the given node?"
   [node]
-  (try (exec :ping :-w 1 node) true
+  (try (c/exec :ping :-w 1 node) true
        (catch RuntimeException _ false)))
 
 (defn local-ip
   "The local node's eth0 address"
   []
-  (nth (->> (exec :ifconfig "eth0")
+  (nth (->> (c/exec :ifconfig "eth0")
             (re-find #"inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"))
        1))
 
@@ -24,10 +25,17 @@
   ; 74.125.239.39   STREAM host.com
   ; 74.125.239.39   DGRAM
   ; ...
-  (first (str/split (->> (exec :getent :ahosts host)
-                         (str/split-lines)
-                         (first))
-                    #"\s+")))
+  (let [res (c/exec :getent :ahosts host)
+        ip (first (str/split (->> res
+                                  (str/split-lines)
+                                  (first))
+                             #"\s+"))]
+    (when (str/blank? ip)
+      ; We get this occasionally for reasons I don't understand
+      (throw+ {:type    :blank-getent-ip
+               :output  res
+               :host    host}))
+    ip))
 
 (def ip
   "Look up an ip for a hostname. Memoized."

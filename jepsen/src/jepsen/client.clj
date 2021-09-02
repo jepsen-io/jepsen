@@ -3,7 +3,8 @@
   (:require [clojure.tools.logging :refer :all]
             [clojure.reflect :refer [reflect]]
             [jepsen.util :as util]
-            [dom-top.core :refer [with-retry]]))
+            [dom-top.core :refer [with-retry]]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol Client
   ; TODO: this should be open, not open!
@@ -68,3 +69,63 @@
         (close! client test))
     (do (warn "DEPRECATED: `jepsen.client/close!` not implemented. Falling back to deprecated semantics of `jepsen.client/teardown!`. You should separate your client's `teardown!` function into `close!` and `teardown!`. See the jepsen.client documentation for details.")
         (teardown! client test))))
+
+(defrecord Validate [client]
+  Client
+  (open! [this test node]
+    (let [res (open! client test node)]
+      (when-not (satisfies? Client res)
+        (throw+ {:type    ::open-returned-non-client
+                 :got     res}
+                nil
+                "expected open! to return a Client, but got %s instead"
+                (pr-str res)))
+      res))
+
+  (close! [this test]
+    (close! client test))
+
+  (setup! [this test]
+          (setup! client test))
+
+  (invoke! [this test op]
+    (let [op' (invoke! client test op)]
+      (let [problems
+            (cond-> []
+              (not (map? op'))
+              (conj "should be a map")
+
+              (not (#{:ok :info :fail} (:type op')))
+              (conj ":type should be :ok, :info, or :fail")
+
+              (not= (:process op) (:process op'))
+              (conj ":process should be the same")
+
+              (not= (:f op) (:f op'))
+              (conj ":f should be the same"))]
+        (when (seq problems)
+          (throw+ {:type      ::invalid-completion
+                   :op        op
+                   :op'       op'
+                   :problems  problems})))
+        op'))
+
+  (teardown! [this test]
+    (teardown! client test)))
+
+(defn validate
+  "Wraps a client, validating that its return types are what you'd expect."
+  [client]
+  (Validate. client))
+
+(defmacro with-client
+  "Analogous to with-open. Takes a binding of the form [client-sym
+  client-expr], and a body. Binds client-sym to client-expr (presumably,
+  client-expr opens a new client), evaluates body with client-sym bound, and
+  ensures client is closed before returning."
+  [[client-sym client-expr] & body]
+  `(let [~client-sym ~client-expr]
+     (try
+       ~@body
+       (finally
+         (close! ~client-sym test)))))
