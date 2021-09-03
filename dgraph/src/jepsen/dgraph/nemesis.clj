@@ -4,10 +4,10 @@
             [clojure.tools.logging :refer [info warn]]
             [slingshot.slingshot :refer [try+ throw+]]
             [jepsen [control :as c]
-             [generator :as gen]
              [net :as net]
              [util :as util]
              [nemesis :as nemesis]]
+            [jepsen.generator.pure :as gen]
             [jepsen.nemesis.time :as nt]
             [jepsen.control.util :as cu]
             [jepsen.dgraph [support :as s]]
@@ -158,7 +158,7 @@
 (defn op
   "Construct a nemesis op"
   [f]
-  {:type :info, :f f, :value nil})
+  {:type :info, :f f})
 
 (defn full-generator
   "Takes a nemesis specification map from the command line, and constructs a
@@ -166,20 +166,20 @@
   partitions."
   [opts]
   (->> [(when (:kill-alpha? opts)
-          [(gen/seq (cycle [(op :kill-alpha)
-                            (op :restart-alpha)]))])
+          [(cycle [(op :kill-alpha)
+                   (op :restart-alpha)])])
         (when (:kill-zero? opts)
-          [(gen/seq (cycle (map op [:kill-zero  :restart-zero])))])
+          [(cycle (map op [:kill-zero :restart-zero]))])
         (when (:fix-alpha? opts)
           [(op :fix-alpha)])
         (when (:partition-halves? opts)
-          [(gen/seq (cycle (map op [:start-partition-halves
-                                    :stop-partition-halves])))])
+          [(cycle (map op [:start-partition-halves
+                           :stop-partition-halves]))])
         (when (:partition-ring? opts)
-          [(gen/seq (cycle (map op [:start-partition-ring
-                                    :stop-partition-ring])))])
+          [(cycle (map op [:start-partition-ring
+                           :stop-partition-ring]))])
         (when (:skew-clock? opts)
-          [(gen/seq (cycle (map op [:start-skew :stop-skew])))])
+          [(cycle (map op [:start-skew :stop-skew]))])
         (when (:move-tablet? opts)
           [(op :move-tablet)])]
        (apply concat)
@@ -191,12 +191,12 @@
   [opts]
   {:nemesis   (full-nemesis opts)
    :generator (full-generator opts)
-   :final-generator (->> [(when (:partition-halves opts) :stop-partition-halves)
-                          (when (:partition-ring opts)   :stop-partition-ring)
-                          (when (:skew-clock? opts)      :stop-skew)
-                          (when (:kill-zero?  opts)      :restart-zero)
-                          (when (:kill-alpha? opts)      :restart-alpha)]
-                         (remove nil?)
-                         (map op)
-                         gen/seq
-                         (gen/delay 5))})
+   :final-generator
+   (->> [(when (:partition-halves? opts) :stop-partition-halves)
+         (when (:partition-ring? opts)   :stop-partition-ring)
+         (when (:skew-clock? opts)      :stop-skew)
+         (when (:kill-zero?  opts)      :restart-zero)
+         (when (:kill-alpha? opts)      :restart-alpha)]
+        (remove nil?)
+        (map op)
+        (gen/delay-til 5))})

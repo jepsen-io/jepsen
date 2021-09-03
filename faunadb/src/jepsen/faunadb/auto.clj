@@ -106,29 +106,30 @@
 
 (defn join!
   "Joins this node to the given target node."
-  [target]
+  [replica target]
   (c/su
     (info "joining FaunaDB node" target)
-    (c/exec :faunadb-admin :join target)))
+    (c/exec :faunadb-admin :join :-r replica target)))
 
 (defn init!
   "Sets up cluster on node. Must be called on all nodes in test concurrently."
-  [test node]
+  [test replica node]
   (when (= node (jepsen/primary test))
     (info node "initializing FaunaDB cluster")
-    (c/exec :faunadb-admin :init))
+    (c/exec :faunadb-admin :init :-r replica))
   (jepsen/synchronize test 300)
 
   (when (not= node (jepsen/primary test))
-    (join! (jepsen/primary test))
-    (c/exec :faunadb-admin :join (jepsen/primary test)))
+    (join! replica (jepsen/primary test))
+    (c/exec :faunadb-admin :join :-r replica (jepsen/primary test)))
   (jepsen/synchronize test)
 
   (when (= node (jepsen/primary test))
     (info node (str/join ["creating " (:replicas test) " replicas"]))
     (when (< 1 (:replica-count @(:topology test)))
       (c/exec :faunadb-admin
-              :update-replication
+              :update-replica
+              :data+log
               (topo/replicas @(:topology test))))
     (when (:wait-for-convergence test)
       (wait-for-replication node)
@@ -432,15 +433,10 @@
                   {:auth_root_key                  f/root-key
                    :network_coordinator_http_address ip
                    :network_broadcast_address      node
-                   :replica_name                   (topo/replica topo node)
                    :network_host_id                node
                    :network_listen_address         ip}
-                  (when (topo/manual-log-config? test)
-                    {:storage_transaction_log_nodes (topo/log-configuration
-                                                       topo)})
                   (when (:accelerate-indexes test)
                     {:accelerate_indexes true})
-
                   (when (:datadog-api-key test)
                     {:stats_host "localhost"
                      :stats_port 8125})))
@@ -464,17 +460,8 @@
     (setup! [_ test node]
       (install! test)
       (configure! test @(:topology test) node)
-      (when (:clear-cache test)
-        (clear-cache!))
-      (if (cache-valid? test)
-        (unpack-cache!)
-        ; We have to go through the whole setup process, then we'll build a
-        ; cache for next time
-        (do (start! test node)
-            (init! test node)
-            (stop! test node)
-            (build-cache! test)))
-      (start! test node))
+      (start! test node)
+      (init! test (topo/replica @(:topology test) node) node))
 
     (teardown! [_ test node]
       (info node "tearing down FaunaDB")

@@ -12,7 +12,7 @@
   (:import (io.dgraph TxnConflictException)))
 
 (def pred-count "Number of predicates to stripe keys and values across."
-  3)
+  7)
 
 (defn multi-pred-acct->key+amount
   "Takes a query result like {:key_0 1 :amount_2 5} and returns [1 5], by
@@ -70,8 +70,8 @@
                   :q
                   first)]
         (if r
-          ;; Note that we need :type for new accounts, but don't want to update it
-          ;; normally.
+          ;; Note that we need :type for new accounts, but don't want to update
+          ;; it normally.
           {:uid    (:uid r)
            :key    (get r (keyword kp))
            :amount (get r (keyword ap))}
@@ -131,8 +131,8 @@
            (c/alter-schema! conn))
       (info "Schema altered")
 
-      ;; Insert initial value
-      (try
+      ;; Insert initial value. This tends to fail a lot.
+      (c/retry-conflicts
         (c/with-txn [t conn]
           (let [k (first (:accounts test))
                 tp (keyword (c/gen-pred "type"    pred-count k))
@@ -142,9 +142,7 @@
                     tp "account",
                     ap (:total-amount test)}]
             (info "Upserting" r)
-            (c/upsert! t kp r)))
-        (catch io.grpc.StatusRuntimeException e)
-        (catch TxnConflictException e))))
+            (c/upsert! t kp r))))))
 
   (invoke! [this test op]
     (t/with-trace "bank.invoke"

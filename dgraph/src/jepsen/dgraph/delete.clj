@@ -6,8 +6,8 @@
             [jepsen.dgraph [client :as c]]
             [jepsen [client :as client]
                     [checker :as checker]
-                    [generator :as gen]
                     [independent :as independent]]
+            [jepsen.generator.pure :as gen]
             [jepsen.checker.timeline :as timeline])
   (:import (io.dgraph TxnConflictException)))
 
@@ -91,7 +91,7 @@
   "Stuff you need to build a test!"
   [opts]
   {:client      (Client. nil)
-   :generator   (independent/concurrent-generator
+   :generator   (independent/pure-concurrent-generator
                   (* 2 (count (:nodes opts)))
                   (range)
                   (fn [k]

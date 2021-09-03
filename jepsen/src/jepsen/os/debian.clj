@@ -1,7 +1,7 @@
 (ns jepsen.os.debian
   "Common tasks for Debian boxes."
-  (:use clojure.tools.logging)
   (:require [clojure.set :as set]
+            [clojure.tools.logging :refer [info]]
             [jepsen.util :refer [meh]]
             [jepsen.os :as os]
             [jepsen.control :as c :refer [|]]
@@ -52,6 +52,7 @@
          (map (fn [line] (str/split line #"\s+")))
          (filter #(= "install" (second %)))
          (map first)
+         (map (fn [p] (str/replace p #":amd64|:i386" {":amd64" "" ":i386" ""})))
          set)))
 
 (defn uninstall!
@@ -169,10 +170,11 @@
                 :tar
                 :bzip2
                 :iputils-ping
-                :iproute
+                :iproute2
                 :rsyslog
                 :logrotate
-                :dirmngr])
+                :dirmngr
+                :tcpdump])
       (try+ (install [:libzip4])
             (catch [:exit 100] _
               ; Wrong package name; let's use the old one for jessie

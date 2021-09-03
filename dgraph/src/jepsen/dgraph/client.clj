@@ -6,11 +6,15 @@
             [dom-top.core :refer [with-retry]]
             [wall.hack]
             [cheshire.core :as json]
-            [jepsen.client :as jc]
-            [jepsen.dgraph.trace :as t])
+            [jepsen [client :as jc]
+                    [util :as util :refer [ex-root-cause]]]
+            [jepsen.dgraph.trace :as t]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent TimeUnit)
            (com.google.protobuf ByteString)
-           (io.grpc ManagedChannel
+           (io.grpc ClientInterceptor
+                    ClientInterceptors$InterceptorChannel
+                    ManagedChannel
                     ManagedChannelBuilder)
            (io.dgraph DgraphGrpc
                       DgraphGrpc$DgraphStub
@@ -27,6 +31,24 @@
 ;; milliseconds given to the grpc blockingstub as a deadline
 (def deadline 30000)
 
+(defmacro unwrap-exceptions
+  "The Dgraph client now throws deeply nested exception hierarchies; you'll
+  get, for instance, a RuntimeException wrapping a
+  java.util.concurrent.ExecutionException wrapping a
+  io.grpc.StatusRuntimeException, where it used to just throw a
+  StatusRuntimeException. This macro catches RuntimeExceptions, unwraps them to
+  inspect their root causes, and, if they're io.grpc.StatusRuntimeExceptions,
+  throws those directly."
+  [& body]
+  `(try ~@body
+        (catch RuntimeException e#
+          (let [cause# (ex-root-cause e#)]
+            (if (or (instance? io.grpc.StatusRuntimeException cause#)
+                    (instance? java.net.ConnectException cause#)
+                    (instance? java.io.IOException cause#))
+              (throw cause#)
+              (throw e#))))))
+
 (defn open
   "Creates a new DgraphClient for the given node."
   ([node]
@@ -38,24 +60,44 @@
                        (usePlaintext true)
                        (build))
            stub  (DgraphGrpc/newStub channel)
-           stub  (.withDeadlineAfter stub deadline TimeUnit/MILLISECONDS)
+
+           interceptors
+           ; Apply the same deadline to every call
+           [(reify ClientInterceptor
+             (interceptCall [this method call-opts next]
+               (.newCall next method
+                         (.withDeadlineAfter call-opts deadline
+                                             TimeUnit/MILLISECONDS))))]
+           interceptors (into-array ClientInterceptor interceptors)
+           stub (.withInterceptors stub interceptors)
+
+           ; Apparently this way of setting deadlines only applies to the first
+           ; call the client makes, not subsequent calls? See
+           ; https://github.com/dgraph-io/dgraph4j#setting-deadlines
+           ; stub  (.withDeadlineAfter stub deadline TimeUnit/MILLISECONDS)
            stubs (into-array DgraphGrpc$DgraphStub [stub])]
        (DgraphClient. stubs)))))
 
 (defn close!
   "Closes a client. Close is asynchronous; resources may be freed some time
-  after calling (close! client)."
+  after calling (close! client).
+
+  So much reflection to get at private fields. Hopefully DgraphClient will
+  add a shutdown function and we can use that instead."
   [client]
   (t/with-trace "client.close!"
     (let [async-client (wall.hack/field DgraphClient :asyncClient client)]
-      (doseq [c (wall.hack/field DgraphAsyncClient :stubs async-client)]
-        (.. c getChannel shutdown)))))
+      (doseq [client (wall.hack/field DgraphAsyncClient :stubs async-client)]
+        (let [c1 (.getChannel client)]
+          (let [c2 (wall.hack/field ClientInterceptors$InterceptorChannel
+                                    :channel c1)]
+            (.shutdown c2)))))))
 
 (defn abort-txn!
   "Aborts a transaction object."
   [^Transaction t]
   (t/with-trace "client.abort-txn!"
-    (try (.discard t)
+    (try (unwrap-exceptions (.discard t))
        (catch io.grpc.StatusRuntimeException e
          (if (re-find #"ABORTED: Transaction has been aborted\. Please retry\."
                       (.getMessage e))
@@ -100,20 +142,42 @@
   thrown, returns `op` with :type :fail, :error :conflict."
   [op & body]
   `(with-unavailable-backoff
-     (try ~@body
+     (try (unwrap-exceptions ~@body)
+          ; This one's special!
+          (catch java.net.ConnectException e#
+            ; Give it a sec to come back
+            (Thread/sleep 1000)
+            (condp re-find (.getMessage e#)
+              #"Connection refused"
+              (assoc ~op :type :fail, :error :connection-refused)
+
+              (throw e#)))
+
+          ; This one too
+          (catch java.io.IOException e#
+            (condp re-find (.getMessage e#)
+              #"Connection reset by peer"
+              (assoc ~op :type :info, :error :connection-reset)
+
+              (throw e#)))
+
           (catch io.grpc.StatusRuntimeException e#
             (condp re-find (.getMessage e#)
               #"DEADLINE_EXCEEDED:"
-              (assoc ~op, :type :info, :error :timeout)
+              (assoc ~op, :type :info, :error :timeout-deadline-exceeded)
 
               #"context deadline exceeded"
-              (assoc ~op, :type :info, :error :timeout)
+              (assoc ~op, :type :info, :error
+                     :timeout-context-deadline-exceeded)
 
               #"Conflicts with pending transaction. Please abort."
               (assoc ~op :type :fail, :error :conflict)
 
               #"readTs: \d+ less than minTs: \d+ for key:"
               (assoc ~op :type :fail, :error :old-timestamp)
+
+              #"StartTs: (\d+) is from before MoveTs: (\d+) for pred: (.+)"
+              (assoc ~op :type :fail, :error :start-ts-before-move-ts)
 
               #"Predicate is being moved, please retry later"
               (assoc ~op :type :fail, :error :predicate-moving)
@@ -127,21 +191,35 @@
               #"Please retry again, server is not ready to accept requests"
               (assoc ~op :type :fail, :error :not-ready-for-requests)
 
-              #"UNAVAILABLE"
-              (assoc ~op, :type :fail, :error :unavailable)
-
               #"No connection exists"
               (assoc ~op :type :fail, :error :no-connection)
 
-              ; Guessssing this means it couldn't even open a conn but not sure
-              ; This might be a fail???
+              ; Guessssing this means it couldn't even open a conn but not
+              ; sure. This might be a fail???
               #"Unavailable desc = all SubConns are in TransientFailure"
-              (assoc ~op :type :info, :error :unavailable-all-subconns-down)
+              (assoc ~op :type :info, :error
+                     :unavailable-all-subconns-transient-failure)
+
+              ; Maybe a new way of phrasing the previous error?
+              #"UNAVAILABLE: all SubConns are in TransientFailure"
+              (assoc ~op :type :info, :error
+                     :unavailable-all-subconns-transient-failure)
 
               #"rpc error: code = Unavailable desc = transport is closing"
               (assoc ~op :type :info, :error :unavailable-transport-closing)
 
-              #"dispatchTaskOverNetwork: while retrieving connection. error: Unhealthy connection"
+              ; You might THINK this is definite but I suspect it might
+              ; actually be a success sometimes
+              #"UNAVAILABLE: Network closed for unknown reason"
+              (assoc ~op :type :info, :error
+                     :unavailable-network-closed-unknown-reason)
+
+              ; You might THINK this is definite but I suspect it might
+              ; actually be a success sometimes
+              #"UNAVAILABLE: transport is closing"
+              (assoc ~op :type :info, :error :unavailable-transport-closing)
+
+              #"Unhealthy connection"
               (assoc ~op :type :info, :error :unhealthy-connection)
 
               #"Only leader can decide to commit or abort"
@@ -153,10 +231,28 @@
               #"ABORTED"
               (assoc ~op :type :fail, :error :transaction-aborted)
 
+              #"Attribute .+ not indexed"
+              (assoc ~op :type :fail, :error (.getMessage e#))
+
+              #"Schema not defined for predicate"
+              (assoc ~op :type :fail, :error :schema-not-defined)
+
               (throw e#)))
 
-          (catch TxnConflictException e#
-            (assoc ~op :type :fail, :error :conflict)))))
+            (catch TxnConflictException e#
+              (assoc ~op :type :fail, :error :conflict)))))
+
+(defmacro retry-conflicts
+  "Retries body with a short delay on transaction conflicts."
+  [& body]
+  `(with-retry [attempts# 10]
+     (unwrap-exceptions ~@body)
+     (catch TxnConflictException e#
+       (if (pos? attempts#)
+         (do (info "Retrying transaction conflict...")
+             (Thread/sleep (rand-int 100))
+             (~'retry (dec attempts#)))
+         (throw e#)))))
 
 (defn str->byte-string
   "Converts a string to a protobuf bytestring."
@@ -165,27 +261,23 @@
 
 (defn alter-schema!
   "Takes a schema string (or any number of strings) and applies that alteration
-  to dgraph. Retries if DEADLINE_EXCEEDED, since dgraph likes to throw this for
-  ??? reasons at the start of the test. Should be idempotent, so... hopefully
-  we can retry, at least in this context?"
+  to dgraph. Retries if the alter fails. There are too many different types of
+  failures so we retry all to avoid missing any. Alters are idempotent so retrying
+  should not be an issue."
   [^DgraphClient client & schemata]
   (t/with-trace "client.alter-schema!"
     (with-retry [i 10]
-      (.alter client (.. (DgraphProto$Operation/newBuilder)
-                         (setSchema (str/join "\n" schemata))
-                         build))
-
-      (catch java.util.concurrent.CompletionException e
-        (let [message (.getMessage e)]
-          (if (and (< 0 i)
-                   (or (re-find #"DEADLINE_EXCEEDED" message)
-                       (re-find #"Pending transactions" message)
-                       (re-find #"ABORTED" message)))
-            (do
-              (warn "alter-schema! failed due to retriable error, retrying...")
-              (Thread/sleep (rand-int 5000))
-              (retry (dec i)))
-            (throw e)))))))
+      (unwrap-exceptions
+       (.alter client (.. (DgraphProto$Operation/newBuilder)
+                          (setSchema (str/join "\n" schemata))
+                          build)))
+      (catch io.grpc.StatusRuntimeException e
+        (if (< 0 i)
+          (do
+            (warn "alter-schema! failed, retrying...")
+            (Thread/sleep (rand-int 5000))
+            (retry (dec i)))
+          (throw e))))))
 
 (defn ^DgraphProto$Response mutate!*
   "Takes a mutation object and applies it to a transaction. Returns a Response."
@@ -304,8 +396,9 @@
   client."
   [client]
   (with-retry [attempts 16]
-    (with-txn [t client]
-      (schema t))
+    (unwrap-exceptions
+      (with-txn [t client]
+        (schema t)))
     (catch io.grpc.StatusRuntimeException e
       (cond (<= attempts 1)
             (throw e)
@@ -329,13 +422,14 @@
 
 (defn upsert!
   "Takes a transaction, a predicate, and a record map. If only one map is
-  provided, it is used as the predicate. If no record exists for the given
-  predicate, inserts the record map.
+  provided, it is used as the predicate. If no UID exists for the given
+  predicate, inserts the record map. If a matching UID exists, mutates it
+  in-place.
 
   Predicate can be a keyword, which is used as the primary key of the record.
   TODO: add more complex predicates.
 
-  Returns nil if upsert did not take place. Returns mutation results otherwise."
+  Returns mutation results."
   [t pred record]
   (t/with-trace "client.upsert!"
     (if-let [pred-value (get record pred)]
@@ -345,10 +439,18 @@
                                   "  }\n"
                                   "}")
                            {:a pred-value}))]
-        ;;(info "Query results:" res)
-        (when (empty? (:all res))
-          ;;(info "Inserting...")
-          (mutate! t record)))
+        ; (info "Query results:" res)
+        (condp = (count (:all res))
+          ; No matches, insert
+          0 (mutate! t record)
+          ; Found a UID, update that
+          1 (mutate! t (assoc record :uid (:uid (first (:all res)))))
+          ; Um
+          (throw+ {:type :unexpected-multiple-results
+                   :in   :upsert
+                   :key  pred-value
+                   :record record
+                   :results res})))
 
       (throw (IllegalArgumentException.
               (str "Record " (pr-str record) " has no value for "
@@ -383,42 +485,59 @@
       (alter-schema! conn (str keys vals))))
 
   (invoke! [this test op]
-    (with-conflict-as-fail op
-      (with-txn [t conn]
-        (->> (:value op)
-             (reduce
-              (fn [txn' [f k v :as micro-op]]
-                (let [kp (gen-pred "key" (:key-predicate-count opts) k)
-                      vp (gen-pred "val" (:value-predicate-count opts) k)]
-                  (case f
-                    :r
-                    (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
-                                            "  " vp "\n"
-                                            "}}")
-                                     {:key k})
-                          reads (:q res)]
-                      (conj txn' [f k (condp = (count reads)
-                                        ; Not found
-                                        0 nil
-                                        ; Found
-                                        1 (get (first reads)
-                                               (keyword vp))
-                                        ; Ummm
-                                        (throw (RuntimeException.
-                                                (str "Unexpected multiple results for key "
-                                                     (pr-str k) ": "
-                                                     (pr-str reads)))))]))
+    (try+
+      (with-conflict-as-fail op
+        (with-txn [t conn]
+          (->> (:value op)
+               (reduce
+                 (fn [txn' [f k v :as micro-op]]
+                   (let [kp (gen-pred "key" (:key-predicate-count opts) k)
+                         vp (gen-pred "val" (:value-predicate-count opts) k)]
+                     (case f
+                       :r
+                       (let [res (query t (str "{ q(func: eq(" kp ", $key)) {\n"
+                                               "  " vp "\n"
+                                               "}}")
+                                        {:key k})
+                             reads (:q res)]
+                         (conj txn' [f k (condp = (count reads)
+                                           ; Not found
+                                           0 nil
+                                           ; Found. COERCE TO LONG, OMFG
+                                           1 (try (long (get (first reads)
+                                                        (keyword vp)))
+                                                  (catch ClassCastException c
+                                                    (throw+ {:type :unexpected-read-class
+                                                             :key-pred kp
+                                                             :val-pred vp
+                                                             :key      k
+                                                             :res      res})))
+                                           ; Ummm
+                                           (do
+                                             (throw+ {:type :unexpected-multiple-results
+                                                      :in      :read
+                                                      :key     k
+                                                      :results reads})
+                                             ; Alternate behavior: just go for
+                                             ; it?
+                                             (info "Unexpected multiple results for key" k "-" (pr-str reads))
+                                             (get (rand-nth reads)
+                                                  (keyword vp))))]))
 
-                                        ; TODO: we should be able to optimize this to do pure
-                                        ; inserts and UID-direct writes without the upsert
-                                        ; read-write cycle, at least when we know the state
-                    :w (do (if (:blind-insert-on-write? opts)
-                             (mutate! t {(keyword kp) k, (keyword vp) v})
-                             (upsert! t (keyword kp)
-                                      {(keyword kp) k, (keyword vp) v}))
-                           (conj txn' micro-op)))))
-              [])
-             (assoc op :type :ok, :value)))))
+                       ; TODO: we should be able to optimize this to do pure
+                       ; inserts and UID-direct writes without the upsert
+                       ; read-write cycle, at least when we know the state
+                       :w (do (if (:blind-insert-on-write? opts)
+                                (mutate! t {(keyword kp) k, (keyword vp) v})
+                                (upsert! t (keyword kp)
+                                         {(keyword kp) k
+                                          (keyword vp) v}))
+                              (conj txn' micro-op)))))
+                 [])
+               (assoc op :type :ok, :value))))
+      (catch [:type :unexpected-multiple-results] e
+        (assoc op :type :fail, :error e))))
+
 
   (teardown! [this test])
 
@@ -426,8 +545,13 @@
     (close! conn)))
 
 (defn txn-client
-  "A client which can execute generic transcational workloads over arbitrary
-  integer keys and values.
+  "A client which can execute generic transactional workloads over arbitrary
+  integer keys and values. Entities are automatically created; each entity has
+  a key and value attribute. Entities use *different* key and value attributes,
+  e.g. key_1, value_3, to avoid contending on the same attributes.
+
+  Reads are performed by querying for the value associated with the entity
+  which has the given key. Writes use upsert! normally, or mutate! otherwise.
 
   Options:
 

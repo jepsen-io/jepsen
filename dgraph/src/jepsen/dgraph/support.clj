@@ -282,10 +282,11 @@
           (jepsen/synchronize test 300)
           (with-retry [attempts 4]
             (try
-              (let [conn (dc/open node alpha-public-grpc-port)]
-                (try (dc/await-ready conn)
-                     (finally
-                       (dc/close! conn))))
+              (dc/unwrap-exceptions
+                (let [conn (dc/open node alpha-public-grpc-port)]
+                  (try (dc/await-ready conn)
+                       (finally
+                         (dc/close! conn)))))
 
               (catch io.grpc.StatusRuntimeException e
                 (if (re-find #"error while fetching schema" (.getMessage e))

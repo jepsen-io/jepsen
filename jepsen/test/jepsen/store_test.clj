@@ -1,10 +1,9 @@
 (ns jepsen.store-test
   (:refer-clojure :exclude [load])
-  (:use clojure.test
-        clojure.pprint
-        jepsen.store)
+  (:use clojure.test)
   (:require [clojure.data.fressian :as fress]
             [clojure.string :as str]
+            [jepsen.store :refer :all]
             [jepsen [common-test :refer [quiet-logging]]]
             [jepsen.core-test :as core-test]
             [jepsen.core :as core]
@@ -68,7 +67,7 @@
       (is (string? k))
       (testing "test.fressian"
         (is (= (dissoc t :db :os :net :client :checker
-                       :nemesis :generator :model)
+                       :nemesis :generator :model :remote)
                @t')))
       (testing "results.edn"
         (is (= (:results t) (load-results "store-test" k)))))))

@@ -15,13 +15,19 @@ addons:
       - python-pip
 before_install:
   - cd ${TRAVIS_BUILD_DIR}/jepsen
-script: |
+script:
+  - |
   (
     set -euo pipefail
     pip install --user pycodestyle
     pycodestyle --max-line-length=100 ../yugabyte/run-jepsen.py
-    lein do clean, test
   )
+  - lein clean
+  # Exclude namespaces importing rhizome.viz, because compiling those requires
+  # X11. For full error message, see:
+  # https://travis-ci.com/github/jepsen-io/jepsen/builds/161202862
+  - lein eastwood '{:config-files [".eastwood.clj"], :exclude-namespaces [jepsen.tests.cycle.wr jepsen.tests.cycle.append]}'
+  - lein test
 
 notifications:
   email:

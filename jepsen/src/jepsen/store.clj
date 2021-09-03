@@ -2,8 +2,10 @@
   "Persistent storage for test runs and later analysis."
   (:refer-clojure :exclude [load])
   (:require [clojure.data.fressian :as fress]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str]
+            [clojure [string :as str]
+                     [walk :as walk]]
             [clojure.tools.logging :refer :all]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
@@ -13,7 +15,8 @@
             [unilog.config :as unilog]
             [multiset.core :as multiset]
             [jepsen.util :as util])
-  (:import (java.io File)
+  (:import (java.util AbstractList)
+           (java.io File)
            (java.nio.file Files
                           FileSystems
                           Path)
@@ -164,13 +167,25 @@
   [test]
   (into default-nonserializable-keys (:nonserializable-keys test)))
 
+(defn postprocess-fressian
+  "Fressian likes to give us ArrayLists, which are kind of a PITA when you're
+  used to working with vectors. We map those back to vectors again."
+  [obj]
+  (walk/prewalk (fn transform [x]
+                  ; (prn :x (class x) (instance? AbstractList x))
+                  (if (instance? AbstractList x)
+                    (vec x)
+                    x))
+                obj))
+
 (defn load
   "Loads a specific test by name and time."
   [test-name test-time]
   (with-open [file (io/input-stream (fressian-file {:name       test-name
                                                     :start-time test-time}))]
     (let [in (fress/create-reader file :handlers read-handlers)]
-      (fress/read-object in))))
+      (-> (fress/read-object in)
+          postprocess-fressian))))
 
 (defn class-name->ns-str
   "Turns a class string into a namespace string (by translating _ to -)"
@@ -221,7 +236,7 @@
                      (io/reader (path {:name       test-name
                                        :start-time test-time}
                                       "results.edn")))]
-    (clojure.edn/read {:default default-edn-reader} file)))
+    (edn/read {:default default-edn-reader} file)))
 
 (def memoized-load-results (memoize load-results))
 
@@ -297,8 +312,8 @@
     (let [src  (.toPath (path test))
           dest (.. FileSystems
                    getDefault
-                   (getPath base-dir (into-array dest)))]
-      (Files/deleteIfExists dest)
+                   (getPath base-dir (into-array dest)))
+          _    (Files/deleteIfExists dest)]
       (Files/createSymbolicLink dest (.relativize (.getParent dest) src)
                                 (make-array FileAttribute 0)))))
 
@@ -398,14 +413,17 @@
   symlink. Test may include a :logging key, which should be a map with the
   following optional options:
 
-      {:overrides   A map of packages to log level keywords}"
+      {:overrides   A map of packages to log level keywords}
+
+  Test may also include a :logging-json? flag, which produces JSON structured
+  Jepsen logs."
   [test]
   (unilog/start-logging!
     {:level   "info"
      :console   false
      :appenders [console-appender
                  {:appender :file
-                  :encoder :pattern
+                  :encoder  (if (:logging-json? test) :json :pattern)
                   :pattern "%d{ISO8601}{GMT}\t%p\t[%t] %c: %m%n"
                   :file (.getCanonicalPath (path! test "jepsen.log"))}]
      :overrides (merge default-logging-overrides
