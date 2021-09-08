@@ -387,11 +387,15 @@
                                     (with-db test
                                       (util/with-relative-time
                                         ; Run a single case
-                                        (-> test
-                                            (assoc :history (run-case! test))
-                                            ; Remove state
-                                            (dissoc :barrier :sessions)))))]
-                         (info "Run complete, writing")
-                         (when (:name test) (store/save-1! test))
+                                        (let [test (-> test
+                                                       (assoc :history
+                                                              (run-case! test))
+                                                       ; Remove state
+                                                       (dissoc :barrier
+                                                               :sessions))]
+                                          (info "Run complete, writing")
+                                          (when (:name test)
+                                            (store/save-1! test))
+                                          test))))]
                          (analyze! test)))]
             (log-results test)))))))
