@@ -150,19 +150,22 @@ Options:\n")
 (defn parse-concurrency
   "Takes a parsed map. Parses :concurrency; if it is a string ending with n,
   e.g 3n, sets it to 3 * the number of :nodes. Otherwise, parses as a plain
-  integer."
-  [parsed]
-  (let [c (:concurrency (:options parsed))]
-    (let [[match integer unit] (re-find #"(\d+)(n?)" c)]
-      (when-not match
-        (throw (IllegalArgumentException.
-                 (str "--concurrency " c
-                      " should be an integer optionally followed by n"))))
-      (let [unit (if (= "n" unit)
-                   (count (:nodes (:options parsed)))
-                   1)]
-        (assoc-in parsed [:options :concurrency]
-                  (* unit (Long/parseLong integer)))))))
+  integer. With an optional keyword k, parses that key in the parsed map--by
+  default, the key is :concurrency."
+  ([parsed]
+   (parse-concurrency parsed :concurrency))
+  ([parsed k]
+   (let [c (get (:options parsed) k)]
+     (let [[match integer unit] (re-find #"(\d+)(n?)" c)]
+       (when-not match
+         (throw (IllegalArgumentException.
+                  (str "--concurrency " c
+                       " should be an integer optionally followed by n"))))
+       (let [unit (if (= "n" unit)
+                    (count (:nodes (:options parsed)))
+                    1)]
+         (assoc-in parsed [:options k]
+                   (* unit (Long/parseLong integer))))))))
 
 (defn parse-nodes
   "Takes a parsed map and merges all the various node specifications together.
