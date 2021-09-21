@@ -77,7 +77,7 @@
     :validate [(complement neg?) "should be a non-negative number"]]
 
    [nil "--nemesis-long-recovery" "Every so often, have a long period of no faults, to see whether the cluster recovers."
-    :default false
+    :default true
     :assoc-fn (fn [m k v] (update m :nemesis assoc :long-recovery v))]
 
    [nil "--nemesis-schedule SCHEDULE" "Whether to have randomized delays between nemesis actions, or fixed ones."

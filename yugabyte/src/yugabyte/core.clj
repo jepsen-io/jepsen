@@ -204,21 +204,24 @@
   "Initial test construction from a map of CLI options. Establishes the test
   name, OS, DB."
   [opts]
-  (assoc opts
-    :name (str "yb " (-> (or (:url opts) (:version opts))
-                         (str/split #"/")
-                         (last))
-               " " (name (:workload opts))
-               (when-not (= [:interval] (keys (:nemesis opts)))
-                 (str " nemesis " (->> (dissoc (:nemesis opts) :interval)
-                                       keys
-                                       (map name)
-                                       sort
-                                       (str/join ",")))))
-    :os (case (:os opts)
-          :centos centos/os
-          :debian debian/os)
-    :db (auto/->YugaByteDB)))
+  (let [api (keyword (namespace (:workload opts)))]
+    (assoc opts
+      :api api
+      :name (str "yb_" (-> (or (:url opts) (:version opts))
+                           (str/split #"/")
+                           (last))
+                 "_" (name api)
+                 "_" (name (:workload opts))
+                 (when-not (= [:interval] (keys (:nemesis opts)))
+                   (str "_nemesis_" (->> (dissoc (:nemesis opts) :interval)
+                                         keys
+                                         (map name)
+                                         sort
+                                         (str/join ",")))))
+      :os (case (:os opts)
+            :centos centos/os
+            :debian debian/os)
+      :db (auto/->YugaByteDB))))
 
 (defn test-2
   "Second phase of test construction. Builds the workload and nemesis, and
@@ -226,7 +229,6 @@
   [opts]
   (let [workload ((get workloads (:workload opts)) opts)
         nemesis  (nemesis/nemesis opts)
-        api      (keyword (namespace (:workload opts)))
         gen      (->> (:generator workload)
                       (gen/nemesis (:generator nemesis))
                       (gen/time-limit (:time-limit opts)))
@@ -278,8 +280,7 @@
                    :checker)
            (when (:yugabyte-ssh opts) (yugabyte-ssh-defaults))
            (when (:trace-cql opts) (trace-logging))
-           {:api       api
-            :client    (:client workload)
+           {:client    (:client workload)
             :nemesis   (:nemesis nemesis)
             :generator gen
             :checker   checker})))
