@@ -12,7 +12,8 @@ how a system responds to different faults. See
 [jepsen.io](https://jepsen.io/analyses) for examples of the sorts of analyses
 you can carry out with Jepsen.
 
-[![Build Status](https://travis-ci.com/jepsen-io/jepsen.svg?branch=master)](https://travis-ci.com/jepsen-io/jepsen)
+[![Clojars Project](https://img.shields.io/clojars/v/jepsen.svg)](https://clojars.org/jepsen)
+[![Build Status](https://travis-ci.com/jepsen-io/jepsen.svg?branch=main)](https://travis-ci.com/jepsen-io/jepsen)
 
 ## Design Overview
 
