@@ -1288,7 +1288,7 @@
   "Wraps a generator. Operations from that generator are scheduled at uniformly
   random intervals between 0 to 2 * dt, or, if we can't keep up, as fast as
   possible. There's... an argument that maybe we should limit the amount of
-  catching-up this generator performs, but I'm not sure if that's a practiacl
+  catching-up this generator performs, but I'm not sure if that's a practical
   concern yet.
 
   Unlike Jepsen's original version of `stagger`, this actually *means*
