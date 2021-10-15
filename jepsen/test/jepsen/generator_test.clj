@@ -530,3 +530,36 @@
     (is (= n (count h)))
     (is (< 2.5 (mean-interval as) 3.5))
     (is (< 4.5 (mean-interval bs) 5.5))))
+
+(deftest cycle-times-test
+   (is (= [; We start with five seconds of as
+           [0  :a 0]
+           [1  :a 1]
+           [2  :a 2]
+           [3  :a 3]
+           [4  :a 4]
+           ; At time 5, we switch to bs, which begin immediately
+           [5  :b 0]
+           [8  :b 1]
+           [11 :b 2]
+           [14 :b 3]
+           ; At time 15, we go back to as
+           [15 :a 5]
+           [16 :a 6]
+           [17 :a 7]
+           [18 :a 8]
+           [19 :a 9]
+           ; And at time 20, we return to bs
+           [20 :b 4]
+           ; But now the b generator is exhausted, and we complete
+           ]
+          (->> (gen/cycle-times 5 (->> (range)
+                                       (map (fn [i] {:f :a, :value i}))
+                                       (gen/delay 1))
+                                10 (->> (range)
+                                        (map (fn [i] {:f :b, :value i}))
+                                        (gen/delay 3)
+                                        (gen/limit 5)))
+               gen/clients
+               gen.test/perfect
+               (map (juxt (comp long util/nanos->secs :time) :f :value))))))

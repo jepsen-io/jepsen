@@ -1266,30 +1266,27 @@
   Generator
   (op [this test ctx]
     (when-let [[op gen'] (op gen test ctx)]
-      (let [next-time (or next-time (:time ctx))]
+      (let [now       (:time ctx)
+            next-time (or next-time now)]
         (cond ; No need to do anything to pending ops
               (= :pending op)
               [op this]
 
               ; We're ready to issue this operation.
               (<= next-time (:time op))
-              [op (Stagger. dt (+ next-time (long (rand dt))) gen')]
+              [op (Stagger. dt (+ (:time op) (long (rand dt))) gen')]
 
               ; Not ready yet
               true
               [(assoc op :time next-time)
                (Stagger. dt (+ next-time (long (rand dt))) gen')]))))
 
-
   (update [_ test ctx event]
     (Stagger. dt next-time (update gen test ctx event))))
 
 (defn stagger
   "Wraps a generator. Operations from that generator are scheduled at uniformly
-  random intervals between 0 to 2 * dt, or, if we can't keep up, as fast as
-  possible. There's... an argument that maybe we should limit the amount of
-  catching-up this generator performs, but I'm not sure if that's a practical
-  concern yet.
+  random intervals between 0 to 2 * (dt seconds).
 
   Unlike Jepsen's original version of `stagger`, this actually *means*
   'schedule at roughly every dt seconds', rather than 'introduce roughly dt
@@ -1352,7 +1349,7 @@
         ; OK we have an actual op. Compute its new event time.
         (let [next-time (or next-time (:time op))
               op        (c/update op :time max next-time)]
-          [op (Delay. dt (+ next-time dt) gen')]))))
+          [op (Delay. dt (+ (:time op) dt) gen')]))))
 
   (update [this test ctx event]
     (Delay. dt next-time (update gen test ctx event))))
@@ -1462,3 +1459,95 @@
   etc. Stops as soon as any gen is exhausted. Updates are ignored."
   [a b]
   (FlipFlop. [a b] 0))
+
+(defrecord CycleTimes [period    ; Total period of the cycle, in nanos
+                       t0        ; Starting time, in nanos (initially nil)
+                       intervals ; Vector of durations in nanos that each
+                                 ; generator should last for.
+                       cutoffs   ; Vector of times in nanos below which that
+                                 ; particular generator starts. Omits the last
+                                 ; generator.
+                       gens]     ; Vector of generators
+  Generator
+  (op [this test ctx]
+    ; We start by figuring out the current generator based on the context time.
+    (let [now       (:time ctx)
+          ; When's the zero point of our timeline?
+          t0        (or t0 (:time ctx))
+          ; How far are we into the current cycle?
+          in-period (mod (- now t0) period)
+          ; When was the start of the current cycle?
+          cycle-start (- now in-period)
+          ; What generator do we think is most likely to have an operation for
+          ; us?
+          i         (loop [i 0]
+                      (if (or (= i (count cutoffs))
+                              (< in-period (nth cutoffs i)))
+                        i
+                        (recur (inc i))))]
+      ; Now we cycle through the generators in order, looking for one which can
+      ; produce an operation which falls before the end of its window.
+      (loop [i i
+             ; When we ask a later generator for an operation, we don't want to
+             ; ask it for an operation with the *current* time, because that
+             ; generator won't actually be valid until *later*. Instead we're
+             ; going to pretend its time t had arrived already, and see what
+             ; the answer *would* be at that time.
+             t (reduce + cycle-start (take i intervals))]
+        (let [gen      (nth gens i)
+              interval (nth intervals i)
+              ; When does the next generator start?
+              t'       (+ t interval)
+              ; Ask this generator for an operation. We use the current time,
+              ; or the start of the generator's window, whichever is higher.
+              [op gen'] (op gen test (assoc ctx :time (max now t)))]
+          (cond ; Ah, this generator is exhausted. So are we.
+                (nil? op)
+                nil
+
+                ; We're pending--we might choose to emit an operation before
+                ; this window is over.
+                (= :pending op)
+                [:pending (CycleTimes. period t0 intervals cutoffs
+                                       (assoc gens i gen'))]
+
+                ; This operation falls before the generator's window ends.
+                (< (:time op) t')
+                [op (CycleTimes. period t0 intervals cutoffs
+                                 (assoc gens i gen'))]
+
+                ; This operation falls after the generator's window ends; try
+                ; the next generator.
+                true
+                (recur (mod (inc i) (count gens))
+                       t'))))))
+
+  (update [this test ctx event]
+    (CycleTimes. period t0 intervals cutoffs
+                 (mapv (fn updater [gen] (update gen test ctx event)) gens))))
+
+(defn cycle-times
+  "Cycles between several generators on a rotating schedule. Takes a flat
+  series of [time, generator] pairs, like so:
+
+      (cycle-times 5  {:f :write}
+                   10 (gen/stagger 1 {:f :read}))
+
+  This generator emits writes for five seconds, then staggered reads for ten
+  seconds, then goes back to writes, and so on. Generator state is preserved
+  from cycle to cycle, which makes this suitable for e.g. interleaving quiet
+  periods into a nemesis generator which needs to perform a specific sequence
+  of operations like :add-node, :remove-node, :add-node ...
+
+  Updates are propagated to all generators."
+  [& specs]
+  (when (seq specs)
+    (assert (even? (count specs)))
+    (let [intervals       (->> specs
+                               (partition 1 2)
+                               (mapcat identity)
+                               (mapv (comp long util/secs->nanos)))
+          gens            (->> specs next (partition 1 2) vec)
+          period          (reduce + intervals)
+          cutoffs         (vec (reductions + intervals))]
+      (CycleTimes. period nil intervals cutoffs gens))))
