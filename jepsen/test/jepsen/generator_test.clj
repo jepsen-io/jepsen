@@ -531,6 +531,19 @@
     (is (< 2.5 (mean-interval as) 3.5))
     (is (< 4.5 (mean-interval bs) 5.5))))
 
+(deftest cycle-test
+  (is (= [; With two concurrent clients, we can process 2 of the 3 a's
+          ;concurrently, then the third, and when that's done, we can move on
+          ;to the b. We repeat that twice.
+          [0 :a]  [0 :a] [10 :a] [20 :b]
+          [30 :a] [30 :a] [40 :a] [50 :b]]
+         (->> (gen/cycle 2
+                         (gen/phases (gen/limit 3 (repeat {:f :a}))
+                                     {:f :b}))
+              gen/clients
+              gen.test/perfect
+              (map (juxt :time :f))))))
+
 (deftest cycle-times-test
    (is (= [; We start with five seconds of as
            [0  :a 0]

@@ -367,7 +367,7 @@
   not evaluated until they *could* produce an op, so you can include them in
   sequences, phases, etc., and they'll be evaluated only once prior ops have
   been consumed."
-  (:refer-clojure :exclude [await concat delay filter map repeat run! update])
+  (:refer-clojure :exclude [await concat cycle delay filter map repeat run! update])
   (:require [clojure [core :as c]
                      [datafy :refer [datafy]]
                      [set :as set]]
@@ -1208,6 +1208,34 @@
   ([limit gen]
    (assert (not (neg? limit)))
    (Repeat. limit gen)))
+
+(defrecord Cycle [remaining original-gen gen]
+  Generator
+  (op [_ test ctx]
+    (when-not (zero? remaining)
+      (if-let [[op gen'] (op gen test ctx)]
+        ; We've got operations still. Emit them and let the generator evolve.
+        [op (Cycle. remaining original-gen gen')]
+        ; Out of operations. Recycle! If you actually hit MIN_INT doing this...
+        ; you probably have bigger problems on your hands.
+        (op (Cycle. (dec remaining) original-gen original-gen)
+            test
+            ctx))))
+
+  (update [this test ctx event]
+    (Cycle. remaining original-gen (update gen test ctx event))))
+
+(defn cycle
+  "Wraps a finite generator so that once it completes (e.g. emits nil), it
+  begins again. With an optional integer limit, repeats the generator that many
+  times. When the generator returns nil, it is reset to its original value and
+  the cycle repeats. Updates are propagated to the current generator, but do
+  not affect the original. Not sure if this is the right call--might change
+  that later."
+  ([gen]
+   (Cycle. -1 gen gen))
+  ([limit gen]
+   (Cycle. limit gen gen)))
 
 (defrecord ProcessLimit [n procs gen]
   Generator
