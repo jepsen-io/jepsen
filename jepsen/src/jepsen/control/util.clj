@@ -317,40 +317,59 @@
                         jepsen.control/env for alternative forms.
   :background?
   :chdir
+  :exec                 Sets a custom executable to check for.
   :logfile
   :make-pidfile?
-  :match-executable?
+  :match-executable?    Helpful for cases where the daemon is a wrapper script
+                        that execs another process, so that pidfile management
+                        doesn't work right. When this option is true, we ask
+                        start-stop-daemon to check for any process running the
+                        given executable program: either :exec or the `bin`
+                        argument.
   :match-process-name?  Helpful for cases where the daemon is a wrapper script
                         that execs another process, so that pidfile management
                         doesn't work right. When this option is true, we ask
                         start-stop-daemon to check for any process with a COMM
                         field matching :process-name (or the name of the bin).
-  :pidfile              Where should we write (and check for) the pidfile?
-  :process-name         Overrides the process name for :match-process-name?"
+  :pidfile              Where should we write (and check for) the pidfile? If
+                        nil, doesn't use the pidfile at all.
+  :process-name         Overrides the process name for :match-process-name?
+
+  Returns :started if the daemon was started, or :already-running if it was
+  already running, or throws otherwise."
   [opts bin & args]
-  (let [env (env (:env opts))]
+  (let [env  (env (:env opts))
+        ssd-args [:--start
+                  (when (:background? opts true) [:--background :--no-close])
+                  (when (and (:pidfile opts) (:make-pidfile? opts true))
+                    :--make-pidfile)
+                  (when (:match-executable? opts true)
+                    [:--exec (or (:exec opts) bin)])
+                  (when (:match-process-name? opts false)
+                    [:--name (:process-name opts (.getName (file bin)))])
+                  (when (:pidfile opts)
+                    [:--pidfile (:pidfile opts)])
+                  :--chdir    (:chdir opts)
+                  :--startas  bin
+                  :--
+                  args
+                  :>> (:logfile opts) (lit "2>&1")]]
     (info "Starting" (.getName (file (name bin))))
     (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
           (str "Jepsen starting " (escape env) " " bin " " (escape args))
           :>> (:logfile opts))
-    (apply exec
-           env
-           :start-stop-daemon :--start
-           (when (:background? opts true) [:--background :--no-close])
-           (when (:make-pidfile? opts true) :--make-pidfile)
-           (when (:match-executable? opts true) [:--exec bin])
-           (when (:match-process-name? opts false)
-             [:--name (:process-name opts (.getName (file bin)))])
-           :--pidfile  (:pidfile opts)
-           :--chdir    (:chdir opts)
-           :--oknodo
-           :--startas  bin
-           :--
-           (concat args [:>> (:logfile opts) (lit "2>&1")]))))
+    (try+
+      ;(info "start-stop-daemon" (escape ssd-args))
+      (exec env :start-stop-daemon ssd-args)
+      :started
+      (catch [:type   :jepsen.control/nonzero-exit
+              :exit   1] e
+        :already-running))))
 
 (defn stop-daemon!
   "Kills a daemon process by pidfile, or, if given a command name, kills all
-  processes with that command name, and cleans up pidfile."
+  processes with that command name, and cleans up pidfile. Pidfile may be nil
+  in the two-argument case, in which case it is ignored."
   ([pidfile]
    (when (exists? pidfile)
      (info "Stopping" pidfile)
@@ -361,7 +380,8 @@
   ([cmd pidfile]
    (info "Stopping" cmd)
    (meh (exec :killall :-9 :-w cmd))
-   (meh (exec :rm :-rf pidfile))))
+   (when pidfile
+     (meh (exec :rm :-rf pidfile)))))
 
 (defn daemon-running?
   "Given a pidfile, returns true if the pidfile is present and the process it
