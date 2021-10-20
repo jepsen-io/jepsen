@@ -320,9 +320,13 @@
   :logfile
   :make-pidfile?
   :match-executable?
-  :match-process-name?
-  :pidfile
-  :process-name"
+  :match-process-name?  Helpful for cases where the daemon is a wrapper script
+                        that execs another process, so that pidfile management
+                        doesn't work right. When this option is true, we ask
+                        start-stop-daemon to check for any process with a COMM
+                        field matching :process-name (or the name of the bin).
+  :pidfile              Where should we write (and check for) the pidfile?
+  :process-name         Overrides the process name for :match-process-name?"
   [opts bin & args]
   (let [env (env (:env opts))]
     (info "Starting" (.getName (file (name bin))))
