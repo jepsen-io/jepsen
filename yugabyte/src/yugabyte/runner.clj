@@ -76,9 +76,11 @@
     :assoc-fn (fn [m k v] (update m :nemesis assoc :interval v))
     :validate [(complement neg?) "should be a non-negative number"]]
 
-   [nil "--nemesis-long-recovery" "Every so often, have a long period of no faults, to see whether the cluster recovers."
-    :default true
-    :assoc-fn (fn [m k v] (update m :nemesis assoc :long-recovery v))]
+   [nil "--nemesis-no-recovery" "Disable guaranteed time period for cluster recovery."
+    ; for some reason :default true will not trigger fn below
+    ; original logic was reverted because of this issue
+    :default false
+    :assoc-fn (fn [m k v] (update m :nemesis assoc :no-recovery v))]
 
    [nil "--nemesis-schedule SCHEDULE" "Whether to have randomized delays between nemesis actions, or fixed ones."
     :parse-fn keyword
