@@ -10,7 +10,7 @@
   []
   (->> (range)
        (map (fn [x] {:type :invoke, :f :add, :value x}))
-       gen/seq))
+       (map gen/once)))
 
 (defn reads
   []
@@ -19,7 +19,7 @@
 (defn workload
   [opts]
   {:generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
-                                (reads))
+                                reads)
                    (gen/stagger 1/10)
                    (ygen/with-op-index))
    :checker   (checker/set-full)})

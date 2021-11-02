@@ -218,6 +218,7 @@
                                          (map name)
                                          sort
                                          (str/join ",")))))
+      :pure-generators true
       :os (case (:os opts)
             :centos centos/os
             :debian debian/os)
@@ -283,6 +284,7 @@
            {:client    (:client workload)
             :nemesis   (:nemesis nemesis)
             :generator gen
+            :pure-generators true
             :checker   checker})))
 
 (defn yb-test

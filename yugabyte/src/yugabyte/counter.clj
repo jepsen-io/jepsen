@@ -6,9 +6,9 @@
             [yugabyte.generator :as ygen]))
 
 
-(def add {:type :invoke :f :add :value 1})
-(def sub {:type :invoke :f :add :value -1})
-(def r   {:type :invoke :f :read})
+(defn add []  {:type :invoke :f :add :value 1})
+(defn sub []  {:type :invoke :f :add :value -1})
+(defn r   []  {:type :invoke :f :read})
 
 (defn workload
   [opts]

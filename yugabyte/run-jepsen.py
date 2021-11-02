@@ -92,7 +92,7 @@ def cleanup():
             time.sleep(1)
         try:
             p.kill()
-        except OSError, e:
+        except OSError as e:
             if e.errno != errno.ESRCH:
                 raise e
 
@@ -109,7 +109,7 @@ def truncate_line(line, max_chars=500):
 def get_last_lines(file_path, n_lines):
     total_num_lines = int(subprocess.check_output(['wc', '-l', file_path]).strip().split()[0])
     return (
-        subprocess.check_output(['tail', '-n', str(n_lines), file_path]).split("\n"),
+        subprocess.check_output(['tail', '-n', str(n_lines), file_path]).decode().split("\n"),
         total_num_lines
     )
 
@@ -198,7 +198,7 @@ def run_cmd(cmd,
             if not keep_output_log_file:
                 try:
                     os.remove(stdout_path)
-                except IOError, ex:
+                except IOError as ex:
                     logging.error("Error deleting output log %s, ignoring: %s", stdout_path, ex)
         if stderr_file is not None:
             stderr_file.close()
@@ -206,7 +206,7 @@ def run_cmd(cmd,
             if not keep_output_log_file:
                 try:
                     os.remove(stderr_path)
-                except IOError, ex:
+                except IOError as ex:
                     logging.error("Error deleting stderr log %s, ignoring: %s", stderr_path, ex)
 
 
