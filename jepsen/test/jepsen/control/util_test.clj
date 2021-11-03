@@ -16,7 +16,6 @@
 (defn assert-file-exists
   "Asserts that a file exists at a given destination"
   [dest file]
-  (prn (str (io/file dest file)))
   (is (util/exists? (io/file dest file))))
 
 (defn assert-file-cached
