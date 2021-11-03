@@ -144,8 +144,8 @@
   ([url opts]
    (let [filename (.getName (file url))
          wget-opts std-wget-opts
-         ; second parameter was changed from a boolean flag (force?) to an options map
-         ; this check is here for backwards compatibility
+         ; second parameter was changed from a boolean flag (force?) to an
+         ; options map this check is here for backwards compatibility
          opts (if (map? opts) opts {:force? opts})]
      (when (:force? opts)
       (exec :rm :-f filename))
@@ -183,7 +183,7 @@
   ([url opts]
    (let [encoded-url (encode url)
          dest-file   (str wget-cache-dir "/" encoded-url)
-         wget-opts   (if (empty? (:user? opts)) 
+         wget-opts   (if (empty? (:user? opts))
                        (concat std-wget-opts [:-O dest-file])
                        (concat std-wget-opts [:-O dest-file :--user (:user? opts) :--password (:pw? opts)]))]
      (when (:force? opts)

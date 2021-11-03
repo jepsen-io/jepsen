@@ -8,7 +8,7 @@
                             [sshj :as sshj]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
-(use-fixtures :once (fn [t]
+(use-fixtures :once (fn with-ssh [t]
                       (c/with-ssh {}
                         (c/on "n1"
                           (t)))))
@@ -16,7 +16,8 @@
 (defn assert-file-exists
   "Asserts that a file exists at a given destination"
   [dest file]
-  (is (= (util/exists? (io/file dest file)) true)))
+  (prn (str (io/file dest file)))
+  (is (util/exists? (io/file dest file))))
 
 (defn assert-file-cached
   "Asserts that a file from a url was downloaded and cached in the wget-cache-dir"
@@ -62,30 +63,28 @@
                         (catch [:exit 1] _ true)))))))))
 
 (deftest ^:integration install-archive-test
-  (testing "install-archive works without auth credentials"
+  (testing "without auth credentials"
     (let [dest "/tmp/test"
           url "https://storage.googleapis.com/etcd/v3.0.0/etcd-v3.0.0-linux-amd64.tar.gz"]
       (util/install-archive! (str url) dest {:force? true})
       (assert-file-exists dest "etcd")
       (assert-file-cached url)))
 
-  (testing "install-archive works with auth credentials"
+  (testing "with auth credentials"
     (let [dest "/tmp/test"
-          url "ftp://speedtest.tele2.net/1KB.zip"]
-      (try+
-        (util/install-archive! (str url) dest {:force? true :user? "anonymous" :pw? "anonymous"})
-        (catch Object m
-          ; The ZIP we download from the test server is not a real archive
-          ; so unzip returns an exit code of 9 with a specific message 
-          ; that must be in the exception if the download was successful
-          (is (= (:exit m) 9))
-          (.contains (:err m) "End-of-central-directory signature not found")
-          (assert-file-cached url))))))
+          url "https://aphyr.com/jepsen-auth/test.zip"]
+      (util/install-archive! (str url) dest {:force? true
+                                             :user? "jepsen"
+                                             :pw? "hunter2"})
+      (assert-file-exists dest "zeroes.txt")
+      (assert-file-cached url))))
 
 (deftest ^:integration cached-wget-test
-  (testing "cached-wget works with and without auth credentials"
-    (let [url "ftp://speedtest.tele2.net/1KB.zip"]
-      (util/cached-wget! (str url) {:force? true})
-      (assert-file-cached url)
-      (util/cached-wget! (str url) {:force? true :user? "anonymous" :pw? "anonymous"})
+  (testing "without auth credentials"
+    (let [url "https://aphyr.com/jepsen/test.zip"]
+      (util/cached-wget! url {:force? true})
+      (assert-file-cached url)))
+  (testing "with auth credentials"
+    (let [url "https://aphyr.com/jepsen-auth/test.zip"]
+      (util/cached-wget! url {:force? true :user?  "jepsen" :pw? "hunter2"})
       (assert-file-cached url))))
