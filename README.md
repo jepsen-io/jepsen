@@ -115,7 +115,7 @@ sudo apt-get install openjdk-8-jre openjdk-8-jre-headless libjna-java gnuplot gr
 ```
 
 ... to get the basic requirements in place. Debian's Leiningen packages are
-anchient, so download lein from the web instead.
+ancient, so download lein from the web instead.
 
 ## Running a Test
 
