@@ -29,6 +29,7 @@
                  [org.clojure/data.codec "0.1.1"]
                  [fipp "0.6.24"]
                  [io.lacuna/bifurcan "0.1.0"]]
+  :java-source-paths ["src"]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
             [lein-codox "0.10.7"]

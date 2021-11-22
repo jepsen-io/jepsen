@@ -14,7 +14,8 @@
             [fipp.edn :refer [pprint]]
             [unilog.config :as unilog]
             [multiset.core :as multiset]
-            [jepsen.util :as util])
+            [jepsen [util :as util]]
+            [jepsen.store [fressian :as jsf]])
   (:import (java.util AbstractList)
            (java.io File)
            (java.nio.file Files
@@ -28,92 +29,10 @@
 
 (def base-dir "store")
 
-(def write-handlers
-  (-> {clojure.lang.Atom
-       {"atom" (reify WriteHandler
-                 (write [_ w a]
-                   (.writeTag    w "atom" 1)
-                   (.writeObject w @a)))}
-
-       org.joda.time.DateTime
-       {"date-time" (reify WriteHandler
-                      (write [_ w t]
-                        (.writeTag    w "date-time" 1)
-                        (.writeObject w (time.local/format-local-time
-                                          t :basic-date-time))))}
-
-       clojure.lang.PersistentHashSet
-       {"persistent-hash-set" (reify WriteHandler
-                                (write [_ w set]
-                                  (.writeTag w "persistent-hash-set" 1)
-                                  (.writeObject w (seq set))))}
-
-       clojure.lang.PersistentTreeSet
-       {"persistent-sorted-set" (reify WriteHandler
-                                  (write [_ w set]
-                                    (.writeTag w "persistent-sorted-set" 1)
-                                    (.writeObject w (seq set))))}
-
-       clojure.lang.MapEntry
-       {"map-entry" (reify WriteHandler
-                      (write [_ w e]
-                        (.writeTag    w "map-entry" 2)
-                        (.writeObject w (key e))
-                        (.writeObject w (val e))))}
-
-       multiset.core.MultiSet
-       {"multiset" (reify WriteHandler
-                     (write [_ w set]
-                       (.writeTag     w "multiset" 1)
-                       (.writeObject  w (multiset/multiplicities set))))}
-
-      java.time.Instant
-      {"instant" (reify WriteHandler
-                   (write [_ w instant]
-                     (.writeTag w "instant" 1)
-                     (.writeObject w (.toString instant))))}}
-
-      (merge fress/clojure-write-handlers)
-      fress/associative-lookup
-      fress/inheritance-lookup))
-
-(def read-handlers
-  (-> {"atom"      (reify ReadHandler
-                     (read [_ rdr tag component-count]
-                       (atom (.readObject rdr))))
-
-       "date-time" (reify ReadHandler
-                     (read [_ rdr tag component-count]
-                       (time.format/parse
-                         (:basic-date-time time.local/*local-formatters*)
-                         (.readObject rdr))))
-
-       "persistent-hash-set" (reify ReadHandler
-                               (read [_ rdr tag component-count]
-                                 (assert (= 1 component-count))
-                                 (into #{} (.readObject rdr))))
-
-       "persistent-sorted-set" (reify ReadHandler
-                                 (read [_ rdr tag component-count]
-                                   (assert (= 1 component-count))
-                                   (into (sorted-set) (.readObject rdr))))
-
-       "map-entry" (reify ReadHandler
-                     (read [_ rdr tag component-count]
-                       (clojure.lang.MapEntry. (.readObject rdr)
-                                               (.readObject rdr))))
-
-       "multiset" (reify ReadHandler
-                    (read [_ rdr tag component-count]
-                      (multiset/multiplicities->multiset
-                        (.readObject rdr))))
-
-       "instant" (reify ReadHandler
-                   (read [_ rdr tag component-count]
-                     (Instant/parse (.readObject rdr))))}
-
-      (merge fress/clojure-read-handlers)
-      fress/associative-lookup))
+; These were moved into their own namespace, and are here for backwards
+; compatibility
+(def write-handlers jsf/write-handlers)
+(def read-handlers  jsf/read-handlers)
 
 (defn ^File path
   "With one arg, a test, returns the directory for that test's results. Given
@@ -167,28 +86,13 @@
   [test]
   (into default-nonserializable-keys (:nonserializable-keys test)))
 
-(defn postprocess-fressian
-  "Fressian likes to give us ArrayLists, which are kind of a PITA when you're
-  used to working with vectors. We map those back to vectors again."
-  [obj]
-  (walk/prewalk (fn transform [x]
-                  ; (prn :x (class x) (instance? AbstractList x))
-                  (cond (instance? clojure.lang.Atom x)
-                        (atom (postprocess-fressian @x))
-
-                        (instance? AbstractList x)
-                        (vec x)
-
-                        :else x))
-                obj))
-
 (defn load-fressian-file
   "Loads an arbitrary Fressian file."
   [file]
-  (with-open [is (io/input-stream file)]
-    (let [in (fress/create-reader is :handlers read-handlers)]
-      (-> (fress/read-object in)
-          postprocess-fressian))))
+  (with-open [is (io/input-stream file)
+              in (jsf/reader is)]
+    (-> (fress/read-object in)
+        jsf/postprocess-fressian)))
 
 (defn load
   "Loads a specific test by name and time."
@@ -375,9 +279,9 @@
 
       (write-fressian-file! {:foo 2} (path! test \"foo.fressian\"))."
   [data file]
-  (with-open [os (io/output-stream file)]
-    (let [out (fress/create-writer os :handlers write-handlers)]
-      (fress/write-object out data))))
+  (with-open [os (io/output-stream file)
+              out (jsf/writer os)]
+    (fress/write-object out data)))
 
 (defn write-fressian!
   "Write the entire test as a .fressian file."
