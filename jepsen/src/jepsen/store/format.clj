@@ -57,15 +57,17 @@
 
   All blocks begin with an 8-byte length prefix which indicates the length of
   the block in bytes, including the length prefix itself. Then follows a CRC32
-  checksum, which applies to the entire block including the length header,
-  except for the checksum field itself, which is zeroed out for computing the
-  checksum. Third, we have a 16-bit block type field, which identifies how to
-  interpret the block. Finally, we have the block's data, which is
-  type-dependent.
+  checksum. Third, we have a 16-bit block type field, which
+  identifies how to interpret the block. Finally, we have the block's data,
+  which is type-dependent.
 
         64        32       16
     | length | checksum | type | ... data ...
 
+  Checksums are computed by taking the CRC32 of the data region, THEN the block
+  header: the length, the checksum (all zeroes, for purposes of computing the
+  checksum itself), and the type. We compute checksums this way so that writers
+  can write large blocks of data with an unknown size in a single pass.
 
   ## Index Blocks (Type 1)
 
@@ -427,26 +429,27 @@
   [^ByteBuffer buf checksum]
   (.putInt buf block-checksum-offset checksum))
 
+(defn block-checksum-given-data-checksum
+  "Computes the checksum of a block, given a ByteBuffer header, and an
+  already-computed CRC32 checksum of the data. Useful for streaming writers
+  which compute their own checksums while writing. Mutates data-crc in place; I
+  can't figure out how to safely copy it."
+  [^ByteBuffer header, ^CRC32 data-crc]
+  (let [header' (-> (block-header)
+                    (set-block-header-type!   (block-header-type header))
+                    (set-block-header-length! (block-header-length header)))]
+    (.update data-crc header')
+    (unchecked-int (.getValue data-crc))))
+
 (defn ^Integer block-checksum
   "Compute the checksum of a block, given two bytebuffers: one for the header,
   and one for the data."
-  [^ByteBuffer header ^ByteBuffer data]
-  (let [c       (CRC32.)
-        ; Create a copy of the header with a zeroed-out checksum.
-        header' (block-header)]
-    (.put header' header)
-    (set-block-header-checksum! header' 0)
-    ; Compute checksum
-    ;(info :checksumming)
-    (.rewind header')
-    ;(bs/print-bytes header')
-    ;(println "---")
-    (.update c header')
+  [header, ^ByteBuffer data]
+  (let [c (CRC32.)]
     (.rewind data)
     ;(bs/print-bytes data)
     (.update c data)
-    ;(info :checksum (unchecked-int (.getValue c)))
-    (unchecked-int (.getValue c))))
+    (block-checksum-given-data-checksum header c)))
 
 (defn check-block-checksum
   "Verifies the checksum of a block, given two ByteBuffers: one for the header,
@@ -529,6 +532,18 @@
               :expected (.limit data)}))
   handle)
 
+(defn ^ByteBuffer block-header-for-length-and-checksum!
+  "An optimized way to construct a block header, a block type, the length of a
+  data region (not including headers) and the CRC checksum of that data.
+  Mutates the checksum in place."
+  [block-type data-length data-checksum]
+  (let [header (block-header)]
+    (-> header
+        (set-block-header-type!     block-type)
+        (set-block-header-length!   (+ block-header-size data-length))
+        (set-block-header-checksum! (block-checksum-given-data-checksum
+                                      header data-checksum)))))
+
 (defn ^ByteBuffer block-header-for-data
   "Takes a block type and a ByteBuffer of data, and constructs a block header
   whose type is the given type, and which has the appropriate length and
@@ -536,9 +551,8 @@
   [block-type ^ByteBuffer data]
   (let [header (block-header)]
     (-> header
-        (set-block-header-type! block-type)
-        (set-block-header-length! (+ block-header-size
-                                     (.limit data)))
+        (set-block-header-type!     block-type)
+        (set-block-header-length!   (+ block-header-size (.limit data)))
         (set-block-header-checksum! (block-checksum header data)))))
 
 (defn write-block!
@@ -672,13 +686,15 @@
   16384)
 
 (defn write-fressian-to-file!
-  "Takes a FileChannel, an offset, and a data structure as Fressian. Writes the
-  data structure as Fressian to the file at the given offset. Returns the size
-  of the data that was just written, in bytes."
-  [^FileChannel file, ^long offset, data]
+  "Takes a FileChannel, an offset, a checksum, and a data structure as
+  Fressian. Writes the data structure as Fressian to the file at the given
+  offset. Returns the size of the data that was just written, in bytes. Mutates
+  checksum with written bytes."
+  [^FileChannel file, ^long offset, ^CRC32 checksum, data]
   ; First, write the data to the file directly; then we'll go back and write
   ; the header.
-  (let [data-size (with-open [foos (FileOffsetOutputStream. file offset)
+  (let [data-size (with-open [foos (FileOffsetOutputStream.
+                                     file offset checksum)
                               bos  (BufferedOutputStream.
                                      foos fressian-buffer-size)
                               w    (jsf/writer bos)]
@@ -694,11 +710,14 @@
   ; First, write the data to the file directly; then we'll go back and write
   ; the header.
   (let [data-offset (+ offset block-header-size)
-        data-size (write-fressian-to-file! (:file handle) data-offset data)
+        checksum    (CRC32.)
+        data-size   (write-fressian-to-file!
+                      (:file handle) data-offset checksum data)
         ; Construct a ByteBuffer over the region we just wrote
-        data-buf (read-file (:file handle) data-offset data-size)
+        data-buf    (read-file (:file handle) data-offset data-size)
         ; And build our header
-        header (block-header-for-data :fressian data-buf)]
+        header      (block-header-for-length-and-checksum!
+                      :fressian data-size checksum)]
     ; Now write the header; data's already in the file.
     (write-block-header! handle offset header)
   handle))
@@ -721,7 +740,6 @@
 
 ;; Partial map blocks
 
-
 (defn write-partial-map-block!
   "Takes a handle, a byte offset, a Clojure map, and the ID of the block which
   stores the rest of the map (use `nil` if there is no more to the PartialMap).
@@ -731,20 +749,24 @@
   (assert (map? m))
   (let [; First, write the rest pointer to the file
         file        (:file handle)
+        checksum    (CRC32.)
         rest-buf    (doto (ByteBuffer/allocate block-id-size)
                       (.putInt 0 (if rest-id (int rest-id) 0))
                       .rewind)
         rest-offset (+ offset block-header-size)
         _           (write-file! file rest-offset rest-buf)
+        _           (.update checksum (.rewind rest-buf))
         ; Next, stream the map as Fressian to the rest of the block.
         map-size   (write-fressian-to-file!
                      file
                      (+ rest-offset block-id-size)
+                     checksum
                      m)
         ; And construct a buffer over the entire block data region
         data-buf    (read-file file rest-offset (+ block-id-size map-size))
         ; And construct our header
-        header (block-header-for-data :partial-map data-buf)]
+        header (block-header-for-length-and-checksum!
+                 :partial-map (+ block-id-size map-size) checksum)]
     ; Write header
     (write-block-header! handle offset header))
   handle)
