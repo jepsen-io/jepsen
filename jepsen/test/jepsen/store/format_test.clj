@@ -1,6 +1,7 @@
 (ns jepsen.store.format-test
   (:require [byte-streams :as bs]
-            [clojure [test :refer :all]]
+            [clojure [pprint :refer [pprint]]
+                     [test :refer :all]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.store.format :refer :all]
@@ -89,3 +90,34 @@
         (refresh-block-index! h2)
         (is (= data (read-fressian-block h2 id)))
         ))))
+
+(deftest partial-map-test
+  (let [shallow {:shallow "waters"}
+        deep    {:deep "lore"}]
+    (testing "write"
+      (with-open [h (open file)]
+        (write-header! h)
+        (write-block-index! h)
+        (let [id1     (new-block-id! h)
+              id2     (new-block-id! h)
+              offset2 (next-block-offset h)]
+          (is (= id1 (int 2)))
+          ; Write block 2 first
+          (write-partial-map-block! h offset2 deep nil)
+          (assoc-block! h id2 offset2)
+          ; Then block 1, pointing to 2
+          (let [offset1 (next-block-offset h)]
+            (write-partial-map-block! h offset1 shallow id2)
+            (assoc-block! h id1 offset1))
+          ; And finalize
+          (write-block-index! h)
+          (flush! h))))
+
+    (testing "read"
+      (with-open [h (open file)]
+        (refresh-block-index! h)
+        (let [m (read-partial-map-block h (int 2))]
+          (is (instance? jepsen.store.format.PartialMap m))
+          (is (= "waters" (:shallow m)))
+          (is (= "lore" (:deep m)))
+          (is (= (merge deep shallow) m)))))))

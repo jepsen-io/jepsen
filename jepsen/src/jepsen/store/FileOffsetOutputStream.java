@@ -53,7 +53,7 @@ public class FileOffsetOutputStream extends OutputStream implements AutoCloseabl
   }
 
   public void write(byte[] bs, int offset, int len) throws IOException {
-    System.out.printf("Wrote fast %d", len);
+    //System.out.printf("Wrote fast %d", len);
     final ByteBuffer buf = ByteBuffer.wrap(bs, offset, len);
     final int written = file.write(buf, currentOffset);
     currentOffset += written;

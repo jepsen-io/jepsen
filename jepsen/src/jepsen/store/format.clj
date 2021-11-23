@@ -50,7 +50,7 @@
   later: you can leave padding for their sizes to change.
 
   The first block is an index block. The top-level value of the file (e.g. the
-  test map) is stored in block 1.
+  test map) is stored in block 2.
 
 
   ## Block Structure
@@ -165,7 +165,8 @@
             [dom-top.core :refer [assert+]]
             [jepsen [util :as util :refer [map-vals]]]
             [jepsen.store.fressian :as jsf]
-            [potemkin :refer [definterface+]]
+            [potemkin :refer [def-map-type
+                              definterface+]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io BufferedOutputStream
                     File
@@ -263,6 +264,11 @@
   the header?"
   (* block-index-count (+ block-id-size block-offset-size)))
 
+(def large-region-size
+  "How big does a file region have to be before we just mmap it instead of
+  doing read calls?"
+  (* 1024 1024)) ; 1M
+
 (defrecord BlockRef [block-id])
 
 (defrecord Handle
@@ -299,6 +305,43 @@
   [handle]
   (.force (:file handle) false)
   handle)
+
+; General IO routines
+
+(defn write-file!
+  "Takes a FileChannel, an offset, and a ByteBuffer. Writes the ByteBuffer to
+  the FileChannel at the given offset completely. Returns number of bytes
+  written."
+  [^FileChannel file offset ^ByteBuffer buffer]
+  (let [size    (.remaining ^ByteBuffer buffer)
+        written (.write file buffer offset)]
+    ; Gonna punt on this for now because the position semantics are
+    ; tricky and I'm kinda hoping we never hit it
+    (assert+ (= size written)
+             {:type     ::incomplete-write
+              :offset   offset
+              :expected size
+              :actual   written})
+    written))
+
+(defn ^ByteBuffer read-file
+  "Returns a ByteBuffer corresponding to a given file region. Uses mmap for
+  large regions, or regular read calls for small ones."
+  [^FileChannel file, ^long offset, ^long size]
+  (if (<= size large-region-size)
+    ; Small region: read directly
+    (let [buf        (ByteBuffer/allocate size)
+          bytes-read (.read file buf offset)]
+      (assert+ (= size bytes-read)
+               {:type     ::incomplete-read
+                :offset   offset
+                :expected size
+                :actual   bytes-read})
+      (.rewind buf))
+    ; Big region: mmap
+    (.map file FileChannel$MapMode/READ_ONLY offset size)))
+
+; General file headers
 
 (defn write-header!
   "Takes a Handle and writes the initial magic bytes and version number."
@@ -624,20 +667,25 @@
 
 ;; Fressian blocks
 
-(defn write-buffer-to-file!
-  "Takes a FileChannel, an offset, and a ByteBuffer. Writes the ByteBuffer to
-  the FileChannel at the given offset completely. Returns number of bytes
-  written."
-  [^FileChannel file offset ^ByteBuffer buffer]
-  (let [size    (.remaining ^ByteBuffer buffer)
-        written (.write file buffer offset)]
-    ; Gonna punt on this for now because the position semantics are
-    ; tricky and I'm kinda hoping we never hit it
-    (assert (= size written)
-            (str "Expected to write " size " bytes, but only wrote "
-                 written
-                 " bytes; go back and figure out what to do here."))
-    written))
+(def fressian-buffer-size
+  "How many bytes should we buffer before writing Fressian data to disk?"
+  16384)
+
+(defn write-fressian-to-file!
+  "Takes a FileChannel, an offset, and a data structure as Fressian. Writes the
+  data structure as Fressian to the file at the given offset. Returns the size
+  of the data that was just written, in bytes."
+  [^FileChannel file, ^long offset, data]
+  ; First, write the data to the file directly; then we'll go back and write
+  ; the header.
+  (let [data-size (with-open [foos (FileOffsetOutputStream. file offset)
+                              bos  (BufferedOutputStream.
+                                     foos fressian-buffer-size)
+                              w    (jsf/writer bos)]
+                    (fress/write-object w data)
+                    (.flush bos)
+                    (.bytesWritten foos))]
+    data-size))
 
 (defn write-fressian-block!
   "Takes a handle, a byte offset, and some Clojure data. Writes that data to a
@@ -645,27 +693,18 @@
   [handle offset data]
   ; First, write the data to the file directly; then we'll go back and write
   ; the header.
-  (let [data-size (with-open [foos (FileOffsetOutputStream.
-                                     (:file handle)
-                                     (+ offset block-header-size))
-                              bos  (BufferedOutputStream. foos 16384)
-                              w    (jsf/writer bos)]
-                    (fress/write-object w data)
-                    (.flush bos)
-                    (.bytesWritten foos))
+  (let [data-offset (+ offset block-header-size)
+        data-size (write-fressian-to-file! (:file handle) data-offset data)
         ; Construct a ByteBuffer over the region we just wrote
-        data (.map ^FileChannel (:file handle)
-                   FileChannel$MapMode/READ_ONLY
-                   (+ offset block-header-size)
-                   data-size)
+        data-buf (read-file (:file handle) data-offset data-size)
         ; And build our header
-        header (block-header-for-data :fressian data)]
+        header (block-header-for-data :fressian data-buf)]
     ; Now write the header; data's already in the file.
     (write-block-header! handle offset header)
   handle))
 
 (defn read-fressian-block
-  "Takes a handle and an id. Reads the Fressian block at the given offset and
+  "Takes a handle and an id. Reads the Fressian block at the given id and
   returns its data."
   [handle id]
   (let [{:keys [^ByteBuffer header, ^ByteBuffer data]}
@@ -679,3 +718,92 @@
                 r  (jsf/reader is)]
       (-> (fress/read-object r)
           (jsf/postprocess-fressian)))))
+
+;; Partial map blocks
+
+
+(defn write-partial-map-block!
+  "Takes a handle, a byte offset, a Clojure map, and the ID of the block which
+  stores the rest of the map (use `nil` if there is no more to the PartialMap).
+  Writes the map and rest pointer to a PartialMap block at the given offset.
+  Returns handle."
+  [handle offset m rest-id]
+  (assert (map? m))
+  (let [; First, write the rest pointer to the file
+        file        (:file handle)
+        rest-buf    (doto (ByteBuffer/allocate block-id-size)
+                      (.putInt 0 (if rest-id (int rest-id) 0))
+                      .rewind)
+        rest-offset (+ offset block-header-size)
+        _           (write-file! file rest-offset rest-buf)
+        ; Next, stream the map as Fressian to the rest of the block.
+        map-size   (write-fressian-to-file!
+                     file
+                     (+ rest-offset block-id-size)
+                     m)
+        ; And construct a buffer over the entire block data region
+        data-buf    (read-file file rest-offset (+ block-id-size map-size))
+        ; And construct our header
+        header (block-header-for-data :partial-map data-buf)]
+    ; Write header
+    (write-block-header! handle offset header))
+  handle)
+
+; A lazy map structure which has a map m and a *rest-map*: a Delay which can
+; unpack to another PartialMap (presumably by reading another block in the
+; file).
+(def-map-type PartialMap [m rest-map metadata]
+  (get [this key default-value]
+       ; Try to retrieve from this map, or from the rest map.
+       (if (contains? m key)
+         (get m key)
+         (get @rest-map key default-value)))
+
+  (assoc [this key value]
+         ; We associate onto the top-level map.
+         (PartialMap. (assoc m key value) rest-map metadata))
+
+  (dissoc [this key]
+          ; Here we have to strip out the key at every level
+          (PartialMap. (dissoc m key)
+                       (delay (dissoc @rest-map key))
+                       metadata))
+
+  (keys [this]
+        ; We unify keys at all levels recursively.
+        (distinct (concat (keys m) (keys @rest-map))))
+
+  (meta [this]
+        metadata)
+
+  (with-meta [this metadata']
+             (PartialMap. m rest-map metadata')))
+
+(defn read-partial-map-block
+  "Takes a handle and an ID. Reads the partial map block at the given id
+  and returns a lazy map representing its data."
+  [handle id]
+  (let [file ^FileChannel (:file handle)
+
+        {:keys [^ByteBuffer header, ^ByteBuffer data]}
+        (read-block-by-id handle id)
+
+        _ (assert+ (= :partial-map (block-header-type header))
+                   {:type     ::block-type-mismatch
+                    :id       id
+                    :expected :partial-map
+                    :actual   (block-header-type header)})
+        ; Read next ID
+        next-id (.getInt data)
+        ; And read map
+        m (with-open [is (bs/to-input-stream data)
+                      r  (jsf/reader is)]
+            (-> (fress/read-object r)
+                (jsf/postprocess-fressian)))
+        ; Construct a lazy delay for the rest of the partialmap. Zero denotes
+        ; there's no more.
+        rest-map (delay
+                   (when-not (zero? next-id)
+                     (read-partial-map-block handle next-id)))]
+    ; Construct lazy map
+    (PartialMap. m rest-map {})))
