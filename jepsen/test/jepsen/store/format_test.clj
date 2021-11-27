@@ -117,75 +117,97 @@
       (let [test' (read-test h)]
         (is (= test test'))))))
 
-(deftest crash-recovery-test
-  (let [base-test  {:name  "a test"
-                    :state :base}
-        history    [{:type :invoke} {:type :ok}]
-        run-test   (assoc base-test
-                          :state  :run
-                          :history history)
-        results    {:valid? false, :vent-cores :frog-blasted}
-        final-test (assoc run-test
-                          :state   :final
-                          :results results)
-        read-test #(read-test (open file))
+;; Test-specific tests
+(let [base-test  {:name  "a test"
+                  :state :base}
+      history    [{:type :invoke} {:type :ok}]
+      run-test   (assoc base-test
+                        :state  :run
+                        :history history)
+      results    {:valid? false, :vent-cores :frog-blasted}
+      final-test (assoc run-test
+                        :state   :final
+                        :results results)
+      read-test #(read-test (open file))]
+  (deftest crash-recovery-test
+    (let [history-id (promise)]
+      (with-open [w (open file)]
+        (testing "empty file"
+          (is-thrown+ [:type :jepsen.store.format/magic-mismatch]
+                      (read-test)))
 
-        history-id (promise)]
-
-    (with-open [w (open file)]
-      (testing "empty file"
-        (is-thrown+ [:type :jepsen.store.format/magic-mismatch]
-                    (read-test)))
-
-      (testing "just header"
-        (write-header! w)
-        (is-thrown+ [:type :jepsen.store.format/no-block-index]
-                    (read-test)))
-
-      (testing "base test"
-        (let [id (write-fressian-block! w base-test)]
+        (testing "just header"
+          (write-header! w)
           (is-thrown+ [:type :jepsen.store.format/no-block-index]
-                      (read-test))
+                      (read-test)))
 
-          (set-root! w id)
-          (write-block-index! w)
-          (is (= base-test (read-test)))))
+        (testing "base test"
+          (let [id (write-fressian-block! w base-test)]
+            (is-thrown+ [:type :jepsen.store.format/no-block-index]
+                        (read-test))
 
-      (testing "history"
-        ; Write history; test should be unchanged.
-        (deliver history-id (write-fressian-block! w history))
-        (is (= base-test (read-test)))
+            (set-root! w id)
+            (write-block-index! w)
+            (is (= base-test (read-test)))))
 
-        ; Write new test referencing that history; test still unchanged.
-        (let [test-id (write-fressian-block! w
-                        (assoc run-test :history (block-ref @history-id)))]
+        (testing "history"
+          ; Write history; test should be unchanged.
+          (deliver history-id (write-fressian-block! w history))
           (is (= base-test (read-test)))
 
-          ; Once we write the block index with the new root, test should
-          ; reflect the history.
-          (-> w (set-root! test-id) write-block-index!)
-          (is (= run-test (read-test)))))
+          ; Write new test referencing that history; test still unchanged.
+          (let [test-id (write-fressian-block!
+                          w (assoc run-test :history (block-ref @history-id)))]
+            (is (= base-test (read-test)))
 
-      (testing "analysis"
-        ; Write more results
-        (let [more-results-id (write-partial-map-block!
-                                w (dissoc results :valid?) nil)
-              _ (is (= run-test (read-test)))
+            ; Once we write the block index with the new root, test should
+            ; reflect the history.
+            (-> w (set-root! test-id) write-block-index!)
+            (is (= run-test (read-test)))))
 
-              ; Write main results
-              results-id (write-partial-map-block!
-                           w (select-keys results [:valid?]) more-results-id)
-              _ (is (= run-test (read-test)))
+        (testing "analysis"
+          ; Write more results
+          (let [more-results-id (write-partial-map-block!
+                                  w (dissoc results :valid?) nil)
+                _ (is (= run-test (read-test)))
 
-              ; And new test block
-              test-id (write-fressian-block!
-                        w (assoc final-test
-                                 :history (block-ref @history-id)
-                                 :results (block-ref results-id)))]
-          (is (= run-test (read-test)))
+                ; Write main results
+                results-id (write-partial-map-block!
+                             w (select-keys results [:valid?]) more-results-id)
+                _ (is (= run-test (read-test)))
 
-          ; Save!
-          (-> w (set-root! test-id) write-block-index!)
-          (is (= final-test (read-test)))))
+                ; And new test block
+                test-id (write-fressian-block!
+                          w (assoc final-test
+                                   :history (block-ref @history-id)
+                                   :results (block-ref results-id)))]
+            (is (= run-test (read-test)))
 
-      )))
+            ; Save!
+            (-> w (set-root! test-id) write-block-index!)
+            (is (= final-test (read-test))))))))
+
+  (deftest incremental-test-write-test
+    (is-thrown+ [:type :jepsen.store.format/magic-mismatch] (read-test))
+
+    ; Write initial test
+    (with-open [w (open file)]
+      (write-initial-test! w base-test)
+      (is (= base-test (read-test)))
+
+      ; Write history
+      (let [run-test' (write-history! w run-test)]
+        (is (= run-test (read-test)))
+
+        ; Write results
+        (let [final-test' (merge run-test' final-test)]
+          (is-thrown+ [:type :jepsen.store.format/no-history-id-in-meta]
+                      (write-results! w final-test))
+          (write-results! w final-test')
+          (is (= final-test (read-test)))
+
+          ; Write NEW results on top of old ones
+          (let [final-test' (assoc final-test' :results {:valid?   :unknown
+                                                         :whoopsie :daisy})]
+            (write-results! w final-test')
+            (is (= final-test' (read-test)))))))))

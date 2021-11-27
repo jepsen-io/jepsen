@@ -968,6 +968,50 @@
 
 ;; Test-specific writing
 
+(defn write-initial-test!
+  "Writes an initial test to a handle, making the test the root. Called when we
+  first begin a test. Returns test."
+  [handle test]
+  (let [id (write-fressian-block! handle test)]
+    (-> handle (set-root! id) write-block-index!))
+  test)
+
+(defn write-history!
+  "Takes a handle and a test, and appends its :history as a block, then writes
+  the test using that history as the new root. Returns test with additional
+  metadata, so that future writes of this test can refer to this history
+  block."
+  [handle test]
+  (let [history    (:history test)
+        history-id (write-fressian-block! handle history)
+        test-id    (write-fressian-block!
+                     handle (assoc test :history (block-ref history-id)))]
+    (-> handle (set-root! test-id) write-block-index!)
+    (vary-meta test assoc ::history-id history-id)))
+
+(defn write-results!
+  "Takes a handle and a test with a ::history-id metadata key (presumably
+  provided by write-history!), and appends its :results as a partial map block:
+  :valid? in the top tier, and other results below. Writes test using those
+  results and history blocks. Returns test, with ::results-id metadata pointing
+  to the block ID of these results."
+  [handle test]
+  (let [history-id  (::history-id (meta test))
+        _           (assert+ (integer? history-id)
+                             {:type ::no-history-id-in-meta})
+        results     (:results test)
+        more-id     (write-partial-map-block!
+                      handle (dissoc results :valid?) nil)
+        results-id  (write-partial-map-block!
+                      handle (select-keys results [:valid?]) more-id)
+        test-id     (write-fressian-block!
+                      handle
+                      (assoc test
+                             :history (block-ref history-id)
+                             :results (block-ref results-id)))]
+    (-> handle (set-root! test-id) write-block-index!)
+    (vary-meta test assoc ::results-id results-id)))
+
 (defn write-test!
   "Writes an entire test map to a handle, making the test the root. Useful for
   re-writing a completed test that's already in memory. Returns handle."
