@@ -195,7 +195,9 @@
                               FileChannel$MapMode)
            (java.nio.file StandardOpenOption)
            (java.util.zip CRC32)
-           (jepsen.store.format FileOffsetOutputStream)))
+           (jepsen.store.format FileOffsetOutputStream)
+           (org.fressian.handlers WriteHandler
+                                  ReadHandler)))
 
 (def magic
   "The magic string at the start of Jepsen files."
@@ -284,7 +286,16 @@
   doing file reads?"
   (* 1024 1024)) ; 1M
 
-(defrecord BlockRef [block-id])
+(def fressian-buffer-size
+  "How many bytes should we buffer before writing Fressian data to disk?"
+  16384) ; 16K
+
+(defrecord BlockRef [id])
+
+(defn block-ref
+  "Constructs a new BlockRef object pointing to the given block ID."
+  [id]
+  (BlockRef. id))
 
 (defrecord Handle
   [^FileChannel file  ; The filechannel we use for reads and writes
@@ -738,11 +749,33 @@
              :id               id
              :known-block-ids (sort (keys (:blocks @(:block-index handle))))})))
 
+(defn read-root
+  "Takes a handle. Looks up the root block from the current block index and
+  reads it. Returns nil if there is no root."
+  [handle]
+  (when-let [root (:root @(:block-index handle))]
+    (read-block-by-id handle root)))
+
 ;; Fressian blocks
 
-(def fressian-buffer-size
-  "How many bytes should we buffer before writing Fressian data to disk?"
-  16384)
+(def fressian-write-handlers
+  "How do we write Fressian data?"
+  (-> jsf/write-handlers*
+      (assoc jepsen.store.format.BlockRef
+             {"block-ref" (reify WriteHandler
+                            (write [_ w block-ref]
+                              (.writeTag w "block-ref" 1)
+                              (.writeObject w (:id block-ref))))})
+      fress/associative-lookup
+      fress/inheritance-lookup))
+
+(def fressian-read-handlers
+  "How do we read Fressian data?"
+  (-> jsf/read-handlers*
+      (assoc "block-ref" (reify ReadHandler
+                           (read [_ rdr tag component-count]
+                             (block-ref (int (.readObject rdr))))))
+      fress/associative-lookup))
 
 (defn write-fressian-to-file!
   "Takes a FileChannel, an offset, a checksum, and a data structure as
@@ -752,17 +785,16 @@
   [^FileChannel file, ^long offset, ^CRC32 checksum, data]
   ; First, write the data to the file directly; then we'll go back and write
   ; the header.
-  (let [data-size (with-open [foos (FileOffsetOutputStream.
-                                     file offset checksum)
-                              bos  (BufferedOutputStream.
-                                     foos fressian-buffer-size)
-                              w    (jsf/writer bos)]
-                    (fress/write-object w data)
-                    (.flush bos)
-                    (.bytesWritten foos))]
-    data-size))
+  (with-open [foos (FileOffsetOutputStream.
+                     file offset checksum)
+              bos  (BufferedOutputStream.
+                     foos fressian-buffer-size)
+              w    (jsf/writer bos {:handlers fressian-write-handlers})]
+    (fress/write-object w data)
+    (.flush bos)
+    (.bytesWritten foos)))
 
-(defn write-fressian-block!
+(defn write-fressian-block!*
   "Takes a handle, a byte offset, and some Clojure data. Writes that data to a
   Fressian block at the given offset. Returns handle."
   [handle offset data]
@@ -781,18 +813,30 @@
     (write-block-header! handle offset header)
   handle))
 
+(defn write-fressian-block!
+  "Takes a handle and some Clojure data. Writes that data to a Fressian block
+  at the end of the file, records the new block in the handle's block index,
+  and returns the ID of the newly written block."
+  [handle data]
+  (let [offset (next-block-offset handle)
+        id     (new-block-id! handle)]
+    (-> handle
+        (write-fressian-block!* offset data)
+        (assoc-block! id offset))
+    id))
+
 (defn read-fressian-block
   "Takes a handle and a ByteBuffer of data from a Fressian block. Returns its
   parsed contents."
   [handle ^ByteBuffer data]
   (jsf/postprocess-fressian
     (with-open [is (bs/to-input-stream data)
-                r  (jsf/reader is)]
+                r  (jsf/reader is {:handlers fressian-read-handlers})]
       (fress/read-object r))))
 
 ;; Partial map blocks
 
-(defn write-partial-map-block!
+(defn write-partial-map-block!*
   "Takes a handle, a byte offset, a Clojure map, and the ID of the block which
   stores the rest of the map (use `nil` if there is no more to the PartialMap).
   Writes the map and rest pointer to a PartialMap block at the given offset.
@@ -822,6 +866,21 @@
     ; Write header
     (write-block-header! handle offset header))
   handle)
+
+(defn write-partial-map-block!
+  "Takes a handle, a Clojure map, and the ID of the block which stores the rest
+  of the map (use `nil` if there is no more data to the PartialMap). Writes the
+  map and disk to a new PartialMap block, records it in the handle's block
+  index, and returns the ID of this block itself. Optionally takes an explicit
+  ID for this block."
+  ([handle m rest-id]
+   (write-partial-map-block! handle (new-block-id! handle) m rest-id))
+  ([handle id m rest-id]
+   (let [offset (next-block-offset handle)]
+     (-> handle
+         (write-partial-map-block!* offset m rest-id)
+         (assoc-block! id offset))
+     id)))
 
 ; A lazy map structure which has a map m and a *rest-map*: a Delay which can
 ; unpack to another PartialMap (presumably by reading another block in the
@@ -876,3 +935,79 @@
                        (:data block))))]
     ; Construct lazy map
     (PartialMap. m rest-map {})))
+
+;; Test-specific writing
+
+(defn write-test!
+  "Writes an entire test map to a handle, making the test the root. Useful for
+  re-writing a completed test that's already in memory. Returns handle."
+  [handle test]
+  (let [; Where will we store the remainder of the :results field?
+        more-results-id (new-block-id! handle)
+
+        ; Write the minimal part of the results
+        results (:results test)
+        results-id (write-partial-map-block! handle
+                                             (select-keys results [:valid?])
+                                             more-results-id)
+        ; And the rest of the results
+        _ (write-partial-map-block! handle
+                                    more-results-id
+                                    (dissoc results :valid?)
+                                    nil)
+        ; Next, the history
+        history-id (write-fressian-block! handle (:history test))
+
+        ; And finally, the test
+        test    (assoc test
+                       :history (block-ref history-id)
+                       :results (block-ref results-id))
+        test-id (write-fressian-block! handle test)]
+    (-> handle
+        (set-root! test-id)
+        write-block-index!)))
+
+(def-map-type LazyTest [m history results metadata]
+  (get [this key default-value]
+       (condp identical? key
+         :history (if history @history default-value)
+         :results (if results @results default-value)
+         (get m key default-value)))
+
+  (assoc [this key value]
+         (condp identical? key
+           :history (LazyTest. m (deliver (promise) value) results metadata)
+           :results (LazyTest. m history (deliver (promise) value) metadata)
+           (LazyTest. (assoc m key value) history results metadata)))
+
+  (dissoc [this key]
+          (condp identical? key
+            :history (LazyTest. m nil results metadata)
+            :results (LazyTest. m history nil metadata)
+            (LazyTest. (dissoc m key) history results metadata)))
+
+  (keys [this]
+        (cond-> (keys m)
+          history (conj :history)
+          results (conj :results)))
+
+  (meta [this]
+        metadata)
+
+  (with-meta [this metadata']
+             (LazyTest. m history results metadata')))
+
+(defn read-test
+  "Reads a test from a handle's root. Constructs a lazy test map where history
+  and results are loaded as-needed from the file. Leave the handle open so this
+  map can use it; it'll be automatically closed when this map is GCed."
+  [handle]
+  (let [test    (:data (read-root handle))
+        history (when-let [h (:history test)]
+                  (delay (:data (read-block-by-id handle (:id h)))))
+        results (when-let [r (:results test)]
+                  (delay (:data (read-block-by-id handle (:id r)))))]
+    (LazyTest. (dissoc test :history :results)
+               history
+               results
+               {})))

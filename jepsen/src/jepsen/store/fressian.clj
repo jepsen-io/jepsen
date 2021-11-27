@@ -14,7 +14,7 @@
            (org.fressian.handlers WriteHandler ReadHandler)
            (multiset.core MultiSet)))
 
-(def write-handlers
+(def write-handlers*
   (-> {clojure.lang.Atom
        {"atom" (reify WriteHandler
                  (write [_ w a]
@@ -58,12 +58,14 @@
                    (write [_ w instant]
                      (.writeTag w "instant" 1)
                      (.writeObject w (.toString instant))))}}
+      (merge fress/clojure-write-handlers)))
 
-      (merge fress/clojure-write-handlers)
+(def write-handlers
+  (-> write-handlers*
       fress/associative-lookup
       fress/inheritance-lookup))
 
-(def read-handlers
+(def read-handlers*
   (-> {"atom"      (reify ReadHandler
                      (read [_ rdr tag component-count]
                        (atom (.readObject rdr))))
@@ -98,8 +100,10 @@
                    (read [_ rdr tag component-count]
                      (Instant/parse (.readObject rdr))))}
 
-      (merge fress/clojure-read-handlers)
-      fress/associative-lookup))
+      (merge fress/clojure-read-handlers)))
+
+(def read-handlers
+  (fress/associative-lookup read-handlers*))
 
 (defn postprocess-fressian
   "Fressian likes to give us ArrayLists, which are kind of a PITA when you're
@@ -117,11 +121,21 @@
                 obj))
 
 (defn reader
-  "Creates a Fressian reader given an InputStream."
-  [input-stream]
-  (fress/create-reader input-stream :handlers read-handlers))
+  "Creates a Fressian reader given an InputStream. Options:
+
+    :handlers   Read handlers"
+  ([input-stream]
+   (reader input-stream {}))
+  ([input-stream opts]
+   (fress/create-reader input-stream
+                        :handlers (:handlers opts read-handlers))))
 
 (defn writer
-  "Creates a Fressian writer given an OutputStream."
-  [output-stream]
-  (fress/create-writer output-stream :handlers write-handlers))
+  "Creates a Fressian writer given an OutputStream. Options:
+
+    :handlers   Write handlers"
+  ([output-stream]
+   (writer output-stream {}))
+  ([output-stream opts]
+   (fress/create-writer output-stream
+                        :handlers (:handlers opts write-handlers))))

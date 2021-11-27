@@ -71,28 +71,20 @@
               (is (= [] (:known-block-ids e))))))))
 
 (deftest fressian-block-test
-  (with-open [h1 (open file)
-              h2 (open file)]
-    (testing "writing block 2"
-      ; Prepare
-      (write-header! h1)
-      (write-block-index! h1)
-      ; Build block
-      (let [offset (next-block-offset h1)
-            id     (new-block-id! h1)
-            data   {:foo 2 :bar ["cat" #{'mew}]}]
-        (is (= 62 offset))
-        (is (= 2 id))
-        ; Write block
-        (write-fressian-block! h1 offset data)
-        (assoc-block! h1 id offset)
-        (write-block-index! h1)
-        (flush! h1)
+  (with-open [h1   (open file)
+              h2   (open file)]
+    (let [data {:foo 2 :bar ["cat" #{'mew}]}]
+      (testing "writing block 2"
+        ; Write header and block, and make it the root
+        (write-header! h1)
+        (->> (write-fressian-block! h1 data)
+             (set-root! h1)
+             write-block-index!
+             flush!)
 
         ; Now... can we read it?
         (load-block-index! h2)
-        (is (= data (:data (read-block-by-id h2 id))))
-        ))))
+        (is (= data (:data (read-root h2))))))))
 
 (deftest partial-map-test
   (let [shallow {:shallow "waters"}
@@ -101,27 +93,38 @@
       (with-open [h (open file)]
         (write-header! h)
         (write-block-index! h)
-        (let [id1     (new-block-id! h)
-              id2     (new-block-id! h)
-              offset2 (next-block-offset h)]
-          (is (= id1 (int 2)))
-          ; Write block 2 first
-          (write-partial-map-block! h offset2 deep nil)
-          (assoc-block! h id2 offset2)
-          ; Then block 1, pointing to 2
-          (let [offset1 (next-block-offset h)]
-            (write-partial-map-block! h offset1 shallow id2)
-            (assoc-block! h id1 offset1))
-          ; And finalize
-          (write-block-index! h)
-          (flush! h))))
+        (let [; Write deep block
+              deep-id    (write-partial-map-block! h deep nil)
+              ; Then shallow block pointing to deep
+              shallow-id (write-partial-map-block! h shallow deep-id)]
+          ; Make it the root
+          (set-root! h shallow-id))
+
+        ; And finalize
+        (write-block-index! h)
+        (flush! h)))
 
     (testing "read"
       (with-open [h (open file)]
         (load-block-index! h)
-        (let [m (:data (read-block-by-id h (int 2)))]
+        (let [m (:data (read-root h))]
           ; Instance checks get awkward with hot code reloading
           (is (= "jepsen.store.format.PartialMap" (.getName (class m))))
           (is (= "waters" (:shallow m)))
           (is (= "lore" (:deep m)))
           (is (= (merge deep shallow) m)))))))
+
+(deftest write-test-test
+  (let [test {:history [:a :b :c]
+              :results {:valid? false
+                        :more [:oh :no]}
+              :name "hello"
+              :generator [:complex]}]
+    (with-open [h (open file)]
+      (write-header! h)
+      (write-test! h test))
+
+    (with-open [h (open file)]
+      (load-block-index! h)
+      (let [test' (read-test h)]
+        (is (= test test'))))))
