@@ -37,20 +37,30 @@
 
   Jepsen files begin with the magic UTF8 string JEPSEN, followed by a 32-byte
   big-endian unsigned integer version field, which we use to read old formats
-  when necessary. This is version 0. There follows a series of *blocks*:
+  when necessary. This is version 0. Then there is a 64-bit offset into the
+  file where the *block index*--the metadata structure--lives. There follows a
+  series of *blocks*:
 
-         6            32
-    | \"JEPSEN\" | version | block 1 | block 2 | ...
+         6            32             64
+    | \"JEPSEN\" | version | block-index-offset | block 1 | block 2 | ...
+
+  In general, files are written by appending blocks sequentially to the end of
+  the file---this allows Jepsen to write files in (mostly) a single pass,
+  without moving large chunks of bytes around. When one is ready to save the
+  file, one writes a new index block to the end of the file which provides the
+  offsets of all the (active) blocks in the file, and finally updates the
+  block-index-offset at the start of the file to point to that most-recent
+  index block.
 
   All integers are signed and big-endian, unless otherwise noted. This is the
   JVM, after all.
 
   Blocks may be sparse--their lengths may be shorter than the distance to the
-  start of the next block. This is helpful when one needs to rewrite blocks
+  start of the next block. This is helpful if one needs to rewrite blocks
   later: you can leave padding for their sizes to change.
 
-  The first block is an index block. The top-level value of the file (e.g. the
-  test map) is stored in block 2.
+  The top-level value of the file (e.g. the test map) is given in the block
+  index.
 
 
   ## Block Structure
@@ -69,19 +79,20 @@
   checksum itself), and the type. We compute checksums this way so that writers
   can write large blocks of data with an unknown size in a single pass.
 
+
   ## Index Blocks (Type 1)
 
-  An index block maps logical block numbers to file offsets. It consists of a
-  series of pairs: each pair a 32-bit logical block ID and an offset into the
-  file.
+  An index block lays out the overall arrangement of the file: it stores a map
+  of logical block numbers to file offsets, and also stores a root id, which
+  identifies the block containing the top-level test map. The root id comes
+  first, and is followed by the block map: a series of pairs, each a 32-bit
+  logical block ID and an offset into the file.
 
-       32       64       32      64
-    | id 1 | offset 1 | id 2 | offset 2 | ...
+       32      32       64       32      64
+    root id | id 1 | offset 1 | id 2 | offset 2 | ...
 
-  There is no block with ID 0: 0 is used as a nil sentinel.
-
-  Index blocks are deliberately spaced out from the following block so that
-  they can be rewritten when more blocks are added.
+  There is no block with ID 0: 0 is used as a nil sentinel when one wishes to
+  indicate the absence of a block.
 
 
   ## Fressian Blocks (Type 2)
@@ -126,32 +137,35 @@
 
   1. Write the header.
 
-  2. Write an index block (block 1) with enough space for, say, a dozen slots.
+  2. Write the initial test map as a PartialMap block to block 1, with no
+  history or results. Write an index block pointing to 1 as the root.
 
-  3. Write the test map as a Fressian block to block 2 (the test map), with
-  :history and :results pointing to blocks 3 and 4. Update the index block.
+  3. Write the history as a Fressian block to block 2.
 
-  4. Write the history as a Fressian block to block 3. Update the index block.
+  4. Write a new PartialMap at block 3 with {:history (block-ref 2)}, and
+  rest-ptr 1. Write a new index block with block 3 as the root. This ensures
+  that if we crash after completing the history, but before starting the
+  analysis, we'll still be able to recover the history itself and retry the
+  analysis.
 
   5. Write the results as a PartialMap to blocks 4 and 5: 4 containing the
-  :valid? field, and 5 containing the rest of the results. Update the index
-  block.
+  :valid? field, and 5 containing the rest of the results.
 
   6. The test may contain state which changed by the end of the test, and we
-  might want to save that state. Write the final test map as a new Fressian
-  block at the end of the test, again referencing blocks 3 and 4 for the
-  history and results. Flip the block index for block 1 to point to this block.
-  Zero out the original block 1, if we like. Probably not worth preserving
-  history.
+  might want to save that state. Write the entire test map again as block 6: a
+  Fressian block now referencing blocks 3 and 4 for the history and results.
+  Write a new index block with block 6 as the root.
 
   To read this file, we:
 
-  1. Check the magic and version
+  1. Check the magic and version.
 
-  2. Read the index block into memory.
+  2. Read the index block offset.
 
-  3. Look up block 2 and decode it as Fressian. Wrap it in a lazy map
-  structure.
+  3. Read the index block into memory.
+
+  3. Look up the root block ID, use the index to work out its offset, read that
+  block, and decode it into a lazy map structure.
 
   When it comes time to reference the results or history in that lazy map, we
   look up the right block in the block index, seek to that offset, and decode
@@ -207,9 +221,23 @@
   "Where in the file the version begins"
   (+ magic-offset magic-size))
 
+(def block-id-size
+  "How many bytes per block ID?"
+  4)
+
+(def block-offset-size
+  "How many bytes per block offset address?"
+  8)
+
+(def block-index-offset-offset
+  "Where in the file do we write the offset of the index block?"
+  (+ version-offset version-size))
+
 (def first-block-offset
   "Where in the file the first block begins."
-  (+ version-offset version-size))
+  (+ block-index-offset-offset block-offset-size))
+
+;; Block Headers
 
 (def block-len-size
   "How long is the length prefix for a block?"
@@ -249,26 +277,11 @@
   "How long is a block header?"
   (+ block-len-size block-checksum-size block-type-size))
 
-(def block-id-size
-  "How many bytes per block ID?"
-  4)
-
-(def block-offset-size
-  "How many bytes per block offset address?"
-  8)
-
-(def block-index-count
-  "How many blocks do we store, maximum, per file?"
-  16)
-
-(def block-index-size
-  "How many bytes do we allocate to the block index structure, not including
-  the header?"
-  (* block-index-count (+ block-id-size block-offset-size)))
+;; Perf tuning
 
 (def large-region-size
   "How big does a file region have to be before we just mmap it instead of
-  doing read calls?"
+  doing file reads?"
   (* 1024 1024)) ; 1M
 
 (defrecord BlockRef [block-id])
@@ -293,7 +306,8 @@
                                             [StandardOpenOption/CREATE
                                              StandardOpenOption/READ
                                              StandardOpenOption/WRITE]))
-        block-index (atom {})]
+        block-index (atom {:root   nil
+                           :blocks {}})]
     (Handle. f block-index)))
 
 (defn close
@@ -354,7 +368,7 @@
     (bs/transfer magic file {:close? false})
     (.putInt buf version)
     (.flip buf)
-    (bs/transfer buf file {:close? false})))
+    (write-file! file version-offset buf)))
 
 (defn check-magic
   "Takes a Handle and reads the magic bytes, ensuring they match."
@@ -388,6 +402,29 @@
                               :eof
                               fversion)}))))
   handle)
+
+; Fetching and updating the block index offset root pointer
+
+(defn write-block-index-offset!
+  "Takes a handle and the offset of a block index block to use as the new root.
+  Updates the file's block pointer. Returns handle."
+  [handle root]
+  (let [buf (ByteBuffer/allocate block-offset-size)]
+    (.putLong buf 0 root)
+    (write-file! (:file handle) block-index-offset-offset buf))
+  handle)
+
+(defn read-block-index-offset
+  "Takes a handle and returns the current root block index offset from its
+  file."
+  [handle]
+  (try+
+    (let [buf (read-file (:file handle)
+                         block-index-offset-offset
+                         block-offset-size)]
+      (.getLong buf 0))
+    (catch [:type ::incomplete-read] e
+      (throw+ {:type ::no-root}))))
 
 ; Working with block headers
 
@@ -522,14 +559,7 @@
   handle."
   [handle ^long offset ^ByteBuffer data]
   (.rewind data)
-  (let [written (.write ^FileChannel (:file handle)
-                        data
-                        (+ offset block-header-size))]
-    ; (info :wrote-block-data written :bytes)
-    (assert+ (= written (.limit data))
-             {:type     ::block-data-write-failed
-              :written  written
-              :expected (.limit data)}))
+  (write-file! (:file handle) (+ offset block-header-size) data)
   handle)
 
 (defn ^ByteBuffer block-header-for-length-and-checksum!
@@ -563,7 +593,7 @@
       (write-block-header! offset (block-header-for-data block-type data))
       (write-block-data!   offset data)))
 
-(defn read-block-by-offset
+(defn read-block-by-offset*
   "Takes a Handle and the offset of a block. Reads the block header and data,
   validates the checksum, and returns a map of:
 
@@ -578,89 +608,42 @@
     {:header header
      :data   data}))
 
+(declare read-block-index-block
+         read-fressian-block
+         read-partial-map-block)
+
+(defn read-block-by-offset
+  "Takes a Handle and the offset of a block. Reads the block header, validates
+  the checksum, and interprets the block data depending on the block type.
+  Returns a map of:
+
+    {:type   The block type, as a keyword
+     :offset The offset of this block
+     :length How many bytes are in this block, total
+     :data   The interpreted data stored in this block---depends on block type}"
+  [handle offset]
+  (let [{:keys [header data]} (read-block-by-offset* handle offset)
+        type (block-header-type header)]
+    {:type   type
+     :offset offset
+     :length (block-header-length header)
+     :data   (case type
+               :block-index (read-block-index-block handle data)
+               :fressian    (read-fressian-block    handle data)
+               :partial-map (read-partial-map-block handle data))}))
+
 ;; Block indices
-
-(defn write-block-index!
-  "Writes the block index for a Handle, based on whatever that Handle's current
-  block index is. If handle doesn't have a block index entry for the block
-  index itself, adds one. Returns handle."
-  [handle]
-  (let [file    ^FileChannel (:file handle)
-        data    (ByteBuffer/allocate block-index-size)
-        index   (swap! (:block-index handle)
-                       (fn ensure-block-index-block [index]
-                         (if (contains? index (int 1))
-                           index
-                           (assoc index (int 1) first-block-offset))))]
-    ; Make sure the block index fits
-    (assert+ (<= (count index) block-index-count)
-             {:type  ::block-index-too-large
-              :limit block-index-count
-              :count (count index)})
-    ; Write each entry to the buffer
-    (doseq [[id offset] index]
-      (when-not (= :reserved offset)
-        (.putInt data id)
-        (.putLong data offset)))
-    (.flip data)
-
-    ; Write the header and data to the file.
-    (write-block! handle first-block-offset :block-index data))
-  handle)
-
-(defn read-block-index
-  "Reads the block index structure from a Handle. Returns a map of ids to
-  offsets, or throws if the Handle doesn't contain a block index yet."
-  [handle]
-  (let [{:keys [^ByteBuffer header
-                ^ByteBuffer data]} (read-block-by-offset handle
-                                                         first-block-offset)
-        ; Make sure this is a block index
-        _ (assert+ (= :block-index (block-header-type header))
-                   {:type     ::block-type-mismatch
-                    :offset   first-block-offset
-                    :expected :block-index
-                    :actual   (block-header-type header)})]
-    ; Great, interpret the data
-    (loop [index (transient {})]
-      (if (.hasRemaining data)
-        (let [id      (.getInt data)
-              offset  (.getLong data)]
-          (recur (assoc! index id offset)))
-        (persistent! index)))))
-
-(defn refresh-block-index!
-  "Takes a handle, reloads its block index from disk, and returns handle."
-  [handle]
-  (reset! (:block-index handle) (read-block-index handle))
-  handle)
-
-(defn read-block-by-id
-  "Takes a handle and a logical block id. Assumes that the handle has a
-  loaded block id. Looks up the offset for the given block, reads it using
-  read-block-by-offset* (which includes verifying the checksum), and returns a
-  map of:
-
-    {:header header, as bytebuffer
-     :data   data, as bytebuffer}"
-  [handle id]
-  (assert (instance? Integer id) "Block ids are integers, not longs!")
-  (if-let [offset (get @(:block-index handle) id)]
-    (read-block-by-offset handle offset)
-    (throw+ {:type             ::block-not-found
-             :id               id
-             :known-block-ids (sort (keys @(:block-index handle)))})))
 
 (defn new-block-id!
   "Takes a handle and returns a fresh block ID for that handle, mutating the
   handle so that this ID will not be allocated again."
   [handle]
   (let [index (:block-index handle)
-        i     @index
-        id    (int (if (empty? i)
-                     2 ; Leave 1 free for the block index block itself.
-                     (inc (reduce max (keys i)))))]
-    (swap! index assoc id :reserved)
+        bs     (:blocks @index)
+        id    (int (if (empty? bs)
+                     1 ; Blocks start at 1
+                     (inc (reduce max (keys bs)))))]
+    (swap! index assoc-in [:blocks id] :reserved)
     id))
 
 (defn next-block-offset
@@ -668,16 +651,92 @@
   just the end of the file."
   [handle]
   (max (.size ^FileChannel (:file handle))
-       ; When we first ask for a block, leave room for the block index
-       ; beforehand.
-       (+ first-block-offset block-header-size block-index-size)))
+       first-block-offset))
 
 (defn assoc-block!
   "Takes a handle, a block ID, and its corresponding offset. Updates the
   handle's block index (in-memory) to add this mapping. Returns handle."
   [handle id offset]
-  (swap! (:block-index handle) assoc id offset)
+  (swap! (:block-index handle) assoc-in [:blocks id] offset)
   handle)
+
+(defn set-root!
+  "Takes a handle and a block ID. Updates the handle's block index (in-memory)
+  to point to this block ID as the root. Returns handle."
+  [handle root-id]
+  (swap! (:block-index handle) assoc :root root-id)
+  handle)
+
+(defn write-block-index!
+  "Writes a block index for a Handle, based on whatever that Handle's current
+  block index is. Automatically generates a new block ID for this index and
+  adds it to the handle as well. Then writes a new block index offset pointing
+  to this block index. Returns handle."
+  ([handle]
+   (write-block-index! (next-block-offset handle) handle))
+  ([offset handle]
+   (let [file    ^FileChannel (:file handle)
+         id      (new-block-id! handle)
+         _       (assoc-block! handle id offset)
+         index   @(:block-index handle)
+         ; How big does the index need to be?
+         size    (+ block-offset-size
+                    (* (count (:blocks index))
+                       (+ block-id-size block-offset-size)))
+         data    (ByteBuffer/allocate size)]
+     ; Write the root ID
+     (.putInt data (or (:root index) (int 0)))
+     ; And each block mapping
+     (doseq [[id offset] (:blocks index)]
+       (when-not (= :reserved offset)
+         (.putInt data id)
+         (.putLong data offset)))
+     (.flip data)
+
+     ; Write the header and data to the file.
+     (write-block! handle offset :block-index data)
+     ; And the block index offset
+     (write-block-index-offset! handle offset))
+   handle))
+
+(defn read-block-index-block
+  "Takes a ByteBuffer and reads a block index from it: a map of
+
+    {:root   root-id
+     :blocks {id offset, id2 offset2, ...}}"
+  [handle ^ByteBuffer data]
+  (let [root (.getInt data)]
+    (loop [index (transient {})]
+      (if (.hasRemaining data)
+        (let [id      (.getInt data)
+              offset  (.getLong data)]
+          (recur (assoc! index id offset)))
+        {:root   (if (zero? root) nil root)
+         :blocks (persistent! index)}))))
+
+(defn load-block-index!
+  "Takes a handle, reloads its block index from disk, and returns handle."
+  [handle]
+  (let [block (read-block-by-offset handle (read-block-index-offset handle))]
+    (assert+ (= :block-index (:type block))
+             {:type     ::block-type-mismatch
+              :expected :block-index
+              :actual   (:type block)})
+    (reset! (:block-index handle) (:data block)))
+  handle)
+
+(defn read-block-by-id
+  "Takes a handle and a logical block id. Assumes that the handle has a
+  loaded block id. Looks up the offset for the given block and reads it using
+  read-block-by-offset (which includes verifying the checksum)."
+  [handle id]
+  (assert (instance? Integer id)
+          (str "Block ids are integers, not " (class id) " - " (pr-str id)))
+  (if-let [offset (get-in @(:block-index handle) [:blocks id])]
+    (read-block-by-offset handle offset)
+    (throw+ {:type             ::block-not-found
+             :id               id
+             :known-block-ids (sort (keys (:blocks @(:block-index handle))))})))
 
 ;; Fressian blocks
 
@@ -723,20 +782,13 @@
   handle))
 
 (defn read-fressian-block
-  "Takes a handle and an id. Reads the Fressian block at the given id and
-  returns its data."
-  [handle id]
-  (let [{:keys [^ByteBuffer header, ^ByteBuffer data]}
-        (read-block-by-id handle id)]
-    (assert+ (= :fressian (block-header-type header))
-             {:type     ::block-type-mismatch
-              :id       id
-              :expected :fressian
-              :actual   (block-header-type header)})
+  "Takes a handle and a ByteBuffer of data from a Fressian block. Returns its
+  parsed contents."
+  [handle ^ByteBuffer data]
+  (jsf/postprocess-fressian
     (with-open [is (bs/to-input-stream data)
                 r  (jsf/reader is)]
-      (-> (fress/read-object r)
-          (jsf/postprocess-fressian)))))
+      (fress/read-object r))))
 
 ;; Partial map blocks
 
@@ -802,20 +854,10 @@
              (PartialMap. m rest-map metadata')))
 
 (defn read-partial-map-block
-  "Takes a handle and an ID. Reads the partial map block at the given id
-  and returns a lazy map representing its data."
-  [handle id]
-  (let [file ^FileChannel (:file handle)
-
-        {:keys [^ByteBuffer header, ^ByteBuffer data]}
-        (read-block-by-id handle id)
-
-        _ (assert+ (= :partial-map (block-header-type header))
-                   {:type     ::block-type-mismatch
-                    :id       id
-                    :expected :partial-map
-                    :actual   (block-header-type header)})
-        ; Read next ID
+  "Takes a handle and a ByteBuffer for a partial-map block. Returns a lazy map
+  representing its data."
+  [handle ^ByteBuffer data]
+  (let [; Read next ID
         next-id (.getInt data)
         ; And read map
         m (with-open [is (bs/to-input-stream data)
@@ -826,6 +868,11 @@
         ; there's no more.
         rest-map (delay
                    (when-not (zero? next-id)
-                     (read-partial-map-block handle next-id)))]
+                     (let [block (read-block-by-id handle next-id)]
+                       (assert+ (= :partial-map (:type block))
+                                {:type      ::block-type-mismatch
+                                 :expected  :partial-map
+                                 :actual    (:type block)})
+                       (:data block))))]
     ; Construct lazy map
     (PartialMap. m rest-map {})))

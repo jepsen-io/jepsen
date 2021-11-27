@@ -46,16 +46,19 @@
   (with-open [h1 (open file)
               h2 (open file)]
     (testing "empty file"
-      (try+ (read-block-index h1)
+      (try+ (load-block-index! h1)
             (is false)
-            (catch [:type :jepsen.store.format/block-header-truncated] e
-              (is (= 0 (:length e))))))
+            (catch [:type :jepsen.store.format/no-root] e
+              (is true))))
 
     (testing "trivial index"
       (write-header! h1)
       (write-block-index! h1)
       (flush! h1)
-      (is (= {(int 1) 10} (read-block-index h2))))))
+      (load-block-index! h2)
+      (is (= {:root nil
+              :blocks {(int 1) 18}}
+             @(:block-index h2))))))
 
 (deftest read-block-by-id-test
   (with-open [h1 (open file)
@@ -78,8 +81,8 @@
       (let [offset (next-block-offset h1)
             id     (new-block-id! h1)
             data   {:foo 2 :bar ["cat" #{'mew}]}]
-        (is (= offset 230))
-        (is (= id 2))
+        (is (= 62 offset))
+        (is (= 2 id))
         ; Write block
         (write-fressian-block! h1 offset data)
         (assoc-block! h1 id offset)
@@ -87,8 +90,8 @@
         (flush! h1)
 
         ; Now... can we read it?
-        (refresh-block-index! h2)
-        (is (= data (read-fressian-block h2 id)))
+        (load-block-index! h2)
+        (is (= data (:data (read-block-by-id h2 id))))
         ))))
 
 (deftest partial-map-test
@@ -115,9 +118,10 @@
 
     (testing "read"
       (with-open [h (open file)]
-        (refresh-block-index! h)
-        (let [m (read-partial-map-block h (int 2))]
-          (is (instance? jepsen.store.format.PartialMap m))
+        (load-block-index! h)
+        (let [m (:data (read-block-by-id h (int 2)))]
+          ; Instance checks get awkward with hot code reloading
+          (is (= "jepsen.store.format.PartialMap" (.getName (class m))))
           (is (= "waters" (:shallow m)))
           (is (= "lore" (:deep m)))
           (is (= (merge deep shallow) m)))))))
