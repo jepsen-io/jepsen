@@ -448,15 +448,19 @@
 
 (defn read-block-index-offset
   "Takes a handle and returns the current root block index offset from its
-  file."
+  file. Throws :type ::no-block-index if the block index is 0 or the file is
+  too short."
   [handle]
   (try+
     (let [buf (read-file (:file handle)
                          block-index-offset-offset
-                         block-offset-size)]
-      (.getLong buf 0))
+                         block-offset-size)
+          offset (.getLong buf 0)]
+      (when (zero? offset)
+        (throw+ {:type ::no-block-index}))
+      offset)
     (catch [:type ::incomplete-read] e
-      (throw+ {:type ::no-root}))))
+      (throw+ {:type ::no-block-index}))))
 
 ; Working with block headers
 
@@ -756,7 +760,9 @@
              {:type     ::block-type-mismatch
               :expected :block-index
               :actual   (:type block)})
-    (reset! (:block-index handle) (:data block)))
+    (reset! (:block-index handle) (:data block))
+    ;(info :block-index (:data block))
+    )
   handle)
 
 (defn read-block-by-id
