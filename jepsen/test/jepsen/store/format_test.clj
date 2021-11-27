@@ -52,9 +52,7 @@
               (is true))))
 
     (testing "trivial index"
-      (write-header! h1)
       (write-block-index! h1)
-      (flush! h1)
       (load-block-index! h2)
       (is (= {:root nil
               :blocks {(int 1) 18}}
@@ -71,19 +69,15 @@
               (is (= [] (:known-block-ids e))))))))
 
 (deftest fressian-block-test
-  (with-open [h1   (open file)
-              h2   (open file)]
+  (with-open [h1 (open file)
+              h2 (open file)]
     (let [data {:foo 2 :bar ["cat" #{'mew}]}]
-      (testing "writing block 2"
-        ; Write header and block, and make it the root
-        (write-header! h1)
+      (testing "writing"
         (->> (write-fressian-block! h1 data)
              (set-root! h1)
-             write-block-index!
-             flush!)
+             write-block-index!))
 
-        ; Now... can we read it?
-        (load-block-index! h2)
+      (testing "reading"
         (is (= data (:data (read-root h2))))))))
 
 (deftest partial-map-test
@@ -91,7 +85,7 @@
         deep    {:deep "lore"}]
     (testing "write"
       (with-open [h (open file)]
-        (write-header! h)
+        ; Just to push things around a bit
         (write-block-index! h)
         (let [; Write deep block
               deep-id    (write-partial-map-block! h deep nil)
@@ -101,12 +95,10 @@
           (set-root! h shallow-id))
 
         ; And finalize
-        (write-block-index! h)
-        (flush! h)))
+        (write-block-index! h)))
 
     (testing "read"
       (with-open [h (open file)]
-        (load-block-index! h)
         (let [m (:data (read-root h))]
           ; Instance checks get awkward with hot code reloading
           (is (= "jepsen.store.format.PartialMap" (.getName (class m))))
@@ -121,10 +113,8 @@
               :name "hello"
               :generator [:complex]}]
     (with-open [h (open file)]
-      (write-header! h)
       (write-test! h test))
 
     (with-open [h (open file)]
-      (load-block-index! h)
       (let [test' (read-test h)]
         (is (= test test'))))))

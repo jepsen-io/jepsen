@@ -300,6 +300,8 @@
 (defrecord Handle
   [^FileChannel file  ; The filechannel we use for reads and writes
    block-index        ; An atom to a block index: a map of block IDs to offsets
+   written?           ; An atom: have we written to this file yet?
+   read?              ; An atom: have we read this file yet?
    ]
 
   java.lang.AutoCloseable
@@ -319,7 +321,7 @@
                                              StandardOpenOption/WRITE]))
         block-index (atom {:root   nil
                            :blocks {}})]
-    (Handle. f block-index)))
+    (Handle. f block-index (atom false) (atom false))))
 
 (defn close
   "Closes a Handle"
@@ -371,7 +373,7 @@
 ; General file headers
 
 (defn write-header!
-  "Takes a Handle and writes the initial magic bytes and version number."
+  "Takes a Handle and writes the initial magic bytes and version number. Returns handle."
   [handle]
   (let [buf  (ByteBuffer/allocate (+ magic-size version-size))
         file ^FileChannel (:file handle)]
@@ -379,7 +381,8 @@
     (bs/transfer magic file {:close? false})
     (.putInt buf version)
     (.flip buf)
-    (write-file! file version-offset buf)))
+    (write-file! file version-offset buf))
+  handle)
 
 (defn check-magic
   "Takes a Handle and reads the magic bytes, ensuring they match."
@@ -412,6 +415,24 @@
                  :actual    (if (= -1 read-bytes)
                               :eof
                               fversion)}))))
+  handle)
+
+(defn prep-write!
+  "Called when we write anything to a handle. Ensures that we've written the
+  header before doing anything else. Returns handle."
+  [handle]
+  (when (compare-and-set! (:written? handle) false true)
+    (write-header! handle))
+  handle)
+
+(declare load-block-index!)
+
+(defn prep-read!
+  "Called when we read anything from a handle. Ensures that we've checked the
+  magic, version, and loaded the block index."
+  [handle]
+  (when (compare-and-set! (:read? handle) false true)
+    (-> handle check-magic check-version load-block-index!))
   handle)
 
 ; Fetching and updating the block index offset root pointer
@@ -633,6 +654,7 @@
      :length How many bytes are in this block, total
      :data   The interpreted data stored in this block---depends on block type}"
   [handle offset]
+  (prep-read! handle)
   (let [{:keys [header data]} (read-block-by-offset* handle offset)
         type (block-header-type header)]
     {:type   type
@@ -650,7 +672,7 @@
   handle so that this ID will not be allocated again."
   [handle]
   (let [index (:block-index handle)
-        bs     (:blocks @index)
+        bs    (:blocks @index)
         id    (int (if (empty? bs)
                      1 ; Blocks start at 1
                      (inc (reduce max (keys bs)))))]
@@ -686,6 +708,7 @@
   ([handle]
    (write-block-index! (next-block-offset handle) handle))
   ([offset handle]
+   (prep-write! handle)
    (let [file    ^FileChannel (:file handle)
          id      (new-block-id! handle)
          _       (assoc-block! handle id offset)
@@ -753,6 +776,7 @@
   "Takes a handle. Looks up the root block from the current block index and
   reads it. Returns nil if there is no root."
   [handle]
+  (prep-read! handle)
   (when-let [root (:root @(:block-index handle))]
     (read-block-by-id handle root)))
 
