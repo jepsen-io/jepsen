@@ -50,7 +50,10 @@
             [fipp.edn :refer [pprint]]
             [jepsen [control :as c]
                     [util :as util]])
-  (:import (java.io File)))
+  (:import (java.io File)
+           (java.nio.file AtomicMoveNotSupportedException
+                          StandardCopyOption
+                          Files)))
 
 ;; Where do we store files, and how do we encode paths?
 
@@ -133,6 +136,27 @@
     (io/make-parents f)
     f))
 
+(defn atomic-move!
+  "Attempts to move a file atomically, even across filesystems."
+  [^File f1 ^File f2]
+  (let [p1 (.toPath f1)
+        p2 (.toPath f2)]
+    (try (Files/move p1 p2 (into-array [StandardCopyOption/ATOMIC_MOVE]))
+         (catch AtomicMoveNotSupportedException _
+           ; Copy to the same directory, then rename
+           (let [tmp (.resolveSibling p2 (str (.getFileName p2)
+                                              ".tmp."
+                                              ; Hopefully good enough
+                                              (System/nanoTime)))]
+             (try
+               (Files/copy p1 tmp
+                           (into-array [StandardCopyOption/COPY_ATTRIBUTES]))
+               (Files/move tmp p2
+                           (into-array [StandardCopyOption/ATOMIC_MOVE]))
+               (Files/deleteIfExists p1)
+               (finally
+                 (Files/deleteIfExists tmp))))))))
+
 (defmacro write-atomic!
   "Writes a file atomically. Takes a binding form and a body, like so
 
@@ -146,7 +170,7 @@
   `(let [final#   ^File ~final
          ~tmp-sym (File/createTempFile (.getName final#) ".tmp")]
      (try ~@body
-          (.renameTo ~tmp-sym final#)
+          (atomic-move! ~tmp-sym final#)
           (finally
             (.delete ~tmp-sym)))))
 
