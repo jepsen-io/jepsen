@@ -17,7 +17,8 @@
             [jepsen [util :as util]]
             [jepsen.store [fressian :as jsf]])
   (:import (java.util AbstractList)
-           (java.io File)
+           (java.io Closeable
+                    File)
            (java.nio.file Files
                           FileSystems
                           Path)
@@ -90,7 +91,7 @@
   "Loads an arbitrary Fressian file."
   [file]
   (with-open [is (io/input-stream file)
-              in (jsf/reader is)]
+              in ^Closeable (jsf/reader is)]
     (-> (fress/read-object in)
         jsf/postprocess-fressian)))
 
@@ -280,7 +281,7 @@
       (write-fressian-file! {:foo 2} (path! test \"foo.fressian\"))."
   [data file]
   (with-open [os (io/output-stream file)
-              out (jsf/writer os)]
+              out ^Closeable (jsf/writer os)]
     (fress/write-object out data)))
 
 (defn write-fressian!

@@ -175,16 +175,20 @@
   over that region of the file, check the block type, then decode the remaining
   data based on the block structure."
   (:require [byte-streams :as bs]
+            [clojure [set :as set]
+                     [walk :as walk]]
             [clojure.data.fressian :as fress]
             [clojure.tools.logging :refer [info warn]]
             [clojure.java.io :as io]
             [dom-top.core :refer [assert+]]
-            [jepsen [util :as util :refer [map-vals]]]
+            [jepsen [util :as util :refer [map-vals]]
+                    [fs-cache :refer [write-atomic!]]]
             [jepsen.store.fressian :as jsf]
             [potemkin :refer [def-map-type
                               definterface+]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io BufferedOutputStream
+                    Closeable
                     File
                     InputStream
                     OutputStream
@@ -304,7 +308,7 @@
    read?              ; An atom: have we read this file yet?
    ]
 
-  java.lang.AutoCloseable
+  Closeable
   (close [this]
     (reset! block-index :closed)
     (.close file)))
@@ -323,16 +327,16 @@
                            :blocks {}})]
     (Handle. f block-index (atom false) (atom false))))
 
-(defn close
+(defn close!
   "Closes a Handle"
   [handle]
-  (.close (:file handle))
+  (.close ^FileChannel (:file handle))
   nil)
 
 (defn flush!
   "Flushes writes to a Handle to disk."
   [handle]
-  (.force (:file handle) false)
+  (.force ^FileChannel (:file handle) false)
   handle)
 
 ; General IO routines
@@ -387,7 +391,7 @@
 (defn check-magic
   "Takes a Handle and reads the magic bytes, ensuring they match."
   [handle]
-  (let [file (:file handle)
+  (let [file ^FileChannel (:file handle)
         buf  (ByteBuffer/allocate magic-size)]
     (let [read-bytes (.read file buf magic-offset)
           _          (.flip buf)
@@ -452,9 +456,9 @@
   too short."
   [handle]
   (try+
-    (let [buf (read-file (:file handle)
-                         block-index-offset-offset
-                         block-offset-size)
+    (let [buf ^ByteBuffer (read-file (:file handle)
+                                     block-index-offset-offset
+                                     block-offset-size)
           offset (.getLong buf 0)]
       (when (zero? offset)
         (throw+ {:type ::no-block-index}))
@@ -511,7 +515,7 @@
   (let [header' (-> (block-header)
                     (set-block-header-type!   (block-header-type header))
                     (set-block-header-length! (block-header-length header)))]
-    (.update data-crc header')
+    (.update data-crc ^ByteBuffer header')
     (unchecked-int (.getValue data-crc))))
 
 (defn ^Integer block-checksum
@@ -704,24 +708,29 @@
   (swap! (:block-index handle) assoc :root root-id)
   handle)
 
+(defn block-index-data-size
+  "Takes a block index and returns the number of bytes required for that block
+  to be written, NOT including headers."
+  [index]
+  (+ block-id-size
+     (* (count (:blocks index))
+        (+ block-id-size block-offset-size))))
+
 (defn write-block-index!
   "Writes a block index for a Handle, based on whatever that Handle's current
   block index is. Automatically generates a new block ID for this index and
   adds it to the handle as well. Then writes a new block index offset pointing
   to this block index. Returns handle."
   ([handle]
-   (write-block-index! (next-block-offset handle) handle))
-  ([offset handle]
+   (let [id     (new-block-id! handle)
+         offset (next-block-offset handle)
+         _      (assoc-block! handle id offset)]
+     (write-block-index! handle offset)))
+  ([handle offset]
    (prep-write! handle)
    (let [file    ^FileChannel (:file handle)
-         id      (new-block-id! handle)
-         _       (assoc-block! handle id offset)
          index   @(:block-index handle)
-         ; How big does the index need to be?
-         size    (+ block-offset-size
-                    (* (count (:blocks index))
-                       (+ block-id-size block-offset-size)))
-         data    (ByteBuffer/allocate size)]
+         data    (ByteBuffer/allocate (block-index-data-size index))]
      ; Write the root ID
      (.putInt data (or (:root index) (int 0)))
      ; And each block mapping
@@ -786,6 +795,127 @@
   (when-let [root (:root @(:block-index handle))]
     (read-block-by-id handle root)))
 
+;; Garbage collection
+
+(declare partial-map-rest-id)
+
+(defn block-references
+  "Takes a handle and a block ID, and returns the set of all block IDs which
+  that block references. Right now we do this by parsing the block data; later
+  we might want to move references into block headers. With no block ID,
+  returns references from the root."
+  ([handle]
+   (if-let [root (:root @(:block-index handle))]
+     (conj (block-references handle root) root)
+     #{}))
+  ([handle block-id]
+   (let [block (read-block-by-id handle block-id)
+         shallow-refs
+         (case (:type block)
+           :block-index #{}
+           :fressian    (let [refs (atom #{})]
+                          (walk/postwalk (fn finder [x]
+                                           (when (instance? BlockRef x)
+                                             (swap! refs conj (:id x)))
+                                           x)
+                                         (:data block))
+                          @refs)
+           :partial-map (if-let [id (partial-map-rest-id (:data block))]
+                          #{(partial-map-rest-id (:data block))}
+                          #{}))]
+     (->> shallow-refs
+          (map (partial block-references handle))
+          (cons shallow-refs)
+          (reduce set/union)))))
+
+(defn copy!
+  "Takes two handles: a reader and a writer. Copies the root and any other
+  referenced blocks from reader to writer."
+  [r w]
+  (prep-read! r)
+  (prep-write! w)
+  (when-let [root (:root @(:block-index r))]
+    (let [r-file ^FileChannel (:file r)
+          w-file ^FileChannel (:file w)
+          block-index @(:block-index r)
+          ; What blocks are reachable from the root?
+          block-ids (block-references r)
+          ; Fetch lengths and offsets for those block IDs
+          headers (->> block-ids
+                       (map (fn get-header [block-id]
+                              (let [offset (get-in block-index
+                                                   [:blocks block-id])
+                                    header (read-block-header r offset)]
+                                [block-id
+                                 {:length (block-header-length header)
+                                  :offset offset}])))
+                       (into {}))
+          ; Order these: root first, then by size, small blocks first
+          block-ids (->> (disj block-ids root)
+                         (sort-by (comp :length headers))
+                         (cons root))
+          ; Work out new block index. Bit of a hack here: we want to write our
+          ; block index at the start of the file, which means all the other
+          ; offsets depend on it, so we need to know exactly how big it is.
+          ; We'll use block-index-size, which doesn't actually care about the
+          ; blocks themselves; just how many there are. We add an extra `nil`
+          ; block for the index itself.
+          block-index-size (+ block-header-size
+                              (block-index-data-size
+                                {:blocks (cons nil block-ids)}))
+          ; Now work out the IDS and offsets for our new index
+          block-index'
+          (loop [; Offset in new file
+                 offset       (+ first-block-offset
+                                 block-index-size)
+                 ; Remaining old block IDs
+                 block-ids    block-ids
+                 ; New block index
+                 block-index' {:blocks {}}]
+            (if-not (seq block-ids)
+              block-index'
+              (let [block-id (first block-ids)
+                    length   (:length (get headers block-id))
+                    offset'  (+ offset length)]
+                (recur (+ offset length)
+                       (next block-ids)
+                       (cond-> (assoc-in block-index'
+                                         [:blocks block-id]
+                                         offset)
+                         ; If this is the root block, update root too
+                         (= root block-id) (assoc :root block-id))))))]
+          ; Clobber writer's block index
+          (reset! (:block-index w) block-index')
+          ; Write block index. Make sure we're actually starting where we think
+          ; we are...
+          (assert (= first-block-offset (next-block-offset w)))
+          (write-block-index! w)
+          ; And that we finish at the offset we thought we would...
+          (assert+ (= (+ first-block-offset block-index-size)
+                        (next-block-offset w))
+                     {:type ::unexpected-block-index-size
+                      :expected block-index-size
+                      :actual   (- (next-block-offset w) first-block-offset)})
+
+          ; Copy remaining blocks in order
+          (.position w-file (+ first-block-offset
+                               block-index-size))
+          (doseq [block-id block-ids]
+            (let [{:keys [offset length]} (get headers block-id)
+                  copied (.transferTo r-file offset length w-file)]
+              (when-not (= length copied)
+                (throw+ {:type            ::copy-failed
+                         :expected-bytes  length
+                         :copied-bytes    copied})))))))
+
+(defn gc!
+  "Garbage-collects a file (anything that works with io/file) in-place."
+  [file]
+  (write-atomic! [tmp (io/file file)]
+    (with-open [r ^Closeable (open file)
+                w ^Closeable (open tmp)]
+      (copy! r w))))
+
 ;; Fressian blocks
 
 (def fressian-write-handlers
@@ -819,7 +949,8 @@
                      file offset checksum)
               bos  (BufferedOutputStream.
                      foos fressian-buffer-size)
-              w    (jsf/writer bos {:handlers fressian-write-handlers})]
+              w    ^Closeable (jsf/writer
+                                bos {:handlers fressian-write-handlers})]
     (fress/write-object w data)
     (.flush bos)
     (.bytesWritten foos)))
@@ -861,7 +992,8 @@
   [handle ^ByteBuffer data]
   (jsf/postprocess-fressian
     (with-open [is (bs/to-input-stream data)
-                r  (jsf/reader is {:handlers fressian-read-handlers})]
+                r  ^Closeable (jsf/reader
+                                is {:handlers fressian-read-handlers})]
       (fress/read-object r))))
 
 ;; Partial map blocks
@@ -900,9 +1032,9 @@
 (defn write-partial-map-block!
   "Takes a handle, a Clojure map, and the ID of the block which stores the rest
   of the map (use `nil` if there is no more data to the PartialMap). Writes the
-  map and disk to a new PartialMap block, records it in the handle's block
-  index, and returns the ID of this block itself. Optionally takes an explicit
-  ID for this block."
+  map to a new PartialMap block, records it in the handle's block index, and
+  returns the ID of this block itself. Optionally takes an explicit ID for this
+  block."
   ([handle m rest-id]
    (write-partial-map-block! handle (new-block-id! handle) m rest-id))
   ([handle id m rest-id]
@@ -915,7 +1047,10 @@
 ; A lazy map structure which has a map m and a *rest-map*: a Delay which can
 ; unpack to another PartialMap (presumably by reading another block in the
 ; file).
-(def-map-type PartialMap [m rest-map metadata]
+(defprotocol IPartialMap
+  (partial-map-rest-id [this]))
+
+(def-map-type PartialMap [m rest-id rest-map metadata]
   (get [this key default-value]
        ; Try to retrieve from this map, or from the rest map.
        (if (contains? m key)
@@ -924,11 +1059,12 @@
 
   (assoc [this key value]
          ; We associate onto the top-level map.
-         (PartialMap. (assoc m key value) rest-map metadata))
+         (PartialMap. (assoc m key value) rest-id rest-map metadata))
 
   (dissoc [this key]
           ; Here we have to strip out the key at every level
           (PartialMap. (dissoc m key)
+                       rest-id
                        (delay (dissoc @rest-map key))
                        metadata))
 
@@ -940,31 +1076,36 @@
         metadata)
 
   (with-meta [this metadata']
-             (PartialMap. m rest-map metadata')))
+             (PartialMap. m rest-id rest-map metadata'))
+
+  IPartialMap
+  (partial-map-rest-id [this]
+    rest-id))
 
 (defn read-partial-map-block
   "Takes a handle and a ByteBuffer for a partial-map block. Returns a lazy map
   representing its data."
   [handle ^ByteBuffer data]
   (let [; Read next ID
-        next-id (.getInt data)
+        rest-id (.getInt data)
+        rest-id (when-not (zero? rest-id) rest-id)
         ; And read map
         m (with-open [is (bs/to-input-stream data)
-                      r  (jsf/reader is)]
+                      r  ^Closeable (jsf/reader is)]
             (-> (fress/read-object r)
                 (jsf/postprocess-fressian)))
         ; Construct a lazy delay for the rest of the partialmap. Zero denotes
         ; there's no more.
         rest-map (delay
-                   (when-not (zero? next-id)
-                     (let [block (read-block-by-id handle next-id)]
+                   (when rest-id
+                     (let [block (read-block-by-id handle rest-id)]
                        (assert+ (= :partial-map (:type block))
                                 {:type      ::block-type-mismatch
                                  :expected  :partial-map
                                  :actual    (:type block)})
                        (:data block))))]
     ; Construct lazy map
-    (PartialMap. m rest-map {})))
+    (PartialMap. m rest-id rest-map {})))
 
 ;; Test-specific writing
 

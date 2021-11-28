@@ -24,7 +24,7 @@
                  [hiccup "1.0.5"]
                  [metametadata/multiset "0.1.1"]
                  [byte-streams "0.2.5-alpha2"]
-                 [dom-top "1.0.6"]
+                 [dom-top "1.0.7-SNAPSHOT"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.1.1"]
                  [fipp "0.6.24"]

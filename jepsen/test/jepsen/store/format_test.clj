@@ -210,4 +210,13 @@
           (let [final-test' (assoc final-test' :results {:valid?   :unknown
                                                          :whoopsie :daisy})]
             (write-results! w final-test')
-            (is (= final-test' (read-test)))))))))
+            (is (= final-test' (read-test)))
+
+            ; GC that!
+            (let [size1 (.size (:file w))
+                  _     (close! w)
+                  _     (gc! file)
+                  size2 (with-open [r (open file)] (.size (:file r)))]
+              (is (= final-test' (read-test)))
+              (is (= 1128 size1))
+              (is (= 383 size2)))))))))
