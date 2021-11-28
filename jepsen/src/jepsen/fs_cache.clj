@@ -53,7 +53,8 @@
   (:import (java.io File)
            (java.nio.file AtomicMoveNotSupportedException
                           StandardCopyOption
-                          Files)))
+                          Files)
+           (java.nio.file.attribute FileAttribute)))
 
 ;; Where do we store files, and how do we encode paths?
 
@@ -168,7 +169,11 @@
   to final-file. Ensures temp file is cleaned up."
   [[tmp-sym final] & body]
   `(let [final#   ^File ~final
-         ~tmp-sym (File/createTempFile (.getName final#) ".tmp")]
+         ~tmp-sym (-> (.getParent (.toPath final#))
+                      (Files/createTempFile (str "." (.getName final#) ".")
+                                            ".tmp"
+                                            (make-array FileAttribute 0))
+                      .toFile)]
      (try ~@body
           (atomic-move! ~tmp-sym final#)
           (finally
