@@ -221,8 +221,8 @@
 (defn analyze!
   "After running the test and obtaining a history, we perform some
   post-processing on the history, run the checker, and write the test to disk
-  again."
-  [test]
+  again. Takes a test map and a writer. Returns a new test with results."
+  [test writer]
   (info "Analyzing...")
   (let [; Give each op in the history a monotonically increasing index
         test (assoc test :history (history/index (:history test)))
@@ -232,8 +232,9 @@
                                    test
                                    (:history test)))]
     (info "Analysis complete")
-    (when (:name test) (store/save-2! test))
-    test))
+    (if (:name test)
+      (store/save-2! test writer)
+      test)))
 
 (defn log-results
   "Logs info about the results of a test to stdout, and returns test."
@@ -377,11 +378,14 @@
   9. When the generator is finished, invoke the checker with the history
     - This generates the final report"
   [test]
-  (try
-    (with-thread-name "jepsen test runner"
-      (let [test (prepare-test test)]
-        (with-logging test
-          (let [test (with-sessions [test test]
+  (with-thread-name "jepsen test runner"
+    (let [test (prepare-test test)]
+      (with-logging test
+        (store/with-writer test [writer]
+          (let [test (if (:name test)
+                       (store/save-0! test writer)
+                       test)
+                test (with-sessions [test test]
                        ; Launch OS, DBs, evaluate test
                        (let [test (with-os test
                                     (with-db test
@@ -392,10 +396,11 @@
                                                               (run-case! test))
                                                        ; Remove state
                                                        (dissoc :barrier
-                                                               :sessions))]
-                                          (info "Run complete, writing")
-                                          (when (:name test)
-                                            (store/save-1! test))
+                                                               :sessions))
+                                              _ (info "Run complete, writing")
+                                              test (if (:name test)
+                                                     (store/save-1! test writer)
+                                                     test)]
                                           test))))]
-                         (analyze! test)))]
+                         (analyze! test writer)))]
             (log-results test)))))))

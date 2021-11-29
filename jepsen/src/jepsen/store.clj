@@ -73,6 +73,11 @@
   [test]
   (path test "test.jepsen"))
 
+(defn ^File jepsen-file!
+  "Gives the path to a .jepsen file, ensuring its directory exists."
+  [test]
+  (path! test "test.jepsen"))
+
 (defn ^File fressian-file
   "Gives the path to a fressian file encoding all the results from a test."
   [test]
@@ -86,7 +91,7 @@
 
 (def default-nonserializable-keys
   "What keys in a test can't be serialized to disk, by default?"
-  #{:db :os :net :client :checker :nemesis :generator :model :remote})
+  #{:barrier :db :os :net :client :checker :nemesis :generator :model :remote})
 
 (defn nonserializable-keys
   "What keys in a test can't be serialized to disk? The union of default
@@ -94,6 +99,10 @@
   [test]
   (into default-nonserializable-keys (:nonserializable-keys test)))
 
+(defn serializable-test
+  "Takes a test and returns it without its serializable keys."
+  [test]
+  (apply dissoc test (nonserializable-keys test)))
 (defn load-fressian-file
   "Loads an arbitrary Fressian file."
   [file]
@@ -163,6 +172,14 @@
     (throw (RuntimeException.
              (str "Don't know how to read edn tag " (pr-str tag))))))
 
+(defn load-results-edn
+  "Loads the results map for a test by parsing the result.edn file, instead of
+  test.jepsen."
+  [test]
+  (with-open [file (java.io.PushbackReader.
+                     (io/reader (path test "results.edn")))]
+    (edn/read {:default default-edn-reader} file)))
+
 (defn load-results
   "Loads the results map for a test by name and time. Prefers a lazy map from
   test.fressian; falls back to parsing results.edn."
@@ -170,12 +187,8 @@
   (let [test   {:name test-name, :start-time test-time}
         jepsen (jepsen-file test)]
     (if (.exists jepsen)
-      ; Use the .jepsen file
       (:results (load-jepsen-file jepsen))
-      ; Fall back to results.edn
-      (with-open [file (java.io.PushbackReader.
-                         (io/reader (path test "results.edn")))]
-        (edn/read {:default default-edn-reader} file)))))
+      (load-results-edn test))))
 
 (def memoized-load-results (memoize load-results))
 
@@ -236,8 +249,9 @@
   "Takes a test and saves it as a .jepsen binary file."
   [test]
   (write-atomic! [tmp (path! test "test.jepsen")]
-    (with-open [w (store.format/open tmp)]
-      (store.format/write-test! w test))))
+                 (with-open [w (store.format/open tmp)]
+                   (store.format/write-test! w (serializable-test test))))
+  test)
 
 (defn migrate-to-jepsen-format!
   "Loads every test and copies their Fressian files to the new on-disk
@@ -346,35 +360,63 @@
 (defn write-fressian!
   "Write the entire test as a .fressian file."
   [test]
-  (let [test (apply dissoc test (nonserializable-keys test))]
-    (write-fressian-file! test (fressian-file! test))))
+  (write-fressian-file! (serializable-test test) (fressian-file! test)))
+
+; Top-level API for writing tests
+
+(defmacro with-writer
+  "Opens a *writer* for saving test data. Evaluates body with that writer bound
+  to the given symbol, and ensures that writer is closed at the end of the
+  with-writer form. This writer is passed to save-0, save-1, etc, to write each
+  phase of the test run."
+  [test [writer-sym] & body]
+  `(with-open [~writer-sym (store.format/open (jepsen-file! ~test))]
+     ~@body))
+
+(defn save-0!
+  "Writes a test at the start of a test run. Updates symlinks. Returns a new
+  version of test which should be used for subsequent writes."
+  [test writer]
+  (let [stest  (serializable-test test)
+        stest' (store.format/write-initial-test! writer stest)]
+    (update-current-symlink! test)
+    (vary-meta test merge (meta stest'))))
 
 (defn save-1!
-  "Writes a history and fressian file to disk and updates latest symlinks.
-  Returns test."
-  [test]
-  (->> [(future (util/with-thread-name "jepsen history"
-                  (write-history! test)))
-        (future (util/with-thread-name "jepsen fressian"
-                  (write-fressian! test)))]
-       (map deref)
-       dorun)
-  (update-symlinks! test)
-  test)
+  "Writes test.jepsen, the history, and fressian files to disk and updates
+  latest symlinks. Returns test with metadata which should be preserved for
+  calls to save-2!"
+  [test writer]
+  (let [stest   (serializable-test test)
+        jepsen  (future (util/with-thread-name "jepsen format"
+                          (store.format/write-history! writer stest)))
+        history (future (util/with-thread-name "jepsen history"
+                          (write-history! stest)))
+        fressian (future (util/with-thread-name "jepsen fressian"
+                           (write-fressian! stest)))]
+    @jepsen @history @fressian
+    (update-symlinks! test)
+    ; We want to merge the jepsen writer's metadata back into the original test.
+    (vary-meta test merge (meta @jepsen))))
 
 (defn save-2!
   "Phase 2: after computing results, we re-write the fressian file, histories,
-  and also dump results as edn. Returns test."
-  [test]
-  (->> [(future (util/with-thread-name "jepsen results" (write-results! test)))
-        (future (util/with-thread-name "jepsen history"
-                  (write-history! test)))
-        (future (util/with-thread-name "jepsen fressian"
-                  (write-fressian! test)))]
-       (map deref)
-       dorun)
-  (update-symlinks! test)
-  test)
+  and also dump results as edn. Returns test with metadata that should be
+  preserved for future save calls."
+  [test writer]
+  (let [stest   (serializable-test test)
+        jepsen  (future (util/with-thread-name "jepsen format"
+                          (store.format/write-results! writer stest)))
+        results (future (util/with-thread-name "jepsen results"
+                          (write-results! stest)))
+        history (future (util/with-thread-name "jepsen history"
+                          (write-history! stest)))
+        fressian (future (util/with-thread-name "jepsen fressian"
+                           (write-fressian! stest)))]
+    @jepsen @results @history @fressian
+    (update-symlinks! test)
+    ; Return the Jepsen writer's results; it's got metadata.
+    (vary-meta test merge (meta @jepsen))))
 
 (def console-appender
   {:appender :console

@@ -57,20 +57,27 @@
         #{:foo}]))
 
 (deftest ^:integration roundtrip-test
-  (delete! "store-test")
-
-  (let [t (-> base-test
+  (let [name "store-test"
+        _ (delete! name)
+        t (-> base-test
               core/run!
               save-1!
               (assoc-in [:results :kitten] (Kitten. "hi" "there"))
-              save-2!)]
-    (let [ts     (tests "store-test")
-          [k t'] (first ts)]
+              save-2!)
+        serialized-t (dissoc t :db :os :net :client :checker :nemesis
+                             :generator :model :remote)]
+    (let [ts        (tests name)
+          [time t'] (first ts)]
       (is (= 1 (count ts)))
-      (is (string? k))
+      (is (string? time))
+
+      (testing "generic test load"
+        (is (= serialized-t @t')))
       (testing "test.fressian"
-        (is (= (dissoc t :db :os :net :client :checker
-                       :nemesis :generator :model :remote)
-               @t')))
+        (is (= serialized-t (load-fressian-file (fressian-file t)))))
+      (testing "test.jepsen"
+        (is (= serialized-t (load-jepsen-file (jepsen-file t)))))
+      (testing "load-results"
+        (is (= (:results t) (load-results name time))))
       (testing "results.edn"
-        (is (= (:results t) (load-results "store-test" k)))))))
+        (is (= (:results t) (load-results-edn t)))))))
