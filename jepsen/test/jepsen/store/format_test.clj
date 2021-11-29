@@ -219,4 +219,14 @@
                   size2 (with-open [r (open file)] (.size (:file r)))]
               (is (= final-test' (read-test)))
               (is (= 1128 size1))
-              (is (= 383 size2)))))))))
+              (is (= 383 size2))
+
+              ; Now we should be able to open up this test, update its
+              ; analysis, and write it back *re-using* the existing history.
+              (with-open [r (open file)
+                          w (open file)]
+                (let [test  (jepsen.store.format/read-test r)
+                      test' (assoc test :results {:valid? :rewritten
+                                                  :new    :findings})]
+                  (write-results! w test')
+                  (is (= test' (read-test))))))))))))

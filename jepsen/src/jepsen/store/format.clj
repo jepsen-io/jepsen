@@ -1123,6 +1123,7 @@
   metadata, so that future writes of this test can refer to this history
   block."
   [handle test]
+  (prep-read! handle)
   (let [history    (:history test)
         history-id (write-fressian-block! handle history)
         test-id    (write-fressian-block!
@@ -1137,6 +1138,7 @@
   results and history blocks. Returns test, with ::results-id metadata pointing
   to the block ID of these results."
   [handle test]
+  (prep-read! handle)
   (let [history-id  (::history-id (meta test))
         _           (assert+ (integer? history-id)
                              {:type ::no-history-id-in-meta})
@@ -1215,14 +1217,18 @@
 (defn read-test
   "Reads a test from a handle's root. Constructs a lazy test map where history
   and results are loaded as-needed from the file. Leave the handle open so this
-  map can use it; it'll be automatically closed when this map is GCed."
+  map can use it; it'll be automatically closed when this map is GCed. Includes
+  metadata so that this test can be rewritten using write-results!"
   [handle]
   (let [test    (:data (read-root handle))
-        history (when-let [h (:history test)]
+        h       (:history test)
+        r       (:results test)
+        history (when h
                   (delay (:data (read-block-by-id handle (:id h)))))
-        results (when-let [r (:results test)]
+        results (when r
                   (delay (:data (read-block-by-id handle (:id r)))))]
     (LazyTest. (dissoc test :history :results)
                history
                results
-               {})))
+               {::history-id (:id h)
+                ::results-id (:id r)})))

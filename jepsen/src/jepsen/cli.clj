@@ -408,7 +408,8 @@ Options:\n")
                           (let [cli-test    (test-fn options)
                                 stored-test (store/latest)
                                 test (-> cli-test
-                                         (merge (dissoc stored-test :results)))]
+                                         (merge (dissoc stored-test :results))
+                                         (vary-meta merge (meta stored-test)))]
                             (assert+ stored-test IllegalStateException
                                      "Not sure what the last test was")
                             (assert+ (= (:name stored-test)
@@ -426,8 +427,8 @@ Options:\n")
                                         (update :history conj '...)
                                         pprint
                                         with-out-str)))
-
-                            (jepsen/analyze! test)))}}))
+                            (store/with-writer test [w]
+                              (jepsen/analyze! test w))))}}))
 
 (defn test-all-run-tests!
   "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,
