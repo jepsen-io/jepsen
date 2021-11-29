@@ -859,7 +859,7 @@
           ; offsets depend on it, so we need to know exactly how big it is.
           ; We'll use block-index-size, which doesn't actually care about the
           ; blocks themselves; just how many there are. We add an extra `nil`
-          ; block for the index itself.
+          ; block for the block index block itself.
           block-index-size (+ block-header-size
                               (block-index-data-size
                                 {:blocks (cons nil block-ids)}))
@@ -893,7 +893,7 @@
           ; And that we finish at the offset we thought we would...
           (assert+ (= (+ first-block-offset block-index-size)
                         (next-block-offset w))
-                     {:type ::unexpected-block-index-size
+                     {:type     ::unexpected-block-index-size
                       :expected block-index-size
                       :actual   (- (next-block-offset w) first-block-offset)})
 

@@ -14,8 +14,10 @@
             [fipp.edn :refer [pprint]]
             [unilog.config :as unilog]
             [multiset.core :as multiset]
-            [jepsen [util :as util]]
-            [jepsen.store [fressian :as jsf]])
+            [jepsen [fs-cache :refer [write-atomic!]]
+                    [util :as util]]
+            [jepsen.store [fressian :as jsf]
+                          [format :as store.format]])
   (:import (java.util AbstractList)
            (java.io Closeable
                     File)
@@ -66,6 +68,11 @@
     (io/make-parents path)
     path))
 
+(defn ^File jepsen-file
+  "Gives the path to a .jepsen file encoding all the results from a test."
+  [test]
+  (path test "test.jepsen"))
+
 (defn ^File fressian-file
   "Gives the path to a fressian file encoding all the results from a test."
   [test]
@@ -95,11 +102,24 @@
     (-> (fress/read-object in)
         jsf/postprocess-fressian)))
 
+(defn load-jepsen-file
+  "Loads a test from an arbitrary Jepsen file. This is lazy, and retains a
+  filehandle which will remain open until all references to this test are gone
+  and the GC kicks in."
+  [file]
+  (store.format/read-test (store.format/open file)))
+
 (defn load
-  "Loads a specific test by name and time."
+  "Loads a specific test by name and time. Prefers .jepsen file, falls back to
+  .fressian."
   [test-name test-time]
-  (load-fressian-file (fressian-file {:name       test-name
-                                      :start-time test-time})))
+  (let [test     {:name       test-name
+                  :start-time test-time}
+        jepsen   (jepsen-file test)
+        fressian (fressian-file test)]
+    (if (.exists jepsen)
+      (load-jepsen-file jepsen)
+      (load-fressian-file fressian))))
 
 (defn class-name->ns-str
   "Turns a class string into a namespace string (by translating _ to -)"
@@ -144,13 +164,18 @@
              (str "Don't know how to read edn tag " (pr-str tag))))))
 
 (defn load-results
-  "Loads only a results.edn by name and time."
+  "Loads the results map for a test by name and time. Prefers a lazy map from
+  test.fressian; falls back to parsing results.edn."
   [test-name test-time]
-  (with-open [file (java.io.PushbackReader.
-                     (io/reader (path {:name       test-name
-                                       :start-time test-time}
-                                      "results.edn")))]
-    (edn/read {:default default-edn-reader} file)))
+  (let [test   {:name test-name, :start-time test-time}
+        jepsen (jepsen-file test)]
+    (if (.exists jepsen)
+      ; Use the .jepsen file
+      (:results (load-jepsen-file jepsen))
+      ; Fall back to results.edn
+      (with-open [file (java.io.PushbackReader.
+                         (io/reader (path test "results.edn")))]
+        (edn/read {:default default-edn-reader} file)))))
 
 (def memoized-load-results (memoize load-results))
 
@@ -206,6 +231,40 @@
         (map file-name)
         (map (fn [f] [f (delay (load test-name f))]))
         (into {}))))
+
+(defn write-jepsen!
+  "Takes a test and saves it as a .jepsen binary file."
+  [test]
+  (write-atomic! [tmp (path! test "test.jepsen")]
+    (with-open [w (store.format/open tmp)]
+      (store.format/write-test! w test))))
+
+(defn migrate-to-jepsen-format!
+  "Loads every test and copies their Fressian files to the new on-disk
+  format."
+  []
+  (->> (tests)
+       vals
+       (mapcat vals)
+       (pmap (fn [test]
+              (let [t1 (System/nanoTime)]
+                (try
+                  (when-not (.exists (path @test "test.jepsen"))
+                    (let [t2 (System/nanoTime)
+                          _  (write-jepsen! @test)
+                          t3 (System/nanoTime)]
+                      (info "Migrated" (str (path @test))
+                            "in"  (float (* 1e-9 (- t2 t1)))
+                            "+" (float (* 1e-9 (- t3 t2))) "seconds")))
+                  (catch java.io.FileNotFoundException _
+                    ; No file; don't worry about it.
+                    )
+                  (catch java.io.EOFException _
+                    ; File truncated, probably crashed during write
+                    (warn "Couldn't migrate test; .fressian truncated"))
+                  (catch Exception e
+                    (warn e "Couldn't migrate test"))))))
+       dorun))
 
 (defn latest
   "Loads the latest test"
