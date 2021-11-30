@@ -45,28 +45,53 @@
   [x]
   (str/replace (java.net.URLEncoder/encode x "UTF-8") #"%2F" "/"))
 
+(def test-cache
+  "An in-memory cache of {:name, :start-time, :valid?} maps, indexed by an
+  ordered map of [:start-time :name]. Earliest start times at the front."
+  (atom (sorted-map-by (comp - compare))))
+
+(def test-cache-key
+  "Function which extracts the key for the test cache from a map."
+  (juxt :start-time :name))
+
+(def test-cache-mutable-window
+  "How far back in the test cache do we refresh on every page load?"
+  2)
+
 (defn fast-tests
-  "Abbreviated set of tests"
+  "Abbreviated set of tests: just name, start-time, results. Memoizes
+  (partially) via test-cache."
   []
-  (->> (store/tests)
-       (mapcat (fn [[test-name runs]]
-                 (keep (fn [[test-time full-test]]
-                         (try
-                           {:name        test-name
-                            :start-time  test-time
-                            :results     (store/memoized-load-results test-name test-time)}
-                           (catch java.io.FileNotFoundException e
-                             ; Incomplete test
-                             {:name       test-name
-                              :start-time test-time
-                              :results    {:valid? :incomplete}})
-                           (catch java.lang.RuntimeException e
-                             ; Um???
-                             (warn e "Unable to parse" test-name test-time)
-                             {:name       test-name
-                              :start-time test-time
-                              :results    {:valid? :incomplete}})))
-                       runs)))))
+  (let [cached @test-cache
+        ; Drop the most recent n keys from the cache--these we assume may have
+        ; changed recently.
+        _ (info :cached cached)
+        cached (->> (keys cached)
+                    (take test-cache-mutable-window)
+                    (reduce dissoc cached))]
+    (->> (for [[name runs] (store/tests)
+               [time test] runs]
+           (let [t {:name name, :start-time time}]
+             (or (get cached (test-cache-key t))
+                 ; Fetch from disk if not cached. Note that we construct a new
+                 ; map so we can release the filehandle associated with the lazy
+                 ; test map.
+                 (try
+                   (let [results {:valid? (or (:valid? (store/load-results
+                                                         name time))
+                                              :incomplete)}
+                         t (assoc t :results results)]
+                     (swap! test-cache assoc (test-cache-key t) t)
+                     t)
+                   (catch java.io.EOFException e
+                     (assoc t :results {:valid? :incomplete}))
+                   (catch java.io.FileNotFoundException e
+                     (assoc t :results {:valid? :incomplete}))
+                   (catch java.lang.RuntimeException e
+                     ; Um???
+                     (warn e "Unable to parse" (str name "/" time))
+                     (assoc t :results {:valid? :incomplete}))))))
+         (sort-by :start-time))))
 
 (defn test-header
   []
