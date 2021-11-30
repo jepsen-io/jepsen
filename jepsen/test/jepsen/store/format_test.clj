@@ -213,10 +213,10 @@
             (is (= final-test' (read-test)))
 
             ; GC that!
-            (let [size1 (.size (:file w))
+            (let [size1 (.size ^java.nio.channels.FileChannel (:file w))
                   _     (close! w)
                   _     (gc! file)
-                  size2 (with-open [r (open file)] (.size (:file r)))]
+                  size2 (with-open [r (open file)] (.size ^java.nio.channels.FileChannel (:file r)))]
               (is (= final-test' (read-test)))
               (is (= 1128 size1))
               (is (= 383 size2))
