@@ -65,7 +65,6 @@
   (let [cached @test-cache
         ; Drop the most recent n keys from the cache--these we assume may have
         ; changed recently.
-        _ (info :cached cached)
         cached (->> (keys cached)
                     (take test-cache-mutable-window)
                     (reduce dissoc cached))]
@@ -77,9 +76,9 @@
                  ; map so we can release the filehandle associated with the lazy
                  ; test map.
                  (try
-                   (let [results {:valid? (or (:valid? (store/load-results
-                                                         name time))
-                                              :incomplete)}
+                   (let [results {:valid? (:valid? (store/load-results
+                                                     name time)
+                                                   :incomplete)}
                          t (assoc t :results results)]
                      (swap! test-cache assoc (test-cache-key t) t)
                      t)
