@@ -898,8 +898,8 @@
                       :actual   (- (next-block-offset w) first-block-offset)})
 
           ; Copy remaining blocks in order
-          (.position w-file (+ first-block-offset
-                               block-index-size))
+          (.position w-file ^long (+ first-block-offset
+                                     block-index-size))
           (doseq [block-id block-ids]
             (let [{:keys [offset length]} (get headers block-id)
                   copied (.transferTo r-file offset length w-file)]
