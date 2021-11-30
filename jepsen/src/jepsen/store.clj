@@ -141,8 +141,7 @@
   [tag]
   (let [c (resolve tag)]
     (when (nil? c)
-      (throw (RuntimeException. (str "EDN tag " (pr-str tag) " isn't resolvable to a class")
-                                (pr-str tag))))
+      (throw (RuntimeException. (str "EDN tag " (pr-str tag) " isn't resolvable to a class"))))
 
     (when-not ((supers c) clojure.lang.IRecord)
       (throw (RuntimeException.
