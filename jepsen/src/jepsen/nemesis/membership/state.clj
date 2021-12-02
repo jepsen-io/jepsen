@@ -40,7 +40,9 @@
       operation is available.")
 
   (invoke! [this test op]
-           "Applies an operation we generated. Returns a completed op.")
+           "Applies an operation we generated. Returns a completed op, or a
+           tuple of [op, state'].")
+
 
   (resolve [this test]
            "Called repeatedly on a state to evolve it towards some fixed new

@@ -119,21 +119,22 @@
             (pprint-str nv)))
     (let [; And merge it into the state atom.
           changed-view (atom nil)
-          s (swap! state
-                   (fn merge-views [state]
-                     ; Update this node view
-                     (let [node-views' (assoc (:node-views state) node nv)
-                           state'      (assoc state :node-views node-views')
-                           ; Merge views together
-                           view'       (state/merge-views state' test)
-                           state'      (assoc state' :view view')
-                           ; Resolve any changes
-                           state'      (resolve state' test opts)]
-                       ; For logging purposes, keep track of changes
-                       (reset! changed-view
-                               (when (not= (:view state) view')
-                                 view'))
-                       state')))]
+          s (locking state
+              (swap! state
+                     (fn merge-views [state]
+                       ; Update this node view
+                       (let [node-views' (assoc (:node-views state) node nv)
+                             state'      (assoc state :node-views node-views')
+                             ; Merge views together
+                             view'       (state/merge-views state' test)
+                             state'      (assoc state' :view view')
+                             ; Resolve any changes
+                             state'      (resolve state' test opts)]
+                         ; For logging purposes, keep track of changes
+                         (reset! changed-view
+                                 (when (not= (:view state) view')
+                                   view'))
+                         state'))))]
       (when (:log-view? opts)
         (when-let [v @changed-view]
           (info (str "New membership view (from " node "):\n"
@@ -168,8 +169,9 @@
   nem/Nemesis
   (setup! [this test]
     ; Initialize our state
-    (swap! state into (initial-state test))
-    (swap! state state/setup! test)
+    (locking state
+      (swap! state into (initial-state test))
+      (swap! state state/setup! test))
 
     (let [; We'll use this atom to track whether to shut down.
           running? (atom true)
@@ -186,14 +188,28 @@
 
   (invoke! [this test op]
     ; Resolve pending ops, and record our new op.
-    (let [; Apply the operation.
-          op' (state/invoke! @state test op)]
-      ; Update the map to reflect the operation.
-      (swap! state (fn [state]
-                     (-> state
-                         (update :pending conj [op op'])
-                         (resolve test opts))))
-      op'))
+    (locking state
+      (let [; Apply the operation.
+            s   @state
+            res (state/invoke! s test op)
+            op' (if (vector? res)
+                  ; If invoke! yielded a pair, we replace the current state
+                  ; with the new one.
+                  (let [[op' s'] res]
+                    ; This shouldn't happen if we lock correctly, but let's
+                    ; make sure
+                    (when-not (compare-and-set! state s s')
+                      (throw (IllegalStateException.
+                               "Membership nemesis state changed during invoke!")))
+                    op')
+                  ; Invoke yielded a non-pair; assume it was an op.
+                  res)]
+        ; Update the map to reflect the operation.
+        (swap! state (fn [state]
+                       (-> state
+                           (update :pending conj [op op'])
+                           (resolve test opts))))
+        op')))
 
   (teardown! [this test]
     ; Graceful shutdown
