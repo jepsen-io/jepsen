@@ -115,7 +115,7 @@
   (when-let [nv (state/node-view @state test node)]
     (when (and (:log-node-views? opts)
                (not= nv (get-in @state [:node-views node])))
-      (info (str "New view from " node ":\n")
+      (info (str "New node view from " node ":\n")
             (pprint-str nv)))
     (let [; And merge it into the state atom.
           changed-view (atom nil)
@@ -136,9 +136,8 @@
                        state')))]
       (when (:log-view? opts)
         (when-let [v @changed-view]
-          (info (str "New membership view from " node ":\n"
+          (info (str "New membership view (from " node "):\n"
                      (pprint-str v))))))))
-
 
 (defn node-view-future
   "Spawns a future which keeps the given state atom updated with our view of
