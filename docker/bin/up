@@ -135,6 +135,7 @@ if [ -z "${DEV}" ]; then
     INFO "Copying .. to control/jepsen"
     (
         (cd ..; tar --exclude=./docker --exclude=./.git --exclude-ignore=.gitignore -cf - .)  | tar Cxf ./control/jepsen -
+        cp ../jepsen/src/jepsen/store/* ./control/jepsen/jepsen/src/jepsen/store/
     )
 fi
 
