@@ -1,13 +1,6 @@
 (ns yugabyte.ycql.bank
   (:refer-clojure :exclude [test])
   (:require [clojure.tools.logging :refer [debug info warn]]
-            [clojure.core.reducers :as r]
-            [jepsen.client :as client]
-            [jepsen.checker :as checker]
-            [jepsen.generator :as gen]
-            [jepsen.tests.bank :as bank]
-            [jepsen.checker.timeline :as timeline]
-            [knossos.op :as op]
             [clojurewerkz.cassaforte.client :as cassandra]
             [clojurewerkz.cassaforte.cql :as cql]
             [clojurewerkz.cassaforte.query :as q :refer :all]

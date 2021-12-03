@@ -11,9 +11,10 @@
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
             [yugabyte [append :as append]
-                      [default-value :as default-value]]
+                           [default-value :as default-value]]
             [yugabyte.auto :as auto]
             [yugabyte.bank :as bank]
+            [yugabyte.bank-improved :as bank-improved]
             [yugabyte.counter :as counter]
             [yugabyte.long-fork :as long-fork]
             [yugabyte.multi-key-acid :as multi-key-acid]
@@ -22,6 +23,7 @@
             [yugabyte.set :as set]
             [yugabyte.utils :refer :all]
             [yugabyte.ycql.bank]
+            [yugabyte.ycql.bank-improved]
             [yugabyte.ycql.counter]
             [yugabyte.ycql.long-fork]
             [yugabyte.ycql.multi-key-acid]
@@ -31,6 +33,7 @@
                            [append-table :as ysql.append-table]
                            [default-value :as ysql.default-value]]
             [yugabyte.ysql.bank]
+            [yugabyte.ysql.bank-improved]
             [yugabyte.ysql.counter]
             [yugabyte.ysql.long-fork]
             [yugabyte.ysql.multi-key-acid]
@@ -77,6 +80,7 @@
          :set             (with-client set/workload (yugabyte.ycql.set/->CQLSetClient))
          :set-index       (with-client set/workload (yugabyte.ycql.set/->CQLSetIndexClient))
          :bank            (with-client bank/workload-allow-neg (yugabyte.ycql.bank/->CQLBank))
+         :bank-inserts    (with-client bank-improved/workload-with-inserts (yugabyte.ycql.bank-improved/->CQLBankImproved))
          ; Shouldn't be used until we support transactions with selects.
          ; :bank-multitable (with-client bank/workload-allow-neg (yugabyte.ycql.bank/->CQLMultiBank))
          :long-fork       (with-client long-fork/workload (yugabyte.ycql.long-fork/->CQLLongForkIndexClient))
@@ -94,6 +98,7 @@
          ; We'd rather allow negatives for now because it makes reproducing error easier
          :bank            (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLBankClient true))
          :bank-multitable (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLMultiBankClient true))
+         :bank-contention (with-client bank-improved/workload-contention-keys (yugabyte.ysql.bank-improved/->YSQLBankContentionClient))
          :long-fork       (with-client long-fork/workload (yugabyte.ysql.long-fork/->YSQLLongForkClient))
          :single-key-acid (with-client single-key-acid/workload (yugabyte.ysql.single-key-acid/->YSQLSingleKeyAcidClient))
          :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))
