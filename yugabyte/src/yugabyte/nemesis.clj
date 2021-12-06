@@ -216,8 +216,8 @@
     (mixed-generator n)
     (let [mix     #(gen/time-limit 120 (mixed-generator n))
           recover #(gen/phases (final-generator n) (gen/sleep 60))]
-      (interleave (repeatedly mix)
-                  (repeatedly recover)))))
+      (interleave (repeatedly recover)
+                  (repeatedly mix)))))
 
 (defn expand-options
   "We support shorthand options in nemesis maps, like :kill, which expands to
