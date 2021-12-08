@@ -36,7 +36,7 @@
                     (range)
                     (fn [k]
                       (->> (gen/reserve n (gen/mix [w cas cas]) r)
-                           (gen/stagger n)
+                           (gen/stagger (/ 1 n))
                            (gen/process-limit 20)))))
      :checker   (independent/checker
                   (checker/compose
