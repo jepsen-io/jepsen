@@ -23,7 +23,7 @@
                              ; yet, so we create/drop tables instead.
                              ; [add-column drop-column]
                              (take 50 (cycle [r i])))))
-       (gen/stagger 1/100)))
+       (gen/stagger 1/500)))
 
 (defn bad-row
   "Is this particular row illegal--e.g. does it contain a `null`? Returns row

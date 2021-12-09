@@ -20,6 +20,6 @@
   [opts]
   {:generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
                                 reads)
-                   (gen/stagger 1/10)
+                   (gen/stagger 1/50)
                    (ygen/with-op-index))
    :checker   (checker/set-full)})

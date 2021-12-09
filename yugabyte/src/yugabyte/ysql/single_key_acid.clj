@@ -5,6 +5,7 @@
             [jepsen.client :as client]
             [jepsen.independent :as independent]
             [jepsen.reconnect :as rc]
+            [yugabyte.single-key-acid :as ska]
             [yugabyte.ysql.client :as c]))
 
 (def table-name "single_key_acid")
@@ -15,7 +16,7 @@
   (setup-cluster! [this test c conn-wrapper]
     (c/execute! c (j/create-table-ddl table-name [[:id :int "PRIMARY KEY"]
                                                   [:val :int]]))
-    (doseq [id (range 5)]
+    (doseq [id (range ska/keys-count)]
       (c/insert! c table-name {:id id :val 0})))
 
   (invoke-op! [this test op c conn-wrapper]

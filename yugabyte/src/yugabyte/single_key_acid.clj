@@ -14,7 +14,6 @@
   - Workers 5 to 9 and 15 to 19 will be reading their respective rows"
   (:require [clojure [pprint :refer :all]]
             [clojure.tools.logging :refer [debug info warn]]
-            [jepsen.client :as client]
             [jepsen.checker :as checker]
             [jepsen.generator :as gen]
             [jepsen.independent :as independent]
@@ -22,10 +21,11 @@
             [knossos.model :as model]
             [yugabyte.generator :as ygen]))
 
+(def keys-count 5)
 
 (defn r   [_ _] {:type :invoke, :f :read, :value nil})
-(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int 5)})
-(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
+(defn w   [_ _] {:type :invoke, :f :write, :value (rand-int keys-count)})
+(defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int keys-count) (rand-int keys-count)]})
 
 (defn workload
   [opts]
@@ -37,7 +37,7 @@
                     (fn [k]
                       (->> (gen/reserve n (gen/mix [w cas cas]) r)
                            (gen/stagger (/ 1 n))
-                           (gen/process-limit 20)))))
+                           (gen/process-limit (* 2 keys-count n))))))
      :checker   (independent/checker
                   (checker/compose
                     {:timeline (timeline/html)
