@@ -63,7 +63,7 @@
                     (range)
                     (fn [k]
                       (->> (gen/reserve n r w)
-                           (gen/stagger n)
+                           (gen/stagger (/ 1 n))
                            (gen/process-limit 20)))))
      :checker   (independent/checker
                   (checker/compose
