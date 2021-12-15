@@ -18,8 +18,9 @@
 
 (defn workload
   [opts]
-  {:generator (->> (gen/reserve (/ (:concurrency opts) 2) (adds)
-                                reads)
-                   (gen/stagger 1/10)
-                   (ygen/with-op-index))
-   :checker   (checker/set-full)})
+  (let [threads  (:concurrency opts)]
+    {:generator (->> (gen/reserve (/ threads 2) (adds)
+                                  reads)
+                     (gen/stagger (/ 1 threads))
+                     (ygen/with-op-index))
+     :checker   (checker/set-full)}))
