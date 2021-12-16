@@ -1,6 +1,6 @@
 (ns jepsen.store
   "Persistent storage for test runs and later analysis."
-  (:refer-clojure :exclude [load])
+  (:refer-clojure :exclude [load test])
   (:require [clojure.data.fressian :as fress]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -103,6 +103,7 @@
   "Takes a test and returns it without its serializable keys."
   [test]
   (apply dissoc test (nonserializable-keys test)))
+
 (defn load-fressian-file
   "Loads an arbitrary Fressian file."
   [file]
@@ -119,16 +120,18 @@
   (store.format/read-test (store.format/open file)))
 
 (defn load
-  "Loads a specific test by name and time. Prefers .jepsen file, falls back to
-  .fressian."
-  [test-name test-time]
-  (let [test     {:name       test-name
-                  :start-time test-time}
-        jepsen   (jepsen-file test)
-        fressian (fressian-file test)]
-    (if (.exists jepsen)
-      (load-jepsen-file jepsen)
-      (load-fressian-file fressian))))
+  "Loads a specific test, either given a map with {:name ... :start-time ...},
+  or by name and time as separate arguments. Prefers to load a .jepsen file,
+  falls back to .fressian."
+  ([test]
+   (let [jepsen   (jepsen-file test)
+         fressian (fressian-file test)]
+     (if (.exists jepsen)
+       (load-jepsen-file jepsen)
+       (load-fressian-file fressian))))
+  ([test-name test-time]
+   (load {:name       test-name
+          :start-time test-time})))
 
 (defn class-name->ns-str
   "Turns a class string into a namespace string (by translating _ to -)"
@@ -243,6 +246,39 @@
         (map file-name)
         (map (fn [f] [f (delay (load test-name f))]))
         (into {}))))
+
+(defn all-tests
+  "A plain old vector of test delays, sorted in chronological order. Unlike
+  `tests`, attempts to load tests with no .fressian or .jepsen file will return
+  `nil` here, instead of throwing. Helpful when you want to slice and dice all
+  tests at the REPL."
+  []
+  (->> (tests)
+       (mapcat val)
+       (sort)
+       (map val)
+       (map (fn [test-delay] (delay (try @test-delay
+                                         (catch java.io.FileNotFoundException e
+                                           nil)))))))
+
+(defn test
+  "Like `load`, loads a specific test. Frequently you don't care about
+  individual test names; you just want \"the last test\", or \"the third most
+  recent\". This function can take:
+
+    - A Long. (test 0) returns the first test ever run; (test 2) loads the
+              third. (test -1) loads the most recent test; -2 the
+              next-to-most-recent.
+
+    - A String. Can be a directory name, in which case we look for a
+                test.jepsen in that directory."
+  [which]
+  (condp instance? which
+    Long (let [tests-by-time (all-tests)
+               i (if (neg? which)
+                   (+ (count tests-by-time) which)
+                   which)]
+           (-> tests-by-time (nth i) deref))))
 
 (defn write-jepsen!
   "Takes a test and saves it as a .jepsen binary file."
