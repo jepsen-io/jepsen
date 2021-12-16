@@ -278,7 +278,9 @@
                i (if (neg? which)
                    (+ (count tests-by-time) which)
                    which)]
-           (-> tests-by-time (nth i) deref))))
+           (-> tests-by-time (nth i) deref))
+
+    String (load-jepsen-file (io/file which "test.jepsen"))))
 
 (defn write-jepsen!
   "Takes a test and saves it as a .jepsen binary file."
