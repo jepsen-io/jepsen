@@ -71,7 +71,7 @@
           ; Combine custom, port, and client filters
           (let [filters (remove nil? [(->> (:ports opts)
                                            (map (partial str "port "))
-                                           (str/join " and "))
+                                           (str/join " or "))
                                       (when (:clients-only? opts)
                                         (str "host " (cn/control-ip)))
                                       (:filter opts)])
