@@ -30,6 +30,7 @@
                  [fipp "0.6.24"]
                  [io.lacuna/bifurcan "0.1.0"]]
   :java-source-paths ["src"]
+  :javac-options ["-target" "1.11" "-source" "1.11"]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
             [lein-codox "0.10.7"]
