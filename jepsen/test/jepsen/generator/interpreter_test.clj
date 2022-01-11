@@ -142,6 +142,28 @@
       (is (< 5000 (float (/ (count h) time-limit)))))
     ))
 
+(deftest run!-end-process-test
+  ; When a client explicitly signifies that it'd like to end the process, we
+  ; should spawn a new one.
+  (let [test (assoc base-test
+                    :concurrency 1
+                    :client (reify Client
+                              (open! [this test node] this)
+                              (setup! [this test])
+                              (invoke! [this test op]
+                                (assoc op :type :fail, :end-process? true))
+                              (teardown! [this test])
+                              (close! [this test]))
+                    :generator (->> {:f :wag}
+                                    (repeat 3)
+                                    gen/clients))
+        h (util/with-relative-time (run! test))
+        completions (remove op/invoke? h)]
+    (is (= [[0 :fail :wag]
+            [1 :fail :wag]
+            [2 :fail :wag]]
+           (map (juxt :process :type :f) completions)))))
+
 (deftest run!-throw-test
   (testing "worker throws"
     (let [test (assoc base-test

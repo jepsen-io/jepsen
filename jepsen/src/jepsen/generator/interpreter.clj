@@ -228,12 +228,15 @@
                 ; process here, so that thread->process recovers the right
                 ; value for this event.
                 gen     (gen/update gen test ctx op')
-                ; Threads that crash (other than the nemesis) should be assigned
-                ; new process identifiers.
-                ctx     (if (or (= :nemesis thread) (not= :info (:type op')))
-                          ctx
+                ; Threads that crash (other than the nemesis), or which
+                ; explicitly request a new process, should be assigned new
+                ; process identifiers.
+                ctx     (if (and (not= :nemesis thread)
+                                 (or (= :info (:type op'))
+                                     (:end-process? op')))
                           (update ctx :workers assoc thread
-                                  (gen/next-process ctx thread)))
+                                  (gen/next-process ctx thread))
+                          ctx)
                 history (if (goes-in-history? op')
                           (conj! history op')
                           history)]
