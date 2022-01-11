@@ -12,7 +12,10 @@
 
 (use-fixtures :each
               (fn wipe-file [t]
-                (io/delete-file file)
+                (try (io/delete-file file)
+                     (catch java.io.IOException _
+                       ; Likely doesn't exist
+                      ))
                 (t)))
 
 (defmacro is-thrown+
