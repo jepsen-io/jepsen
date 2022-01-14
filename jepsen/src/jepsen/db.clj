@@ -2,8 +2,9 @@
   "Allows Jepsen to set up and tear down databases."
   (:require [clojure [string :as str]]
             [clojure.tools.logging :refer [info warn]]
+            [dom-top.core :refer [assert+]]
             [jepsen [control :as control]
-                    [util :refer [fcatch meh]]]
+                    [util :as util :refer [fcatch meh]]]
             [jepsen.control [util :as cu]
                             [net :as cn]]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -38,7 +39,42 @@
   (setup-primary! [db test node] "Performs one-time setup on a single node."))
 
 (defprotocol LogFiles
-  (log-files [db test node] "Returns a sequence of log files for this node."))
+  (log-files [db test node]
+             "Returns either a.) a map of fully-qualified remote paths (on this
+             DB node) to short local paths (in store/), or b.) a sequence of
+             fully-qualified remote paths."))
+
+(defn log-files-map
+  "Takes a DB, a test, and a node. Returns a map of remote paths to local
+  paths. Checks to make sure there are no duplicate local paths.
+
+  log-files used to return a sequence of remote paths, and some people are
+  likely still assuming that form for composition. When they start e.g.
+  concatenating maps into lists of strings, we're going to get mixed
+  representations. We try to make all this Just Work (TM)."
+  [db test node]
+  (let [log-files (log-files db test node)
+        log-files (if (map? log-files)
+                    ; We're done here; the DB knows exactly what short names
+                    ; they want.
+                    log-files
+                    ; OK, we've got a sequence. Break that up into two
+                    ; parts--those where we know the short name (kv pairs), and
+                    ; those where we only know the remote long name (strings).
+                    (let [short-files (into {} (filter map-entry? log-files))
+                          long-files  (remove map-entry? log-files)
+                          ; Now try to figure out short names for the long files
+                          auto-shorts (->> long-files
+                                           (map #(str/split % #"/"))
+                                           util/drop-common-proper-prefix
+                                           (map (partial str/join "/"))
+                                           (zipmap log-files))]
+                      (merge short-files auto-shorts)))]
+    ; Check for collisions in short names
+    (assert+ (distinct? (vals log-files))
+             {:type       ::log-files-local-name-collision
+              :log-files  log-files})
+    log-files))
 
 (def noop
   "Does nothing."
@@ -112,7 +148,9 @@
           (control/exec :rm :-rf dir)))
 
       LogFiles
-      (log-files [db test node] [log-file cap-file]))))
+      (log-files [db test node]
+        {log-file "tcpdump.log"
+         cap-file "tcpdump.pcap"}))))
 
 (def cycle-tries
   "How many tries do we get to set up a database?"

@@ -108,31 +108,24 @@
       (info "Snarfing log files")
       (control/on-nodes test
         (fn [test node]
-          (let [full-paths (db/log-files (:db test) test node)
-                ; A map of full paths to short paths
-                paths      (->> full-paths
-                                (map #(str/split % #"/"))
-                                util/drop-common-proper-prefix
-                                (map (partial str/join "/"))
-                                (zipmap full-paths))]
-            (doseq [[remote local] paths]
-              (when (cu/exists? remote)
-                (info "downloading" remote "to" local)
-                (try
-                  (control/download
-                    remote
-                    (.getCanonicalPath
-                      (store/path! test (name node)
-                                   ; strip leading /
-                                   (str/replace local #"^/" ""))))
-                  (catch java.io.IOException e
-                    (if (= "Pipe closed" (.getMessage e))
-                      (info remote "pipe closed")
-                      (throw e)))
-                  (catch java.lang.IllegalArgumentException e
-                    ; This is a jsch bug where the file is just being
-                    ; created
-                    (info remote "doesn't exist")))))))))
+          (doseq [[remote local] (db/log-files-map (:db test) test node)]
+            (when (cu/exists? remote)
+              (info "downloading" remote "to" local)
+              (try
+                (control/download
+                  remote
+                  (.getCanonicalPath
+                    (store/path! test (name node)
+                                 ; strip leading /
+                                 (str/replace local #"^/" ""))))
+                (catch java.io.IOException e
+                  (if (= "Pipe closed" (.getMessage e))
+                    (info remote "pipe closed")
+                    (throw e)))
+                (catch java.lang.IllegalArgumentException e
+                  ; This is a jsch bug where the file is just being
+                  ; created
+                  (info remote "doesn't exist"))))))))
     (store/update-symlinks! test)))
 
 (defn maybe-snarf-logs!
