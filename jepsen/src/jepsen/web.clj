@@ -226,11 +226,18 @@
     (sort files)))
 
 (defn js-escape
-  "Escape a javascript string."
+  "Escape a Javascript string."
   [s]
   (-> s
+      (str/replace "\\" "\\\\")
       (str/replace "'" "\\x27")
       (str/replace "\"" "\\x22")))
+
+(defn clj-escape
+  "Escape a Clojure string."
+  [s]
+  (-> (str/escape s {\" "\\\""
+                     \\ "\\\\"})))
 
 (defn dir
   "Serves a directory."
@@ -257,7 +264,8 @@
                              "jepsen"])
                       (interpose "/"))
                  ; Title
-                 (let [path (js-escape (str \' (.getCanonicalPath dir) \'))]
+                 (let [path (js-escape
+                              (str \" (clj-escape (.getCanonicalPath dir)) \"))]
                    ; You can click to copy the full local path
                    [:h1 {:onclick (str "navigator.clipboard.writeText('"
                                        path "')")}
