@@ -9,15 +9,15 @@ set -o nounset
 # set -o xtrace
 
 ERROR() {
-    /bin/echo -e "\e[101m\e[97m[ERROR]\e[49m\e[39m" "$@"
+    printf "\e[101m\e[97m[ERROR]\e[49m\e[39m %s\n" "$@"
 }
 
 WARNING() {
-    /bin/echo -e "\e[101m\e[97m[WARNING]\e[49m\e[39m" "$@"
+    printf "\e[101m\e[97m[WARNING]\e[49m\e[39m %s\n" "$@"
 }
 
 INFO() {
-    /bin/echo -e "\e[104m\e[97m[INFO]\e[49m\e[39m" "$@"
+    printf "\e[104m\e[97m[INFO]\e[49m\e[39m %s\n" "$@"
 }
 
 exists() {
@@ -83,7 +83,9 @@ do
             ;;
     esac
 done
-set -- "${POSITIONAL[@]}" # restore positional parameters
+if [ "${#POSITIONAL[@]}" -gt 0 ]; then
+  set -- "${POSITIONAL[@]}" # restore positional parameters
+fi
 
 if [ "${HELP}" -eq 1 ]; then
     echo "Usage: $0 [OPTION]"

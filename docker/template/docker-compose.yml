@@ -10,10 +10,10 @@ x-node:
     - /run:size=100M
     - /run/lock:size=100M
   volumes:
-    - "/sys/fs/cgroup:/sys/fs/cgroup:ro"
     - "jepsen-shared:/var/jepsen/shared"
   networks:
     - jepsen
+  privileged: true
   cap_add:
     - ALL
   ports:
