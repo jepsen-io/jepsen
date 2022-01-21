@@ -6,7 +6,8 @@
             [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
             [clojure.pprint :refer [pprint]]
-            [clj-time [core :as time]
+            [clj-time [coerce :as time.coerce]
+                      [core :as time]
                       [local :as time.local]
                       [format :as timef]]
             [hiccup.core :as h]
@@ -54,7 +55,7 @@
 
 (def test-cache-key
   "Function which extracts the key for the test cache from a map."
-  (juxt :start-time :name))
+  (juxt :start-time-str :name))
 
 (def test-cache-mutable-window
   "How far back in the test cache do we refresh on every page load?"
@@ -62,14 +63,15 @@
 
 (def page-limit
   "How many test rows per page?"
-  256)
+  128)
 
 (def basic-date-time (timef/formatters :basic-date-time))
 
 (defn parse-time
   "Parses a time from a string"
   [t]
-  (timef/parse basic-date-time t))
+  (-> (timef/parse-local basic-date-time t)
+      time.coerce/to-date-time))
 
 (defn fast-tests
   "Abbreviated set of tests: just name, start-time, results. Memoizes
@@ -83,7 +85,8 @@
                     (reduce dissoc cached))]
     (->> (for [[name runs] (store/tests)
                [time test] runs]
-           (let [t {:name name, :start-time (parse-time time)}]
+           (let [t {:name           name,
+                    :start-time     (parse-time time)}]
              (or (get cached (test-cache-key t))
                  ; Fetch from disk if not cached. Note that we construct a new
                  ; map so we can release the filehandle associated with the lazy
@@ -172,35 +175,32 @@
 (defn home
   "Home page"
   [req]
-  (time
-    (let [params (params req)
-          after (if-let [a (:after params)]
-                  (parse-time a)
-                  (time.local/local-now))
-          _     (prn :after after)
-          tests (->> (fast-tests)
-                     (drop-while (fn [t]
-                                   (prn :start-time (:start-time t))
-                                   (->> (:start-time t)
-                                        (time/after? after)
-                                        not))))
-          _     (prn :tests (count tests))
-          more? (< page-limit (count tests))
-          tests (take page-limit tests)]
-      {:status 200
-       :headers {"Content-Type" "text/html"}
-       :body (h/html
-               [:h1 "Jepsen"]
-               [:table {:cellspacing 3
-                        :cellpadding 3}
-                [:thead (test-header)]
-                [:tbody (map test-row tests)]]
-               (when more?
-                 [:p [:a {:href (str "/?after="
-                                     (->> (last tests)
-                                          :start-time
-                                          (timef/unparse basic-date-time)))}
-                      "Older tests..."]]))})))
+  (let [params (params req)
+        after (if-let [a (:after params)]
+                (parse-time a)
+                (time.local/local-now))
+        tests (->> (fast-tests)
+                   (drop-while (fn [t]
+                                 (->> (:start-time t)
+                                      (time/after? after)
+                                      not))))
+        more? (< page-limit (count tests))
+        tests (take page-limit tests)]
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body (h/html
+             [:h1 "Jepsen"]
+             [:table {:cellspacing 3
+                      :cellpadding 3}
+              [:thead (test-header)]
+              [:tbody (map test-row tests)]]
+             (when more?
+               [:p [:a {:href (str "/?after="
+                                   (->> (last tests)
+                                        :start-time
+                                        time.coerce/to-date-time
+                                        (timef/unparse basic-date-time)))}
+                    "Older tests..."]]))}))
 
 (defn dir-cell
   "Renders a File (a directory) for a directory view."
