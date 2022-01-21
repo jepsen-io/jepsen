@@ -6,7 +6,9 @@
             [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
             [clojure.pprint :refer [pprint]]
-            [clj-time.format :as timef]
+            [clj-time [core :as time]
+                      [local :as time.local]
+                      [format :as timef]]
             [hiccup.core :as h]
             [ring.util.response :as response]
             [org.httpkit.server :as server])
@@ -58,6 +60,17 @@
   "How far back in the test cache do we refresh on every page load?"
   2)
 
+(def page-limit
+  "How many test rows per page?"
+  256)
+
+(def basic-date-time (timef/formatters :basic-date-time))
+
+(defn parse-time
+  "Parses a time from a string"
+  [t]
+  (timef/parse basic-date-time t))
+
 (defn fast-tests
   "Abbreviated set of tests: just name, start-time, results. Memoizes
   (partially) via test-cache."
@@ -70,7 +83,7 @@
                     (reduce dissoc cached))]
     (->> (for [[name runs] (store/tests)
                [time test] runs]
-           (let [t {:name name, :start-time time}]
+           (let [t {:name name, :start-time (parse-time time)}]
              (or (get cached (test-cache-key t))
                  ; Fetch from disk if not cached. Note that we construct a new
                  ; map so we can release the filehandle associated with the lazy
@@ -79,7 +92,7 @@
                    (let [results {:valid? (:valid? (store/load-results
                                                      name time)
                                                    :incomplete)}
-                         t (assoc t :results results)]
+                         t (-> t (assoc :results results))]
                      (swap! test-cache assoc (test-cache-key t) t)
                      t)
                    (catch java.io.EOFException e
@@ -90,7 +103,9 @@
                      ; Um???
                      (warn e "Unable to parse" (str name "/" time))
                      (assoc t :results {:valid? :incomplete}))))))
-         (sort-by :start-time))))
+         (sort-by :start-time)
+         reverse
+         vec)))
 
 (defn test-header
   []
@@ -125,13 +140,13 @@
   (url-encode-path-components
     (str "/files/" (->> f io/file .toPath (relative-path store/base-dir)))))
 
+
 (defn test-row
   "Turns a test map into a table row."
   [t]
   (let [r    (:results t)
         time (->> t
                   :start-time
-                  (timef/parse   (timef/formatters :basic-date-time))
                   (timef/unparse (timef/formatters :date-hour-minute-second)))]
     [:tr
      [:td [:a {:href (url t "")} (:name t)]]
@@ -143,19 +158,49 @@
      [:td [:a {:href (url t "jepsen.log")}     "jepsen.log"]]
      [:td [:a {:href (str (url t) ".zip")} "zip"]]]))
 
+(defn params
+  "Parses a query params map from a request."
+  [req]
+  (when-let [q (:query-string req)]
+    (->> (str/split q #"&")
+         (keep (fn [pair]
+                 (when (not= "" pair)
+                   (let [[k v] (str/split pair #"=")]
+                     [(keyword k) v]))))
+         (into {}))))
+
 (defn home
   "Home page"
   [req]
-  {:status 200
-   :headers {"Content-Type" "text/html"}
-   :body (h/html [:h1 "Jepsen"]
-                 [:table {:cellspacing 3
-                          :cellpadding 3}
-                  [:thead (test-header)]
-                  [:tbody (->> (fast-tests)
-                               (sort-by :start-time)
-                               reverse
-                               (map test-row))]])})
+  (time
+    (let [params (params req)
+          after (if-let [a (:after params)]
+                  (parse-time a)
+                  (time.local/local-now))
+          _     (prn :after after)
+          tests (->> (fast-tests)
+                     (drop-while (fn [t]
+                                   (prn :start-time (:start-time t))
+                                   (->> (:start-time t)
+                                        (time/after? after)
+                                        not))))
+          _     (prn :tests (count tests))
+          more? (< page-limit (count tests))
+          tests (take page-limit tests)]
+      {:status 200
+       :headers {"Content-Type" "text/html"}
+       :body (h/html
+               [:h1 "Jepsen"]
+               [:table {:cellspacing 3
+                        :cellpadding 3}
+                [:thead (test-header)]
+                [:tbody (map test-row tests)]]
+               (when more?
+                 [:p [:a {:href (str "/?after="
+                                     (->> (last tests)
+                                          :start-time
+                                          (timef/unparse basic-date-time)))}
+                      "Older tests..."]]))})))
 
 (defn dir-cell
   "Renders a File (a directory) for a directory view."
