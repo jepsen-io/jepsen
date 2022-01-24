@@ -55,7 +55,7 @@
 
 (def test-cache-key
   "Function which extracts the key for the test cache from a map."
-  (juxt :start-time-str :name))
+  (juxt :start-time :name))
 
 (def test-cache-mutable-window
   "How far back in the test cache do we refresh on every page load?"
