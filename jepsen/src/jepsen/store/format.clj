@@ -313,7 +313,7 @@
     (reset! block-index :closed)
     (.close file)))
 
-(defn open
+(defn ^Handle open
   "Constructs a new handle for a Jepsen file of the given path (anything which
   works with io/file)."
   [path]
