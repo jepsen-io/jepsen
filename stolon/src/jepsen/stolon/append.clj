@@ -123,7 +123,7 @@
 (defrecord Client [node conn initialized?]
   client/Client
   (open! [this test node]
-    (let [c (c/open node)]
+    (let [c (c/open test node)]
       (assoc this
              :node          node
              :conn          c
