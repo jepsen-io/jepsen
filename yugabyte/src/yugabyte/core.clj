@@ -11,7 +11,7 @@
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
             [yugabyte [append :as append]
-                           [default-value :as default-value]]
+                      [default-value :as default-value]]
             [yugabyte.auto :as auto]
             [yugabyte.bank :as bank]
             [yugabyte.bank-improved :as bank-improved]
@@ -40,6 +40,8 @@
             [yugabyte.ysql.set]
             [yugabyte.ysql.single-key-acid])
   (:import (jepsen.client Client)))
+
+(def version-regex #"(?<=yugabyte\-)(\d+\.\d+(\.\d+){0,2}(-b\d+)?)")
 
 (defn noop-test
   "NOOP test, exists to validate setup/teardown phases"
@@ -209,9 +211,10 @@
   "Initial test construction from a map of CLI options. Establishes the test
   name, OS, DB."
   [opts]
-  (let [api (keyword (namespace (:workload opts)))]
+  (let [api (keyword (namespace (:workload opts)))
+        url-version (first (re-find version-regex (get opts :url "")))]
     (assoc opts
-      :version (or (re-find #"\d+\.\d+(\.\d+){0,2}(-b\d+)?" (:url opts)) (:version opts))
+      :version (or url-version (:version opts))
       :api api
       :name (str "yb_" (-> (or (:url opts) (:version opts))
                            (str/split #"/")
