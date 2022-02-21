@@ -151,6 +151,12 @@
    [nil "--postgres-password PASS" "What password should we use to connect to postgres?"
     :default "pw"]
 
+   [nil "--postgres-sslmode MODE" "What sslmode should we use to connect to postgres: require, disable?"
+    :default "disable"
+    :parse-fn str
+    :validate [#{"require" "disable"}
+               "Should be one of require, or disable"]]
+
    [nil "--postgres-port NUMBER" "What port should we connect to when talking to postgres?"
     :default 5432
     :parse-fn parse-long]
