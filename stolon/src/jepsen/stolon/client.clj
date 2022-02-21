@@ -20,12 +20,7 @@
                :port      (:postgres-port     test)
                :user      (:postgres-user     test)
                :password  (:postgres-password test)
-               ; The docs say ssl is a boolean but also it's mere *presence*
-               ; implies using SSL, so... maybe we have to set disable too?
-               :ssl       false
-               ; OK neither of these apparently works, so... let's try in the
-               ; server config.
-               :sslmode   "disable"}
+               :sslmode   (:postgres-sslmode test)}
         spec  (if-let [pt (:prepare-threshold test)]
                 (assoc spec :prepareThreshold pt)
                 spec)
