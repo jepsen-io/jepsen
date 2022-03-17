@@ -320,6 +320,7 @@
   [api node]
   (if (= api :ysql)
     [:--start_pgsql_proxy
+     :--yb_enable_read_committed_isolation
      :--pgsql_proxy_bind_address (cn/ip node)]
     []))
 

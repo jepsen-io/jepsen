@@ -11,12 +11,13 @@
             [dom-top.core :as dt]
             [wall.hack :as wh]
             [slingshot.slingshot :refer [try+ throw+]]
-            [yugabyte.utils :as yutil]))
+            [yugabyte.utils :as yutil])
+  (:import (java.sql Connection)))
 
 (def default-timeout "Default timeout for operations in ms" 30000)
 
 (def conn-isolation-level "Default isolation level for connections"
-  java.sql.Connection/TRANSACTION_SERIALIZABLE)
+  Connection/TRANSACTION_SERIALIZABLE)
 
 (def ysql-port 5433)
 

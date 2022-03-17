@@ -104,8 +104,12 @@
          :long-fork       (with-client long-fork/workload (yugabyte.ysql.long-fork/->YSQLLongForkClient))
          :single-key-acid (with-client single-key-acid/workload (yugabyte.ysql.single-key-acid/->YSQLSingleKeyAcidClient))
          :multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))
-         :append          (with-client append/workload (ysql.append/->Client))
-         :append-table    (with-client append/workload (ysql.append-table/->Client))
+         :append-rc       (with-client append/workload-rc (ysql.append/->Client :read-committed))
+         ; See https://docs.yugabyte.com/latest/architecture/transactions/isolation-levels/
+         ; :snapshot-isolation maps to :repeatable_read SQL
+         :append-si       (with-client append/workload-si (ysql.append/->Client :repeatable-read))
+         :append          (with-client append/workload-serializable (ysql.append/->Client :serializable))
+         :append-table    (with-client append/workload-serializable (ysql.append-table/->Client :serializable))
          :default-value   (with-client default-value/workload (ysql.default-value/->Client))})
 
 (def workloads
@@ -211,7 +215,7 @@
   "Initial test construction from a map of CLI options. Establishes the test
   name, OS, DB."
   [opts]
-  (let [api (keyword (namespace (:workload opts)))
+  (let [api         (keyword (namespace (:workload opts)))
         url-version (first (re-find version-regex (get opts :url "")))]
     (assoc opts
       :version (or url-version (:version opts))
@@ -277,11 +281,11 @@
                                 :fill-color "#888888"}}})
         checker  (if (is-stub-workload (:workload opts))
                    (:checker workload)
-                   (checker/compose {:perf     perf
-                                     :stats    (checker/stats)
+                   (checker/compose {:perf                 perf
+                                     :stats                (checker/stats)
                                      :unhandled-exceptions (checker/unhandled-exceptions)
-                                     :clock    (checker/clock-plot)
-                                     :workload (:checker workload)}))]
+                                     :clock                (checker/clock-plot)
+                                     :workload             (:checker workload)}))]
     (merge tests/noop-test
            opts
            (dissoc workload
@@ -290,11 +294,11 @@
                    :checker)
            (when (:yugabyte-ssh opts) (yugabyte-ssh-defaults))
            (when (:trace-cql opts) (trace-logging))
-           {:client    (:client workload)
-            :nemesis   (:nemesis nemesis)
-            :generator gen
+           {:client          (:client workload)
+            :nemesis         (:nemesis nemesis)
+            :generator       gen
             :pure-generators true
-            :checker   checker})))
+            :checker         checker})))
 
 (defn yb-test
   "Constructs a yugabyte test from CLI options."
