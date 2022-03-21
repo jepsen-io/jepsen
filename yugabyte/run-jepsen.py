@@ -68,7 +68,7 @@ TESTS = [
    "ysql/multi-key-acid",
    "ysql/append",
    "ysql/append-si",
-   "ysql/append-rc",
+   # "ysql/append-rc",
    "ysql/default-value",
 ]
 NEMESES = [
