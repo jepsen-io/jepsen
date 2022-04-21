@@ -1,6 +1,13 @@
 (ns jepsen.nemesis.lazyfs
   "The lazyfs nemesis allows the injection of filesystem-level faults:
-  specifically, losing data which was written to disk but not fsynced."
+  specifically, losing data which was written to disk but not fsynced.
+
+  In containers you may not have /dev/fuse by default; you can create it with
+
+      mknod /dev/fuse c 10 229
+
+  I've opted not to make this automatic here, because it feels like it might be
+  risky on strangers' machines."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
@@ -30,12 +37,9 @@
   "The lazyfs binary"
   (str dir "/lazyfs/build/lazyfs"))
 
-(def fifo
-  "The fifo we use to control lazyfs."
-  "/opt/jepsen/lazyfs.fifo")
-
-(def config
-  "The lazyfs config file"
+(defn config
+  "The lazyfs config file text. Takes a lazyfs map"
+  [{:keys [fifo]}]
   (str "[faults]
 fifo_path=\"" fifo "\"
 
@@ -81,31 +85,66 @@ blocks_per_page=1"))
           (c/cd "lazyfs"
             (c/exec "./build.sh")))))
 
-(defn mount!
-  "Starts lazyfs as a daemon at the given directory. You likely want to call
-  this before beginning database setup."
+(defn lazyfs
+  "Constructs a map of all the files we need to run a lazyfs map for a
+  directory."
   [dir]
-  (info "Mounting lazyfs" dir)
-  (let [real-dir    (str dir real-extension)
-        config-path (cu/tmp-file!)]
-    ; Write config file
-    (cu/write-file! config config-path)
-    ; Make directories
-    (c/exec :mkdir :-p dir)
-    (c/exec :mkdir :-p real-dir)
-    ; And go!
-    (try+
-      (c/exec bin dir :--config-path config-path :-o :allow_other :-o "modules=subdir" :-o (str "subdir=" real-dir))
-      (catch [:exit -1] e
-        (if (re-find #"fuse: device not found" (:err e))
-          (do (c/exec :mknod "/dev/fuse" :c 10 229)
-              (c/exec bin dir :--config-path config-path :-o :allow_other :-o "modules=subdir" :-o (str "subdir=" real-dir)))
-          (throw+ e))))))
+  (let [lazyfs-dir  (str dir ".lazyfs")
+        data-dir    (str lazyfs-dir "/data")
+        fifo        (str lazyfs-dir "/fifo")
+        config-file (str lazyfs-dir "/config")
+        log-file    (str lazyfs-dir "/log")
+        pid-file    (str lazyfs-dir "/pid")]
+    {:dir         dir
+     :lazyfs-dir  lazyfs-dir
+     :data-dir    data-dir
+     :fifo        fifo
+     :config-file config-file
+     :log-file    log-file
+     :pid-file    pid-file}))
+
+(defn start-daemon!
+  "Starts the lazyfs daemon once preparation is complete. We daemonize
+  ourselves so that we can get logs--also it looks like the built-in daemon
+  might not work right now."
+  [{:keys [dir lazyfs-dir data-dir pid-file log-file fifo config-file]}]
+  (cu/start-daemon!
+    {:chdir   lazyfs-dir
+     :logfile log-file
+     :pidfile pid-file}
+    bin
+    dir
+    :--config-path config-file
+    :-o "allow_other"
+    :-o "modules=subdir"
+    :-o (str "subdir=" data-dir)
+    :-f))
+
+(defn mount!
+  "Takes a lazyfs map, creates directories and config files, and starts the
+  lazyfs daemon. You likely want to call this before beginning database setup.
+  Returns the lazyfs map."
+  [lazyfs]
+  (info "Mounting lazyfs" (:dir lazyfs))
+  ; Make directories
+  (c/exec :mkdir :-p (:dir lazyfs))
+  (c/exec :mkdir :-p (:data-dir lazyfs))
+  ; Write config file
+  (cu/write-file! (config lazyfs) (:config-file lazyfs))
+  ; And go!
+  (try+
+    (start-daemon! lazyfs)
+    (catch [:exit -1] e
+      (if (re-find #"fuse: device not found" (:err e))
+        (do (c/exec :mknod "/dev/fuse" :c 10 229)
+            (start-daemon! lazyfs))
+        (throw+ e))))
+  lazyfs)
 
 (defn umount!
-  "Stops lazyfs at the given directory. You probably want to call this as a
-  part of database teardown."
-  [dir]
+  "Stops the given lazyfs map. You probably want to call this as a part of
+  database teardown."
+  [{:keys [dir]}]
   (try+
     (info "Unmounting lazyfs" dir)
     (c/exec :fusermount :-uz dir)
@@ -117,31 +156,39 @@ blocks_per_page=1"))
       nil)))
 
 (defn fifo!
-  "Sends a string to the fifo channel."
-  [cmd]
+  "Sends a string to the fifo channel for the given lazyfs map."
+  [{:keys [fifo]} cmd]
+  (info :echo cmd :> fifo)
   (c/exec :echo cmd :> fifo))
 
-(defn db
-  "A database which responds to setup! and teardown! by making the specified
-  directory a lazyfs."
-  [dir]
-  (reify db/DB
-    (setup! [this test node]
-      (install!)
-      (mount! dir))
+(defrecord DB [lazyfs]
+  db/DB
+  (setup! [this test node]
+    (install!)
+    (mount! lazyfs))
 
-    (teardown! [this test node]
-      (umount! dir))))
+  (teardown! [this test node]
+    (umount! lazyfs))
+
+  db/LogFiles
+  (log-files [this test node]
+    {"lazyfs.log" (:log-file lazyfs)}))
+
+(defn db
+  "Takes a lazyfs map and constructs a DB whose setup installs lazyfs and
+  mounts the given lazyfs dir."
+  [lazyfs]
+  (DB. lazyfs))
 
 (defn nemesis
-  "A nemesis which inject faults into the currently mounted lazyfs by writing
-  to the lazyfs fifo. Types of faults (:f) supported:
+  "A nemesis which inject faults into the given lazyfs map by writing to its
+  fifo. Types of faults (:f) supported:
 
   :lose-unfsynced-writes
 
       Forgets any writes which were not fsynced. The
       :value should be a list of nodes you'd like to lose un-fsynced writes on."
-  []
+  [lazyfs]
   (reify nemesis/Nemesis
     (setup! [this test]
       this)
@@ -151,8 +198,12 @@ blocks_per_page=1"))
         :lose-unfsynced-writes
         (let [v (c/on-nodes test (:value op)
                             (fn [_ _]
-                              (do (fifo! "lazyfs::clear-cache")
+                              (do (fifo! lazyfs "lazyfs::clear-cache")
                                   :done)))]
             (assoc op :value v))))
 
-    (teardown! [this test])))
+    (teardown! [this test])
+
+    nemesis/Reflection
+    (fs [this]
+      #{:lose-unfsynced-writes})))

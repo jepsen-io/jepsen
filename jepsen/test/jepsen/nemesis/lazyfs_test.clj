@@ -37,7 +37,8 @@
                                   (assoc op :type :ok))
                         :read (let [vals (-> (c/exec :cat file)
                                              (str/split #"\s+")
-                                             (->> (map util/parse-long)))]
+                                             (->> (remove #{""})
+                                                  (mapv util/parse-long)))]
                                 (assoc op :type :ok, :value vals)))))
         (get node)))
 
@@ -51,13 +52,14 @@
   (map->FileSetClient {:dir dir}))
 
 (deftest ^:integration file-set-test
-  (let [dir  "/tmp/jepsen/file-set-test"
+  (let [dir    "/tmp/jepsen/file-set-test"
+        lazyfs (lazyfs/lazyfs dir)
         test (assoc tests/noop-test
                     :name      "lazyfs file set"
                     :os        debian/os
-                    :db        (lazyfs/db dir)
+                    :db        (lazyfs/db lazyfs)
                     :client    (file-set-client dir)
-                    :nemesis   (lazyfs/nemesis)
+                    :nemesis   (lazyfs/nemesis lazyfs)
                     :generator (gen/phases
                                  (->> (range)
                                       (map (fn [x] {:f :add, :value x}))
@@ -67,8 +69,8 @@
                                               :f    :lose-unfsynced-writes
                                               :value ["n1"]}
                                              repeat
-                                             (gen/delay 1)))
-                                      (gen/time-limit 100))
+                                             (gen/delay 1/2)))
+                                      (gen/time-limit 5))
                                  (gen/clients {:f :read}))
                     :checker   (checker/set)
                     :nodes     ["n1"])
@@ -76,5 +78,6 @@
     (pprint (:history test))
     (pprint (:results test))
     (is (false? (:valid? (:results test))))
-    (is (pos? (:lost-count (:results test)) 0))))
+    (is (pos? (:ok-count (:results test))))
+    (is (pos? (:lost-count (:results test))))))
 
