@@ -26,7 +26,7 @@
 (def start-key 0)
 (def end-key 5)
 
-(def insert-key-ctr (atom end-key))
+(def insert-key-ctr (atom (inc end-key)))
 (def contention-keys (range end-key (+ end-key 3)))
 
 (defn transfer-without-deletes
