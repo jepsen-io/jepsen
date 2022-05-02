@@ -63,7 +63,7 @@
                     :generator (gen/phases
                                  (->> (range)
                                       (map (fn [x] {:f :add, :value x}))
-                                      (gen/delay 1/10)
+                                      (gen/delay 1/100)
                                       (gen/nemesis
                                         (->> {:type :info
                                               :f    :lose-unfsynced-writes
@@ -75,8 +75,8 @@
                     :checker   (checker/set)
                     :nodes     ["n1"])
         test (jepsen/run! test)]
-    (pprint (:history test))
-    (pprint (:results test))
+    ;(pprint (:history test))
+    ;(pprint (:results test))
     (is (false? (:valid? (:results test))))
     (is (pos? (:ok-count (:results test))))
     (is (pos? (:lost-count (:results test))))))

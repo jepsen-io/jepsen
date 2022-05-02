@@ -14,7 +14,7 @@
             [jepsen [control :as c]
                     [db :as db]
                     [generator :as gen]
-                    [util :as util]
+                    [util :as util :refer [timeout]]
                     [nemesis :as nemesis]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
@@ -27,7 +27,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "1f6c3cd021612866a047195c53201bc7b22b4326")
+  "657a007bc764d2509534e1fcbf8345eec8cf4de1")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
@@ -36,6 +36,10 @@
 (def bin
   "The lazyfs binary"
   (str dir "/lazyfs/build/lazyfs"))
+
+(def fuse-dev
+  "The path to the fuse device."
+  "/dev/fuse")
 
 (defn config
   "The lazyfs config file text. Takes a lazyfs map"
@@ -63,6 +67,9 @@ blocks_per_page=1"))
   (c/su
     ; Dependencies
     (debian/install [:g++ :cmake :libfuse3-dev :libfuse3-3 :fuse3])
+    ; LXC containers like to delete /dev/fuse on reboot for some reason
+    (when-not (cu/exists? fuse-dev)
+      (c/exec :mknod fuse-dev "c" 10 229))
     ; Set up allow_other so anyone can read and write to the fs
     (c/exec :sed :-i "/\\s*user_allow_other/s/^#//g" "/etc/fuse.conf")
     ; Get the repo
@@ -76,6 +83,7 @@ blocks_per_page=1"))
           (c/exec :git :clone repo-url dir))))
     ; Check out version
     (c/cd dir
+          (c/exec :git :fetch)
           (c/exec :git :checkout commit)
           (c/exec :git :clean :-fx)
           ; Install libpcache
@@ -158,8 +166,11 @@ blocks_per_page=1"))
 (defn fifo!
   "Sends a string to the fifo channel for the given lazyfs map."
   [{:keys [fifo]} cmd]
-  (info :echo cmd :> fifo)
-  (c/exec :echo cmd :> fifo))
+  (timeout 1000 (throw+ {:type ::fifo-timeout
+                         :cmd  cmd
+                         :fifo fifo})
+           ;(info :echo cmd :> fifo)
+           (c/exec :echo cmd :> fifo)))
 
 (defrecord DB [lazyfs]
   db/DB
