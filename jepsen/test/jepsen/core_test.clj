@@ -64,10 +64,9 @@
         meta-log (atom [])
         db    (tst/atom-db state)
         n     1000
-        test  (run!
-                (assoc tst/noop-test
+        test (assoc tst/noop-test
                        :name      "basic cas pure-gen"
-                       :db        (tst/atom-db state)
+                       :db        db
                        :client    (tst/atom-client state meta-log)
                        :concurrency 10
                        :pure-generators true
@@ -83,8 +82,9 @@
                                            :value [(rand-int 5)
                                                    (rand-int 5)]})]))
                               (gen/limit n)
-                              (gen/clients)))))
-        h (:history test)
+                              (gen/clients))))
+        test     (run! test)
+        h        (:history test)
         invokes  (partial filter op/invoke?)
         oks      (partial filter op/ok?)
         reads    (partial filter (comp #{:read} :f))

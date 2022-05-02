@@ -45,7 +45,7 @@
               (is (= "n1" (:host e)))
               (is (= "cd /; thiscmdshouldnotexist" (:cmd e)))
               (is (= "" (:out e)))
-              (is (= "bash: thiscmdshouldnotexist: command not found\n"
+              (is (= "bash: line 1: thiscmdshouldnotexist: command not found\n"
                      (:err e)))
               (is (= 127 (:exit e))))))
 
