@@ -1,20 +1,13 @@
 (ns jepsen.nemesis.lazyfs
   "The lazyfs nemesis allows the injection of filesystem-level faults:
-  specifically, losing data which was written to disk but not fsynced.
-
-  In containers you may not have /dev/fuse by default; you can create it with
-
-      mknod /dev/fuse c 10 229
-
-  I've opted not to make this automatic here, because it feels like it might be
-  risky on strangers' machines."
+  specifically, losing data which was written to disk but not fsynced."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as c]
                     [db :as db]
                     [generator :as gen]
-                    [util :as util :refer [timeout]]
+                    [util :as util :refer [await-fn meh timeout]]
                     [nemesis :as nemesis]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
@@ -27,7 +20,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "657a007bc764d2509534e1fcbf8345eec8cf4de1")
+  "e1e5f860cddf2eaade005d773701a6191d721765")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
@@ -66,10 +59,19 @@ blocks_per_page=1"))
   (info "Installing lazyfs")
   (c/su
     ; Dependencies
-    (debian/install [:g++ :cmake :libfuse3-dev :libfuse3-3 :fuse3])
+    (debian/install [:g++ :cmake :libfuse3-dev :libfuse3-3 :fuse3 :git])
     ; LXC containers like to delete /dev/fuse on reboot for some reason
     (when-not (cu/exists? fuse-dev)
-      (c/exec :mknod fuse-dev "c" 10 229))
+      ; We're going to create a fuse device that's writable by everyone. This
+      ; would be unsafe on normal systems, but Jepsen DB nodes are intended to
+      ; be a disposable playground.
+      ;
+      ; This is an awful hack, but figuring out how to cleanly get permissions
+      ; to the right users while also working with systems like debian 3 which
+      ; don't HAVE a fuse group any more is... well I'm not sure I can do it
+      ; safely/reliably.
+      (c/exec :mknod fuse-dev "c" 10 229)
+      (c/exec :chmod "a+rw" fuse-dev))
     ; Set up allow_other so anyone can read and write to the fs
     (c/exec :sed :-i "/\\s*user_allow_other/s/^#//g" "/etc/fuse.conf")
     ; Get the repo
@@ -94,22 +96,44 @@ blocks_per_page=1"))
             (c/exec "./build.sh")))))
 
 (defn lazyfs
-  "Constructs a map of all the files we need to run a lazyfs map for a
-  directory."
-  [dir]
-  (let [lazyfs-dir  (str dir ".lazyfs")
-        data-dir    (str lazyfs-dir "/data")
-        fifo        (str lazyfs-dir "/fifo")
-        config-file (str lazyfs-dir "/config")
-        log-file    (str lazyfs-dir "/log")
-        pid-file    (str lazyfs-dir "/pid")]
+  "Takes a directory as a string, or a map of options, or a full lazyfs map,
+  which is passed through unaltered. Constructs a lazyfs map of all the files
+  we need to run a lazyfs for a directory. Map options are:
+
+    :dir      The directory to mount
+    :user     Which user should run lazyfs? Default \"root\".
+    :chown    Who to set as the owner of the directory. Defaults to
+              \"<user>:<user>\"
+  "
+  [x]
+  (let [opts (cond (string? x)
+                   {:dir x}
+
+                   (map? x)
+                   x
+
+                   true
+                   (throw (IllegalArgumentException.
+                            (str "Expected a string directory or a lazyfs map, but got "
+                                 (pr-str x)))))
+        dir         (:dir         opts)
+        lazyfs-dir  (:lazyfs-dir  opts (str dir ".lazyfs"))
+        data-dir    (:data-dir    opts (str lazyfs-dir "/data"))
+        fifo        (:fifo        opts (str lazyfs-dir "/fifo"))
+        config-file (:config-file opts (str lazyfs-dir "/config"))
+        log-file    (:log-file    opts (str lazyfs-dir "/log"))
+        pid-file    (:pid-file    opts (str lazyfs-dir "/pid"))
+        user        (:user        opts "root")
+        chown       (:chown       opts (str user ":" user))]
     {:dir         dir
      :lazyfs-dir  lazyfs-dir
      :data-dir    data-dir
      :fifo        fifo
      :config-file config-file
      :log-file    log-file
-     :pid-file    pid-file}))
+     :pid-file    pid-file
+     :user        user
+     :chown       chown}))
 
 (defn start-daemon!
   "Starts the lazyfs daemon once preparation is complete. We daemonize
@@ -132,45 +156,62 @@ blocks_per_page=1"))
   "Takes a lazyfs map, creates directories and config files, and starts the
   lazyfs daemon. You likely want to call this before beginning database setup.
   Returns the lazyfs map."
-  [lazyfs]
-  (info "Mounting lazyfs" (:dir lazyfs))
-  ; Make directories
-  (c/exec :mkdir :-p (:dir lazyfs))
-  (c/exec :mkdir :-p (:data-dir lazyfs))
-  ; Write config file
-  (cu/write-file! (config lazyfs) (:config-file lazyfs))
-  ; And go!
-  (try+
-    (start-daemon! lazyfs)
-    (catch [:exit -1] e
-      (if (re-find #"fuse: device not found" (:err e))
-        (do (c/exec :mknod "/dev/fuse" :c 10 229)
-            (start-daemon! lazyfs))
-        (throw+ e))))
+  [{:keys [dir data-dir lazyfs-dir chown user config-file] :as lazyfs}]
+  (c/su
+    (info "Mounting lazyfs" dir)
+    ; Make directories
+    (c/exec :mkdir :-p dir)
+    (c/exec :mkdir :-p data-dir)
+    (c/exec :chown chown dir)
+    (c/exec :chown :-R chown lazyfs-dir))
+  (c/sudo user
+    ; Write config file
+    (cu/write-file! (config lazyfs) config-file)
+    ; And go!
+    (start-daemon! lazyfs))
+  ; Await mount
+  (c/su
+    (await-fn (fn check-mounted []
+                (or (re-find #"lazyfs" (c/exec :findmnt dir))
+                    (throw+ {:type ::not-mounted
+                             :dir  dir
+                             :node c/*host*})))
+              {:retry-interval 500
+               :log-interval   5000
+               :log-message "Waiting for lazyfs to mount"}))
   lazyfs)
 
+(declare lose-unfsynced-writes!)
+
 (defn umount!
-  "Stops the given lazyfs map. You probably want to call this as a part of
-  database teardown."
-  [{:keys [dir]}]
-  (try+
-    (info "Unmounting lazyfs" dir)
-    (c/exec :fusermount :-uz dir)
-    (catch [:exit 1] _
-      ; No such directory
-      nil)
-    (catch [:exit 127] _
-      ; Command not found
-      nil)))
+  "Stops the given lazyfs map and destroys the lazyfs directory. You probably
+  want to call this as a part of database teardown."
+  [{:keys [lazyfs-dir dir] :as lazyfs}]
+  (c/su
+    (try+
+      ; I think it flushes on umount which can take *forever*, so we drop the
+      ; page cache here to try and speed that up.
+      (meh (lose-unfsynced-writes! lazyfs))
+      (info "Unmounting lazyfs" dir)
+      (c/exec :fusermount :-uz dir)
+      (info "Unmounted lazyfs" dir)
+      (catch [:exit 1] _
+        ; No such directory
+        nil)
+      (catch [:exit 127] _
+        ; Command not found
+        nil))
+    (c/exec :rm :-rf lazyfs-dir)))
 
 (defn fifo!
   "Sends a string to the fifo channel for the given lazyfs map."
-  [{:keys [fifo]} cmd]
+  [{:keys [user fifo]} cmd]
   (timeout 1000 (throw+ {:type ::fifo-timeout
                          :cmd  cmd
+                         :node c/*host*
                          :fifo fifo})
            ;(info :echo cmd :> fifo)
-           (c/exec :echo cmd :> fifo)))
+           (c/sudo user (c/exec :echo cmd :> fifo))))
 
 (defrecord DB [lazyfs]
   db/DB
@@ -183,13 +224,22 @@ blocks_per_page=1"))
 
   db/LogFiles
   (log-files [this test node]
-    {"lazyfs.log" (:log-file lazyfs)}))
+    {(:log-file lazyfs) "lazyfs.log"}))
 
 (defn db
-  "Takes a lazyfs map and constructs a DB whose setup installs lazyfs and
-  mounts the given lazyfs dir."
-  [lazyfs]
-  (DB. lazyfs))
+  "Takes a directory or a lazyfs map and constructs a DB whose setup installs
+  lazyfs and mounts the given lazyfs dir."
+  [dir-or-lazyfs]
+  (DB. (lazyfs dir-or-lazyfs)))
+
+(defn lose-unfsynced-writes!
+  "Takes a lazyfs map or a lazyfs DB. Asks the local node to lose any writes to
+  the given lazyfs map which have not been fsynced yet."
+  [db-or-lazyfs-map]
+  (if (instance? DB db-or-lazyfs-map)
+    (recur (:lazyfs db-or-lazyfs-map))
+    (do (fifo! db-or-lazyfs-map "lazyfs::clear-cache")
+        :done)))
 
 (defn nemesis
   "A nemesis which inject faults into the given lazyfs map by writing to its
@@ -208,9 +258,7 @@ blocks_per_page=1"))
       (case (:f op)
         :lose-unfsynced-writes
         (let [v (c/on-nodes test (:value op)
-                            (fn [_ _]
-                              (do (fifo! lazyfs "lazyfs::clear-cache")
-                                  :done)))]
+                            (fn [_ _] (lose-unfsynced-writes! lazyfs)))]
             (assoc op :value v))))
 
     (teardown! [this test])
