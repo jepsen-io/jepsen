@@ -1,5 +1,5 @@
-(ns jepsen.nemesis.lazyfs-test
-  "Tests for the lazyfs nemesis"
+(ns jepsen.lazyfs-test
+  "Tests for the lazyfs write-losing filesystem"
   (:require [clojure [pprint :refer [pprint]]
                      [string :as str]
                      [test :refer :all]]
@@ -11,12 +11,12 @@
                     [core :as jepsen]
                     [db :as db]
                     [generator :as gen]
+                    [lazyfs :as lazyfs]
                     [nemesis :as nem]
                     [os :as os]
                     [tests :as tests]
                     [util :as util]]
             [jepsen.control.util :as cu]
-            [jepsen.nemesis.lazyfs :as lazyfs]
             [jepsen.os.debian :as debian]))
 
 (defrecord FileSetClient [dir file node]

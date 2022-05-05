@@ -1,6 +1,11 @@
-(ns jepsen.nemesis.lazyfs
-  "The lazyfs nemesis allows the injection of filesystem-level faults:
-  specifically, losing data which was written to disk but not fsynced."
+(ns jepsen.lazyfs
+  "Lazyfs allows the injection of filesystem-level faults: specifically, losing
+  data which was written to disk but not fsynced. This namespace lets you mount
+  a specific directory as a lazyfs filesystem, and offers a DB which
+  mounts/unmounts it, and downloads the lazyfs log file--this can be composed
+  into your own database. You can then call lose-unfsynced-writes! as a part of
+  your database's db/kill! implementation, likely after killing your DB process
+  itself."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
@@ -249,7 +254,12 @@ blocks_per_page=1"))
   :lose-unfsynced-writes
 
       Forgets any writes which were not fsynced. The
-      :value should be a list of nodes you'd like to lose un-fsynced writes on."
+      :value should be a list of nodes you'd like to lose un-fsynced writes on.
+
+  You don't necessarily need to use this--I haven't figured out how to
+  integrate it well into jepsen.nemesis combined. Once we start getting other
+  classes of faults it will probably make sense for this nemesis to get more
+  use and expand."
   [lazyfs]
   (reify nemesis/Nemesis
     (setup! [this test]
