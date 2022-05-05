@@ -20,7 +20,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "e1e5f860cddf2eaade005d773701a6191d721765")
+  "a072011c15de166211d6c52a9477b2328c33d3e7")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
@@ -238,7 +238,8 @@ blocks_per_page=1"))
   [db-or-lazyfs-map]
   (if (instance? DB db-or-lazyfs-map)
     (recur (:lazyfs db-or-lazyfs-map))
-    (do (fifo! db-or-lazyfs-map "lazyfs::clear-cache")
+    (do (info "Losing un-fsynced writes to" (:dir db-or-lazyfs-map))
+        (fifo! db-or-lazyfs-map "lazyfs::clear-cache")
         :done)))
 
 (defn nemesis
