@@ -166,6 +166,6 @@
       exit
       (:host result)
       (:cmd action)
-      (:in result)
+      (:in action)
       (:out result)
       (:err result))))
