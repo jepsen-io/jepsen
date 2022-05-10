@@ -382,8 +382,8 @@
 
 (defn await-fn
   "Invokes a function (f) repeatedly. Blocks until (f) returns, rather than
-  throwing. Returns that return value. Catches RuntimeExceptions and retries
-  them automatically. Options:
+  throwing. Returns that return value. Catches Exceptions (except for
+  InterruptedException) and retries them automatically. Options:
 
     :retry-interval   How long between retries, in ms. Default 1s.
     :log-interval     How long between logging that we're still waiting, in ms.
@@ -404,7 +404,9 @@
      (loop []
        (let [res (try
                    (f)
-                   (catch RuntimeException e
+                   (catch InterruptedException e
+                     (throw e))
+                   (catch Exception e
                      (let [now (linear-time-nanos)]
                        ; Are we out of time?
                        (when (<= deadline now)
