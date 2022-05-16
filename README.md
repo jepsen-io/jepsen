@@ -63,7 +63,15 @@ which helps fund Jepsen development.
 
 ### Docker
 
-You can run a full Jepsen cluster on a single machine using Docker Compose. See the [Docker](/docker) directory for more details. Docker containers don't have real clocks, so you generally can't use them to test clock skew.
+You can run a full Jepsen cluster on a single machine using Docker Compose. See
+the [Docker](/docker) directory for more details. Sadly the Docker platform has
+been something of a moving target; this environment tends to break in new and
+exciting ways on various platforms every few months. If you're a Docker whiz
+and can get this going reliably on Debian & OS X (ideally without breaking the
+other platform), that's great--pull requests would be a big help.
+
+Like other containers Docker containers don't have real clocks--that means you
+generally can't use them to test clock skew.
 
 ### LXC
 
