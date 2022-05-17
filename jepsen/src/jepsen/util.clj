@@ -125,6 +125,12 @@
   (try (rand-nth coll)
        (catch IndexOutOfBoundsException e nil)))
 
+(defn rand-exp
+  "Generates a exponentially distributed random value with rate parameter
+  lambda."
+  [lambda]
+  (* (Math/log (- 1 (rand))) (- lambda)))
+
 (defn fraction
   "a/b, but if b is zero, returns unity."
   [a b]
