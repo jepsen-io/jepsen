@@ -3,12 +3,13 @@
   (:require [clojure.data.fressian :as fress]
             [clojure.java.io :as io]
             [clojure [walk :as walk]]
-            [clojure.tools.logging :refer :all]
+            [clojure.tools.logging :refer [info warn]]
             [clj-time.local :as time.local]
             [clj-time.format :as time.format]
             [fipp.edn :refer [pprint]]
             [multiset.core :as multiset]
-            [jepsen.util :as util])
+            [jepsen.util :as util]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util AbstractList)
            (java.time Instant)
            (org.fressian.handlers WriteHandler ReadHandler)
@@ -52,6 +53,14 @@
                      (write [_ w set]
                        (.writeTag     w "multiset" 1)
                        (.writeObject  w (multiset/multiplicities set))))}
+
+
+       java.lang.Throwable
+       {"throwable" (reify WriteHandler
+                      (write [_ w e]
+                        (warn e "Can't serialize Throwable as Fressian")
+                        (throw+ {:type ::unserializable
+                                 :value e})))}
 
       java.time.Instant
       {"instant" (reify WriteHandler
