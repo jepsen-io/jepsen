@@ -2,7 +2,7 @@
   "Supports serialization of various Jepsen datatypes via Fressian."
   (:require [clojure.data.fressian :as fress]
             [clojure.java.io :as io]
-            [clojure [walk :as walk]]
+            [clojure [datafy :refer [datafy]]]
             [clojure.tools.logging :refer [info warn]]
             [clj-time.local :as time.local]
             [clj-time.format :as time.format]
@@ -58,9 +58,9 @@
        java.lang.Throwable
        {"throwable" (reify WriteHandler
                       (write [_ w e]
-                        (warn e "Can't serialize Throwable as Fressian")
-                        (throw+ {:type ::unserializable
-                                 :value e})))}
+                        (warn e "Can't fully serialize Throwable as Fressian")
+                        (.writeTag w "throwable" 1)
+                        (.writeObject w (datafy e))))}
 
       java.time.Instant
       {"instant" (reify WriteHandler

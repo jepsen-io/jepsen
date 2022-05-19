@@ -951,3 +951,43 @@
                    (:out res) "\n"
                    (:err res))))
     res))
+
+(defn deepfind
+  "Finds things that match a predicate in a nested structure. Returns a
+  lazy sequence of matching things, each represented by a vector *path* which
+  denotes how to access that object, ending in the matching thing itself. Path
+  elements are:
+
+    - keys for maps
+    - integers for sequentials
+    - :member for sets
+    - :deref  for deref-ables.
+
+    (deepfind string? [:a {:b \"foo\"} :c])
+    ; => ([1 :b \"foo\"])
+  "
+  ([pred haystack]
+   (deepfind pred [] haystack))
+  ([pred path haystack]
+   (cond ; This is a match; we're done
+         (pred haystack)
+         [(conj path haystack)]
+
+         (map? haystack)
+         (mapcat (fn [[k v]]
+                   (deepfind pred (conj path k) v))
+                 haystack)
+
+         (sequential? haystack)
+         (->> haystack
+              (map-indexed (fn [i x] (deepfind pred (conj path i) x)))
+              (mapcat identity))
+
+         (set? haystack)
+         (mapcat (partial deepfind pred (conj path :member)) haystack)
+
+         (instance? clojure.lang.IDeref haystack)
+         (deepfind pred (conj path :deref) @haystack)
+
+         true
+         nil)))
