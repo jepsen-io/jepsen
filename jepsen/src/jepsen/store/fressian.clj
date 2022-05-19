@@ -2,7 +2,8 @@
   "Supports serialization of various Jepsen datatypes via Fressian."
   (:require [clojure.data.fressian :as fress]
             [clojure.java.io :as io]
-            [clojure [datafy :refer [datafy]]]
+            [clojure [datafy :refer [datafy]]
+                     [walk :as walk]]
             [clojure.tools.logging :refer [info warn]]
             [clj-time.local :as time.local]
             [clj-time.format :as time.format]
