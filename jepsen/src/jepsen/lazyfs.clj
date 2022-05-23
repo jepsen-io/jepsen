@@ -21,7 +21,7 @@
 
 (def repo-url
   "Where can we clone lazyfs from?"
-  "git@github.com:dsrhaslab/lazyfs.git")
+  "https://github.com/dsrhaslab/lazyfs.git")
 
 (def commit
   "What version should we check out and build?"
