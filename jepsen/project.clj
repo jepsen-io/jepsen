@@ -42,6 +42,7 @@
                               (not (or (:perf m)
                                        (:integration m)
                                        (:logging m))))
+                   :focus       :focus
                    :perf        :perf
                    :logging     :logging
                    :integration :integration}
