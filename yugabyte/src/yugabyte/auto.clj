@@ -12,8 +12,6 @@
             [jepsen.control.net :as cn]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
-            [jepsen.os.centos :as centos]
-            [jepsen.reconnect :as rc]
             [yugabyte.ycql.client :as ycql.client]
             [yugabyte.ysql.client :as ysql.client]
             [slingshot.slingshot :refer [try+ throw+]])
@@ -323,6 +321,13 @@
      :--pgsql_proxy_bind_address (cn/ip node)]
     []))
 
+(defn tserver-workload-specific-opts
+  "Version-specific flags"
+  [test]
+  (if (and (= (:workload test) :ysql/append-rc))
+    [:--yb_enable_read_committed_isolation]
+    []))
+
 (def experimental-tuning-flags
   ; Speed up recovery from partitions and crashes. Right now it looks like
   ; these actually make the cluster slower to, or unable to, recover.
@@ -408,6 +413,7 @@
             :--rpc_slow_query_threshold_ms 1000
             :--load_balancer_max_concurrent_adds 10
             (tserver-api-opts (:api test) node)
+            (tserver-workload-specific-opts test)
 
             ; Heartbeats
             ;:--heartbeat_interval_ms 100
