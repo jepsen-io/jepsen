@@ -488,8 +488,17 @@
                                 #"No such file or directory" :does-not-exist
                                 (throw+ e)))))
 
-    :touch (do (c/exec :touch (join-path value))
-               (assoc :op :type :ok))
+    :touch
+    (try+ (c/exec :touch (join-path value))
+          (assoc op :type :ok)
+          (catch [:exit 1] e
+            (assoc op
+                   :type :fail
+                   :error (condp re-find (:err e)
+                            #"Not a directory"           :not-dir
+                            #"No such file or directory" :does-not-exist
+                            (throw+ e)))))
+
 
     :write (let [[path data] value]
              (try+ (cu/write-file! data (join-path path))
@@ -555,7 +564,7 @@
             (fn [] {:f :read, :value [(rand-path) nil]})
             (fn [] {:f :rm, :value (rand-path)})
             ; Touch is broken in lazyfs rn
-            ; (fn [] {:f :touch, :value (rand-path)})
+            (fn [] {:f :touch, :value (rand-path)})
             (fn [] {:f :write, :value [(rand-path) (str (rand-int 10000))]})
             ]))
 
@@ -642,7 +651,7 @@
                  :valid? false)
           {:valid? true})))))
 
-(deftest ^:integration ^:focus fs-test
+(deftest ^:integration fs-test
   (let [dir    "/tmp/jepsen/fs-test"
         lazyfs (lazyfs/lazyfs dir)
         test (assoc tests/noop-test
@@ -666,4 +675,5 @@
         test (jepsen/run! test)]
     ;(pprint (:history test))
     ;(pprint (:results test))
+    ; This fails due to the bash > overwrite non-truncation bug in lazyfs
     (is (true? (:valid? (:results test))))))
