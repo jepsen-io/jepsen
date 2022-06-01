@@ -563,7 +563,6 @@
             (fn [] {:f :mv, :value [(rand-path) (rand-path)]})
             (fn [] {:f :read, :value [(rand-path) nil]})
             (fn [] {:f :rm, :value (rand-path)})
-            ; Touch is broken in lazyfs rn
             (fn [] {:f :touch, :value (rand-path)})
             (fn [] {:f :write, :value [(rand-path) (str (rand-int 10000))]})
             ]))
