@@ -18,7 +18,8 @@
                     [os :as os]
                     [tests :as tests]
                     [util :as util :refer [pprint-str]]]
-            [jepsen.control.util :as cu]
+            [jepsen.control [core :as cc]
+                            [util :as cu]]
             [jepsen.os.debian :as debian]
             [knossos.op :as op]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -124,17 +125,27 @@
   {:type :file
    :data ""})
 
+(defn model-dir?
+  "Is this a model directory?"
+  [dir]
+  (= :dir (:type dir)))
+
+(defn model-file?
+  "Is this a model file?"
+  [file]
+  (= :file (:type file)))
+
 (defn assert-file
   "Throws {:type ::not-file} when x is not a file. Returns file."
   [file]
-  (when-not (= :file (:type file))
+  (when-not (model-file? file)
     (throw+ {:type ::not-file}))
   file)
 
 (defn assert-dir
   "Throws {:type ::not-dir} when x is not a directory. Returns dir."
   [dir]
-  (when-not (= :dir (:type dir))
+  (when-not (model-dir? dir)
     (throw+ {:type ::not-dir}))
   dir)
 
@@ -159,7 +170,7 @@
       root)))
 
 (defn get-path
-  "Like get-path, but throws :type ::does-not-exist when the thing doesn't
+  "Like get-path*, but throws :type ::does-not-exist when the thing doesn't
   exist."
   [root path]
   (if-let [entry (get-path* root path)]
@@ -238,8 +249,8 @@
     {:type ::not-file}  If the path exists but isn't a file"
   [root path transform]
   (update-path* root path (fn [file]
-                            (when-not (or (nil? file)
-                                          (not= :file (:type file)))
+                            (when (and (not (nil? file))
+                                       (not= :file (:type file)))
                               (throw+ {:type ::not-file}))
                             (transform file))))
 
@@ -281,19 +292,63 @@
   [root {:keys [f value] :as op}]
   (try+
     (case f
+      :append
+      (try+
+        (let [[path data] value]
+          [(update-file* root path
+                         (fn [file]
+                           (let [file (or file (model-file))]
+                             (update file :data str data))))
+           (assoc op :type :ok)]))
+
+      :mkdir
+      [(update-path* root value
+                     (fn [path]
+                       ; We expect this to be empty
+                       (when-not (nil? path)
+                         (throw+ {:type ::exists}))
+                       (model-dir)))
+       (assoc op :type :ok)]
+
+
       :mv (try+
-            (let [; Working out the exact order that mv checks and throws errors
-                  ; has proven incredibly hard so we just collapse them to one
-                  ; value.
-                  [from-path to-path] value
-                  from-entry (get-path root from-path)
-                  to-dir     (assert-dir (get-path* root (parent-dir to-path)))
-                  _ (when (= from-path to-path)
-                      (throw+ {:type ::same-file}))]
+            (let [[from-path to-path] value
+                  from-entry (get-path* root from-path)
+                  to-entry   (get-path* root to-path)
+                  ; If moving to a directory, put us *inside* the given dir
+                  to-path    (if (model-dir? to-entry)
+                               (vec (concat to-path [(last from-path)]))
+                               to-path)
+                  to-entry   (get-path* root to-path)]
+
+              ; Look at ALL THESE WAYS TO FAIL
+              (assert-dir (get-path* root (parent-dir to-path)))
+
+              (when (nil? from-entry)
+                (throw+ {:type ::does-not-exist}))
+
+              (when (= from-path to-path)
+                (throw+ {:type ::same-file}))
+
+              (when (= from-path (take (count from-path) to-path))
+                (throw+ {:type ::cannot-move-inside-self}))
+
+              (when (and (= :dir (:type to-entry))
+                         (not= :dir (:type from-entry)))
+                (throw+ {:type ::cannot-overwrite-dir-with-non-dir}))
+
+              (when (and to-entry
+                         (= :dir (:type from-entry))
+                         (not= :dir (:type to-entry)))
+                (throw+ {:type ::cannot-overwrite-non-dir-with-dir}))
+
               [(-> root
                    (dissoc-path from-path)
                    (assoc-path to-path from-entry))
                (assoc op :type :ok)])
+            ; Working out the exact order that mv checks and throws errors
+            ; has proven incredibly hard so we collapse some of them to
+            ; one value.
             (catch [:type ::not-dir] _
               (throw+ {:type ::does-not-exist})))
 
@@ -303,6 +358,10 @@
         (when (not= :file (:type entry))
           (throw+ {:type ::not-file}))
         [root (assoc op :type :ok, :value [path (:data entry)])])
+
+      :rm
+      (do (get-path root value) ; Throws if does not exist
+          [(dissoc-path root value) (assoc op :type :ok)])
 
       :touch
       [(update-dir root (parent-dir value)
@@ -327,19 +386,63 @@
                                   (let [file' (assoc file :data data)]
                                     (assoc-in dir [:files filename] file')))))]
         [root' (assoc op :type :ok)]))
-    (catch [:type ::same-file] e
-      [root (assoc op :type :fail, :error :same-file)])
-    (catch [:type ::not-dir] e
-      [root (assoc op :type :fail, :error :not-dir)])
+    (catch [:type ::cannot-move-inside-self] e
+      [root (assoc op :type :fail, :error :cannot-move-inside-self)])
+    (catch [:type ::cannot-overwrite-dir-with-non-dir] e
+      [root (assoc op :type :fail, :error :cannot-overwrite-dir-with-non-dir)])
+    (catch [:type ::cannot-overwrite-non-dir-with-dir] e
+      [root (assoc op :type :fail, :error :cannot-overwrite-non-dir-with-dir)])
     (catch [:type ::does-not-exist] e
       [root (assoc op :type :fail, :error :does-not-exist)])
+    (catch [:type ::exists] e
+      [root (assoc op :type :fail, :error :exists)])
+    (catch [:type ::not-dir] e
+      [root (assoc op :type :fail, :error :not-dir)])
     (catch [:type ::not-file] e
-      [root (assoc op :type :fail, :error :not-file)])))
+      [root (assoc op :type :fail, :error :not-file)])
+    (catch [:type ::same-file] e
+      [root (assoc op :type :fail, :error :same-file)])))
 
 (defn fs-op!
   "Applies a filesystem operation to the local node."
   [{:keys [f value] :as op}]
   (case f
+    :append
+    (try+ (let [[path data] value
+                cmd (->> [:cat :>> (join-path path)]
+                         (map c/escape)
+                         (str/join " "))
+                action {:cmd cmd
+                        :in data}]
+            (-> action
+                c/wrap-cd
+                c/wrap-sudo
+                c/wrap-trace
+                c/ssh*
+                cc/throw-on-nonzero-exit))
+          (assoc op :type :ok)
+          (catch [:exit 1] e
+            (assoc op
+                   :type :fail
+                   :error (condp re-find (:err e)
+                            #"Is a directory"  :not-file
+                            #"Not a directory" :not-dir
+                            #"No such file"    :does-not-exist
+
+                            (throw+ e)))))
+
+    :mkdir
+    (try+ (c/exec :mkdir (join-path value))
+          (assoc op :type :ok)
+          (catch [:exit 1] e
+            (assoc op
+                   :type :fail
+                   :error (condp re-find (:err e)
+                            #"File exists"               :exists
+                            #"Not a directory"           :not-dir
+                            #"No such file or directory" :does-not-exist
+                            (throw+ e)))))
+
     :mv
     (try+ (let [[from to] value]
             (c/exec :mv (join-path from) (join-path to))
@@ -349,6 +452,12 @@
                    :type :fail
                    :error (condp re-find (:err e)
                             #"are the same file"         :same-file
+                            #"cannot move .+ to a subdirectory of itself"
+                            :cannot-move-inside-self
+                            #"cannot overwrite directory .+ with non-directory"
+                            :cannot-overwrite-dir-with-non-dir
+                            #"cannot overwrite non-directory .+ with directory"
+                            :cannot-overwrite-non-dir-with-dir
                             #"Not a directory"           ;:not-dir
                             :does-not-exist ; We collapse these for convenience
                             #"No such file or directory" :does-not-exist
@@ -363,10 +472,21 @@
             (assoc op
                    :type :fail
                    :error (condp re-find (:err e)
+                            #"Is a directory"            :not-file
                             #"Not a directory"           :not-dir
                             #"No such file or directory" :does-not-exist
 
                             (throw+ e)))))
+
+    :rm (try+ (do (c/exec :rm :-r (join-path value))
+                  (assoc op :type :ok))
+              (catch [:exit 1] e
+                (assoc op
+                       :type :fail
+                       :error (condp re-find (:err e)
+                                #"Not a directory"           :not-dir
+                                #"No such file or directory" :does-not-exist
+                                (throw+ e)))))
 
     :touch (do (c/exec :touch (join-path value))
                (assoc :op :type :ok))
@@ -378,8 +498,9 @@
                      (assoc op
                             :type :fail
                             :error (condp re-find (:err e)
+                                     #"Is a directory"  :not-file
                                      #"Not a directory" :not-dir
-                                     #"No such file" :does-not-exist
+                                     #"No such file"    :does-not-exist
 
                                      (throw+ e))))))))
 
@@ -411,7 +532,7 @@
 (defn rand-filename
   "Generates a random filename."
   []
-  (rand-nth ["a" "b" "c"]))
+  (rand-nth ["a" "b"]))
 
 (defn rand-path
   "Generates a random path."
@@ -426,12 +547,28 @@
 (defn fs-gen
   "Generator of operations for a model filesystem."
   []
-  (gen/mix [; Touch is broken in lazyfs rn
+  (gen/mix [
+            (fn [] {:f :append, :value [(rand-path)
+                                        (str " " (rand-int 10000))]})
+            (fn [] {:f :mkdir, :value (rand-path)})
+            (fn [] {:f :mv, :value [(rand-path) (rand-path)]})
+            (fn [] {:f :read, :value [(rand-path) nil]})
+            (fn [] {:f :rm, :value (rand-path)})
+            ; Touch is broken in lazyfs rn
             ; (fn [] {:f :touch, :value (rand-path)})
             (fn [] {:f :write, :value [(rand-path) (str (rand-int 10000))]})
-            (fn [] {:f :read, :value [(rand-path) nil]})
-            (fn [] {:f :mv, :value [(rand-path) (rand-path)]})
             ]))
+
+(defn simple-trace
+  "Takes a collection of ops from a history and strips them down to just [type
+  f value maybe-error] tuples, to make it easier to read traces from
+  fs-checker."
+  [history]
+  (->> history
+       (mapv (fn [{:keys [type f value error]}]
+               (if error
+                 [type f value error]
+                 [type f value])))))
 
 (defn fs-checker
   "A checker which compares the actual history to a simulated model
@@ -485,7 +622,7 @@
                                (recur (inc i))
                                ; Not fine
                                (let [; Compute a window of indices
-                                     is (range 0 #_(max 0 (- i 10)) i)
+                                     is (range 0 #_(max 0 (- i 10)) (inc i))
                                      ; And take those recent ops...
                                      ops (->> (map history is)
                                               (remove op/invoke?))
@@ -496,7 +633,7 @@
                                              (model-dir))
                                      root' (nth roots i)]
                                  {:index    i
-                                  :trace    ops
+                                  :trace    (simple-trace ops)
                                   :root     root
                                   :expected expected
                                   :actual   actual})))))]
@@ -505,7 +642,7 @@
                  :valid? false)
           {:valid? true})))))
 
-(deftest ^:integration fs-test
+(deftest ^:integration ^:focus fs-test
   (let [dir    "/tmp/jepsen/fs-test"
         lazyfs (lazyfs/lazyfs dir)
         test (assoc tests/noop-test
@@ -523,7 +660,7 @@
                                                :value ["n1"]}
                                            repeat
                                            (gen/stagger 1/2)))
-                                    (gen/time-limit 50))
+                                    (gen/time-limit 30))
                     :checker   (fs-checker)
                     :nodes     ["n1"])
         test (jepsen/run! test)]
