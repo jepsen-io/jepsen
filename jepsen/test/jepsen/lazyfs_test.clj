@@ -43,7 +43,7 @@
                         :read (let [vals (-> (c/exec :cat file)
                                              (str/split #"\s+")
                                              (->> (remove #{""})
-                                                  (mapv util/parse-long)))]
+                                                  (mapv parse-long)))]
                                 (assoc op :type :ok, :value vals)))))
         (get node)))
 

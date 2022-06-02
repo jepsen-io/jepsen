@@ -1,5 +1,6 @@
 (ns jepsen.util
   "Kitchen sink"
+  (:refer-clojure :exclude [parse-long]) ; Clojure added this in 1.11.1
   (:require [clojure.tools.logging :refer [info]]
             [clojure.core.reducers :as r]
             [clojure [string :as str]]

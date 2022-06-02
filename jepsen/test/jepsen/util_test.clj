@@ -1,4 +1,5 @@
 (ns jepsen.util-test
+  (:refer-clojure :exclude [parse-long])
   (:use clojure.test)
   (:require [jepsen.util :refer :all]))
 

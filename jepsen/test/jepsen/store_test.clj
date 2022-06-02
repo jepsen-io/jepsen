@@ -1,5 +1,5 @@
 (ns jepsen.store-test
-  (:refer-clojure :exclude [load])
+  (:refer-clojure :exclude [load test])
   (:use clojure.test)
   (:require [clojure.data.fressian :as fress]
             [clojure.string :as str]

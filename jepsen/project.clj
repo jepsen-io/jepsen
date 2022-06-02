@@ -3,11 +3,11 @@
   :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.10.3"]
+  :dependencies [[org.clojure/clojure "1.11.1"]
                  [org.clojure/data.fressian "1.0.0"]
                  [org.clojure/tools.logging "1.2.4"]
                  [org.clojure/tools.cli "1.0.206"]
-                 [spootnik/unilog "0.7.29"]
+                 [spootnik/unilog "0.7.30"]
                  [elle "0.1.5-SNAPSHOT"]
                  [clj-time "0.15.2"]
                  [jepsen.txn "0.1.2"]
@@ -16,7 +16,7 @@
                  [gnuplot "0.1.3"]
                  [http-kit "2.5.3"]
                  [ring "1.9.5"]
-                 [com.hierynomus/sshj "0.32.0"]
+                 [com.hierynomus/sshj "0.33.0"]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
                  [com.jcraft/jsch.agentproxy.sshj "0.0.9"
                   :exclusions [net.schmizz/sshj]]
@@ -27,7 +27,7 @@
                  [dom-top "1.0.7"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.1.1"]
-                 [fipp "0.6.25"]
+                 [fipp "0.6.26"]
                  [io.lacuna/bifurcan "0.1.0"]]
   :java-source-paths ["src"]
   :javac-options ["-target" "11" "-source" "11"]
