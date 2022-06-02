@@ -330,9 +330,6 @@
               (when (= from-path to-path)
                 (throw+ {:type ::same-file}))
 
-              (when (= from-path (take (count from-path) to-path))
-                (throw+ {:type ::cannot-move-inside-self}))
-
               (when (and (= :dir (:type to-entry))
                          (not= :dir (:type from-entry)))
                 (throw+ {:type ::cannot-overwrite-dir-with-non-dir}))
@@ -341,6 +338,9 @@
                          (= :dir (:type from-entry))
                          (not= :dir (:type to-entry)))
                 (throw+ {:type ::cannot-overwrite-non-dir-with-dir}))
+
+              (when (= from-path (take (count from-path) to-path))
+                (throw+ {:type ::cannot-move-inside-self}))
 
               [(-> root
                    (dissoc-path from-path)
@@ -674,5 +674,4 @@
         test (jepsen/run! test)]
     ;(pprint (:history test))
     ;(pprint (:results test))
-    ; This fails due to the bash > overwrite non-truncation bug in lazyfs
     (is (true? (:valid? (:results test))))))

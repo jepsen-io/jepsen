@@ -25,7 +25,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "45db294928c5f8365e75fac81f0f3d4c10417614")
+  "57cc7e943c3b771d49ee1de0b4b40744811631ac")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
@@ -245,6 +245,15 @@ blocks_per_page=1"))
     (recur (:lazyfs db-or-lazyfs-map))
     (do (info "Losing un-fsynced writes to" (:dir db-or-lazyfs-map))
         (fifo! db-or-lazyfs-map "lazyfs::clear-cache")
+        :done)))
+
+(defn checkpoint!
+  "Forces the given lazyfs map or DB to flush writes to disk."
+  [db-or-lazyfs-map]
+  (if (instance? DB db-or-lazyfs-map)
+    (recur (:lazyfs db-or-lazyfs-map))
+    (do (info "Checkpointing all writes to" (:dir db-or-lazyfs-map))
+        (fifo! db-or-lazyfs-map "lazyfs::cache-checkpoint")
         :done)))
 
 (defn nemesis
