@@ -70,7 +70,7 @@
 (defn parse-time
   "Parses a time from a string"
   [t]
-  (-> (timef/parse-local basic-date-time t)
+  (-> (timef/parse basic-date-time t)
       time.coerce/to-date-time))
 
 (defn fast-tests
@@ -150,7 +150,7 @@
   (let [r    (:results t)
         time (->> t
                   :start-time
-                  (timef/unparse (timef/formatters :date-hour-minute-second)))]
+                  (timef/unparse-local (timef/formatters :date-hour-minute-second)))]
     [:tr
      [:td [:a {:href (url t "")} (:name t)]]
      [:td [:a {:href (url t "")} time]]
