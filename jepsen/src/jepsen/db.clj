@@ -13,16 +13,19 @@
   (setup!     [db test node] "Set up the database on this particular node.")
   (teardown!  [db test node] "Tear down the database on this particular node."))
 
+(defprotocol Kill
+  "This optional protocol supports starting and killing a DB's processes."
+  (kill!  [db test node] "Forcibly kills the process")
+  (start! [db test node] "Starts the process"))
+
 ; Process is imported by default from java.lang. The eval here is an attempt to
 ; keep lein install from generating broken... cached... something or other. I
 ; can't figure out why this breaks.
 (eval
-  '(do
-     (ns-unmap 'jepsen.db 'Process)
-     (defprotocol Process
-       "This optional protocol supports starting and killing a DB's processes."
-       (start! [db test node] "Starts the process")
-       (kill!  [db test node] "Forcibly kills the process"))))
+  '(do (ns-unmap 'jepsen.db 'Process)
+       ; It's going to jump ahead and compile this def ... ahead of the
+       ; ns-unmap, I think? So we wrap it in a *second* eval. JFC, what a hack.
+       (eval '(def Process Kill))))
 
 (defprotocol Pause
   "This optional protocol supports pausing and resuming a DB's processes."
