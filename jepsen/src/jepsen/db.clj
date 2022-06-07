@@ -119,7 +119,7 @@
               {:logfile log-file
                :pidfile pid-file
                :chdir   dir}
-              "/usr/sbin/tcpdump"
+              "/usr/bin/tcpdump"
               :-w  cap-file
               :-s  65535
               :-B  16384 ; buffer in KB
