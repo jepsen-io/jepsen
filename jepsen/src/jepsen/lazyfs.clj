@@ -25,7 +25,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "57cc7e943c3b771d49ee1de0b4b40744811631ac")
+  "0ca17d6c172615ad86931c0634512fefac23155f")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
@@ -41,7 +41,7 @@
 
 (defn config
   "The lazyfs config file text. Takes a lazyfs map"
-  [{:keys [fifo]}]
+  [{:keys [fifo cache-size]}]
   (str "[faults]
 fifo_path=\"" fifo "\"
 
@@ -49,7 +49,7 @@ fifo_path=\"" fifo "\"
 apply_eviction=false
 
 [cache.simple]
-custom_size=\"0.5GB\"
+custom_size=\"" (or cache-size "0.5GB") "\"
 blocks_per_page=1"))
 
 (def real-extension
@@ -109,6 +109,8 @@ blocks_per_page=1"))
     :user     Which user should run lazyfs? Default \"root\".
     :chown    Who to set as the owner of the directory. Defaults to
               \"<user>:<user>\"
+    :cache-size  The size of the lazyfs page cache. Should be a string like
+                 \"0.5GB\"
   "
   [x]
   (let [opts (cond (string? x)
