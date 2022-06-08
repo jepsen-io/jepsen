@@ -3,9 +3,10 @@
                      [set :as set]
                      [test :refer :all]]
             [jepsen [client :as client]
+                    [common-test :refer [quiet-logging]]
                     [control :as c]
+                    [core :as jepsen]
                     [nemesis :refer :all]
-                    [tests :refer [noop-test]]
                     [util :refer [meh]]]
             [jepsen.control.net :as net]))
 

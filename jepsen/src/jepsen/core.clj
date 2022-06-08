@@ -174,9 +174,10 @@
          (control/on-nodes ~test (partial db/teardown! (:db ~test)))))))
 
 (defmacro with-client+nemesis-setup-teardown
-  "Evaluates body, setting up clients and nemesis before, and tearing them down
-  at the end of the test."
-  [test & body]
+  "Takes a binding vector of a test symbol and a test map. Sets up clients and
+  nemesis, and rebinds (:nemesis test) to the set-up nemesis. Evaluates body.
+  Afterwards, ensures clients and nemesis are torn down."
+  [[test-sym test] & body]
   `(let [client#  (:client ~test)
          nemesis# (nemesis/validate (:nemesis ~test))]
     ; Setup
@@ -188,13 +189,14 @@
                                          (client/setup! c# ~test)
                                          c#)))
                                    (:nodes ~test))
-               nf# @nf#]
+               nemesis# @nf#
+               ~test-sym (assoc ~test :nemesis nemesis#)]
       (try
         (dorun clients#)
         ~@body
         (finally
           ; Teardown (and close clients)
-          (let [nf# (future (nemesis/teardown! nf# ~test))]
+          (let [nf# (future (nemesis/teardown! nemesis# ~test))]
             (dorun (real-pmap (fn [[c# node#]]
                                 (with-thread-name
                                   (str "jepsen node " node#))
@@ -208,7 +210,7 @@
   "Takes a test, spawns nemesis and clients, runs the generator, and returns
   the history."
   [test]
-  (with-client+nemesis-setup-teardown test
+  (with-client+nemesis-setup-teardown [test test]
     (gen.interpreter/run! test)))
 
 (defn analyze!

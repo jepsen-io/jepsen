@@ -78,7 +78,7 @@
                  :op        op
                  :op'       op'
                  :problems  problems}))
-      op))
+      op'))
 
   (teardown! [this test]
     (teardown! nemesis test)))

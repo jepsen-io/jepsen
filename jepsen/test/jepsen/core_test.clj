@@ -4,7 +4,8 @@
   (:require [clojure.string :as str]
             [clojure.pprint :refer [pprint]]
             [jepsen.core :refer :all]
-            [jepsen [common-test :refer [quiet-logging]]]
+            [jepsen [common-test :refer [quiet-logging]]
+                    [nemesis-test :as nemesis-test]]
             [jepsen.os :as os]
             [jepsen.db :as db]
             [jepsen.tests :as tst]
@@ -64,25 +65,27 @@
         meta-log (atom [])
         db    (tst/atom-db state)
         n     1000
+        nemesis (nemesis-test/test-nem :nem #{:fault})
         test (assoc tst/noop-test
                        :name      "basic cas pure-gen"
                        :db        db
                        :client    (tst/atom-client state meta-log)
+                       :nemesis   nemesis
                        :concurrency 10
                        :pure-generators true
                        :generator
-                       (gen/phases
-                         {:f :read}
-                         (->> (gen/reserve
-                                5 (repeat {:f :read})
-                                (gen/mix
-                                  [(fn [] {:f :write
-                                           :value (rand-int 5)})
-                                   (fn [] {:f :cas
-                                           :value [(rand-int 5)
-                                                   (rand-int 5)]})]))
-                              (gen/limit n)
-                              (gen/clients))))
+                       (->> (gen/phases
+                              {:f :read}
+                              (->> (gen/reserve
+                                     5 (repeat {:f :read})
+                                     (gen/mix
+                                       [(fn [] {:f :write
+                                                :value (rand-int 5)})
+                                        (fn [] {:f :cas
+                                                :value [(rand-int 5)
+                                                        (rand-int 5)]})]))
+                                   (gen/limit n)))
+                            (gen/nemesis {:type :info, :f :fault})))
         test     (run! test)
         h        (:history test)
         invokes  (partial filter op/invoke?)
@@ -108,12 +111,32 @@
         (is (= {:open     n2  :close n2}  (frequencies run)))
         (is (= {:teardown n   :close n}   (frequencies teardown)))))
 
+    (testing "nemesis setup/teardown"
+      (let [ops (filter (comp #{:nemesis} :process) h)
+            _   (is (= 2 (count ops)))
+            [op op'] ops]
+        ; Generator should have produced a fault
+        (is (= :fault (:f op)))
+        (is (= :fault (:f op')))
+        ; The nemesis should have been set up, but we won't have seen that
+        ; change the original nemesis.
+        (is (false? (:setup? nemesis)))
+        ; But since we write the nemesis to the completion value, THAT should
+        ; have been set up.
+        (let [nemesis' (:value op')]
+          (is (= :nem (:id nemesis')))
+          (is (true? (:setup? nemesis'))))
+        ; Finally, we want to make sure we actually tore down the nemesis. This
+        ; one's stateful, so we read it from the original nemesis.
+        (is (true? @(:teardown? nemesis)))))
+
     (is (:valid? (:results test)))
     (testing "first read"
       (is (= 0 (:value (first (oks (reads h)))))))
     (testing "history"
-      (is (= (* 2 (+ 1 n)) (count h)))
-      (is (= #{:read :write :cas} (set (map :f h))))
+      ; 1 initial read, 1 nemesis fault
+      (is (= (* 2 (+ 2 n)) (count h)))
+      (is (= #{:read :write :cas :fault} (set (map :f h))))
       (is (every? nil? (values (invokes (reads h)))))
       (is (every? smol? (values (oks (reads h)))))
       (is (every? smol? (values (writes h))))
