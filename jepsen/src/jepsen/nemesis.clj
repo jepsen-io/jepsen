@@ -56,7 +56,7 @@
                 nil
                 "expected setup! to return a Nemesis, but got %s instead"
                 (pr-str res)))
-      res))
+      (Validate. res)))
 
   (invoke! [this test op]
     (let [op' (invoke! nemesis test op)
