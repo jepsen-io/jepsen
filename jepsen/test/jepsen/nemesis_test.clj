@@ -1,12 +1,13 @@
 (ns jepsen.nemesis-test
-  (:use clojure.test)
-  (:require [jepsen.client :as client]
-            [jepsen.nemesis :refer :all]
-            [jepsen.control :as c]
-            [jepsen.control.net :as net]
-            [jepsen.util :refer [meh]]
-            [jepsen.tests :refer [noop-test]]
-            [clojure.set :as set]))
+  (:require [clojure [pprint :refer [pprint]]
+                     [set :as set]
+                     [test :refer :all]]
+            [jepsen [client :as client]
+                    [control :as c]
+                    [nemesis :refer :all]
+                    [tests :refer [noop-test]]
+                    [util :refer [meh]]]
+            [jepsen.control.net :as net]))
 
 (defn edges
   "A map of nodes to the set of nodes they can ping"
@@ -134,3 +135,54 @@
 
   ;    (finally
   ;      (client/teardown! n noop-test)))))
+
+(defrecord TestNem [id fs setup? teardown?]
+  Nemesis
+  (setup! [this test]
+    (assoc this :setup? true))
+
+  (invoke! [this test op]
+    (assert (contains? fs (:f op)))
+    (assoc op :value this))
+
+  (teardown! [this test]
+    (reset! teardown? true))
+
+  Reflection
+  (fs [this]
+    fs))
+
+(defn test-nem
+  "Constructs a test nemesis. Takes an ID (anything) and a set of fs."
+  [id fs]
+  (TestNem. id fs false (atom false)))
+
+(deftest compose-test
+  (testing "reflection"
+    (let [a (test-nem :a #{:a})
+          b (test-nem :b #{:b})
+          c (compose [a b])]
+      (is (= #{:a} (fs a)))
+      (is (= #{:b} (fs b)))
+      ; Composed nemesis should handle both fs
+      (is (= #{:a :b} (fs c)))
+      (is (every? (comp false? :setup?) (:nemeses c)))
+      (is (every? (comp false? deref :teardown?) (:nemeses c)))
+      (let [c' (setup! c {})]
+        ; Should propagate setup! through to children
+        (is (= #{:a :b} (fs c')))
+        (is (every? (comp true? :setup?) (:nemeses c')))
+        (is (every? (comp false? deref :teardown?) (:nemeses c')))
+
+        ; Should evaluate on sub-nemeses
+        (let [[a' b'] (:nemeses c')]
+          (is (= :a (:id a')))
+          (is (= :b (:id b')))
+          (is (= a' (:value (invoke! c' {} {:type :info, :f :a}))))
+          (is (= b' (:value (invoke! c' {} {:type :info, :f :b})))))
+
+        ; Should propagate teardown! through to children
+        (teardown! c' {})
+        (is (= #{:a :b} (fs c')))
+        (is (every? (comp true? :setup?) (:nemeses c')))
+        (is (every? (comp true? deref :teardown?) (:nemeses c')))))))
