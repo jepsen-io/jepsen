@@ -6,7 +6,9 @@
                     [common-test :refer [quiet-logging]]
                     [control :as c]
                     [core :as jepsen]
+                    [generator :as gen]
                     [nemesis :refer :all]
+                    [tests :as tests]
                     [util :refer [meh]]]
             [jepsen.control.net :as net]))
 
@@ -187,3 +189,35 @@
         (is (= #{:a :b} (fs c')))
         (is (every? (comp true? :setup?) (:nemeses c')))
         (is (every? (comp true? deref :teardown?) (:nemeses c')))))))
+
+(defn nonzero-file?
+  "Are there non-zero bytes in a file?"
+  [file]
+  ; This is kind of a weird hack but we're just going to grep for something
+  ; other than all-zeroes in the hexdump.
+  (let [data' (c/on "n1"
+                    (c/su
+                      (c/exec :hd file c/| :head :-n 10)))]
+    (boolean (re-find #"\s([1-9]0|0[1-9])\s" data'))))
+
+(deftest ^:integration bitflip-test
+  ; First, create a file on n1 with a bunch of zeroes.
+  (let [file "/tmp/jepsen/zeroes"]
+    (c/on "n1"
+          (c/su
+            (c/exec :mkdir :-p "/tmp/jepsen")
+            (c/exec :rm :-rf file)
+            (c/exec :dd "if=/dev/zero" (str "of=" file) "bs=1M" "count=1")))
+    (is (not (nonzero-file? file)))
+    ; Then run a test with a nemesis that flips some bits.
+    (let [test (assoc tests/noop-test
+                      :name      "bitflip test"
+                      :nemesis   (bitflip)
+                      :generator (gen/nemesis
+                                   {:type :info
+                                    :f    :bitflip
+                                    :value {"n1" {:file file
+                                                  :probability 0.01}}}))
+          test' (jepsen/run! test)]
+      ; We should see those bitflips!
+      (is (nonzero-file? file)))))

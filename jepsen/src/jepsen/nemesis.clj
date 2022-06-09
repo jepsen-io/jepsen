@@ -6,6 +6,7 @@
                     [control  :as c]
                     [net      :as net]
                     [util     :as util]]
+            [jepsen.control [util :as cu]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol Nemesis
@@ -536,4 +537,54 @@
                           (c/exec :truncate :-c :-s (str "-" drop) file))))))
       op)
 
-    (teardown! [this test])))
+    (teardown! [this test])
+
+    Reflection
+    (fs [this]
+      #{:truncate})))
+
+(def bitflip-dir
+  "Where do we install the bitflip utility?"
+  "/opt/jepsen/bitflip")
+
+(defrecord Bitflip []
+  Nemesis
+  (setup! [this test]
+    (c/with-test-nodes test
+      (c/su
+        (cu/install-archive! "https://github.com/aybabtme/bitflip/releases/download/v0.2.0/bitflip_0.2.0_Linux_x86_64.tar.gz" bitflip-dir))
+      this)
+    this)
+
+  (invoke! [this test {:keys [value] :as op}]
+    (->> (c/on-nodes test (keys value)
+                     (fn flip [test node]
+                       (let [{:keys [file probability]} (get value node)
+                             _ (when-not file
+                                 (throw+ {:type ::no-file}))
+                             probability (or probability 0.01)
+                             percent (* 100 probability)]
+                         (info "Flipping" percent "% of bits in " file)
+                         (c/su
+                           (c/exec (str bitflip-dir "/bitflip")
+                                   :spray
+                                   (format "percent:%.32f" percent)
+                                   file)))))
+         (assoc op :value)))
+
+  (teardown! [this test])
+
+  Reflection
+  (fs [this]
+    #{:bitflip}))
+
+(defn bitflip
+  "A nemesis which introduces random bitflips in files. Takes operations like:
+
+    {:f     :bitflip
+     :value {\"some-node\" {:file         \"/path/to/file\"
+                            :probability  1e-3}}}
+
+  This flips 1 x 10^-3 of the bits in `/path/to/file` on `some-node`."
+  []
+  (Bitflip.))
