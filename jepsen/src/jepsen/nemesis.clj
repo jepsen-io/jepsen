@@ -564,7 +564,6 @@
                                  (throw+ {:type ::no-file}))
                              probability (or probability 0.01)
                              percent (* 100 probability)]
-                         (info "Flipping" percent "% of bits in " file)
                          (c/su
                            (c/exec (str bitflip-dir "/bitflip")
                                    :spray
