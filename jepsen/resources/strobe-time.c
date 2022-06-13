@@ -44,7 +44,7 @@ struct timespec wall_now() {
 
 /* Set wall clock */
 void set_wall_clock(struct timespec ts) {
-  printf("Setting clock: %d %d\n", ts.tv_sec, ts.tv_nsec);
+  /* printf("Setting clock: %d %d\n", ts.tv_sec, ts.tv_nsec); */
   if (0 != clock_settime(CLOCK_REALTIME, &ts)) {
     perror("clock_settime");
     exit(2);
