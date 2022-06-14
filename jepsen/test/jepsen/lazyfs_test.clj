@@ -17,12 +17,15 @@
                     [nemesis :as nem]
                     [os :as os]
                     [tests :as tests]
-                    [util :as util :refer [pprint-str]]]
+                    [util :as util :refer [pprint-str
+                                           timeout]]]
             [jepsen.control [core :as cc]
                             [util :as cu]]
             [jepsen.os.debian :as debian]
             [knossos.op :as op]
             [slingshot.slingshot :refer [try+ throw+]]))
+
+(use-fixtures :once quiet-logging)
 
 (defrecord FileSetClient [dir file node]
   client/Client
@@ -523,11 +526,12 @@
     this)
 
   (invoke! [this test op]
-    (-> (c/on-nodes test [node]
-                    (fn [_ _]
-                      ;(c/trace
-                      (c/cd dir (fs-op! op))))
-        (get node)))
+    (timeout 5000 (assoc op :type :info, :error :timeout)
+             (-> (c/on-nodes test [node]
+                             (fn [_ _]
+                               ;(c/trace
+                               (c/cd dir (fs-op! op))))
+                 (get node))))
 
   (teardown! [this test])
 
