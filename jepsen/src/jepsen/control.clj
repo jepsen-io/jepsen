@@ -5,15 +5,15 @@
 
   Note that a whole bunch of this namespace refers to things as 'ssh',
   although they really can apply to any remote, not just SSH."
-  (:require [clj-ssh.ssh    :as ssh]
-            [jepsen.util    :as util :refer [real-pmap with-thread-name]]
+  (:require [jepsen.util    :as util :refer [real-pmap with-thread-name]]
             [jepsen.control [clj-ssh :as clj-ssh]
                             [core :as core
                              :refer [connect
                                      disconnect!
                                      execute!
                                      upload!
-                                     download!]]]
+                                     download!]]
+                            [sshj :as sshj]]
             [potemkin :refer [import-vars]]
             [clojure.string :as str]
             [clojure.java.io :as io]
@@ -32,9 +32,13 @@
    lit
    throw-on-nonzero-exit])
 
-(def ssh
-  "The default SSH remote"
+(def clj-ssh
+  "The clj-ssh SSH remote. This used to be the default."
   (clj-ssh/remote))
+
+(def ssh
+  "The default (SSHJ-backed) remote."
+  (sshj/remote))
 
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)

@@ -655,7 +655,7 @@
                  :valid? false)
           {:valid? true})))))
 
-(deftest ^:integration ^:focus fs-test
+(deftest ^:integration fs-test
   (let [dir    "/tmp/jepsen/fs-test"
         lazyfs (lazyfs/lazyfs dir)
         test (assoc tests/noop-test
