@@ -1,12 +1,15 @@
 (ns jepsen.nemesis.combined-test
   (:require [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
-            [jepsen [db :as db]
+            [jepsen [common-test :refer [quiet-logging]]
+                    [db :as db]
                     [util :as util]
                     [generator :as gen]]
             [jepsen.generator [interpreter :as interpreter]
                               [interpreter-test :as it]]
             [jepsen.nemesis.combined :refer :all]))
+
+(use-fixtures :once quiet-logging)
 
 (defn first-primary-db
   "A database whose primary is always \"n1\""
