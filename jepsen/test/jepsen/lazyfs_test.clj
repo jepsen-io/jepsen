@@ -92,6 +92,32 @@
 
 ;; More general FS tests
 
+(defn trace-remote
+  "A jepsen.remote/Remote which also logs every command to an atom containing a
+  vector."
+  [log remote]
+  (reify cc/Remote
+    (connect [this conn-spec]
+      (trace-remote log (cc/connect remote conn-spec)))
+
+    (disconnect! [this]
+      (cc/disconnect! remote))
+
+    (execute! [this context action]
+      (try
+        (let [res (cc/execute! remote context action)]
+          (swap! log conj res)
+          res)
+        (catch Throwable t
+          (swap! log conj (assoc action :exception t))
+          (throw t))))
+
+    (upload! [this context local-paths remote-path opts]
+      (cc/upload! remote context local-paths remote-path opts))
+
+    (download! [this context remote-paths local-path opts]
+      (cc/download! remote context remote-paths local-path opts))))
+
 (defn split-path
   "Splits a path string on / separators."
   [path-str]
@@ -517,7 +543,6 @@
 
                                      (throw+ e))))))))
 
-
 (defrecord FSClient [dir node]
   client/Client
   (open! [this test node]
@@ -655,12 +680,60 @@
                  :valid? false)
           {:valid? true})))))
 
-(deftest ^:integration fs-test
-  (let [dir    "/tmp/jepsen/fs-test"
-        lazyfs (lazyfs/lazyfs dir)
+(defn print-remote-log-op
+  "Prints an operation from the remote log."
+  [fs-op-pattern op]
+  (let [{:keys [cmd in out err exit exception]} op
+        cmd              (str/replace cmd fs-op-pattern "")]
+    (println
+      (str cmd
+           (when in           (str " <<< " (c/escape in)))
+           " # => "
+           (when-not (str/blank? out) (pr-str out))
+           (when-not (str/blank? err) (str "(stderr: " (pr-str err) ")"))
+           (when exception    (str " Threw " exception))))))
+
+(defn print-remote-log
+  "Prints out a remote log as a shell script which reproduces an issue."
+  [dir results remote-log]
+  (let [; All fs ops start with this:
+        fs-op-pattern #"^cd /tmp/jepsen/fs-test; "
+        ; Finds out if something is an fs op
+        fs-op? (fn [action]
+                 (re-find fs-op-pattern (:cmd action)))
+        ; Break up log
+        [preamble rest-log] (split-with (complement fs-op?) remote-log)
+        ;_ (prn :preamble)
+        ;_ (pprint preamble)
+        ; Get the lazyfs setup commands
+        lazyfs-setup (drop-while
+                       (fn [action]
+                         (not (re-find #"mkdir -p /tmp/jepsen/fs-test"
+                                       (:cmd action))))
+                       preamble)
+        lazyfs-setup (take-while
+                       (fn [action]
+                         (not (re-find #"findmnt" (:cmd action))))
+                       lazyfs-setup)
+        ; And the fs operations
+        fs-log              (take-while fs-op? rest-log)
+        _                   (println "Log length: " (count fs-log))
+        ; Extract only the fs ops that led to the failure
+        fs-log              (take (/ (inc (:index results)) 2) fs-log)]
+
+    (mapv (partial print-remote-log-op fs-op-pattern) lazyfs-setup)
+    (println)
+    (println "cd /tmp/jepsen/fs-test")
+    (mapv (partial print-remote-log-op fs-op-pattern) fs-log)))
+
+(deftest ^:integration ^:focus fs-test
+  (let [dir        "/tmp/jepsen/fs-test"
+        lazyfs     (lazyfs/lazyfs dir)
+        remote-log (atom [])
+        remote     (trace-remote remote-log c/ssh)
         test (assoc tests/noop-test
                     :name      "lazyfs file set"
-                    :remote    (sshj/remote)
+                    :remote    remote
                     :os        debian/os
                     :db        (lazyfs/db lazyfs)
                     :client    (fs-client dir)
@@ -680,4 +753,17 @@
         test (jepsen/run! test)]
     ;(pprint (:history test))
     ;(pprint (:results test))
+    (when-not (:valid? (:results test))
+      (let [res (:results test)]
+        ;(pprint res)
+        (print-remote-log dir res @remote-log)
+        (println)
+        (println "At this point, the root was theoretically")
+        (pprint (:root res))
+        (println)
+        (println "And we expected to execute")
+        (pprint (:expected res))
+        (println)
+        (println "But with lazyfs we actually executed")
+        (pprint (:actual res))))
     (is (true? (:valid? (:results test))))))
