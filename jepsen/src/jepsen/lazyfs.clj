@@ -25,7 +25,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "0ca17d6c172615ad86931c0634512fefac23155f")
+  "94449157e47a28ed37daf42a6ead67dd76038a8f")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
