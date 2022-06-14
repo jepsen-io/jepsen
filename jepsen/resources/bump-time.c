@@ -58,4 +58,3 @@ int main(int argc, char **argv) {
     fprintf(stdout, "%d.%09d\n", time.tv_sec, time.tv_nsec);
     return 0;
 }
-
