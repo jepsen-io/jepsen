@@ -20,12 +20,13 @@
                     [util :as util :refer [pprint-str
                                            timeout]]]
             [jepsen.control [core :as cc]
-                            [util :as cu]]
+                            [util :as cu]
+                            [sshj :as sshj]]
             [jepsen.os.debian :as debian]
             [knossos.op :as op]
             [slingshot.slingshot :refer [try+ throw+]]))
 
-(use-fixtures :once quiet-logging)
+; (use-fixtures :once quiet-logging)
 
 (defrecord FileSetClient [dir file node]
   client/Client
@@ -526,7 +527,7 @@
     this)
 
   (invoke! [this test op]
-    (timeout 5000 (assoc op :type :info, :error :timeout)
+    (timeout 10000 (assoc op :type :info, :error :timeout)
              (-> (c/on-nodes test [node]
                              (fn [_ _]
                                ;(c/trace
@@ -654,11 +655,12 @@
                  :valid? false)
           {:valid? true})))))
 
-(deftest ^:integration fs-test
+(deftest ^:integration ^:focus fs-test
   (let [dir    "/tmp/jepsen/fs-test"
         lazyfs (lazyfs/lazyfs dir)
         test (assoc tests/noop-test
                     :name      "lazyfs file set"
+                    :remote    (sshj/remote)
                     :os        debian/os
                     :db        (lazyfs/db lazyfs)
                     :client    (fs-client dir)
