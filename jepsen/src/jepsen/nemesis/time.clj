@@ -146,9 +146,9 @@
       (reset-time! test))))
 
 (defn reset-gen-select
-  "A function which returns a reset generator. The parameter of this function is
-  used to select which subset of the test's nodes to use as targets in the
-  generator."
+  "A function which returns a generator of reset operations. Takes a function
+  (select test) which returns nodes from the test we'd like to target for that
+  clock reset."
   [select]
   (fn [test process]
     {:type :info, :f :reset, :value (select test)}))
@@ -159,10 +159,9 @@
   (reset-gen-select (comp util/random-nonempty-subset :nodes)))
 
 (defn bump-gen-select
-  "A function which returns a clock bump generator that bumps the clock from -262
-  to +262 seconds, exponentially distributed. The parameter of this function is
-  used to select which subset of the test's nodes to use as targets in the
-  generator."
+  "A function which returns a clock bump generator that bumps the clock from
+  -262 to +262 seconds, exponentially distributed. (select test) is used to
+  select which subset of the test's nodes to use as targets in the generator."
   [select]
   (fn [test process]
     {:type  :info
@@ -177,10 +176,10 @@
   (bump-gen-select (comp util/random-nonempty-subset :nodes)))
 
 (defn strobe-gen-select
-  "A function which returns a clock strobe generator that introduces clock strobes
-  from 4 ms to 262 seconds, with a period of 1 ms to 1 second, for a duration of
-  0-32 seconds. The parameter of this function is used to select which subset of
-  the test's nodes to use as targets in the generator."
+  "A function which returns a clock strobe generator that introduces clock
+  strobes from 4 ms to 262 seconds, with a period of 1 ms to 1 second, for a
+  duration of 0-32 seconds. (select test) is used to select which subset of the
+  test's nodes to use as targets in the generator."
   [select]
   (fn [test process]
     {:type  :info
