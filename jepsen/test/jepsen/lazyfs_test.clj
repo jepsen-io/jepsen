@@ -4,6 +4,11 @@
                      [pprint :refer [pprint]]
                      [string :as str]
                      [test :refer :all]]
+            [clojure.java.io :as io]
+            [clojure.test.check [clojure-test :refer :all]
+                                [generators :as g]
+                                [properties :as prop]
+                                [results :refer [Result]]]
             [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [loopr]]
             [jepsen [checker :as checker]
@@ -568,35 +573,6 @@
   [dir]
   (map->FSClient {:dir dir}))
 
-(defn rand-filename
-  "Generates a random filename."
-  []
-  (rand-nth ["a" "b"]))
-
-(defn rand-path
-  "Generates a random path."
-  ([]
-   (let [depth (inc (rand-int 2))]
-     (rand-path depth)))
-  ([depth]
-   (->> (repeatedly rand-filename)
-        (take depth)
-        vec)))
-
-(defn fs-gen
-  "Generator of operations for a model filesystem."
-  []
-  (gen/mix [
-            (fn [] {:f :append, :value [(rand-path)
-                                        (str " " (rand-int 10000))]})
-            (fn [] {:f :mkdir, :value (rand-path)})
-            (fn [] {:f :mv, :value [(rand-path) (rand-path)]})
-            (fn [] {:f :read, :value [(rand-path) nil]})
-            (fn [] {:f :rm, :value (rand-path)})
-            (fn [] {:f :touch, :value (rand-path)})
-            (fn [] {:f :write, :value [(rand-path) (str (rand-int 10000))]})
-            ]))
-
 (defn simple-trace
   "Takes a collection of ops from a history and strips them down to just [type
   f value maybe-error] tuples, to make it easier to read traces from
@@ -726,19 +702,45 @@
     (println "cd /tmp/jepsen/fs-test")
     (mapv (partial print-remote-log-op fs-op-pattern) fs-log)))
 
-(deftest ^:integration ^:focus fs-test
+(defn print-fs-test
+  "Prints out a (presumably failing) fs test to the filesystem. Returns the
+  path to that file."
+  [test]
+  (let [file (str "/tmp/jepsen/fs-test-" (rand-int 10000000))]
+    (with-open [w (io/writer file)]
+      (binding [*out* w]
+        (let [dir (:dir test)
+              res (:results test)]
+          ;(pprint res)
+          (print-remote-log dir res (:remote-log test))
+          (println)
+          (println "At this point, the root was theoretically")
+          (pprint (:root res))
+          (println)
+          (println "And we expected to execute")
+          (pprint (:expected res))
+          (println)
+          (println "But with lazyfs we actually executed")
+          (pprint (:actual res)))))
+    file))
+
+(defn run-fs-test
+  "Runs an entire Jepsen test for lazyfs fs test, given a specific history of
+  invocations to evaluate."
+  [dir history]
   (let [dir        "/tmp/jepsen/fs-test"
         lazyfs     (lazyfs/lazyfs dir)
         remote-log (atom [])
         remote     (trace-remote remote-log c/ssh)
         test (assoc tests/noop-test
-                    :name      "lazyfs file set"
+                    :name      "lazyfs fs-test"
+                    :dir       dir
                     :remote    remote
                     :os        debian/os
                     :db        (lazyfs/db lazyfs)
                     :client    (fs-client dir)
                     :nemesis   (lazyfs/nemesis lazyfs)
-                    :generator (->> (fs-gen)
+                    :generator (->> history
                                     ;(gen/stagger 1/20)
                                     (gen/nemesis
                                       nil
@@ -746,24 +748,57 @@
                                                :f    :lose-unfsynced-writes
                                                :value ["n1"]}
                                            repeat
-                                           (gen/stagger 1/2)))
-                                    (gen/time-limit 30))
+                                           (gen/stagger 1/2))))
                     :checker   (fs-checker)
                     :nodes     ["n1"])
         test (jepsen/run! test)]
-    ;(pprint (:history test))
-    ;(pprint (:results test))
-    (when-not (:valid? (:results test))
-      (let [res (:results test)]
-        ;(pprint res)
-        (print-remote-log dir res @remote-log)
-        (println)
-        (println "At this point, the root was theoretically")
-        (pprint (:root res))
-        (println)
-        (println "And we expected to execute")
-        (pprint (:expected res))
-        (println)
-        (println "But with lazyfs we actually executed")
-        (pprint (:actual res))))
-    (is (true? (:valid? (:results test))))))
+    (assoc test :remote-log @remote-log)))
+
+(def gen-path
+  "test.check generator for a random fs-test path. Generates vectors of length
+  1 or 2 of \"a\" or \"b\"--we want a real small state space here or we'll
+  almost never do anything interesting on the same files."
+  (g/vector (g/elements ["a" "b"]) 1 2))
+
+(def data-gen
+  "Generates a short string of data to write to a file for an fs test"
+  (g/scale #(/ % 100) g/string-alphanumeric))
+
+(def fs-op-gen
+  "test.check generator for fs test ops. Generates append, write, mkdir, mv,
+  read, etc."
+  (g/one-of
+    [(g/let [path gen-path]
+       {:f :read, :value [path nil]})
+     (g/let [path gen-path]
+       {:f :touch, :value path})
+     (g/let [path gen-path, data data-gen]
+       {:f :append, :value [path (str " " data)]})
+     (g/let [source gen-path, dest gen-path]
+       {:f :mv, :value [source dest]})
+     (g/let [path gen-path, data data-gen]
+       {:f :write, :value [path data]})
+     (g/let [path gen-path]
+       {:f :mkdir, :value path})
+     (g/let [path gen-path]
+       {:f :rm, :value path})]))
+
+(def fs-history-gen
+  "Generates a whole history"
+  (g/scale (partial * 1000)
+    (g/vector fs-op-gen)))
+
+(defspec ^:integration ^:focus fs-spec
+  (let [dir "/tmp/jepsen/fs-test"]
+    (prop/for-all [history fs-history-gen]
+                  (let [test (run-fs-test dir history)
+                        ; As a side effect, print out failing cases
+                        outfile (when-not (:valid? (:results test))
+                                  ;(pprint (:history test))
+                                  ;(pprint (:results test))
+                                  (print-fs-test test))]
+                    (reify Result
+                      (pass? [_]
+                        (:valid? (:results test)))
+                      (result-data [_]
+                        {:file outfile}))))))
