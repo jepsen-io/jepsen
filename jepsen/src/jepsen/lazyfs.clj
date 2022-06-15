@@ -157,7 +157,7 @@ blocks_per_page=1"))
     :-o "allow_other"
     :-o "modules=subdir"
     :-o (str "subdir=" data-dir)
-    :-s ; Singlethreaded
+    ;:-s ; Singlethreaded
     :-f))
 
 (defn mount!

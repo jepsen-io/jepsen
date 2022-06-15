@@ -788,7 +788,7 @@
   (g/scale (partial * 1000)
     (g/vector fs-op-gen)))
 
-(defspec ^:integration ^:focus fs-spec
+(defspec ^:integration fs-spec
   (let [dir "/tmp/jepsen/fs-test"]
     (prop/for-all [history fs-history-gen]
                   (let [test (run-fs-test dir history)
