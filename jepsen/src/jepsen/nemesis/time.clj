@@ -10,7 +10,8 @@
                     [nemesis :as nemesis]]
             [jepsen.control.util :as cu]
             [clojure.string :as str]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
 (def dir
@@ -53,12 +54,17 @@
   "Uploads and compiles some C programs for messing with clocks."
   []
   (c/su
-    (try (compile-tools!)
-         (catch RuntimeException e
-           (try (debian/install [:build-essential])
-                (catch RuntimeException e
-                  (centos/install [:gcc])))
-           (compile-tools!)))))
+    (try+ (compile-tools!)
+          (catch [:exit 127] e
+            (if (re-find #"command not found" (:err e))
+              ; No build tools?
+              (try+ (debian/install [:build-essential])
+                    (catch [:exit 127] e
+                      (if (re-find #"command not found" (:err e))
+                        (centos/install [:gcc])
+                        (throw+ e))))
+              (throw+ e))
+            (compile-tools!)))))
 
 (defn parse-time
   "Parses a decimal time in unix seconds since the epoch, provided as a string,
