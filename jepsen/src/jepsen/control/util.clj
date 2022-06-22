@@ -2,7 +2,7 @@
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
             [jepsen.control.core :as core]
-            [jepsen.util :as util :refer [meh name+]]
+            [jepsen.util :as util :refer [meh name+ timeout]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
@@ -380,7 +380,10 @@
 
   ([cmd pidfile]
    (info "Stopping" cmd)
-   (meh (exec :killall :-9 :-w cmd))
+   (timeout 30000 (throw+ {:type    ::kill-timed-out
+                           :cmd     cmd
+                           :pidfile pidfile})
+            (meh (exec :killall :-9 :-w cmd)))
    (when pidfile
      (meh (exec :rm :-rf pidfile)))))
 
