@@ -365,17 +365,24 @@
               (when (= from-path to-path)
                 (throw+ {:type ::same-file}))
 
-              (when (and (= :dir (:type to-entry))
-                         (not= :dir (:type from-entry)))
+              (when (and (model-dir? to-entry)
+                         (not (model-dir? from-entry)))
                 (throw+ {:type ::cannot-overwrite-dir-with-non-dir}))
 
               (when (and to-entry
-                         (= :dir (:type from-entry))
-                         (not= :dir (:type to-entry)))
+                         (model-dir? from-entry)
+                         (not (model-dir? to-entry)))
                 (throw+ {:type ::cannot-overwrite-non-dir-with-dir}))
 
               (when (= from-path (take (count from-path) to-path))
                 (throw+ {:type ::cannot-move-inside-self}))
+
+              ; When moving a directory on top of another directory, the target
+              ; must be empty.
+              (when (and (model-dir? from-entry)
+                         (model-dir? to-entry)
+                         (seq (:files to-entry)))
+                (throw+ {:type ::not-empty}))
 
               [(-> root
                    (dissoc-path from-path)
@@ -433,6 +440,8 @@
       [root (assoc op :type :fail, :error :exists)])
     (catch [:type ::not-dir] e
       [root (assoc op :type :fail, :error :not-dir)])
+    (catch [:type ::not-empty] e
+      [root (assoc op :type :fail, :error :not-empty)])
     (catch [:type ::not-file] e
       [root (assoc op :type :fail, :error :not-file)])
     (catch [:type ::same-file] e
@@ -493,6 +502,8 @@
                             :cannot-overwrite-dir-with-non-dir
                             #"cannot overwrite non-directory .+ with directory"
                             :cannot-overwrite-non-dir-with-dir
+                            #"Directory not empty"
+                            :not-empty
                             #"Not a directory"           ;:not-dir
                             :does-not-exist ; We collapse these for convenience
                             #"No such file or directory" :does-not-exist
@@ -788,7 +799,7 @@
   (g/scale (partial * 1000)
     (g/vector fs-op-gen)))
 
-(defspec ^:integration fs-spec
+(defspec ^:integration ^:focus fs-spec
   (let [dir "/tmp/jepsen/fs-test"]
     (prop/for-all [history fs-history-gen]
                   (let [test (run-fs-test dir history)
