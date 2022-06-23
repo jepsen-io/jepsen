@@ -11,7 +11,8 @@
   the current connection at once."
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util])
-  (:import (java.util.concurrent.locks ReentrantReadWriteLock)))
+  (:import (java.io InterruptedIOException)
+           (java.util.concurrent.locks ReentrantReadWriteLock)))
 
 (defn wrapper
   "A wrapper is a stateful construct for talking to a database. Options:
@@ -105,6 +106,10 @@
             (catch InterruptedException e#
               ; When threads are interrupted, we're generally
               ; terminating--there's no reason to reopen or log a message here.
+              (throw e#))
+            (catch InterruptedIOException e#
+              ; Ditto here; this is a consequence of an interrupt, and we
+              ; should, I think, treat it as if it were an interrupt itself.
               (throw e#))
             (catch Exception e#
               ; We can't acquire the write lock until we release our read lock,
