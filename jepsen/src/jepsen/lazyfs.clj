@@ -25,7 +25,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "95859bf160a2feac076a35e8e3e503f7db489612")
+  "e8c192ba045507c3661712fb9355198381478ed0")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
@@ -157,7 +157,7 @@ blocks_per_page=1"))
     :-o "allow_other"
     :-o "modules=subdir"
     :-o (str "subdir=" data-dir)
-    ;:-s ; Singlethreaded
+    :-s ; Singlethreaded
     :-f))
 
 (defn mount!
