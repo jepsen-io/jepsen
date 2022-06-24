@@ -110,23 +110,25 @@
                        ^Semaphore semaphore]
   core/Remote
   (connect [this conn-spec]
-    (try+ (let [c (doto (SSHClient.)
-                    (.loadKnownHosts)
-                    (.connect (:host conn-spec) (:port conn-spec))
-                    (auth! conn-spec))]
-            (assoc this
-                   :conn-spec conn-spec
-                   :client c
-                   :semaphore (Semaphore. concurrency-limit true)))
-          (catch Exception e
-            ; SSHJ wraps InterruptedException in its own exceptions, so we
-            ; have to see through that and rethrow properly.
-            (let [cause (util/ex-root-cause e)]
-              (when (instance? InterruptedException cause)
-                (throw cause)))
-            (throw+ (assoc conn-spec
-                           :type    :jepsen.control/session-error
-                           :message "Error opening SSH session. Verify username, password, and node hostnames are correct.")))))
+    (if (:dummy conn-spec)
+      (assoc this :conn-spec conn-spec)
+      (try+ (let [c (doto (SSHClient.)
+                      (.loadKnownHosts)
+                      (.connect (:host conn-spec) (:port conn-spec))
+                      (auth! conn-spec))]
+              (assoc this
+                     :conn-spec conn-spec
+                     :client c
+                     :semaphore (Semaphore. concurrency-limit true)))
+            (catch Exception e
+              ; SSHJ wraps InterruptedException in its own exceptions, so we
+              ; have to see through that and rethrow properly.
+              (let [cause (util/ex-root-cause e)]
+                (when (instance? InterruptedException cause)
+                  (throw cause)))
+              (throw+ (assoc conn-spec
+                             :type    :jepsen.control/session-error
+                             :message "Error opening SSH session. Verify username, password, and node hostnames are correct."))))))
 
   (disconnect! [this]
     (when-let [c client]
@@ -134,6 +136,8 @@
 
   (execute! [this ctx action]
     ;  (info :permits (.availablePermits semaphore))
+    (when (:dummy conn-spec)
+      (throw+ {:type :jepsen.control/dummy}))
     (.acquire semaphore)
     (with-errors conn-spec ctx
       (try
@@ -161,11 +165,15 @@
           (.release semaphore)))))
 
   (upload! [this ctx local-paths remote-path _opts]
+    (when (:dummy conn-spec)
+      (throw+ {:type :jepsen.control/dummy}))
     (with-errors conn-spec ctx
       (with-open [sftp (.newSFTPClient client)]
         (.put sftp (FileSystemFile. local-paths) remote-path))))
 
   (download! [this ctx remote-paths local-path _opts]
+    (when (:dummy conn-spec)
+      (throw+ {:type :jepsen.control/dummy}))
     (with-errors conn-spec ctx
       (with-open [sftp (.newSFTPClient client)]
         (.get sftp remote-paths (FileSystemFile. local-path))))))
