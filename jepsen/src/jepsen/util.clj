@@ -147,10 +147,9 @@
     (inc x)))
 
 (defn local-time
-  "Drops millisecond resolution"
+  "Local time."
   []
-  (let [t (time.local/local-now)]
-    (time/minus t (time/millis (time/milli t)))))
+  (time.local/local-now))
 
 (defn chunk-vec
   "Partitions a vector into reducibles of size n (somewhat like partition-all)
