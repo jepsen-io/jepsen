@@ -178,7 +178,8 @@
   (let [params (params req)
         after (if-let [a (:after params)]
                 (parse-time a)
-                (time.local/local-now))
+                ; In the year three thousaaaaaand
+                (parse-time "30000101T000000.000Z"))
         tests (->> (fast-tests)
                    (drop-while (fn [t]
                                  (->> (:start-time t)
