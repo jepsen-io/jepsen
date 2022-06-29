@@ -26,7 +26,7 @@
      (into (sorted-map)))))
 
 
-(defrecord YSQLBankContentionYBClient []
+(defrecord YSQLBankContentionYBClient [isolation]
   c/YSQLYbClient
 
   (setup-cluster! [this test c conn-wrapper]
@@ -48,11 +48,11 @@
   (invoke-op! [this test op c conn-wrapper]
     (case (:f op)
       :read
-      (assoc op :type :ok, :value (read-accounts-map test op c))
+      (j/with-db-transaction [c c {:isolation isolation}]
+        (assoc op :type :ok, :value (read-accounts-map test op c)))
 
       :update
-      (c/with-txn
-        c
+      (j/with-db-transaction [c c {:isolation isolation}]
         (let [{:keys [from to amount]} (:value op)
               b-from-before (c/select-single-value op c table-name :balance (str "id = " from))
               b-to-before (c/select-single-value op c table-name :balance (str "id = " to))]
@@ -69,8 +69,7 @@
                 (assoc op :type :ok))))))
 
       :delete
-      (c/with-txn
-        c
+      (j/with-db-transaction [c c {:isolation isolation}]
         (let [{:keys [from to amount]} (:value op)
               b-from-before (c/select-single-value op c table-name :balance (str "id = " from))
               b-to-before (c/select-single-value op c table-name :balance (str "id = " to))]
@@ -86,8 +85,7 @@
                 (assoc op :type :ok :value {:from from, :to to, :amount b-from-before}))))))
 
       :insert
-      (c/with-txn
-        c
+      (j/with-db-transaction [c c {:isolation isolation}]
         (let [{:keys [from to amount]} (:value op)
               b-from-before (c/select-single-value op c table-name :balance (str "id = " from))
               b-to-before (c/select-single-value op c table-name :balance (str "id = " to))]

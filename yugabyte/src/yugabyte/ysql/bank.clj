@@ -20,7 +20,7 @@
        (map (juxt :id :balance))
        (into (sorted-map))))
 
-(defrecord YSQLBankYbClient [allow-negatives?]
+(defrecord YSQLBankYbClient [allow-negatives? isolation]
   c/YSQLYbClient
 
   (setup-cluster! [this test c conn-wrapper]
@@ -41,8 +41,7 @@
       (assoc op :type :ok, :value (read-accounts-map op c))
 
       :transfer
-      (c/with-txn
-        c
+      (j/with-db-transaction [c c {:isolation isolation}]
         (let [{:keys [from to amount]} (:value op)]
           (let [b-from-before (c/select-single-value op c table-name :balance (str "id = " from))
                 b-to-before   (c/select-single-value op c table-name :balance (str "id = " to))
@@ -67,7 +66,7 @@
 ; Multi-table bank test
 ;
 
-(defrecord YSQLMultiBankYbClient [allow-negatives?]
+(defrecord YSQLMultiBankYbClient [allow-negatives? isolation]
   c/YSQLYbClient
 
   (setup-cluster! [this test c conn-wrapper]
@@ -90,8 +89,7 @@
   (invoke-op! [this test op c conn-wrapper]
     (case (:f op)
       :read
-      (c/with-txn
-        c
+      ((j/with-db-transaction [c c {:isolation isolation}]
         (let [accs (shuffle (:accounts test))]
           (->> accs
                (mapv (fn [a]
@@ -101,8 +99,7 @@
 
       :transfer
       (let [{:keys [from to amount]} (:value op)]
-        (c/with-txn
-          c
+        (j/with-db-transaction [c c {:isolation isolation}]
           (let [b-from-before (c/select-single-value op c (str table-name from) :balance (str "id = " from))
                 b-to-before   (c/select-single-value op c (str table-name to) :balance (str "id = " to))
                 b-from-after  (- b-from-before amount)
