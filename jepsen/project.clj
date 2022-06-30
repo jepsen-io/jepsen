@@ -33,7 +33,7 @@
   :javac-options ["-target" "11" "-source" "11"]
   :main jepsen.cli
   :plugins [[lein-localrepo "0.5.4"]
-            [lein-codox "0.10.7"]
+            [lein-codox "0.10.8"]
             [jonase/eastwood "0.3.10"]]
   :jvm-opts ["-Xmx32g"
              "-Djava.awt.headless=true"
