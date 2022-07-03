@@ -47,7 +47,7 @@
                    :logging     :logging
                    :integration :integration}
   :codox {:output-path "doc/"
-          :source-uri "https://github.com/jepsen-io/jepsen/blob/{version}/jepsen/{filepath}#L{line}"
+          :source-uri "https://github.com/jepsen-io/jepsen/blob/v{version}/jepsen/{filepath}#L{line}"
           :metadata {:doc/format :markdown}}
   :profiles {:uberjar {:aot :all}
              :dev {:dependencies [[org.clojure/test.check "1.1.1"]]
