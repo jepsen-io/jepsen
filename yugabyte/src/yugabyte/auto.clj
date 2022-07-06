@@ -411,7 +411,6 @@
             ; Tracing
             :--enable_tracing
             :--rpc_slow_query_threshold_ms 1000
-            :--load_balancer_max_concurrent_adds 10
             (tserver-api-opts (:api test) node)
             (tserver-workload-specific-opts test)
 
