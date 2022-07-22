@@ -315,19 +315,11 @@
           (if (and (< (rand) 1/3)
                    (or (= :assign    (:f op))
                        (= :subscribe (:f op))))
-            (do (info "Injecting" (:f op) "of unpolled keys"
-                      (pr-str (keys sent))
-                      "(sent are:" (pr-str sent) "and polled are:"
-                      (pr-str polled) ")\n"
-                      "Final keys are" (pr-str (->> (:value op)
-                                                    (concat (keys sent))
-                                                    distinct
-                                                    vec)))
-                [(assoc op :value (->> (:value op)
-                                       (concat (keys sent))
-                                       distinct
-                                       vec))
-                 this'])
+            [(assoc op :value (->> (:value op)
+                                   (concat (keys sent))
+                                   distinct
+                                   vec))
+             this']
 
             ; Pass through
             [op this'])))))
