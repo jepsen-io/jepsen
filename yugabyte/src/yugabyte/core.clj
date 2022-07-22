@@ -111,9 +111,9 @@
          ; See https://docs.yugabyte.com/latest/architecture/transactions/isolation-levels/
          ; :snapshot-isolation maps to :repeatable_read SQL
          :si.append          (with-client append/workload-si (ysql.append/->Client :repeatable-read))
-         :si.bank            (with-client append/workload-si (ysql.append/->Client :repeatable-read))
-         :si.bank-multitable (with-client append/workload-si (ysql.append/->Client :repeatable-read))
-         :si.bank-contention (with-client append/workload-si (ysql.append/->Client :repeatable-read))})
+         :si.bank            (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLBankClient true :repeatable-read))
+         :si.bank-multitable (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLBankClient true :repeatable-read))
+         :si.bank-contention (with-client bank-improved/workload-contention-keys (yugabyte.ysql.bank-improved/->YSQLBankContentionClient :repeatable-read))})
 
 (def workloads
   (merge workloads-ycql workloads-ysql))
