@@ -19,6 +19,7 @@
                     [db :as db]
                     [generator :as gen]
                     [nemesis :as n]
+                    [net :as net]
                     [util :as util :refer [majority
                                            minority-third
                                            random-nonempty-subset]]]
@@ -245,6 +246,82 @@
                          :stop  #{:stop-partition}
                          :color "#E9DCA0"}}}))
 
+(defn flaky-nemesis
+  "A nemesis to impair, make flaky, the node's network
+  by delaying, losing, corrupting, duplicating, or reordering network packets.
+  Takes a db to work with [[db-nodes]].
+   
+  This nemesis responds to:
+  ```
+  {:f :start-flaky :value [:node-spec                 ; as interpreted by db-nodes
+                           {:fault {},                ; network emulation fault map
+                            :fault {:opt value}...}]} ; specifies faults, option values 
+  {:f :stop-flaky  :value nil}
+   ```
+  See [[jepsen.net/flaky-network-emulations]]."
+  [db]
+  (reify
+    n/Reflection
+    (fs [_this]
+      [:start-flaky  :stop-flaky])
+
+    n/Nemesis
+    (setup! [this {:keys [net] :as test}]
+      ;; start from known reliable state
+      (net/reliable! net test)
+      this)
+
+    (invoke! [_this {:keys [net] :as test} {:keys [f value] :as op}]
+      (let [result (case f
+                     :start-flaky (let [[node-spec faults] value
+                                        nodes (db-nodes test db node-spec)]
+                                    (net/flaky! net (assoc test :nodes nodes) faults))
+                     :stop-flaky  (net/reliable! net test))]
+        (assoc op :value result)))
+
+    (teardown! [_this _test]
+      ;; leave network state as is
+      )))
+
+(defn flaky-package
+  "A nemesis and generator package for flaky networks.
+   
+   Opts:
+   ```clj
+     {:targets   ; A collection of node specs, e.g. [:one, :all]
+      :faults [  ; A collection of fault maps, e.g.:
+       {}                         ; no faults
+       {:delay {}}                ; delay packets by default amount
+       {:corrupt {:percent :33%}} ; corrupt 33% of packets
+       ;; delay packets by default values, plus duplicate 25% of packets
+       {:delay {},
+        :duplicate {:percent :25% :correlation :80%}}]}
+  ```
+  See [[jepsen.net/flaky-network-emulations]].
+
+  Additional options as for [[nemesis-package]]."
+  [opts]
+  (let [needed? ((:faults opts) :flaky)
+        db      (:db opts)
+        targets (:targets (:flaky opts) (node-specs db))
+        faults  (:faults (:flaky opts) [{}])
+        start   (fn start [_ _]
+                  {:type  :info
+                   :f     :start-flaky
+                   :value [(rand-nth targets) (rand-nth faults)]})
+        stop    {:type :info
+                 :f :stop-flaky
+                 :value nil}
+        gen     (->> (gen/flip-flop start (repeat stop))
+                     (gen/stagger (:interval opts default-interval)))]
+    {:generator       (when needed? gen)
+     :final-generator (when needed? stop)
+     :nemesis         (flaky-nemesis db)
+     :perf            #{{:name  "flaky"
+                         :start #{:start-flaky}
+                         :stop  #{:stop-flaky}
+                         :color "#D1E8A0"}}}))
+
 (defn clock-package
   "A nemesis and generator package for modifying clocks. Options as for
   nemesis-package."
@@ -319,9 +396,10 @@
   "Just like nemesis-package, but returns a collection of packages, rather than
   the combined package, so you can manipulate it further before composition."
   [opts]
-  (let [faults   (set (:faults opts [:partition :kill :pause :clock]))
+  (let [faults   (set (:faults opts [:partition :flaky :kill :pause :clock]))
         opts     (assoc opts :faults faults)]
     [(partition-package opts)
+     (flaky-package opts)
      (clock-package opts)
      (db-package opts)]))
 
@@ -353,12 +431,14 @@
     :interval   The interval between operations, in seconds.
     :faults     A collection of enabled faults, e.g. [:partition, :kill, ...]
     :partition  Controls network partitions
+    :flaky      Controls network faults
     :kill       Controls process kills
     :pause      Controls process pauses and restarts
 
   Possible faults:
 
     :partition
+    :flaky
     :kill
     :pause
     :clock
@@ -366,7 +446,12 @@
   Partition options:
 
     :targets    A collection of partition specs, e.g. [:majorities-ring, ...]
-
+  
+  Flaky options:
+    
+    :targets    A collection of node specs, e.g. [:one, :all]
+    :faults     A collection of fault maps, e.g. [{:delay {}}]
+    
   Kill and Pause options:
 
     :targets    A collection of node specs, e.g. [:one, :all]"
