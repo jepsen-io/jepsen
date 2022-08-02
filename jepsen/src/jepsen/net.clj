@@ -13,10 +13,18 @@
 
 ; TODO: move this into jepsen.net.proto
 (defprotocol Net
-  (drop! [net test src dest] "Drop traffic between nodes src and dest.")
-  (heal! [net test]          "End all traffic drops and restores network to fast operation.")
-  (flaky!    [net test faults] "Make network flaky by delaying, losing, corrupting, duplicating, or reordering network packets.")
-  (reliable! [net test]        "Restore network reliability by removing flakiness."))
+  (drop! [net test src dest]  "Drop traffic between nodes src and dest.")
+  (heal! [net test]           "End all traffic drops and restores network to fast operation.")
+  (slow! [net test]
+         [net test opts]
+         "Delays network packets with options:
+
+         :mean         (in ms)
+         :variance     (in ms)
+         :distribution (e.g. :normal)")
+  (flaky! [net test]          "Introduces randomized packet loss")
+  (fast!  [net test]          "Removes packet loss and delays.")
+  (shape! [net test faults]   "Shapes packet traffic by applying network emulation faults."))
 
 ; Top-level API functions
 (defn drop-all!
@@ -38,9 +46,8 @@
 
 (def tc "/sbin/tc")
 
-(def flaky-network-emulations
-  "All the ways to make a network flaky with
-   network emulation faults and their default option values.
+(def packet-faults
+  "All of the packet faults and their default option values.
 
    Caveats:
    
@@ -63,39 +70,8 @@
    :reorder   {:percent      :20%
                :correlation  :75%}})
 
-(defn- netem-flaky!
-  "Shared convenience call for iptables/ipfilter."
-  [net test faults]
-  ;; reset node networks to reliable before introducing new fault mix
-  (reliable! net test)
-  (if (seq faults)
-    (do
-      (assert (if (:reorder faults)
-                (:delay faults)
-                true)
-              "Cannot reorder packets without a delay.")
-      (let [tc-args (->> faults
-                         ;; fill in all unspecified opts with default values
-                         (reduce (fn [acc [fault opts]]
-                                   (assoc acc fault (merge (fault flaky-network-emulations) opts)))
-                                 {})
-                         ;; build a tc cmd line combining all faults
-                         (reduce (fn [args [fault {:keys [time jitter percent correlation distribution] :as _opts}]]
-                                   (case fault
-                                     :delay
-                                     (concat args [:delay time jitter correlation distribution])
-                                     (:loss :corrupt :duplicate :reorder)
-                                     (concat args [fault percent correlation])))
-                                 [:qdisc :add :dev :eth0 :root :netem]))]
-        (with-test-nodes test
-          (do
-            (su (exec tc tc-args))
-            :flaky))))
-    ;; no faults, node networks left reliable
-    :reliable))
-
-(defn- netem-reliable!
-  "Shared convenience call for iptables/ipfilter."
+(defn- delete-netem!
+  "Deletes a network emulation to remove any packet faults."
   [_net test]
   (with-test-nodes test
     ;; may already be reliable, i.e. no faults
@@ -108,13 +84,48 @@
           :reliable
           (throw e))))))
 
+(defn- set-netem!
+  "Sets a network emulation with given `faults` to disrupt packets.
+   Shared convenience call for iptables/ipfilter."
+  [net test faults]
+  (if (seq faults)
+    (do
+      (assert (if (:reorder faults)
+                (:delay faults)
+                true)
+              "Cannot reorder packets without a delay.")
+      ;; reset node networks to reliable before introducing new fault mix
+      (delete-netem! net test)
+      (let [tc-opts (->> faults
+                         ;; fill in all unspecified opts with default values
+                         (reduce (fn [acc [fault opts]]
+                                   (assoc acc fault (merge (fault packet-faults) opts)))
+                                 {})
+                         ;; build a tc cmd line combining all faults
+                         (reduce (fn [args [fault {:keys [time jitter percent correlation distribution] :as _opts}]]
+                                   (case fault
+                                     :delay
+                                     (concat args [:delay time jitter correlation distribution])
+                                     (:loss :corrupt :duplicate :reorder)
+                                     (concat args [fault percent correlation])))
+                                 [:qdisc :add :dev :eth0 :root :netem]))]
+        (with-test-nodes test
+          (do
+            (su (exec tc tc-opts))
+            :shaped))))
+    ;; no faults desired, delete any existing shaping
+    (delete-netem! net test)))
+
 (def noop
   "Does nothing."
   (reify Net
-    (drop! [net test src dest])
-    (heal! [net test])
-    (flaky!    [net test faults])
-    (reliable! [net test])))
+    (drop!  [net test src dest])
+    (heal!  [net test])
+    (slow!  [net test])
+    (slow!  [net test opts])
+    (flaky! [net test])
+    (fast!  [net test])
+    (shape! [net test faults])))
 
 (def iptables
   "Default iptables (assumes we control everything)."
@@ -129,12 +140,38 @@
           (exec :iptables :-F :-w)
           (exec :iptables :-X :-w))))
 
-    (flaky!
-      [net test faults]
-      (netem-flaky! net test faults))
+    (slow! [net test]
+      (with-test-nodes test
+        (su (exec tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
+                  :10ms :distribution :normal))))
 
-    (reliable! [net test]
-      (netem-reliable! net test))
+    (slow! [net test {:keys [mean variance distribution]
+                      :or   {mean         50
+                             variance     10
+                             distribution :normal}}]
+      (with-test-nodes test
+        (su (exec tc :qdisc :add :dev :eth0 :root :netem :delay
+                  (str mean "ms")
+                  (str variance "ms")
+                  :distribution distribution))))
+
+    (flaky! [net test]
+      (with-test-nodes test
+        (su (exec tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
+                  "75%"))))
+
+    (fast! [net test]
+      (with-test-nodes test
+        (try
+          (su (exec tc :qdisc :del :dev :eth0 :root))
+          (catch RuntimeException e
+            (if (re-find #"RTNETLINK answers: No such file or directory"
+                         (.getMessage e))
+              nil
+              (throw e))))))
+
+    (shape! [net test faults]
+      (set-netem! net test faults))
 
     p/PartitionAll
     (drop-all! [net test grudge]
@@ -158,9 +195,29 @@
       (with-test-nodes test
         (su (exec :ipf :-Fa))))
 
-    (flaky!
-      [net test faults]
-      (netem-flaky! net test faults))
+    (slow! [net test]
+      (with-test-nodes test
+        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
+                  :10ms :distribution :normal))))
 
-    (reliable! [net test]
-      (netem-reliable! net test))))
+    (slow! [net test {:keys [mean variance distribution]
+                      :or   {mean         50
+                             variance     10
+                             distribution :normal}}]
+      (with-test-nodes test
+        (su (exec tc :qdisc :add :dev :eth0 :root :netem :delay
+                  (str mean "ms")
+                  (str variance "ms")
+                  :distribution distribution))))
+
+    (flaky! [net test]
+      (with-test-nodes test
+        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
+                  "75%"))))
+
+    (fast! [net test]
+      (with-test-nodes test
+        (su (exec :tc :qdisc :del :dev :eth0 :root))))
+
+    (shape! [net test faults]
+      (set-netem! net test faults))))
