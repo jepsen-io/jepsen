@@ -252,12 +252,12 @@
    
   This nemesis responds to:
   ```
-  {:f :start-packet :value [:node-spec                 ; as interpreted by db-nodes
-                            {:fault {},                ; packet fault map
-                             :fault {:opt value}...}]} ; specifies faults, option values 
+  {:f :start-packet :value [:node-spec   ; as interpreted by db-nodes
+                            {:delay {},  ; behaviors that disrupt packets
+                             :loss  {:percent :33%},...}]} 
   {:f :stop-packet  :value nil}
    ```
-  See [[jepsen.net/packet-faults]]."
+  See [[jepsen.net/all-packet-behaviors]]."
   [db]
   (reify
     n/Reflection
@@ -272,9 +272,9 @@
 
     (invoke! [_this {:keys [net] :as test} {:keys [f value] :as op}]
       (let [result (case f
-                     :start-packet (let [[node-spec faults] value
+                     :start-packet (let [[node-spec behaviors] value
                                          nodes (db-nodes test db node-spec)]
-                                     (net/shape! net (assoc test :nodes nodes) faults))
+                                     (net/shape! net (assoc test :nodes nodes) behaviors))
                      :stop-packet  (net/shape! net test nil))]
         (assoc op :value result)))
 
@@ -289,32 +289,32 @@
    Opts:
    ```clj
      {:packet
-      {:targets   ; A collection of node specs, e.g. [:one, :all]
-       :faults [  ; A collection of packet fault maps, e.g.:
-        {}                         ; no faults
+      {:targets      ; A collection of node specs, e.g. [:one, :all]
+       :behaviors [  ; A collection of network behaviors that disrupt packets, e.g.:
+        {}                         ; no disruptions
         {:delay {}}                ; delay packets by default amount
         {:corrupt {:percent :33%}} ; corrupt 33% of packets
         ;; delay packets by default values, plus duplicate 25% of packets
         {:delay {},
          :duplicate {:percent :25% :correlation :80%}}]}}
   ```
-  See [[jepsen.net/packet-faults]].
+  See [[jepsen.net/all-packet-behaviors]].
 
   Additional options as for [[nemesis-package]]."
   [opts]
-  (let [needed? ((:faults opts) :packet)
-        db      (:db opts)
-        targets (:targets (:packet opts) (node-specs db))
-        faults  (:faults  (:packet opts) [{}])
-        start   (fn start [_ _]
-                  {:type  :info
-                   :f     :start-packet
-                   :value [(rand-nth targets) (rand-nth faults)]})
-        stop    {:type  :info
-                 :f     :stop-packet
-                 :value nil}
-        gen     (->> (gen/flip-flop start (repeat stop))
-                     (gen/stagger (:interval opts default-interval)))]
+  (let [needed?   ((:faults opts) :packet)
+        db        (:db opts)
+        targets   (:targets   (:packet opts) (node-specs db))
+        behaviors (:behaviors (:packet opts) [{}])
+        start     (fn start [_ _]
+                    {:type  :info
+                     :f     :start-packet
+                     :value [(rand-nth targets) (rand-nth behaviors)]})
+        stop      {:type  :info
+                   :f     :stop-packet
+                   :value nil}
+        gen       (->> (gen/flip-flop start (repeat stop))
+                       (gen/stagger (:interval opts default-interval)))]
     {:generator       (when needed? gen)
      :final-generator (when needed? stop)
      :nemesis         (packet-nemesis db)
@@ -432,7 +432,7 @@
     :interval   The interval between operations, in seconds.
     :faults     A collection of enabled faults, e.g. [:partition, :kill, ...]
     :partition  Controls network partitions
-    :packet     Controls network packet faults
+    :packet     Controls network packet behavior
     :kill       Controls process kills
     :pause      Controls process pauses and restarts
 
@@ -451,7 +451,7 @@
   Packet options:
     
     :targets    A collection of node specs, e.g. [:one, :all]
-    :faults     A collection of fault maps, e.g. [{:delay {}}]
+    :behaviors  A collection of network packet behaviors, e.g. [{:delay {}}]
     
   Kill and Pause options:
 

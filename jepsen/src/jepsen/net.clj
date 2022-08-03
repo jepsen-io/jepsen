@@ -13,18 +13,18 @@
 
 ; TODO: move this into jepsen.net.proto
 (defprotocol Net
-  (drop! [net test src dest]  "Drop traffic between nodes src and dest.")
-  (heal! [net test]           "End all traffic drops and restores network to fast operation.")
+  (drop! [net test src dest]   "Drop traffic between nodes src and dest.")
+  (heal! [net test]            "End all traffic drops and restores network to fast operation.")
   (slow! [net test]
-         [net test opts]
-         "Delays network packets with options:
-
-         :mean         (in ms)
-         :variance     (in ms)
-         :distribution (e.g. :normal)")
-  (flaky! [net test]          "Introduces randomized packet loss")
-  (fast!  [net test]          "Removes packet loss and delays.")
-  (shape! [net test faults]   "Shapes packet traffic by applying network emulation faults."))
+         [net test opts]       "Delays network packets with options:
+                                ```clj
+                                {:mean          ; (in ms)
+                                 :variance      ; (in ms)
+                                 :distribution} ; (e.g. :normal)
+                                ```")
+  (flaky! [net test]           "Introduces randomized packet loss")
+  (fast!  [net test]           "Removes packet loss and delays.")
+  (shape! [net test behaviors] "Shapes network behavior, i.e. packet delay, loss, corruption, duplication, and reordering."))
 
 ; Top-level API functions
 (defn drop-all!
@@ -46,12 +46,12 @@
 
 (def tc "/sbin/tc")
 
-(def packet-faults
-  "All of the packet faults and their default option values.
+(def all-packet-behaviors
+  "All of the available network packet behaviors, and their default option values.
 
    Caveats:
    
-     - faults are applied at the node network level, i.e. all egress regardless of destination, type, etc.
+     - behaviors are applied at the node network level, i.e. all egress regardless of destination, type, etc.
      - `:delay` - Use `:normal` distribution of delays for more typical network behavior. 
      - `:loss`  - When used locally (not on a bridge or router), the loss is reported to the upper level protocols.
                   This may cause TCP to resend and behave as if there was no loss.
@@ -71,10 +71,10 @@
                :correlation  :75%}})
 
 (defn- delete-netem!
-  "Deletes a network emulation to remove any packet faults."
+  "Deletes a network emulation, assumed to have fault'y behavior, returning nodes to reliability."
   [_net test]
   (with-test-nodes test
-    ;; may already be reliable, i.e. no faults
+    ;; may already be reliable, i.e. no queuing discipline
     (try
       (su (exec tc :qdisc :del :dev :eth0 :root))
       :reliable
@@ -85,35 +85,35 @@
           (throw e))))))
 
 (defn- set-netem!
-  "Sets a network emulation with given `faults` to disrupt packets.
+  "Sets a network emulation with given `behaviors` to disrupt packets.
    Shared convenience call for iptables/ipfilter."
-  [net test faults]
-  (if (seq faults)
+  [net test behaviors]
+  (if (seq behaviors)
     (do
-      (assert (if (:reorder faults)
-                (:delay faults)
+      (assert (if (:reorder behaviors)
+                (:delay behaviors)
                 true)
               "Cannot reorder packets without a delay.")
-      ;; reset node networks to reliable before introducing new fault mix
+      ;; reset node networks to reliable before introducing new queuing discipline
       (delete-netem! net test)
-      (let [tc-opts (->> faults
+      (let [tc-opts (->> behaviors
                          ;; fill in all unspecified opts with default values
-                         (reduce (fn [acc [fault opts]]
-                                   (assoc acc fault (merge (fault packet-faults) opts)))
+                         (reduce (fn [acc [behavior opts]]
+                                   (assoc acc behavior (merge (behavior all-packet-behaviors) opts)))
                                  {})
-                         ;; build a tc cmd line combining all faults
-                         (reduce (fn [args [fault {:keys [time jitter percent correlation distribution] :as _opts}]]
-                                   (case fault
+                         ;; build a tc cmd line combining all behaviors
+                         (reduce (fn [args [behavior {:keys [time jitter percent correlation distribution] :as _opts}]]
+                                   (case behavior
                                      :delay
                                      (concat args [:delay time jitter correlation distribution])
                                      (:loss :corrupt :duplicate :reorder)
-                                     (concat args [fault percent correlation])))
+                                     (concat args [behavior percent correlation])))
                                  [:qdisc :add :dev :eth0 :root :netem]))]
         (with-test-nodes test
           (do
             (su (exec tc tc-opts))
             :shaped))))
-    ;; no faults desired, delete any existing shaping
+    ;; no queuing discipline desired, delete any existing shaping
     (delete-netem! net test)))
 
 (def noop
@@ -125,7 +125,7 @@
     (slow!  [net test opts])
     (flaky! [net test])
     (fast!  [net test])
-    (shape! [net test faults])))
+    (shape! [net test behaviors])))
 
 (def iptables
   "Default iptables (assumes we control everything)."
@@ -170,8 +170,8 @@
               nil
               (throw e))))))
 
-    (shape! [net test faults]
-      (set-netem! net test faults))
+    (shape! [net test behaviors]
+      (set-netem! net test behaviors))
 
     p/PartitionAll
     (drop-all! [net test grudge]
@@ -219,5 +219,5 @@
       (with-test-nodes test
         (su (exec :tc :qdisc :del :dev :eth0 :root))))
 
-    (shape! [net test faults]
-      (set-netem! net test faults))))
+    (shape! [net test behaviors]
+      (set-netem! net test behaviors))))
