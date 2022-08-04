@@ -19,6 +19,7 @@
                     [db :as db]
                     [generator :as gen]
                     [nemesis :as n]
+                    [net :as net]
                     [util :as util :refer [majority
                                            minority-third
                                            random-nonempty-subset]]]
@@ -245,6 +246,83 @@
                          :stop  #{:stop-partition}
                          :color "#E9DCA0"}}}))
 
+(defn packet-nemesis
+  "A nemesis to disrupt packets, e.g. delay, loss, corruption, etc.
+   Takes a db to work with [[db-nodes]].
+   
+  This nemesis responds to:
+  ```
+  {:f :start-packet :value [:node-spec   ; as interpreted by db-nodes
+                            {:delay {},  ; behaviors that disrupt packets
+                             :loss  {:percent :33%},...}]} 
+  {:f :stop-packet  :value nil}
+   ```
+  See [[jepsen.net/all-packet-behaviors]]."
+  [db]
+  (reify
+    n/Reflection
+    (fs [_this]
+      [:start-packet  :stop-packet])
+
+    n/Nemesis
+    (setup! [this {:keys [net] :as test}]
+      ;; start from known reliable state
+      (net/shape! net test nil)
+      this)
+
+    (invoke! [_this {:keys [net] :as test} {:keys [f value] :as op}]
+      (let [result (case f
+                     :start-packet (let [[node-spec behaviors] value
+                                         nodes (db-nodes test db node-spec)]
+                                     (net/shape! net (assoc test :nodes nodes) behaviors))
+                     :stop-packet  (net/shape! net test nil))]
+        (assoc op :value result)))
+
+    (teardown! [_this _test]
+      ;; leave network state as is
+      )))
+
+(defn packet-package
+  "A nemesis and generator package that disrupts packets,
+   e.g. delay, loss, corruption, etc.
+   
+   Opts:
+   ```clj
+     {:packet
+      {:targets      ; A collection of node specs, e.g. [:one, :all]
+       :behaviors [  ; A collection of network behaviors that disrupt packets, e.g.:
+        {}                         ; no disruptions
+        {:delay {}}                ; delay packets by default amount
+        {:corrupt {:percent :33%}} ; corrupt 33% of packets
+        ;; delay packets by default values, plus duplicate 25% of packets
+        {:delay {},
+         :duplicate {:percent :25% :correlation :80%}}]}}
+  ```
+  See [[jepsen.net/all-packet-behaviors]].
+
+  Additional options as for [[nemesis-package]]."
+  [opts]
+  (let [needed?   ((:faults opts) :packet)
+        db        (:db opts)
+        targets   (:targets   (:packet opts) (node-specs db))
+        behaviors (:behaviors (:packet opts) [{}])
+        start     (fn start [_ _]
+                    {:type  :info
+                     :f     :start-packet
+                     :value [(rand-nth targets) (rand-nth behaviors)]})
+        stop      {:type  :info
+                   :f     :stop-packet
+                   :value nil}
+        gen       (->> (gen/flip-flop start (repeat stop))
+                       (gen/stagger (:interval opts default-interval)))]
+    {:generator       (when needed? gen)
+     :final-generator (when needed? stop)
+     :nemesis         (packet-nemesis db)
+     :perf            #{{:name  "packet"
+                         :start #{:start-packet}
+                         :stop  #{:stop-packet}
+                         :color "#D1E8A0"}}}))
+
 (defn clock-package
   "A nemesis and generator package for modifying clocks. Options as for
   nemesis-package."
@@ -319,9 +397,10 @@
   "Just like nemesis-package, but returns a collection of packages, rather than
   the combined package, so you can manipulate it further before composition."
   [opts]
-  (let [faults   (set (:faults opts [:partition :kill :pause :clock]))
+  (let [faults   (set (:faults opts [:partition :packet :kill :pause :clock]))
         opts     (assoc opts :faults faults)]
     [(partition-package opts)
+     (packet-package opts)
      (clock-package opts)
      (db-package opts)]))
 
@@ -353,12 +432,14 @@
     :interval   The interval between operations, in seconds.
     :faults     A collection of enabled faults, e.g. [:partition, :kill, ...]
     :partition  Controls network partitions
+    :packet     Controls network packet behavior
     :kill       Controls process kills
     :pause      Controls process pauses and restarts
 
   Possible faults:
 
     :partition
+    :packet
     :kill
     :pause
     :clock
@@ -366,7 +447,12 @@
   Partition options:
 
     :targets    A collection of partition specs, e.g. [:majorities-ring, ...]
-
+  
+  Packet options:
+    
+    :targets    A collection of node specs, e.g. [:one, :all]
+    :behaviors  A collection of network packet behaviors, e.g. [{:delay {}}]
+    
   Kill and Pause options:
 
     :targets    A collection of node specs, e.g. [:one, :all]"
