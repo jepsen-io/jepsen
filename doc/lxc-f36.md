@@ -19,11 +19,16 @@ Then, run all ``systemctl start/enable`` as you need:
 sudo systemctl start sshd.service
 sudo systemctl enable sshd.service
 
+sudo systemctl start lxc.service
+sudo systemctl enable lxc.service
+
 sudo systemctl start  libvirtd.service
 sudo systemctl enable  libvirtd.service
 
 sudo systemctl start  dnsmasq.service
 sudo systemctl enable  dnsmasq.service
+
+
 
 <...> so on <..>
 ```
@@ -192,13 +197,17 @@ resolv.conf:
 
 ```
 echo -e "nameserver 192.168.122.1\n$(cat /etc/resolv.conf)" > /etc/resolv.conf
+systemctl restart NetworkManager
+
 ```
 
 If you're letting dhclient manage it, then:
 
 ```
 echo "prepend domain-name-servers 192.168.122.1;" >>/etc/dhcp/dhclient.conf
-sudo service networking restart
+sudo systemctl start sshd.service
+sudo systemctl enable sshd.service
+
 ```
 
 And update ``/etc/hosts`` if you don't wanna lose your mind seeing ``ping`` fails...
