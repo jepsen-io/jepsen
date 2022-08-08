@@ -128,7 +128,7 @@ ok, ``virbr0`` seems our winner ...
 
 Then 
 ```
-for i in {1..10}; do
+for i in {1..3}; do
 sudo cat >>/var/lib/lxc/n${i}/config <<EOF
 
 # Network config
@@ -144,7 +144,7 @@ Set up the virsh network bindings mapping those MAC addresses to hostnames and
 IP addresses:
 
 ```
-for i in {1..10}; do
+for i in {1..3}; do
   virsh net-update --current default add-last ip-dhcp-host "<host mac=\"00:1E:62:AA:AA:$(printf "%02x" $i)\" name=\"n${i}\" ip=\"192.168.122.1$(printf "%02d" $i)\"/>"
 done
 ```
@@ -170,11 +170,6 @@ TriggeredBy: ● libvirtd-ro.socket
 ```
 
 Then, next steps
-```
-virsh net-autostart default;
-```
-you got:
-
 ```
 [root@fedora ~]# virsh net-autostart default;
 Network default marked as autostarted
@@ -293,7 +288,7 @@ n3 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDcpQcG9GUjYZqM5dA5LwSoCH6Qot42mbsdXwva=
 If you get some problems as "write failed or similars", check again sshd, you got some wrong...
 
 
-And check that you can SSH to the nodes
+And check that you can SSH to the nodes:
 
 fedora 36 needs,
 
@@ -314,7 +309,7 @@ you should be sometime similar :
 Can't connect to display `localhost:0': Connection refused at /usr/share/perl5/vendor_perl/X11/Protocol.pm line 2269.
 ``` 
 
-You should be check ssh connecting previuos steps..
+Not use cssh, use ssh in a loop.
 
 --- O --- 
 
