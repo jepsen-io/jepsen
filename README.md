@@ -61,18 +61,6 @@ VMs, which means they can test clock skew.
 The AWS marketplace clusters come with an hourly fee (generally $1/hr/node),
 which helps fund Jepsen development.
 
-### Docker
-
-You can run a full Jepsen cluster on a single machine using Docker Compose. See
-the [Docker](/docker) directory for more details. Sadly the Docker platform has
-been something of a moving target; this environment tends to break in new and
-exciting ways on various platforms every few months. If you're a Docker whiz
-and can get this going reliably on Debian & OS X (ideally without breaking the
-other platform), that's great--pull requests would be a big help.
-
-Like other containers Docker containers don't have real clocks--that means you
-generally can't use them to test clock skew.
-
 ### LXC
 
 You can set up your DB nodes as LXC containers, and use your local machine as
@@ -102,6 +90,17 @@ test and know exactly what it's doing.
 NOTE: Most Jepsen tests are written with more specific requirements in
 mind---like running on Debian, using `iptables` for network manipulation, etc.
 See the specific test code for more details.
+
+### Docker (Unsupported)
+
+There is a [Docker Compose setup](/docker) for running a Jepsen cluster on a
+single machine. Sadly the Docker platform has been something of a moving
+target; this environment tends to break in new and exciting ways on various
+platforms every few months. If you're a Docker whiz and can get this going
+reliably on Debian & OS X that's great--pull requests would be a big help.
+
+Like other containers Docker containers don't have real clocks--that means you
+generally can't use them to test clock skew.
 
 ### Setting Up Control Nodes
 
