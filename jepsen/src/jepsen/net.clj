@@ -13,17 +13,18 @@
 
 ; TODO: move this into jepsen.net.proto
 (defprotocol Net
-  (drop! [net test src dest] "Drop traffic between nodes src and dest.")
-  (heal! [net test]          "End all traffic drops and restores network to fast operation.")
+  (drop! [net test src dest]   "Drop traffic between nodes src and dest.")
+  (heal! [net test]            "End all traffic drops and restores network to fast operation.")
   (slow! [net test]
-         [net test opts]
-         "Delays network packets with options:
-
-         :mean         (in ms)
-         :variance     (in ms)
-         :distribution (e.g. :normal)")
-  (flaky! [net test]         "Introduces randomized packet loss")
-  (fast! [net test]          "Removes packet loss and delays."))
+         [net test opts]       "Delays network packets with options:
+                                ```clj
+                                {:mean          ; (in ms)
+                                 :variance      ; (in ms)
+                                 :distribution} ; (e.g. :normal)
+                                ```")
+  (flaky! [net test]           "Introduces randomized packet loss")
+  (fast!  [net test]           "Removes packet loss and delays.")
+  (shape! [net test behaviors] "Shapes network behavior, i.e. packet delay, loss, corruption, duplication, and reordering."))
 
 ; Top-level API functions
 (defn drop-all!
@@ -45,15 +46,86 @@
 
 (def tc "/sbin/tc")
 
+(def all-packet-behaviors
+  "All of the available network packet behaviors, and their default option values.
+
+   Caveats:
+   
+     - behaviors are applied at the node network level, i.e. all egress regardless of destination, type, etc.
+     - `:delay` - Use `:normal` distribution of delays for more typical network behavior. 
+     - `:loss`  - When used locally (not on a bridge or router), the loss is reported to the upper level protocols.
+                  This may cause TCP to resend and behave as if there was no loss.
+   
+   See [tc-netem(8)](https://manpages.debian.org/bullseye/iproute2/tc-netem.8)."
+  {:delay     {:time         :50ms
+               :jitter       :10ms
+               :correlation  :25%
+               :distribution [:distribution :normal]}  ; uniform | normal | pareto |  paretonormal
+   :loss      {:percent      :20%
+               :correlation  :75%}
+   :corrupt   {:percent      :20%
+               :correlation  :75%}
+   :duplicate {:percent      :20%
+               :correlation  :75%}
+   :reorder   {:percent      :20%
+               :correlation  :75%}})
+
+(defn- delete-netem!
+  "Deletes a network emulation, assumed to have fault'y behavior, returning nodes to reliability."
+  [_net test]
+  (with-test-nodes test
+    ;; may already be reliable, i.e. no queuing discipline
+    (try
+      (su (exec tc :qdisc :del :dev :eth0 :root))
+      :reliable
+      (catch RuntimeException e
+        (if (re-find #"Error: Cannot delete qdisc with handle of zero\."
+                     (.getMessage e))
+          :reliable
+          (throw e))))))
+
+(defn- set-netem!
+  "Sets a network emulation with given `behaviors` to disrupt packets.
+   Shared convenience call for iptables/ipfilter."
+  [net test behaviors]
+  (if (seq behaviors)
+    (do
+      (assert (if (:reorder behaviors)
+                (:delay behaviors)
+                true)
+              "Cannot reorder packets without a delay.")
+      ;; reset node networks to reliable before introducing new queuing discipline
+      (delete-netem! net test)
+      (let [tc-opts (->> behaviors
+                         ;; fill in all unspecified opts with default values
+                         (reduce (fn [acc [behavior opts]]
+                                   (assoc acc behavior (merge (behavior all-packet-behaviors) opts)))
+                                 {})
+                         ;; build a tc cmd line combining all behaviors
+                         (reduce (fn [args [behavior {:keys [time jitter percent correlation distribution] :as _opts}]]
+                                   (case behavior
+                                     :delay
+                                     (concat args [:delay time jitter correlation distribution])
+                                     (:loss :corrupt :duplicate :reorder)
+                                     (concat args [behavior percent correlation])))
+                                 [:qdisc :add :dev :eth0 :root :netem]))]
+        (with-test-nodes test
+          (do
+            (su (exec tc tc-opts))
+            :shaped))))
+    ;; no queuing discipline desired, delete any existing shaping
+    (delete-netem! net test)))
+
 (def noop
   "Does nothing."
   (reify Net
-    (drop! [net test src dest])
-    (heal! [net test])
-    (slow! [net test])
-    (slow! [net test opts])
+    (drop!  [net test src dest])
+    (heal!  [net test])
+    (slow!  [net test])
+    (slow!  [net test opts])
     (flaky! [net test])
-    (fast! [net test])))
+    (fast!  [net test])
+    (shape! [net test behaviors])))
 
 (def iptables
   "Default iptables (assumes we control everything)."
@@ -97,6 +169,9 @@
                          (.getMessage e))
               nil
               (throw e))))))
+
+    (shape! [net test behaviors]
+      (set-netem! net test behaviors))
 
     p/PartitionAll
     (drop-all! [net test grudge]
@@ -142,4 +217,7 @@
 
     (fast! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :del :dev :eth0 :root))))))
+        (su (exec :tc :qdisc :del :dev :eth0 :root))))
+
+    (shape! [net test behaviors]
+      (set-netem! net test behaviors))))
