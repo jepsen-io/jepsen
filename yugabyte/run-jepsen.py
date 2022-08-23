@@ -59,10 +59,12 @@ TEST_PER_VERSION = [
             "ycql/set",
             "ycql/set-index",
             "ycql/bank",
-            "ycql/bank-inserts",
             "ycql/long-fork",
             "ycql/single-key-acid",
             "ycql/multi-key-acid",
+            # Disabled https://github.com/yugabyte/yugabyte-db/issues/10328
+            # Related to multipage index scan https://github.com/yugabyte/yugabyte-db/issues/13502
+            # "ycql/bank-inserts",
 
 
             # YSQL serializable
