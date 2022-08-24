@@ -65,7 +65,7 @@
   [dev]
   (try+
    (su (exec tc :qdisc :del :dev dev :root))
-   (catch [:exit 2] {}
+   (catch [:exit 2] _
      ; no qdisc to del
      nil)))
 
@@ -121,41 +121,42 @@
 (defn- net-shape!
   "Shared convenience call for iptables/ipfilter.
    Shape the network with tc qdisc, netem, and filter(s) so target nodes have given behavior."
-  [_net {:keys [nodes] :as _test} targets behavior]
-  (let [results (on-many nodes
-                         (let [nodes   (set nodes)
-                               targets (set targets)
-                               targets (if (contains? targets *host*)
-                                         (disj nodes *host*)
-                                         targets)
-                               dev     (net-dev)]
-                           ; start with no qdisc
-                           (qdisc-del dev)
-                           (if (and (seq targets)
-                                    (seq behavior))
-                             ; node will need a prio qdisc, netem qdisc, and a filter per target
-                             (do
-                               (su
-                                ; root prio qdisc, bands 1:1-3 are system default prio
-                                (exec tc
-                                      :qdisc :add :dev dev
-                                      :root :handle "1:"
-                                      :prio :bands 4 :priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1)
-                                ; band 1:4 is a netem qdisc for the behavior
-                                (exec tc
-                                      :qdisc :add :dev dev
-                                      :parent "1:4" :handle "40:"
-                                      :netem (behaviors->netem behavior))
-                                ; filter dst ip's to netem qdisc with behavior
-                                (doseq [target targets]
-                                  (exec tc
-                                        :filter :add :dev dev
-                                        :parent "1:0"
-                                        :protocol :ip :prio :3 :u32 :match :ip :dst (control.net/ip target)
-                                        :flowid "1:4")))
-                               targets)
-                             ; no targets and/or behavior, so no qdisc/netem/filters
-                             nil)))]
+  [_net test targets behavior]
+  (let [results (on-nodes test
+                          (fn [test node]
+                            (let [nodes   (set (:nodes test))
+                                  targets (set targets)
+                                  targets (if (contains? targets node)
+                                            (disj nodes node)
+                                            targets)
+                                  dev     (net-dev)]
+                              ; start with no qdisc
+                              (qdisc-del dev)
+                              (if (and (seq targets)
+                                       (seq behavior))
+                                ; node will need a prio qdisc, netem qdisc, and a filter per target
+                                (do
+                                  (su
+                                   ; root prio qdisc, bands 1:1-3 are system default prio
+                                   (exec tc
+                                         :qdisc :add :dev dev
+                                         :root :handle "1:"
+                                         :prio :bands 4 :priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1)
+                                   ; band 1:4 is a netem qdisc for the behavior
+                                   (exec tc
+                                         :qdisc :add :dev dev
+                                         :parent "1:4" :handle "40:"
+                                         :netem (behaviors->netem behavior))
+                                   ; filter dst ip's to netem qdisc with behavior
+                                   (doseq [target targets]
+                                     (exec tc
+                                           :filter :add :dev dev
+                                           :parent "1:0"
+                                           :protocol :ip :prio :3 :u32 :match :ip :dst (control.net/ip target)
+                                           :flowid "1:4")))
+                                  targets)
+                                ; no targets and/or behavior, so no qdisc/netem/filters
+                                nil))))]
     ; return a more readable value
     (if (and (seq targets) (seq behavior))
       [:shaped   results :netem (vec (behaviors->netem behavior))]
