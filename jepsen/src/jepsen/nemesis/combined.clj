@@ -359,6 +359,60 @@
                            :fs    #{:strobe-clock}
                            :color "#A0E9E3"}}}))
 
+(defn file-corruption-package
+  "A nemesis and generator package that corrupts files.
+   
+   Opts:
+   ```clj
+   {:file-corruption
+    {:targets     [...] ; A collection of node specs, e.g. [:one, [\"n1\", \"n2\"], :all]
+     :corruptions [     ; A collection of file corruptions, e.g.:
+      {:bitflip \"/path/to/file\"
+       :probability 1e-3},
+      {:bitflip \"path/to/dir\"
+       :probability [1e-3 1e-4 1e-5]},
+      {:truncate \"path/to/file/or/dir\"
+       :drop (range 1 1025)}]}}
+   ```
+   
+   If a directory is given to `:bitflip` or `:truncate`,
+   a new random file is selected from that directory on each target node for each operation.
+
+   If `:probability` or `:drop` is a collection, a new `rand-nth` value is chosen for each operation.
+   
+   See [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]].
+
+   Additional options as for [[nemesis-package]]."
+  [{:keys [faults db file-corruption interval nodes] :as _opts}]
+  (let [needed?     (:file-corruption faults)
+        targets     (:targets     file-corruption (node-specs db))
+        corruptions (:corruptions file-corruption)
+        gen (->> (fn gen [_test _context]
+                   (let [targets     (->> (rand-nth targets)
+                                          (db-nodes {:nodes nodes} db))
+                         corruption  (rand-nth corruptions)
+                         {:keys [bitflip truncate probability drop]} corruption
+                         probability (->> probability (util/coll) (rand-nth))
+                         drop        (->> drop        (util/coll) (rand-nth))
+                         [f corruption] (cond
+                                          bitflip  [:bitflip  {:file bitflip  :probability probability}]
+                                          truncate [:truncate {:file truncate :drop        drop}])]
+                     {:type  :info
+                      :f     f
+                      :value (->> targets
+                                  (reduce (fn [plan node]
+                                            (assoc plan node corruption))
+                                          {}))}))
+                 (gen/stagger (or interval default-interval)))]
+    {:generator (when needed? gen)
+     :nemesis   (n/compose {#{:bitflip}  (n/bitflip)
+                            #{:truncate} (n/truncate-file)})
+     :perf      #{{:name  "file-corruption"
+                   :fs    #{:bitflip :truncate}
+                   :start #{}
+                   :stop  #{}
+                   :color "#99F2E2"}}}))
+
 (defn f-map-perf
   "Takes a perf map, and transforms the fs in it using `lift`."
   [lift perf]
@@ -399,10 +453,11 @@
   "Just like nemesis-package, but returns a collection of packages, rather than
   the combined package, so you can manipulate it further before composition."
   [opts]
-  (let [faults   (set (:faults opts [:partition :packet :kill :pause :clock]))
+  (let [faults   (set (:faults opts [:partition :packet :kill :pause :clock :file-corruption]))
         opts     (assoc opts :faults faults)]
     [(partition-package opts)
      (packet-package opts)
+     (file-corruption-package opts)
      (clock-package opts)
      (db-package opts)]))
 
@@ -437,6 +492,7 @@
     :packet     Controls network packet behavior
     :kill       Controls process kills
     :pause      Controls process pauses and restarts
+    :file-corruption Controls file corruption
 
   Possible faults:
 
@@ -445,6 +501,7 @@
     :kill
     :pause
     :clock
+    :file-corruption
 
   Partition options:
 
@@ -457,6 +514,11 @@
     
   Kill and Pause options:
 
-    :targets    A collection of node specs, e.g. [:one, :all]"
+    :targets    A collection of node specs, e.g. [:one, :all]
+
+  File corruption options:
+    
+    :targets     A collection of node specs, e.g. [:one, :all]
+    :corruptions A collection of file corruptions, e.g. [{:bitflip \"/data/dir\" :probability 1e-3}]"
   [opts]
   (compose-packages (nemesis-packages opts)))
