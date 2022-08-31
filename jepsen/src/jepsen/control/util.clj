@@ -30,10 +30,13 @@
             opts))))
 
 (defn file?
+  "Is `filename` a regular file that exists?"
   [filename]
-  (throw (RuntimeException. "Use exists? instead; file? will be used to tell if
-                            something is a file, as opposed to a directory or
-                            link.")))
+  (try+
+   (exec :test :-f filename)
+   true
+   (catch [:exit 1] _
+     false)))
 
 (defn exists?
   "Is a path present?"
