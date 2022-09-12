@@ -21,21 +21,23 @@
 A script to run multiple YugaByte DB Jepsen tests in a loop and organize the results.
 """
 
-import atexit
-import errno
+import argparse
+import logging
 import os
 import re
 import subprocess
-import sys
-import time
-import logging
-import argparse
-
-from itertools import zip_longest, chain
 from collections import namedtuple
 
+import atexit
+import errno
+import sys
+import time
+from itertools import zip_longest, chain
+from junit_xml import TestCase, TestSuite, to_xml_report_string
+
 CmdResult = namedtuple('CmdResult',
-                       ['returncode',
+                       ['output',
+                        'returncode',
                         'timed_out',
                         'everything_looks_good'])
 
@@ -47,7 +49,6 @@ SINGLE_TEST_RUN_TIME = 600
 SINGLE_TEST_RUN_TIME_FOR_SET_TEST = 300
 
 TEST_AND_ANALYSIS_TIMEOUT_SEC = 1200  # Includes test results analysis.
-NODES_FILE = os.path.expanduser("~/code/jepsen/nodes")
 DEFAULT_TARBALL_URL = "https://downloads.yugabyte.com/yugabyte-1.3.1.0-linux.tar.gz"
 
 TEST_PER_VERSION = [
@@ -66,7 +67,6 @@ TEST_PER_VERSION = [
             # Related to multipage index scan https://github.com/yugabyte/yugabyte-db/issues/13502
             # "ycql/bank-inserts",
 
-
             # YSQL serializable
             "ysql/sz.counter",
             "ysql/sz.set",
@@ -80,7 +80,7 @@ TEST_PER_VERSION = [
             "ysql/sz.append",
 
             # YSQL snapshot isolation
-            "ysql/si.append-si",
+            "ysql/si.append",
             "ysql/si.bank",
             "ysql/si.bank-contention",
             "ysql/si.bank-multitable",
@@ -118,17 +118,15 @@ def get_workload_version(workload):
         for tests in el["tests"]:
             if workload in tests:
                 return el["start_version"]
-    assert False, f"Unanable to find workload in tests: {TESTS}"
+    raise EnvironmentError(f"Unanable to find workload in tests: {TESTS}")
 
 
 def is_version_at_least(v_least, v_actual):
     v_least_split = re.split('\.|-b', v_least)
     v_actual_split = re.split('\.|-b', v_actual)
-    for i, j in zip_longest(map(int, v_least_split), map(int, v_actual_split), fillvalue=0):
-        if i == j:
-            continue
-        return i < j
-    return True
+    return next((i < j
+                 for i, j in zip_longest(map(int, v_least_split), map(int, v_actual_split),
+                                         fillvalue=0) if i != j), True)
 
 
 def cleanup():
@@ -177,7 +175,6 @@ def show_last_lines(file_path, n_lines):
 
 
 def run_cmd(cmd,
-            shell=True,
             timeout=None,
             exit_on_error=True,
             log_name_prefix=None,
@@ -187,8 +184,8 @@ def run_cmd(cmd,
     stderr_path = None
     keep_output_log_file = True
     if log_name_prefix is not None:
-        stdout_path = os.path.join(LOGS_DIR, log_name_prefix + '_stdout.log')
-        stderr_path = os.path.join(LOGS_DIR, log_name_prefix + '_stderr.log')
+        stdout_path = os.path.join(LOGS_DIR, f'{log_name_prefix}_stdout.log')
+        stderr_path = os.path.join(LOGS_DIR, f'{log_name_prefix}_stderr.log')
         logging.info("stdout log: %s", stdout_path)
         logging.info("stderr log: %s", stderr_path)
 
@@ -206,8 +203,7 @@ def run_cmd(cmd,
 
         child_processes.append(p)
 
-        if timeout:
-            deadline = time.time() + timeout
+        deadline = time.time() + timeout if timeout else float('inf')
         while p.poll() is None and (timeout is None or time.time() < deadline):
             time.sleep(1)
 
@@ -225,6 +221,7 @@ def run_cmd(cmd,
             if exit_on_error:
                 sys.exit(returncode)
         everything_looks_good = False
+        last_lines_of_output = []
         if stdout_path is not None and os.path.exists(stdout_path):
             last_lines_of_output, _ = get_last_lines(stdout_path, 50)
             everything_looks_good = any(
@@ -232,6 +229,7 @@ def run_cmd(cmd,
         if everything_looks_good:
             keep_output_log_file = False
         return CmdResult(
+            output=None if everything_looks_good else "\n".join([truncate_line(line) for line in last_lines_of_output]),
             returncode=returncode,
             timed_out=timed_out,
             everything_looks_good=everything_looks_good)
@@ -257,6 +255,10 @@ def run_cmd(cmd,
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        '--build_url',
+        default="",
+        help='Jenkins build URL')
     parser.add_argument(
         '--url',
         default=DEFAULT_TARBALL_URL,
@@ -310,9 +312,9 @@ def main():
     total_test_time_sec = 0
 
     if os.path.isdir(LOGS_DIR):
-        logging.info("Directory %s already exists", LOGS_DIR)
+        logging.info(f"Directory {LOGS_DIR} already exists", )
     else:
-        logging.info("Creating directory %s", LOGS_DIR)
+        logging.info(f"Creating directory {LOGS_DIR}")
         os.mkdir(LOGS_DIR)
 
     test_index = 0
@@ -323,18 +325,19 @@ def main():
     url = args.url
 
     version = None
-    for match in re.finditer(r"(?<=yugabyte\-)(\d+\.\d+(\.\d+){0,2}(-b\d+)?)", url, re.MULTILINE):
+    for match in re.finditer(r"(?<=yugabyte-)(\d+\.\d+(\.\d+){0,2}(-b\d+)?)", url, re.MULTILINE):
         version = match.group()
         break
-    assert version is not None, f"Failed to parse version from URL {url}"
+    if version is None:
+        raise AttributeError(f"Failed to parse version from URL {url}")
 
     not_good_tests = []
     lein_cmd = " ".join(["lein run test",
                          "--os debian",
-                         "--url " + url,
-                         "--nemesis " + nemeses,
-                         "--concurrency " + args.concurrency
-                         ])
+                         f"--url {url}",
+                         f"--nemesis {nemeses}",
+                         f"--concurrency {args.concurrency}"])
+
     if args.iterations:
         lein_cmd += " --test-count 1"
         iteration_cnt = args.iterations
@@ -354,6 +357,7 @@ def main():
             f"Workloads to evaluate: {workloads_to_evaluate}")
         exit(1)
 
+    test_cases = {}
     for test in workloads_to_evaluate:
         for iteration in range(iteration_cnt):
             total_elapsed_time_sec = time.time() - start_time
@@ -364,7 +368,7 @@ def main():
                 break
 
             test_index += 1
-            test_description_str = "workload " + test + ", nemesis " + nemeses
+            test_description_str = f"workload {test}, nemesis {nemeses}"
             logging.info(
                 "\n%s\nStarting test run #%d - %s\n%s",
                 "=" * 80,
@@ -383,10 +387,8 @@ def main():
                 full_cmd,
                 timeout=TEST_AND_ANALYSIS_TIMEOUT_SEC,
                 exit_on_error=False,
-                log_name_prefix="{}_nemesis_{}_{}".format(test.replace('/', '-'),
-                                                          nemeses, test_index),
-                num_lines_to_show=30
-            )
+                log_name_prefix=f"{test.replace('/', '-')}_nemesis_{nemeses}_{test_index}",
+                num_lines_to_show=30)
 
             test_elapsed_time_sec = time.time() - test_start_time_sec
             if result.timed_out:
@@ -401,21 +403,49 @@ def main():
                 else:
                     logging.error("File %s does not exist!", jepsen_log_file)
 
+            test_name = f"{test}_{nemeses}"
+            tc = TestCase(name=test_name,
+                          classname=test.split('/')[0],
+                          elapsed_sec=test_elapsed_time_sec,
+                          url=args.build_url,
+                          stderr=result.output)
             logging.info(
                 "Test run #%d: elapsed_time=%.1f, returncode=%d, everything_looks_good=%s",
                 test_index, test_elapsed_time_sec, result.returncode,
                 result.everything_looks_good)
+
             if result.everything_looks_good:
                 num_everything_looks_good += 1
+
+                if test_name not in test_cases:
+                    test_cases[test_name] = tc
             else:
+                tc.add_error_info(test_description_str)
                 num_not_everything_looks_good += 1
                 not_good_tests.append(test_description_str)
+
+                if result.timed_out:
+                    message = "Timed out"
+
+                    tc.add_error_info(message)
+                elif not result.everything_looks_good:
+                    message = "Failure on result validation"
+
+                    tc.add_error_info(message)
+                else:
+                    message = f"Process exited with error code {result.returncode}"
+
+                    tc.add_failure_info(message, failure_type="exit code")
+
+                # always add latest failed run for the results
+                test_cases[test_name] = tc
+
             if result.returncode == 0:
                 num_zero_exit_code += 1
             else:
                 num_non_zero_exit_code += 1
 
-            run_cmd(SORT_RESULTS_SH + " " + nemeses)
+            run_cmd(f"{SORT_RESULTS_SH} {nemeses}")
 
             logging.info(
                 "\n%s\nFinished test run #%d (%s)\n%s",
@@ -444,6 +474,12 @@ def main():
         break
 
     logging.warning(f"Skipped workloads because of version incompatibility {workloads_to_skip}")
+
+    logging.info("Generating JUnit XML report")
+    ts = TestSuite(f"Jepsen {nemeses.replace(',', '-')} {version}", test_cases.values())
+
+    with open(f"jepsen-junit-{nemeses.replace(',', '-')}.xml", "w") as xml_report:
+        xml_report.write(to_xml_report_string([ts]))
 
     if not_good_tests:
         exit(1)
