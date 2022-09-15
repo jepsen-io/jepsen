@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Builds a docker-compose file. You'd THINK we could do this with `replicas`
 # but nooooooo, down that path lies madness. Instead we're going to do some
