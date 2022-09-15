@@ -12,11 +12,9 @@
        (catch RuntimeException _ false)))
 
 (defn local-ip
-  "The local node's eth0 address"
+  "The local node's IP address"
   []
-  (nth (->> (c/exec :ifconfig "eth0")
-            (re-find #"inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"))
-       1))
+  (first (str/split (c/exec :hostname :-I) #"\s+")))
 
 (defn ip*
   "Look up an ip for a hostname. Unmemoized."
@@ -40,3 +38,16 @@
 (def ip
   "Look up an ip for a hostname. Memoized."
   (memoize ip*))
+
+(defn control-ip
+  "Assuming you have a DB node bound in jepsen.client, returns the IP address
+  of the *control* node, as perceived by that DB node. This is helpful when you
+  want to, say, set up a tcpdump filter which snarfs traffic coming from the
+  control node."
+  []
+  ; We have to escape the sudo env for this to work, since the env var doesn't
+  ; make its way into subshells.
+  (binding [c/*sudo* nil]
+    (nth (re-find #"^(.+?)\s"
+                  (c/exec :bash :-c "echo $SSH_CLIENT"))
+         1)))

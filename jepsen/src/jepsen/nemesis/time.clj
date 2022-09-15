@@ -1,34 +1,43 @@
 (ns jepsen.nemesis.time
   "Functions for messing with time and clocks."
-  (:require [jepsen.os.debian :as debian]
+  (:require [clojure.tools.logging :refer [info warn]]
+            [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
             [jepsen [util :as util]
                     [client :as client]
                     [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]]
-            [jepsen.generator.pure :as gen.pure]
+            [jepsen.control.util :as cu]
             [clojure.string :as str]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
+(def dir
+  "Where do we install binaries to?"
+  "/opt/jepsen")
+
 (defn compile!
-  "Takes a Reader to C source code and spits out a binary to /opt/jepsen/<bin>."
+  "Takes a Reader to C source code and spits out a binary to /opt/jepsen/<bin>,
+  if it doesn't already exist."
   [reader bin]
   (c/su
-    (let [tmp-file (File/createTempFile "jepsen-upload" ".c")]
-      (try
-        (io/copy reader tmp-file)
-        ; Upload
-        (c/exec :mkdir :-p "/opt/jepsen")
-        (c/exec :chmod "a+rwx" "/opt/jepsen")
-        (c/upload (.getCanonicalPath tmp-file) (str "/opt/jepsen/" bin ".c"))
-        (c/cd "/opt/jepsen"
-              (c/exec :gcc (str bin ".c"))
-              (c/exec :mv "a.out" bin))
-        (finally
-          (.delete tmp-file)))))
-  bin)
+    (when-not (cu/exists? (str dir "/" bin))
+      (info "Compiling" bin)
+      (let [tmp-file (File/createTempFile "jepsen-upload" ".c")]
+        (try
+          (io/copy reader tmp-file)
+          ; Upload
+          (c/exec :mkdir :-p dir)
+          (c/exec :chmod "a+rwx" dir)
+          (c/upload (.getCanonicalPath tmp-file) (str dir "/" bin ".c"))
+          (c/cd dir
+                (c/exec :gcc (str bin ".c"))
+                (c/exec :mv "a.out" bin))
+          (finally
+            (.delete tmp-file)))))
+    bin))
 
 (defn compile-resource!
   "Given a resource name, spits out a binary to /opt/jepsen/<bin>."
@@ -45,12 +54,17 @@
   "Uploads and compiles some C programs for messing with clocks."
   []
   (c/su
-   (try (compile-tools!)
-     (catch RuntimeException e
-       (try (debian/install [:build-essential])
-         (catch RuntimeException e
-           (centos/install [:gcc])))
-       (compile-tools!)))))
+    (try+ (compile-tools!)
+          (catch [:exit 127] e
+            (if (re-find #"command not found" (:err e))
+              ; No build tools?
+              (try+ (debian/install [:build-essential])
+                    (catch [:exit 127] e
+                      (if (re-find #"command not found" (:err e))
+                        (centos/install [:gcc])
+                        (throw+ e))))
+              (throw+ e))
+            (compile-tools!)))))
 
 (defn parse-time
   "Parses a decimal time in unix seconds since the epoch, provided as a string,
@@ -72,7 +86,7 @@
 (defn reset-time!
   "Resets the local node's clock to NTP. If a test is given, resets time on all
   nodes across the test."
-  ([]     (c/su (c/exec :ntpdate :-b "time.google.com")))
+  ([]     (c/su (c/exec :ntpdate :-p 1 :-b "time.google.com")))
   ([test] (c/with-test-nodes test (reset-time!))))
 
 (defn bump-time!
@@ -101,14 +115,12 @@
   []
   (reify nemesis/Nemesis
     (setup! [nem test]
-      (c/with-test-nodes test (install!))
-      ; Try to stop ntpd service in case it is present and running.
       (c/with-test-nodes test
-        (try (c/su (c/exec :service :ntp :stop))
-             (catch RuntimeException e))
+        (install!)
+        ; Try to stop ntpd service in case it is present and running.
         (try (c/su (c/exec :service :ntpd :stop))
-             (catch RuntimeException e)))
-      (reset-time! test)
+             (catch RuntimeException e))
+        (reset-time!))
       nem)
 
     (invoke! [_ test op]
@@ -140,9 +152,9 @@
       (reset-time! test))))
 
 (defn reset-gen-select
-  "A function which returns a reset generator. The parameter of this function is
-  used to select which subset of the test's nodes to use as targets in the
-  generator."
+  "A function which returns a generator of reset operations. Takes a function
+  (select test) which returns nodes from the test we'd like to target for that
+  clock reset."
   [select]
   (fn [test process]
     {:type :info, :f :reset, :value (select test)}))
@@ -153,10 +165,9 @@
   (reset-gen-select (comp util/random-nonempty-subset :nodes)))
 
 (defn bump-gen-select
-  "A function which returns a clock bump generator that bumps the clock from -262
-  to +262 seconds, exponentially distributed. The parameter of this function is
-  used to select which subset of the test's nodes to use as targets in the
-  generator."
+  "A function which returns a clock bump generator that bumps the clock from
+  -262 to +262 seconds, exponentially distributed. (select test) is used to
+  select which subset of the test's nodes to use as targets in the generator."
   [select]
   (fn [test process]
     {:type  :info
@@ -171,10 +182,10 @@
   (bump-gen-select (comp util/random-nonempty-subset :nodes)))
 
 (defn strobe-gen-select
-  "A function which returns a clock strobe generator that introduces clock strobes
-  from 4 ms to 262 seconds, with a period of 1 ms to 1 second, for a duration of
-  0-32 seconds. The parameter of this function is used to select which subset of
-  the test's nodes to use as targets in the generator."
+  "A function which returns a clock strobe generator that introduces clock
+  strobes from 4 ms to 262 seconds, with a period of 1 ms to 1 second, for a
+  duration of 0-32 seconds. (select test) is used to select which subset of the
+  test's nodes to use as targets in the generator."
   [select]
   (fn [test process]
     {:type  :info
@@ -194,10 +205,6 @@
   "Emits a random schedule of clock skew operations. Always starts by checking
   the clock offsets to establish an initial bound."
   []
-  (gen/stateful+pure
-    (gen/phases
-      (gen/once {:type :info, :f :check-offsets})
-      (gen/mix [reset-gen bump-gen strobe-gen]))
-    (gen.pure/phases
-      {:type :info, :f :check-offsets}
-      (gen.pure/mix [reset-gen bump-gen strobe-gen]))))
+  (gen/phases
+    {:type :info, :f :check-offsets}
+    (gen/mix [reset-gen bump-gen strobe-gen])))

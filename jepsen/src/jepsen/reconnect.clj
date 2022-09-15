@@ -11,7 +11,8 @@
   the current connection at once."
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util])
-  (:import (java.util.concurrent.locks ReentrantReadWriteLock)))
+  (:import (java.io InterruptedIOException)
+           (java.util.concurrent.locks ReentrantReadWriteLock)))
 
 (defn wrapper
   "A wrapper is a stateful construct for talking to a database. Options:
@@ -19,7 +20,8 @@
   :name     An optional name for this wrapper (for debugging logs)
   :open     A function which generates a new conn
   :close    A function which closes a conn
-  :log?     Whether to log reconnect messages"
+  :log?     Whether to log reconnect messages. A special value, minimal
+            logs only a single line rather than a full stacktrace."
   [options]
   (assert (ifn? (:open options)))
   (assert (ifn? (:close options)))
@@ -101,6 +103,14 @@
      (.lock read-lock#)
      (let [~c (conn ~wrapper)]
        (try ~@body
+            (catch InterruptedException e#
+              ; When threads are interrupted, we're generally
+              ; terminating--there's no reason to reopen or log a message here.
+              (throw e#))
+            (catch InterruptedIOException e#
+              ; Ditto here; this is a consequence of an interrupt, and we
+              ; should, I think, treat it as if it were an interrupt itself.
+              (throw e#))
             (catch Exception e#
               ; We can't acquire the write lock until we release our read lock,
               ; because ???
@@ -109,18 +119,30 @@
                 (with-write-lock ~wrapper
                   (when (identical? ~c (conn ~wrapper))
                     ; This is the same conn that yielded the error
-                    (when (:log? ~wrapper)
-                      (warn e# (str "Encountered error with conn "
-                                 (pr-str (:name ~wrapper))
-                                 "; reopening")))
+                    (cond (= :minimal (:log? ~wrapper))
+                          (warn (str (.getName (class e#))
+                                     " with conn "
+                                     (pr-str (:name ~wrapper))
+                                     "; reopening."))
+                          (:log? ~wrapper)
+                          (warn e# (str "Encountered error with conn "
+                                        (pr-str (:name ~wrapper))
+                                        "; reopening")))
                     (reopen! ~wrapper)))
+                (catch InterruptedException e#
+                  ; Same here
+                  (throw e#))
                 (catch Exception e2#
                   ; We don't want to lose the original exception, but we will
                   ; log the reconnect error here. If we don't throw the
                   ; original exception, our caller might not know what kind of
                   ; error occurred in their transaction logic!
-                  (when (:log? ~wrapper)
-                    (warn e2# "Error reopening" (pr-str (:name ~wrapper)))))
+                  (cond (= :minimal (:log? ~wrapper))
+                        (warn (str (.getName (class e2#))
+                                   " reopening " (pr-str (:name ~wrapper))))
+
+                        (:log? ~wrapper)
+                        (warn e2# "Error reopening" (pr-str (:name ~wrapper)))))
                 (finally
                   (.lock read-lock#)))
               ; Right, that's done with, now we can propagate the exception

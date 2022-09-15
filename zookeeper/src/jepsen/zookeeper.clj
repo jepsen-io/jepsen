@@ -56,13 +56,14 @@
                 :> "/etc/zookeeper/conf/zoo.cfg")
 
         (info node "ZK restarting")
-        (c/exec :service :zookeeper :restart)
+        (c/exec :service :zookeeper :stop)
+        (c/exec :service :zookeeper :start) ; for some reason, the restart often fails.
         (info node "ZK ready")))
 
     (teardown! [_ test node]
       (info node "tearing down ZK")
       (c/su
-        (c/exec :service :zookeeper :stop)
+        (c/exec :service :zookeeper :stop) ; we must first comment this line to let the node install zk.
         (c/exec :rm :-rf
                 (c/lit "/var/lib/zookeeper/version-*")
                 (c/lit "/var/log/zookeeper/*"))))
@@ -79,10 +80,12 @@
   "A client for a single compare-and-set register"
   [conn a]
   (reify client/Client
-    (setup! [_ test node]
+    (open! [_ test node]
       (let [conn (avout/connect (name node))
             a    (avout/zk-atom conn "/jepsen" 0)]
         (client conn a)))
+
+    (setup! [this test])
 
     (invoke! [this test op]
       (timeout 5000 (assoc op :type :info, :error :timeout)
@@ -100,6 +103,9 @@
                                                   current))))
                           (assoc op :type @type)))))
 
+    (close! [_ test]
+      (.close conn))
+
     (teardown! [_ test]
       (.close conn))))
 
@@ -112,21 +118,23 @@
          opts
          {:name    "zookeeper"
           :os      debian/os
-          :db      (db "3.4.9-3+deb9u1")
+          :db      (db "3.4.13-2")
           :client  (client nil nil)
           :nemesis (nemesis/partition-random-halves)
           :generator (->> (gen/mix [r w cas])
                           (gen/stagger 1)
                           (gen/nemesis
-                            (gen/seq (cycle [(gen/sleep 5)
-                                             {:type :info, :f :start}
-                                             (gen/sleep 5)
-                                             {:type :info, :f :stop}])))
+                           (cycle [(gen/sleep 5)
+                                   {:type :info, :f :start}
+                                   (gen/sleep 5)
+                                   {:type :info, :f :stop}]))
                           (gen/time-limit 15))
           :model   (model/cas-register 0)
           :checker (checker/compose
-                     {:perf   (checker/perf)
-                      :linear checker/linearizable})}))
+                    {:perf   (checker/perf)
+                     :linear (checker/linearizable 
+                              {:model (model/cas-register)
+                               :algorithm :linear})})}))
 
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for

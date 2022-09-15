@@ -1,4 +1,5 @@
 (ns jepsen.util-test
+  (:refer-clojure :exclude [parse-long])
   (:use clojure.test)
   (:require [jepsen.util :refer :all]))
 
@@ -160,3 +161,14 @@
         e2 {:process :nemesis, :f :stop, :value 2}]
     (is (= [[s1 e1] [s2 e2] [s3 e1] [s4 e2]]
            (nemesis-intervals [s1 s2 s3 s4 e1 e2])))))
+
+(deftest rand-exp-test
+  (let [n             500
+        target-mean   30
+        samples       (take n (repeatedly (partial rand-exp target-mean)))
+        sum           (reduce + samples)
+        mean          (/ sum n)]
+    ;(prn samples)
+    (is (< (* target-mean 0.7)
+           mean
+           (* target-mean 1.3)))))

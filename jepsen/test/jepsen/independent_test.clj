@@ -6,87 +6,22 @@
             [jepsen.independent :refer :all]
             [jepsen.checker :as checker]
             [jepsen.generator :as gen]
-            [jepsen.generator-test :as gen-test :refer [ops]]))
+            [jepsen.generator.test :as gen.test]))
 
 (use-fixtures :once quiet-logging)
 
-(deftest sequential-generator-test
-  (testing "empty keys"
-    (is (= []
-           (ops [:a :b] (sequential-generator [] (fn [k] :x))))))
-
-  (testing "one key"
-    (is (= [{:value [:k1 :ashley]}
-            {:value [:k1 :katchadourian]}]
-           (ops [:a] (sequential-generator
-                       [:k1]
-                       (fn [k] (gen/seq [{:value :ashley}
-                                         {:value :katchadourian}])))))))
-
-  (testing "n keys"
-    (is (= [[1 0]
-            [2 0]
-            [2 1]
-            [3 0]
-            [3 1]
-            [3 2]]
-           (->> (fn [k] (gen/seq (map (partial array-map :value) (range k))))
-                (sequential-generator [1 2 3])
-                (ops [:a])
-                (map :value)))))
-
-  (testing "concurrency"
-    (let [kmax 1000
-          vmax 10]
-      ; Gotta realize the ranges to work around a concurrency bug in LongRange
-      (is (= (set (for [k (range kmax), v (range vmax)] [k v]))
-             (->> (fn [k] (gen/seq (map (partial array-map :value)
-                                        (doall (range vmax)))))
-                  (sequential-generator (doall (range kmax)))
-                  (ops (range 10))
-                  (map :value)
-                  set))))))
-
-(deftest concurrent-generator-test
-  (testing "empty keys"
-    (is (= []
-           (ops (range 10) (concurrent-generator 1 [] identity)))))
-
-  (testing "Too few threads"
-    (is (thrown-with-msg?
-          Exception
-          #"With 10 worker threads, this jepsen\.concurrent/concurrent-generator cannot run a key with 12 threads concurrently\. Consider raising your test's :concurrency to at least 12\."
-          (ops (range 10) (concurrent-generator 12 [] identity)))))
-
-  (testing "Uneven threads"
-    (is (thrown-with-msg?
-          Exception
-          #"This jepsen\.independent/concurrent-generator has 11 threads to work with, but can only use 10 of those threads to run 5 concurrent keys with 2 threads apiece\. Consider raising or lowering the test's :concurrency to a multiple of 2\."
-          (ops (range 11) (concurrent-generator 2 [] identity)))))
-
-  (testing "Fully concurrent"
-    (let [kmax    10
-          vmax    5
-          n       5
-          threads 100]
-      (is (= (set (for [k (range kmax), v (range vmax)] [k v]))
-             (->> (fn [k] (gen/seq (map (partial array-map :value)
-                                        (range vmax))))
-                  (concurrent-generator n (range kmax))
-                  (ops (range threads))
-                  (map :value)
-                  set))))))
-
+; Tests for independent generators are in generator-test; might want to pull
+; them over here later.
 
 (deftest checker-test
   (let [even-checker (reify checker/Checker
                        (check [this test history opts]
                          {:valid? (even? (count history))}))
         history (->> (fn [k] (->> (range k)
-                                  (map (partial array-map :value))
-                                  gen/seq))
+                                  (map (partial array-map :value))))
                      (sequential-generator [0 1 2 3])
-                     (ops [:a :b :c])
+                     (gen/nemesis nil)
+                     (gen.test/perfect (gen.test/n+nemesis-context 3))
                      (concat [{:value :not-sharded}]))]
     (is (= {:valid? false
             :results {1 {:valid? true}

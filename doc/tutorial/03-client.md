@@ -36,7 +36,7 @@ value in for the completion op.
 
 Now we need to take these operations and *apply* them to etcd. We'll use
 the [Verschlimmbessergung](https://github.com/aphyr/verschlimmbesserung)
-library to talk to etcd. We'll start by requireing Verschlimmbesserung, and
+library to talk to etcd. We'll start by requiring Verschlimmbesserung, and
 writing an empty implementation of Jepsen's Client protocol:
 
 ```clj
@@ -87,14 +87,15 @@ connected clients later.
 
 ```clj
 (defn etcd-test
-  "Given an options map from the command-line runner (e.g. :nodes, :ssh,
-  :concurrency, ...), constructs a test map."
+  "Given an options map from the command line runner (e.g. :nodes, :ssh,
+  :concurrency ...), constructs a test map."
   [opts]
   (merge tests/noop-test
          opts
-         {:name "etcd"
-          :os debian/os
-          :db (db "v3.1.5")
+         {:pure-generators true
+          :name   "etcd"
+          :os     debian/os
+          :db     (db "v3.1.5")
           :client (Client. nil)}))
 ```
 
@@ -170,14 +171,15 @@ duties), and stop after 15 seconds.
   [opts]
   (merge tests/noop-test
          opts
-         {:name "etcd"
-          :os   debian/os
-          :db   (db "v3.1.5")
-          :client (Client. nil)
-          :generator (->> r
-                          (gen/stagger 1)
-                          (gen/nemesis nil)
-                          (gen/time-limit 15))}))
+         {:pure-generators true
+          :name            "etcd"
+          :os              debian/os
+          :db              (db "v3.1.5")
+          :client          (Client. nil)
+          :generator       (->> r
+                                (gen/stagger 1)
+                                (gen/nemesis nil)
+                                (gen/time-limit 15))}))
 ```
 
 This throws a bunch of errors, because we haven't told the client *how* to
@@ -186,17 +188,18 @@ intepret these reads yet.
 ```bash
 $ lein run test
 ...
-WARN [2018-02-02 15:00:54,338] jepsen worker 3 - jepsen.core Error running worker 3
-java.lang.AssertionError: Assert failed: Expected client/invoke! to return a map with :type :ok, :fail, or :info, but received {:time 107596475} instead
+WARN [2020-09-21 20:16:33,150] jepsen worker 0 - jepsen.generator.interpreter Process 0 crashed
+clojure.lang.ExceptionInfo: throw+: {:type :jepsen.client/invalid-completion, :op {:type :invoke, :f :read, :value nil, :time 26387538, :process 0}, :op' nil, :problems ["should be a map" ":type should be :ok, :info, or :fail" ":process should be the same" ":f should be the same"]}
 ```
 
 The client's `invoke!` function takes an invocation operation, and right now,
-does nothing with it, returning `nil`. Jepsen adds a timestamp, which is where
-`{:time ...}` comes from, but we have to tell it what else happened to the
-operation. We'll construct a corresponding completion op, with type `:ok` if
-the operation succeeded, `:fail` if it didn't take place, or `:info` if we're
-not sure. `invoke!` can also throw an exception, which is automatically
-converted to an `:info`.
+does nothing with it, returning `nil`. Jepsen is telling us that it should be a
+map, and specifically one with a `:type` field, a matching `:process`, and a
+matching `:f`. In short, we have to construct a completion operation which
+*concludes* the invocation operation. We'll construct this completion op with
+type `:ok` if the operation succeeded, `:fail` if it didn't take place, or
+`:info` if we're not sure. `invoke!` can also throw an exception, which is
+automatically converted to an `:info`.
 
 Let's start by handling reads. We'll use `v/get` to read the value of a single
 key. We can pick any name we like--let's call it "foo" for now.
@@ -237,14 +240,15 @@ We'll change our generator to take a random mixture of reads and writes, using
   [opts]
   (merge tests/noop-test
          opts
-         {:name       "etcd"
-          :os         debian/os
-          :db         (db "v3.1.5")
-          :client     (Client. nil)
-          :generator  (->> (gen/mix [r w])
-                           (gen/stagger 1)
-                           (gen/nemesis nil)
-                           (gen/time-limit 15))}))
+         {:pure-generators true
+          :name            "etcd"
+          :os              debian/os
+          :db              (db "v3.1.5")
+          :client          (Client. nil)
+          :generator       (->> (gen/mix [r w])
+                                (gen/stagger 1)
+                                (gen/nemesis nil)
+                                (gen/time-limit 15))}))
 ```
 
 To handle those writes, we'll use `v/reset!`, and return the op with

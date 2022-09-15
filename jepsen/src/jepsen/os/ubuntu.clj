@@ -22,26 +22,25 @@
     (c/su
       ; Packages!
       (debian/install [:apt-transport-https
-                :wget
-                :curl
-                :vim
-                :man-db
-                :faketime
-                :ntpdate
-                :unzip
-                :iptables
-                :psmisc
-                :tar
-                :bzip2
-                :libzip4
-                :iputils-ping
-                :iproute2
-                :rsyslog
-                :sudo
-                :logrotate]))
+                       :wget
+                       :curl
+                       :vim
+                       :man-db
+                       :faketime
+                       :ntpdate
+                       :unzip
+                       :iptables
+                       :psmisc
+                       :tar
+                       :bzip2
+                       :iputils-ping
+                       :iproute2
+                       :rsyslog
+                       :sudo
+                       :logrotate]))
 
     (meh (net/heal! (:net test) test)))
 
   (teardown! [_ test node]))
 
-  (def os "An implementation of the Ubuntu OS." (Ubuntu.))
+(def os "An implementation of the Ubuntu OS." (Ubuntu.))

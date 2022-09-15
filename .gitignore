@@ -1,5 +1,6 @@
 .cake
 .lein-repl-history
+.rebel_readline_history
 pom.xml
 pom.xml.asc
 repl-port
@@ -9,8 +10,7 @@ repl-port
 *.war
 *.deb
 *~
-*.sw?
-.*.sw?
+.*.swp
 *.log
 log.txt
 lib
@@ -28,9 +28,9 @@ bench/**
 */timeline.html
 */resources/datomic/download-key
 */resources/datomic/riak-transactor.properties
-/.nrepl-port
+*/.nrepl-port
 .idea
 *.iml
 jepsen/doc
 .eastwood
-.session.vim
+docker/docker-compose.yml

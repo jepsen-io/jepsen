@@ -14,31 +14,40 @@
   We also take advantage of the Process and Pause protocols in jepsen.db,
   which allow us to start, kill, pause, and resume processes."
   (:require [clojure.tools.logging :refer [info warn]]
+            [clojure [set :as set]]
             [jepsen [control :as c]
                     [db :as db]
                     [generator :as gen]
                     [nemesis :as n]
                     [util :as util :refer [majority
+                                           minority-third
                                            random-nonempty-subset]]]
-            [jepsen.generator.pure :as gen.pure]
             [jepsen.nemesis.time :as nt]))
 
 (def default-interval
   "The default interval, in seconds, between nemesis operations."
   10)
 
+(def noop
+  "A package which does nothing."
+  {:generator       nil
+   :final-generator nil
+   :nemesis         n/noop
+   :perf            #{}})
+
 (defn db-nodes
   "Takes a test, a DB, and a node specification. Returns a collection of
   nodes taken from that test. node-spec may be one of:
 
-     nil            - Chooses a random, non-empty subset of nodes
-     :one           - Chooses a single random node
-     :minority      - Chooses a random minority of nodes
-     :majority      - Chooses a random majority of nodes
-     :primaries     - A random nonempty subset of nodes which we think are
-                      primaries
-     :all           - All nodes
-     [\"a\", ...]   - The specified nodes"
+     nil              - Chooses a random, non-empty subset of nodes
+     :one             - Chooses a single random node
+     :minority        - Chooses a random minority of nodes
+     :majority        - Chooses a random majority of nodes
+     :minority-third  - Up to, but not including, 1/3rd of nodes
+     :primaries       - A random nonempty subset of nodes which we think are
+                        primaries
+     :all             - All nodes
+     [\"a\", ...]     - The specified nodes"
   [test db node-spec]
   (let [nodes (:nodes test)]
     (case node-spec
@@ -46,6 +55,7 @@
       :one        (list (rand-nth nodes))
       :minority   (take (dec (majority (count nodes))) (shuffle nodes))
       :majority   (take      (majority (count nodes))  (shuffle nodes))
+      :minority-third (take (minority-third (count nodes)) (shuffle nodes))
       :primaries  (random-nonempty-subset (db/primaries db test))
       :all        nodes
       node-spec)))
@@ -54,7 +64,7 @@
   "Returns all possible node specification for the given DB. Helpful when you
   don't know WHAT you want to test."
   [db]
-  (cond-> [nil :one :minority :majority :all]
+  (cond-> [nil :one :minority-third :minority :majority :all]
     (satisfies? db/Primary db) (conj :primaries)))
 
 (defn db-nemesis
@@ -113,12 +123,8 @@
                           :value  (rand-nth pause-targets)})
 
         ; Flip-flop generators
-        kill-start   (gen/stateful+pure
-                       (gen/flip-flop kill start)
-                       (gen.pure/flip-flop kill (repeat start)))
-        pause-resume (gen/stateful+pure
-                       (gen/flip-flop pause resume)
-                       (gen.pure/flip-flop pause (repeat resume)))
+        kill-start (gen/flip-flop kill (repeat start))
+        pause-resume (gen/flip-flop pause (repeat resume))
 
         ; Automatically generate nemesis failure modes based on what the DB
         ; supports.
@@ -130,33 +136,28 @@
                  pause? (conj resume)
                  kill?  (conj start))]
     {:generator       (gen/mix modes)
-     :final-generator (gen/stateful+pure
-                        (gen/seq final)
-                        final)}))
+     :final-generator final}))
 
 (defn db-package
   "A nemesis and generator package for acting on a single DB. Options are from
   nemesis-package."
   [opts]
-  (when (some #{:kill :pause} (:faults opts))
-    (let [{:keys [generator final-generator]} (db-generators opts)
-          generator (gen/stateful+pure
-                      (gen/stagger (:interval opts default-interval)
-                                 generator)
-                      (gen.pure/stagger (:interval opts default-interval)
-                                          generator))
-          nemesis   (db-nemesis (:db opts))]
-      {:generator       generator
-       :final-generator final-generator
-       :nemesis         nemesis
-       :perf #{{:name   "kill"
-                :start  #{:kill}
-                :stop   #{:start}
-                :color  "#E9A4A0"}
-               {:name   "pause"
-                :start  #{:pause}
-                :stop   #{:resume}
-                :color  "#A0B1E9"}}})))
+  (let [needed? (some #{:kill :pause} (:faults opts))
+        {:keys [generator final-generator]} (db-generators opts)
+        generator (gen/stagger (:interval opts default-interval)
+                               generator)
+        nemesis   (db-nemesis (:db opts))]
+    {:generator       (when needed? generator)
+     :final-generator (when needed? final-generator)
+     :nemesis         nemesis
+     :perf #{{:name   "kill"
+              :start  #{:kill}
+              :stop   #{:start}
+              :color  "#E9A4A0"}
+             {:name   "pause"
+              :start  #{:pause}
+              :stop   #{:resume}
+              :color  "#A0B1E9"}}}))
 
 (defn grudge
   "Computes a grudge from a partition spec. Spec may be one of:
@@ -164,6 +165,8 @@
     :one              Isolates a single node
     :majority         A clean majority/minority split
     :majorities-ring  Overlapping majorities in a ring
+    :minority-third   Cleanly splits away up to, but not including, 1/3rd of
+                      nodes
     :primaries        Isolates a nonempty subset of primaries into
                       single-node components"
   [test db part-spec]
@@ -172,6 +175,9 @@
       :one              (n/complete-grudge (n/split-one nodes))
       :majority         (n/complete-grudge (n/bisect (shuffle nodes)))
       :majorities-ring  (n/majorities-ring nodes)
+      :minority-third   (n/complete-grudge (split-at (util/minority-third
+                                                       (count nodes))
+                                                     (shuffle nodes)))
       :primaries        (let [primaries (db/primaries db test)]
                           (->> primaries
                                random-nonempty-subset
@@ -184,7 +190,7 @@
 (defn partition-specs
   "All possible partition specs for a DB."
   [db]
-  (cond-> [nil :one :majority :majorities-ring]
+  (cond-> [:one :minority-third :majority :majorities-ring]
     (satisfies? db/Primary db) (conj :primaries)))
 
 (defn partition-nemesis
@@ -221,93 +227,93 @@
   "A nemesis and generator package for network partitions. Options as for
   nemesis-package."
   [opts]
-  (when ((:faults opts) :partition)
-    (let [db      (:db opts)
-          targets (:targets (:partition opts) (partition-specs db))
-          start (fn start [_ _]
-                  {:type  :info
-                   :f     :start-partition
-                   :value (rand-nth targets)})
-          stop  {:type :info, :f :stop-partition, :value nil}
-          gen   (gen/stateful+pure
-                  (->> (gen/flip-flop start stop)
-                       (gen/stagger (:interval opts default-interval)))
-                  (->> (gen.pure/flip-flop start (repeat stop))
-                       (gen.pure/stagger (:interval opts default-interval))))]
-      {:generator       gen
-       :final-generator (gen/stateful+pure
-                          (gen/once stop)
-                          stop)
-       :nemesis         (partition-nemesis db)
-       :perf            #{{:name  "partition"
-                           :start #{:start-partition}
-                           :stop  #{:stop-partition}
-                           :color "#E9DCA0"}}})))
+  (let [needed? ((:faults opts) :partition)
+        db      (:db opts)
+        targets (:targets (:partition opts) (partition-specs db))
+        start (fn start [_ _]
+                {:type  :info
+                 :f     :start-partition
+                 :value (rand-nth targets)})
+        stop  {:type :info, :f :stop-partition, :value nil}
+        gen   (->> (gen/flip-flop start (repeat stop))
+                   (gen/stagger (:interval opts default-interval)))]
+    {:generator       (when needed? gen)
+     :final-generator (when needed? stop)
+     :nemesis         (partition-nemesis db)
+     :perf            #{{:name  "partition"
+                         :start #{:start-partition}
+                         :stop  #{:stop-partition}
+                         :color "#E9DCA0"}}}))
 
 (defn clock-package
   "A nemesis and generator package for modifying clocks. Options as for
   nemesis-package."
   [opts]
-  (when ((:faults opts) :clock)
-    (let [nemesis (n/compose {{:reset-clock           :reset
-                               :check-clock-offsets   :check-offsets
-                               :strobe-clock          :strobe
-                               :bump-clock            :bump}
-                              (nt/clock-nemesis)})
-          db (:db opts)
-          target-specs (:targets (:clock opts) (node-specs db))
-          targets (fn [test] (db-nodes test db
-                                       (some-> target-specs seq rand-nth)))
-          clock-gen (gen/stateful+pure
-                      (gen/phases
-                       (gen/once {:type :info, :f :check-offsets})
-                       ;; Use a random subset of nodes, specificed by
-                       ;; `targets-specs`, as targets in the generators.
-                       (gen/mix [(nt/reset-gen-select  targets)
-                                 (nt/bump-gen-select   targets)
-                                 (nt/strobe-gen-select targets)]))
-                      (gen.pure/phases
-                       {:type :info, :f :check-offsets}
-                       (gen.pure/mix [(nt/reset-gen-select  targets)
-                                      (nt/bump-gen-select   targets)
-                                      (nt/strobe-gen-select targets)])))
-          gen (gen/stateful+pure
-                (->> clock-gen
-                     (gen/f-map {:reset          :reset-clock
-                                 :check-offsets  :check-clock-offsets
-                                 :strobe         :strobe-clock
-                                 :bump           :bump-clock})
-                     (gen/stagger (:interval opts default-interval)))
-                (->> clock-gen
-                     (gen.pure/f-map {:reset          :reset-clock
-                                      :check-offsets  :check-clock-offsets
-                                      :strobe         :strobe-clock
-                                      :bump           :bump-clock})
-                     (gen.pure/stagger (:interval opts default-interval))))]
-      {:generator         gen
-       :final-generator   (gen/stateful+pure
-                            (gen/once {:type :info, :f :reset-clock})
-                            {:type :info, :f :reset-clock})
-       :nemesis           nemesis
-       :perf              #{{:name  "clock"
-                             :start #{:bump-clock}
-                             :stop  #{:reset-clock}
-                             :fs    #{:strobe-clock}
-                             :color "#A0E9E3"}}})))
+  (let [needed? ((:faults opts) :clock)
+        nemesis (n/compose {{:reset-clock           :reset
+                             :check-clock-offsets   :check-offsets
+                             :strobe-clock          :strobe
+                             :bump-clock            :bump}
+                            (nt/clock-nemesis)})
+        db (:db opts)
+        target-specs (:targets (:clock opts) (node-specs db))
+        targets (fn [test] (db-nodes test db
+                                     (some-> target-specs seq rand-nth)))
+        clock-gen (gen/phases
+                    {:type :info, :f :check-offsets}
+                    (gen/mix [(nt/reset-gen-select  targets)
+                              (nt/bump-gen-select   targets)
+                              (nt/strobe-gen-select targets)]))
+        gen (->> clock-gen
+                 (gen/f-map {:reset          :reset-clock
+                             :check-offsets  :check-clock-offsets
+                             :strobe         :strobe-clock
+                             :bump           :bump-clock})
+                 (gen/stagger (:interval opts default-interval)))]
+    {:generator         (when needed? gen)
+     :final-generator   (when needed? {:type :info, :f :reset-clock})
+     :nemesis           nemesis
+     :perf              #{{:name  "clock"
+                           :start #{:bump-clock}
+                           :stop  #{:reset-clock}
+                           :fs    #{:strobe-clock}
+                           :color "#A0E9E3"}}}))
+
+(defn f-map-perf
+  "Takes a perf map, and transforms the fs in it using `lift`."
+  [lift perf]
+  (let [lift-set (comp set (partial map lift))]
+    (set (map (fn [perf]
+                (cond-> perf
+                  true          (update :name  lift)
+                  (:start perf) (update :start lift-set)
+                  (:stop perf)  (update :stop  lift-set)
+                  (:fs perf)    (update :fs    lift-set)))
+              perf))))
+
+(defn f-map
+  "Takes a function `lift` which (presumably injectively) transforms the :f
+  values used in operations, and a nemesis package. Yields a new nemesis
+  package which uses the lifted fs. See generator/f-map and nemesis/f-map."
+  [lift pkg]
+  (assoc pkg
+         :generator       (gen/f-map  lift (:generator pkg))
+         :final-generator (gen/f-map  lift (:final-generator pkg))
+         :nemesis         (n/f-map    lift (:nemesis pkg))
+         :perf            (f-map-perf lift (:perf pkg))))
 
 (defn compose-packages
   "Takes a collection of nemesis+generators packages and combines them into
-  one. Generators are mixed together randomly; final generators proceed
+  one. Generators are combined with gen/any. Final generators proceed
   sequentially."
   [packages]
-  {:generator       (gen/stateful+pure
-                      (gen/mix (map :generator packages))
-                      (gen.pure/mix (map :generator packages)))
-   :final-generator (gen/stateful+pure
-                      (apply gen/concat (keep :final-generator packages))
-                      (apply concat (keep :final-generator packages)))
-   :nemesis         (n/compose (map :nemesis packages))
-   :perf            (reduce into #{} (map :perf packages))})
+  (case (count packages)
+    0 noop
+    1 (first packages)
+    {:generator       (apply gen/any (keep :generator packages))
+     :final-generator (keep :final-generator packages)
+     :nemesis         (n/compose (keep :nemesis packages))
+     :perf            (reduce set/union (map :perf packages))}))
 
 (defn nemesis-packages
   "Just like nemesis-package, but returns a collection of packages, rather than
@@ -315,9 +321,9 @@
   [opts]
   (let [faults   (set (:faults opts [:partition :kill :pause :clock]))
         opts     (assoc opts :faults faults)]
-    (remove nil? [(partition-package opts)
-                  (clock-package opts)
-                  (db-package opts)])))
+    [(partition-package opts)
+     (clock-package opts)
+     (db-package opts)]))
 
 (defn nemesis-package
   "Takes an option map, and returns a map with a :nemesis, a :generator for

@@ -1,6 +1,6 @@
 (ns jepsen.store
   "Persistent storage for test runs and later analysis."
-  (:refer-clojure :exclude [load])
+  (:refer-clojure :exclude [load test])
   (:require [clojure.data.fressian :as fress]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -14,9 +14,13 @@
             [fipp.edn :refer [pprint]]
             [unilog.config :as unilog]
             [multiset.core :as multiset]
-            [jepsen.util :as util])
+            [jepsen [fs-cache :refer [write-atomic!]]
+                    [util :as util]]
+            [jepsen.store [fressian :as jsf]
+                          [format :as store.format]])
   (:import (java.util AbstractList)
-           (java.io File)
+           (java.io Closeable
+                    File)
            (java.nio.file Files
                           FileSystems
                           Path)
@@ -28,92 +32,10 @@
 
 (def base-dir "store")
 
-(def write-handlers
-  (-> {clojure.lang.Atom
-       {"atom" (reify WriteHandler
-                 (write [_ w a]
-                   (.writeTag    w "atom" 1)
-                   (.writeObject w @a)))}
-
-       org.joda.time.DateTime
-       {"date-time" (reify WriteHandler
-                      (write [_ w t]
-                        (.writeTag    w "date-time" 1)
-                        (.writeObject w (time.local/format-local-time
-                                          t :basic-date-time))))}
-
-       clojure.lang.PersistentHashSet
-       {"persistent-hash-set" (reify WriteHandler
-                                (write [_ w set]
-                                  (.writeTag w "persistent-hash-set" 1)
-                                  (.writeObject w (seq set))))}
-
-       clojure.lang.PersistentTreeSet
-       {"persistent-sorted-set" (reify WriteHandler
-                                  (write [_ w set]
-                                    (.writeTag w "persistent-sorted-set" 1)
-                                    (.writeObject w (seq set))))}
-
-       clojure.lang.MapEntry
-       {"map-entry" (reify WriteHandler
-                      (write [_ w e]
-                        (.writeTag    w "map-entry" 2)
-                        (.writeObject w (key e))
-                        (.writeObject w (val e))))}
-
-       multiset.core.MultiSet
-       {"multiset" (reify WriteHandler
-                     (write [_ w set]
-                       (.writeTag     w "multiset" 1)
-                       (.writeObject  w (multiset/multiplicities set))))}
-
-      java.time.Instant
-      {"instant" (reify WriteHandler
-                   (write [_ w instant]
-                     (.writeTag w "instant" 1)
-                     (.writeObject w (.toString instant))))}}
-
-      (merge fress/clojure-write-handlers)
-      fress/associative-lookup
-      fress/inheritance-lookup))
-
-(def read-handlers
-  (-> {"atom"      (reify ReadHandler
-                     (read [_ rdr tag component-count]
-                       (atom (.readObject rdr))))
-
-       "date-time" (reify ReadHandler
-                     (read [_ rdr tag component-count]
-                       (time.format/parse
-                         (:basic-date-time time.local/*local-formatters*)
-                         (.readObject rdr))))
-
-       "persistent-hash-set" (reify ReadHandler
-                               (read [_ rdr tag component-count]
-                                 (assert (= 1 component-count))
-                                 (into #{} (.readObject rdr))))
-
-       "persistent-sorted-set" (reify ReadHandler
-                                 (read [_ rdr tag component-count]
-                                   (assert (= 1 component-count))
-                                   (into (sorted-set) (.readObject rdr))))
-
-       "map-entry" (reify ReadHandler
-                     (read [_ rdr tag component-count]
-                       (clojure.lang.MapEntry. (.readObject rdr)
-                                               (.readObject rdr))))
-
-       "multiset" (reify ReadHandler
-                    (read [_ rdr tag component-count]
-                      (multiset/multiplicities->multiset
-                        (.readObject rdr))))
-
-       "instant" (reify ReadHandler
-                   (read [_ rdr tag component-count]
-                     (Instant/parse (.readObject rdr))))}
-
-      (merge fress/clojure-read-handlers)
-      fress/associative-lookup))
+; These were moved into their own namespace, and are here for backwards
+; compatibility
+(def write-handlers jsf/write-handlers)
+(def read-handlers  jsf/read-handlers)
 
 (defn ^File path
   "With one arg, a test, returns the directory for that test's results. Given
@@ -146,6 +68,16 @@
     (io/make-parents path)
     path))
 
+(defn ^File jepsen-file
+  "Gives the path to a .jepsen file encoding all the results from a test."
+  [test]
+  (path test "test.jepsen"))
+
+(defn ^File jepsen-file!
+  "Gives the path to a .jepsen file, ensuring its directory exists."
+  [test]
+  (path! test "test.jepsen"))
+
 (defn ^File fressian-file
   "Gives the path to a fressian file encoding all the results from a test."
   [test]
@@ -159,7 +91,7 @@
 
 (def default-nonserializable-keys
   "What keys in a test can't be serialized to disk, by default?"
-  #{:db :os :net :client :checker :nemesis :generator :model :remote})
+  #{:barrier :db :os :net :client :checker :nemesis :generator :model :remote})
 
 (defn nonserializable-keys
   "What keys in a test can't be serialized to disk? The union of default
@@ -167,25 +99,39 @@
   [test]
   (into default-nonserializable-keys (:nonserializable-keys test)))
 
-(defn postprocess-fressian
-  "Fressian likes to give us ArrayLists, which are kind of a PITA when you're
-  used to working with vectors. We map those back to vectors again."
-  [obj]
-  (walk/prewalk (fn transform [x]
-                  ; (prn :x (class x) (instance? AbstractList x))
-                  (if (instance? AbstractList x)
-                    (vec x)
-                    x))
-                obj))
+(defn serializable-test
+  "Takes a test and returns it without its serializable keys."
+  [test]
+  (apply dissoc test (nonserializable-keys test)))
+
+(defn load-fressian-file
+  "Loads an arbitrary Fressian file."
+  [file]
+  (with-open [is (io/input-stream file)
+              in ^Closeable (jsf/reader is)]
+    (-> (fress/read-object in)
+        jsf/postprocess-fressian)))
+
+(defn load-jepsen-file
+  "Loads a test from an arbitrary Jepsen file. This is lazy, and retains a
+  filehandle which will remain open until all references to this test are gone
+  and the GC kicks in."
+  [file]
+  (store.format/read-test (store.format/open file)))
 
 (defn load
-  "Loads a specific test by name and time."
-  [test-name test-time]
-  (with-open [file (io/input-stream (fressian-file {:name       test-name
-                                                    :start-time test-time}))]
-    (let [in (fress/create-reader file :handlers read-handlers)]
-      (-> (fress/read-object in)
-          postprocess-fressian))))
+  "Loads a specific test, either given a map with {:name ... :start-time ...},
+  or by name and time as separate arguments. Prefers to load a .jepsen file,
+  falls back to .fressian."
+  ([test]
+   (let [jepsen   (jepsen-file test)
+         fressian (fressian-file test)]
+     (if (.exists jepsen)
+       (load-jepsen-file jepsen)
+       (load-fressian-file fressian))))
+  ([test-name test-time]
+   (load {:name       test-name
+          :start-time test-time})))
 
 (defn class-name->ns-str
   "Turns a class string into a namespace string (by translating _ to -)"
@@ -198,8 +144,7 @@
   [tag]
   (let [c (resolve tag)]
     (when (nil? c)
-      (throw (RuntimeException. (str "EDN tag " (pr-str tag) " isn't resolvable to a class")
-                                (pr-str tag))))
+      (throw (RuntimeException. (str "EDN tag " (pr-str tag) " isn't resolvable to a class"))))
 
     (when-not ((supers c) clojure.lang.IRecord)
       (throw (RuntimeException.
@@ -229,14 +174,23 @@
     (throw (RuntimeException.
              (str "Don't know how to read edn tag " (pr-str tag))))))
 
-(defn load-results
-  "Loads only a results.edn by name and time."
-  [test-name test-time]
+(defn load-results-edn
+  "Loads the results map for a test by parsing the result.edn file, instead of
+  test.jepsen."
+  [test]
   (with-open [file (java.io.PushbackReader.
-                     (io/reader (path {:name       test-name
-                                       :start-time test-time}
-                                      "results.edn")))]
+                     (io/reader (path test "results.edn")))]
     (edn/read {:default default-edn-reader} file)))
+
+(defn load-results
+  "Loads the results map for a test by name and time. Prefers a lazy map from
+  test.fressian; falls back to parsing results.edn."
+  [test-name test-time]
+  (let [test   {:name test-name, :start-time test-time}
+        jepsen (jepsen-file test)]
+    (if (.exists jepsen)
+      (:results (load-jepsen-file jepsen))
+      (load-results-edn test))))
 
 (def memoized-load-results (memoize load-results))
 
@@ -292,6 +246,76 @@
         (map file-name)
         (map (fn [f] [f (delay (load test-name f))]))
         (into {}))))
+
+(defn all-tests
+  "A plain old vector of test delays, sorted in chronological order. Unlike
+  `tests`, attempts to load tests with no .fressian or .jepsen file will return
+  `nil` here, instead of throwing. Helpful when you want to slice and dice all
+  tests at the REPL."
+  []
+  (->> (tests)
+       (mapcat val)
+       (sort)
+       (map val)
+       (map (fn [test-delay] (delay (try @test-delay
+                                         (catch java.io.FileNotFoundException e
+                                           nil)))))))
+
+(defn test
+  "Like `load`, loads a specific test. Frequently you don't care about
+  individual test names; you just want \"the last test\", or \"the third most
+  recent\". This function can take:
+
+    - A Long. (test 0) returns the first test ever run; (test 2) loads the
+              third. (test -1) loads the most recent test; -2 the
+              next-to-most-recent.
+
+    - A String. Can be a directory name, in which case we look for a
+                test.jepsen in that directory."
+  [which]
+  (condp instance? which
+    Long (let [tests-by-time (all-tests)
+               i (if (neg? which)
+                   (+ (count tests-by-time) which)
+                   which)]
+           (-> tests-by-time (nth i) deref))
+
+    String (load-jepsen-file (io/file which "test.jepsen"))))
+
+(defn write-jepsen!
+  "Takes a test and saves it as a .jepsen binary file."
+  [test]
+  (write-atomic! [tmp (path! test "test.jepsen")]
+                 (with-open [w (store.format/open tmp)]
+                   (store.format/write-test! w (serializable-test test))))
+  test)
+
+(defn migrate-to-jepsen-format!
+  "Loads every test and copies their Fressian files to the new on-disk
+  format."
+  []
+  (->> (tests)
+       vals
+       (mapcat vals)
+       (pmap (fn [test]
+              (let [t1 (System/nanoTime)]
+                (try
+                  (when-not (.exists (path @test "test.jepsen"))
+                    (let [t2 (System/nanoTime)
+                          _  (write-jepsen! @test)
+                          t3 (System/nanoTime)]
+                      (info "Migrated" (str (path @test))
+                            "in"  (float (* 1e-9 (- t2 t1)))
+                            "+" (float (* 1e-9 (- t3 t2))) "seconds")))
+                  (catch java.io.FileNotFoundException _
+                    ; No file; don't worry about it.
+                    )
+                  (catch java.io.EOFException _
+                    ; File truncated, probably crashed during write
+                    (warn "Couldn't migrate test; .fressian truncated"))
+                  (catch Exception e
+                    (warn e "Couldn't migrate test"))))))
+       dorun))
 
 (defn latest
   "Loads the latest test"
@@ -361,40 +385,75 @@
        (map deref)
        dorun))
 
+(defn write-fressian-file!
+  "Writes a data structure to the given file, as Fressian. For instance:
+
+      (write-fressian-file! {:foo 2} (path! test \"foo.fressian\"))."
+  [data file]
+  (with-open [os (io/output-stream file)
+              out ^Closeable (jsf/writer os)]
+    (fress/write-object out data)))
+
 (defn write-fressian!
-  "Write the entire test as a .fressian file"
+  "Write the entire test as a .fressian file."
   [test]
-  (let [test (apply dissoc test (nonserializable-keys test))]
-    (with-open [file   (io/output-stream (fressian-file! test))]
-      (let [out (fress/create-writer file :handlers write-handlers)]
-        (fress/write-object out test)))))
+  (write-fressian-file! (serializable-test test) (fressian-file! test)))
+
+; Top-level API for writing tests
+
+(defmacro with-writer
+  "Opens a *writer* for saving test data. Evaluates body with that writer bound
+  to the given symbol, and ensures that writer is closed at the end of the
+  with-writer form. This writer is passed to save-0, save-1, etc, to write each
+  phase of the test run."
+  [test [writer-sym] & body]
+  `(with-open [~writer-sym (store.format/open (jepsen-file! ~test))]
+     ~@body))
+
+(defn save-0!
+  "Writes a test at the start of a test run. Updates symlinks. Returns a new
+  version of test which should be used for subsequent writes."
+  [test writer]
+  (let [stest  (serializable-test test)
+        stest' (store.format/write-initial-test! writer stest)]
+    (update-current-symlink! test)
+    (vary-meta test merge (meta stest'))))
 
 (defn save-1!
-  "Writes a history and fressian file to disk and updates latest symlinks.
-  Returns test."
-  [test]
-  (->> [(future (util/with-thread-name "jepsen history"
-                  (write-history! test)))
-        (future (util/with-thread-name "jepsen fressian"
-                  (write-fressian! test)))]
-       (map deref)
-       dorun)
-  (update-symlinks! test)
-  test)
+  "Writes test.jepsen, the history, and fressian files to disk and updates
+  latest symlinks. Returns test with metadata which should be preserved for
+  calls to save-2!"
+  [test writer]
+  (let [stest   (serializable-test test)
+        jepsen  (future (util/with-thread-name "jepsen format"
+                          (store.format/write-history! writer stest)))
+        history (future (util/with-thread-name "jepsen history"
+                          (write-history! stest)))
+        fressian (future (util/with-thread-name "jepsen fressian"
+                           (write-fressian! stest)))]
+    @jepsen @history @fressian
+    (update-symlinks! test)
+    ; We want to merge the jepsen writer's metadata back into the original test.
+    (vary-meta test merge (meta @jepsen))))
 
 (defn save-2!
   "Phase 2: after computing results, we re-write the fressian file, histories,
-  and also dump results as edn. Returns test."
-  [test]
-  (->> [(future (util/with-thread-name "jepsen results" (write-results! test)))
-        (future (util/with-thread-name "jepsen history"
-                  (write-history! test)))
-        (future (util/with-thread-name "jepsen fressian"
-                  (write-fressian! test)))]
-       (map deref)
-       dorun)
-  (update-symlinks! test)
-  test)
+  and also dump results as edn. Returns test with metadata that should be
+  preserved for future save calls."
+  [test writer]
+  (let [stest   (serializable-test test)
+        jepsen  (future (util/with-thread-name "jepsen format"
+                          (store.format/write-results! writer stest)))
+        results (future (util/with-thread-name "jepsen results"
+                          (write-results! stest)))
+        history (future (util/with-thread-name "jepsen history"
+                          (write-history! stest)))
+        fressian (future (util/with-thread-name "jepsen fressian"
+                           (write-fressian! stest)))]
+    @jepsen @results @history @fressian
+    (update-symlinks! test)
+    ; Return the Jepsen writer's results; it's got metadata.
+    (vary-meta test merge (meta @jepsen))))
 
 (def console-appender
   {:appender :console
@@ -402,11 +461,15 @@
 
 (def default-logging-overrides
   "Logging overrides that we apply by default"
-  {"clj-libssh2.session"         :warn
-   "clj-libssh2.authentication"  :warn
-   "clj-libssh2.known-hosts"     :warn
-   "clj-libssh2.ssh"             :warn
-   "clj-libssh2.channel"         :warn})
+  {"net.schmizz.concurrent.Promise"                            :fatal
+   "net.schmizz.sshj.transport.random.JCERandom"               :warn
+   "net.schmizz.sshj.transport.TransportImpl"                  :warn
+   "net.schmizz.sshj.connection.channel.direct.SessionChannel" :warn
+   "clj-libssh2.session"                                       :warn
+   "clj-libssh2.authentication"                                :warn
+   "clj-libssh2.known-hosts"                                   :warn
+   "clj-libssh2.ssh"                                           :warn
+   "clj-libssh2.channel"                                       :warn})
 
 (defn start-logging!
   "Starts logging to a file in the test's directory. Also updates current

@@ -49,6 +49,15 @@
                     (assoc m k [v])
                     (update m k conj v))))]))
 
+(defn merge-opt-specs
+  "Takes two option specifications and merges them together. Where both offer
+  the same option name, prefers the latter."
+  [a b]
+  (->> (merge (group-by second a)
+              (group-by second b))
+       vals
+       (map first)))
+
 (def help-opt
   ["-h" "--help" "Print out this message and exit"])
 
@@ -71,6 +80,9 @@
     :default "root"]
 
    [nil "--strict-host-key-checking" "Whether to check host keys"
+    :default false]
+
+   [nil "--no-ssh" "If set, doesn't try to establish SSH connections to any nodes."
     :default false]
 
    [nil "--ssh-private-key FILE" "Path to an SSH identity file"]
@@ -138,19 +150,22 @@ Options:\n")
 (defn parse-concurrency
   "Takes a parsed map. Parses :concurrency; if it is a string ending with n,
   e.g 3n, sets it to 3 * the number of :nodes. Otherwise, parses as a plain
-  integer."
-  [parsed]
-  (let [c (:concurrency (:options parsed))]
-    (let [[match integer unit] (re-find #"(\d+)(n?)" c)]
-      (when-not match
-        (throw (IllegalArgumentException.
-                 (str "--concurrency " c
-                      " should be an integer optionally followed by n"))))
-      (let [unit (if (= "n" unit)
-                   (count (:nodes (:options parsed)))
-                   1)]
-        (assoc-in parsed [:options :concurrency]
-                  (* unit (Long/parseLong integer)))))))
+  integer. With an optional keyword k, parses that key in the parsed map--by
+  default, the key is :concurrency."
+  ([parsed]
+   (parse-concurrency parsed :concurrency))
+  ([parsed k]
+   (let [c (get (:options parsed) k)]
+     (let [[match integer unit] (re-find #"(\d+)(n?)" c)]
+       (when-not match
+         (throw (IllegalArgumentException.
+                  (str "--concurrency " c
+                       " should be an integer optionally followed by n"))))
+       (let [unit (if (= "n" unit)
+                    (count (:nodes (:options parsed)))
+                    1)]
+         (assoc-in parsed [:options k]
+                   (* unit (Long/parseLong integer))))))))
 
 (defn parse-nodes
   "Takes a parsed map and merges all the various node specifications together.
@@ -208,17 +223,20 @@ Options:\n")
 (defn rename-ssh-options
   "Takes a parsed map and moves SSH options to a map under :ssh."
   [parsed]
-  (let [{:keys [username
+  (let [{:keys [no-ssh
+                username
                 password
                 strict-host-key-checking
                 ssh-private-key]} (:options parsed)]
     (assoc parsed :options
            (-> (:options parsed)
-               (assoc :ssh {:username                  username
+               (assoc :ssh {:dummy?                    (boolean no-ssh)
+                            :username                  username
                             :password                  password
                             :strict-host-key-checking  strict-host-key-checking
                             :private-key-path          ssh-private-key})
-               (dissoc :username
+               (dissoc :no-ssh
+                       :username
                        :password
                        :strict-host-key-checking
                        :private-key-path)))))
@@ -263,7 +281,7 @@ Options:\n")
   function with parsed options, and exits with status 0.
 
   Catches exceptions, logs them to the console, and exits with status 255."
-  [subcommands [command & arguments]]
+  [subcommands [command & arguments :as argv]]
   (try
     (assert (not (get subcommands "--help")))
     (assert (not (get subcommands "help")))
@@ -292,6 +310,7 @@ Options:\n")
       (let [{:keys [options arguments summary errors] :as parsed-opts}
             (-> arguments
                 (cli/parse-opts opt-spec)
+                (update :options assoc :argv argv)
                 opt-fn)]
 
         ; Subcommand help
@@ -336,10 +355,11 @@ Options:\n")
 (defn single-test-cmd
   "A command which runs a single test with standard built-ins. Options:
 
-  {:opt-spec A vector of additional options for tools.cli. Appended to
+  {:opt-spec A vector of additional options for tools.cli. Merge into
              `test-opt-spec`. Optional.
    :opt-fn   A function which transforms parsed options. Composed after
              `test-opt-fn`. Optional.
+   :opt-fn*  Replaces test-opt-fn, in case you want to override it altogether.
    :tarball If present, adds a --tarball option to this command, defaulting to
             whatever URL is given here.
    :usage   Defaults to `jc/test-usage`. Optional.
@@ -350,7 +370,7 @@ Options:\n")
   analyzes a history from disk instead.
   "
   [opts]
-  (let [opt-spec (into test-opt-spec (:opt-spec opts))
+  (let [opt-spec (merge-opt-specs test-opt-spec (:opt-spec opts))
         opt-spec (if-let [default-tarball (:tarball opts)]
                    (conj opt-spec
                          [nil "--tarball URL" "URL for the DB tarball to install. May be either HTTP, HTTPS, or a local file on each DB node. For instance, --tarball https://foo.com/bar.tgz, or file:///tmp/bar.tgz"
@@ -364,6 +384,7 @@ Options:\n")
         opt-fn  (if-let [f (:opt-fn opts)]
                   (comp f opt-fn)
                   opt-fn)
+        opt-fn  (or (:opt-fn* opts) opt-fn)
         test-fn (:test-fn opts)]
   {"test" {:opt-spec opt-spec
            :opt-fn   opt-fn
@@ -386,11 +407,9 @@ Options:\n")
                                 (with-out-str (pprint options)))
                           (let [cli-test    (test-fn options)
                                 stored-test (store/latest)
-                                test (-> stored-test
-                                         (dissoc :results)
-                                         (merge cli-test)
-                                         (assoc :history
-                                                (:history stored-test)))]
+                                test (-> cli-test
+                                         (merge (dissoc stored-test :results))
+                                         (vary-meta merge (meta stored-test)))]
                             (assert+ stored-test IllegalStateException
                                      "Not sure what the last test was")
                             (assert+ (= (:name stored-test)
@@ -408,8 +427,8 @@ Options:\n")
                                         (update :history conj '...)
                                         pprint
                                         with-out-str)))
-
-                            (jepsen/analyze! test)))}}))
+                            (store/with-writer test [w]
+                              (jepsen/analyze! test w))))}}))
 
 (defn test-all-run-tests!
   "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,
@@ -418,13 +437,14 @@ Options:\n")
   (->> tests
        (map-indexed
          (fn [i test]
-           (try
-             (let [test' (jepsen/run! test)]
-               [(:valid? (:results test'))
-                (.getPath (store/path test'))])
-             (catch Exception e
-               (warn e "Test crashed")
-               [:crashed (:name test)]))))
+           (let [test' (jepsen/prepare-test test)]
+             (try
+               (let [test' (jepsen/run! test')]
+                 [(:valid? (:results test'))
+                  (.getPath (store/path test'))])
+               (catch Exception e
+                 (warn e "Test crashed")
+                 [:crashed (.getPath (store/path test'))])))))
        (group-by first)
        (map-vals (partial map second))))
 
@@ -475,21 +495,28 @@ Options:\n")
                   test-opt-spec. Optional.
     :opt-fn       A function which transforms parsed options. Composed after
                   test-opt-fn. Optional.
+    :opt-fn*      Replaces test-opt-fn, instead of composing with it.
     :usage        Defaults to `test-usage`. Optional.
     :tests-fn     A function that receives the transformed option map and
                   constructs a sequence of tests to run."
   [opts]
-  {"test-all"
-   {:opt-spec (into test-opt-spec (:opt-spec opts))
-    :opt-fn   test-opt-fn
-    :usage    "Runs all tests"
-    :run      (fn run [{:keys [options]}]
-                (info "CLI options:\n" (with-out-str (pprint options)))
-                (->> options
-                     ((:tests-fn opts))
-                     test-all-run-tests!
-                     test-all-print-summary!
-                     test-all-exit!))}})
+  (let [opt-spec (merge-opt-specs test-opt-spec (:opt-spec opts))
+        opt-fn  test-opt-fn
+        opt-fn  (if-let [f (:opt-fn opts)]
+                  (comp f opt-fn)
+                  opt-fn)
+        opt-fn  (or (:opt-fn* opts) opt-fn)]
+    {"test-all"
+     {:opt-spec opt-spec
+      :opt-fn   opt-fn
+      :usage    "Runs all tests"
+      :run      (fn run [{:keys [options]}]
+                  (info "CLI options:\n" (with-out-str (pprint options)))
+                  (->> options
+                       ((:tests-fn opts))
+                       test-all-run-tests!
+                       test-all-print-summary!
+                       test-all-exit!))}}))
 
 (defn -main
   [& args]

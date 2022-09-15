@@ -1,22 +1,27 @@
 (ns jepsen.util
   "Kitchen sink"
+  (:refer-clojure :exclude [parse-long]) ; Clojure added this in 1.11.1
   (:require [clojure.tools.logging :refer [info]]
             [clojure.core.reducers :as r]
             [clojure [string :as str]]
             [clojure.pprint :refer [pprint]]
             [clojure.walk :as walk]
-            [clojure.java.io :as io]
+            [clojure.java [io :as io]
+                          [shell :as shell]]
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [bounded-future]]
-            [fipp.edn :as fipp]
-            [knossos.history :as history])
+            [fipp [edn :as fipp]
+                  [engine :as fipp.engine]]
+            [knossos.history :as history]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.lang.reflect Method)
            (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
            (java.io File
                     RandomAccessFile)))
+
 
 (defn default
   "Like assoc, but only fills in values which are NOT present in the map."
@@ -55,6 +60,7 @@
 (def uninteresting-exceptions
   "Exceptions which are less interesting; used by real-pmap and other cases where we want to pick a *meaningful* exception."
   #{java.util.concurrent.BrokenBarrierException
+    java.util.concurrent.TimeoutException
     InterruptedException})
 
 (defn real-pmap
@@ -80,6 +86,12 @@
   "Given a number, returns the smallest integer strictly greater than half."
   [n]
   (inc (int (Math/floor (/ n 2)))))
+
+(defn minority-third
+  "Given a number, returns the largest integer strictly less than 1/3rd.
+  Helpful for testing byzantine fault-tolerant systems."
+  [n]
+  (-> n dec (/ 3) long))
 
 (defn min-by
   "Finds the minimum element of a collection based on some (f element), which
@@ -113,6 +125,12 @@
   [coll]
   (try (rand-nth coll)
        (catch IndexOutOfBoundsException e nil)))
+
+(defn rand-exp
+  "Generates a exponentially distributed random value with rate parameter
+  lambda."
+  [lambda]
+  (* (Math/log (- 1 (rand))) (- lambda)))
 
 (defn fraction
   "a/b, but if b is zero, returns unity."
@@ -232,12 +250,38 @@
   op)
 
 (def logger (agent nil))
+
 (defn log-print
       [_ & things]
       (apply println things))
+
 (defn log
       [& things]
       (apply send-off logger log-print things))
+
+(defn test->str
+  "Pretty-prints a test to a string. This binds *print-length* to avoid printing
+  infinite sequences for generators."
+  [test]
+  ; What we're doing here is basically recreating normal map pretty-printing at
+  ; the top level, but overriding generators so that they only print 8 or so
+  ; elements.
+  (with-out-str
+    (fipp.engine/pprint-document
+      [:group "{"
+       [:nest 1
+        (->> test
+             (map (fn [[k v]]
+                    [:group
+                     (fipp/pretty k)
+                     :line
+                     (if (= k :generator)
+                       (binding [*print-length* 8]
+                         (fipp/pretty v))
+                       (fipp/pretty v))]))
+             (interpose [:line ", " ""]))]
+        "}"]
+      {:width 80})))
 
 ;(defn all-loggers []
 ;  (->> (org.apache.log4j.LogManager/getCurrentLoggers)
@@ -294,7 +338,8 @@
   (System/nanoTime))
 
 (def ^:dynamic ^Long *relative-time-origin*
-  "A reference point for measuring time in a test run.")
+  "A reference point for measuring time in a test run."
+  nil)
 
 (defmacro with-relative-time
   "Binds *relative-time-origin* at the start of body."
@@ -341,6 +386,50 @@
        (do (future-cancel worker#)
            ~timeout-val)
        retval#)))
+
+(defn await-fn
+  "Invokes a function (f) repeatedly. Blocks until (f) returns, rather than
+  throwing. Returns that return value. Catches Exceptions (except for
+  InterruptedException) and retries them automatically. Options:
+
+    :retry-interval   How long between retries, in ms. Default 1s.
+    :log-interval     How long between logging that we're still waiting, in ms.
+                      Default `retry-interval.
+    :log-message      What should we log to the console while waiting?
+    :timeout          How long until giving up and throwing :type :timeout, in
+                      ms. Default 60 seconds."
+  ([f]
+   (await-fn f {}))
+  ([f opts]
+   (let [log-message    (:log-message opts (str "Waiting for " f "..."))
+         retry-interval (:retry-interval opts 1000)
+         log-interval   (:log-interval opts retry-interval)
+         timeout        (:timeout opts 60000)
+         t0             (linear-time-nanos)
+         log-deadline   (atom (+ t0 (* 1e6 log-interval)))
+         deadline       (+ t0 (* 1e6 timeout))]
+     (loop []
+       (let [res (try
+                   (f)
+                   (catch InterruptedException e
+                     (throw e))
+                   (catch Exception e
+                     (let [now (linear-time-nanos)]
+                       ; Are we out of time?
+                       (when (<= deadline now)
+                         (throw+ {:type :timeout} e))
+
+                       ; Should we log something?
+                       (when (<= @log-deadline now)
+                         (info log-message)
+                         (swap! log-deadline + (* log-interval 1e6)))
+
+                       ; Right, sleep and retry
+                       (Thread/sleep retry-interval)
+                       ::retry)))]
+         (if (= ::retry res)
+           (recur)
+           res))))))
 
 (defmacro retry
   "Evals body repeatedly until it doesn't throw, sleeping dt seconds."
@@ -843,3 +932,63 @@
           (when (re-find #"invoke" (.getName method))
             (alength (.getParameterTypes method))))
         (-> c .getDeclaredMethods)))
+
+(defn fixed-point
+  "Applies f repeatedly to x until it converges."
+  [f x]
+  (let [x' (f x)]
+    (if (= x x')
+      x
+      (recur f x'))))
+
+(defn sh
+  "A wrapper around clojure.java.shell's sh which throws on nonzero exit."
+  [& args]
+  (let [res (apply shell/sh args)]
+    (when-not (zero? (:exit res))
+      (throw+ (assoc res :type ::nonzero-exit)
+              (str "Shell command " (pr-str args)
+                   " returned exit status " (:exit res) "\n"
+                   (:out res) "\n"
+                   (:err res))))
+    res))
+
+(defn deepfind
+  "Finds things that match a predicate in a nested structure. Returns a
+  lazy sequence of matching things, each represented by a vector *path* which
+  denotes how to access that object, ending in the matching thing itself. Path
+  elements are:
+
+    - keys for maps
+    - integers for sequentials
+    - :member for sets
+    - :deref  for deref-ables.
+
+    (deepfind string? [:a {:b \"foo\"} :c])
+    ; => ([1 :b \"foo\"])
+  "
+  ([pred haystack]
+   (deepfind pred [] haystack))
+  ([pred path haystack]
+   (cond ; This is a match; we're done
+         (pred haystack)
+         [(conj path haystack)]
+
+         (map? haystack)
+         (mapcat (fn [[k v]]
+                   (deepfind pred (conj path k) v))
+                 haystack)
+
+         (sequential? haystack)
+         (->> haystack
+              (map-indexed (fn [i x] (deepfind pred (conj path i) x)))
+              (mapcat identity))
+
+         (set? haystack)
+         (mapcat (partial deepfind pred (conj path :member)) haystack)
+
+         (instance? clojure.lang.IDeref haystack)
+         (deepfind pred (conj path :deref) @haystack)
+
+         true
+         nil)))

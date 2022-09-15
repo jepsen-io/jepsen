@@ -35,34 +35,18 @@ struct timespec monotonic_now() {
 /* Obtain wall clock as a timespec */
 struct timespec wall_now() {
   struct timespec now_ts;
-  struct timeval  now_tv;
-  struct timezone tz;
-  if (0 != gettimeofday(&now_tv, &tz)) {
-    perror("gettimeofday");
+  if (0 != clock_gettime(CLOCK_REALTIME, &now_ts)) {
+    perror("clock_gettime");
     exit(1);
   }
-  TIMEVAL_TO_TIMESPEC(&now_tv, &now_ts);
   return now_ts;
 }
 
-/* Obtain wall clock timezone */
-struct timezone wall_tz() {
-  struct timeval tv;
-  struct timezone tz;
-  if (0 != gettimeofday(&tv, &tz)) {
-    perror("gettimeofday");
-    exit(1);
-  }
-  return tz;
-}
-
 /* Set wall clock */
-void set_wall_clock(struct timespec ts, struct timezone tz) {
-  struct timeval tv;
-  TIMESPEC_TO_TIMEVAL(&tv, &ts);
-  // printf("Setting clock: %d %d\n", tv.tv_sec, tv.tv_usec);
-  if (0 != settimeofday(&tv, &tz)) {
-    perror("settimeofday");
+void set_wall_clock(struct timespec ts) {
+  /* printf("Setting clock: %d %d\n", ts.tv_sec, ts.tv_nsec); */
+  if (0 != clock_settime(CLOCK_REALTIME, &ts)) {
+    perror("clock_settime");
     exit(2);
   }
 }
@@ -134,9 +118,6 @@ int main(int argc, char **argv) {
   struct timespec normal_offset = sub_timespec(wall_now(), monotonic_now());
   struct timespec weird_offset  = add_timespec(normal_offset, delta);
 
-  /* We'll need the timezone to set the clock later */
-  struct timezone tz = wall_tz();
-
   /* And somewhere to store nanosleep remainders */
   struct timespec rem;
 
@@ -152,8 +133,7 @@ int main(int argc, char **argv) {
   /* Strobe the clock until duration's up! */
   while (0 < cmp_timespec(monotonic_now(), end)) {
     set_wall_clock(add_timespec(monotonic_now(),
-                                (weird ? normal_offset : weird_offset)),
-                   tz);
+                                (weird ? normal_offset : weird_offset)));
     // printf("Time now:      %d %d\n", wall_now().tv_sec, wall_now().tv_nsec);
     weird = !weird;
     count += 1;
@@ -165,7 +145,7 @@ int main(int argc, char **argv) {
   }
 
   /* Reset clock and print number of changes */
-  set_wall_clock(add_timespec(monotonic_now(), normal_offset), tz);
+  set_wall_clock(add_timespec(monotonic_now(), normal_offset));
   printf("%d\n", count);
   return 0;
 }

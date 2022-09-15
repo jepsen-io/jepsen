@@ -136,13 +136,13 @@ We have a generator that emits operations on a single key, like `{:type :invoke,
                              (range)
                              (fn [k]
                                (->> (gen/mix [r w cas])
-                                    (gen/stagger 1/10)
+                                    (gen/stagger 1/50)
                                     (gen/limit 100))))
                            (gen/nemesis
-                             (gen/seq (cycle [(gen/sleep 5)
-                                              {:type :info, :f :start}
-                                              (gen/sleep 5)
-                                              {:type :info, :f :stop}])))
+                             (cycle [(gen/sleep 5)
+                                     {:type :info, :f :start}
+                                     (gen/sleep 5)
+                                     {:type :info, :f :stop}]))
                            (gen/time-limit (:time-limit opts)))}))
 ```
 

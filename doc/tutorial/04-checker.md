@@ -20,7 +20,8 @@ that model. We'll require `knossos.model` and `jepsen.checker`:
             [jepsen.os.debian :as debian]
             [knossos.model :as model]
             [slingshot.slingshot :refer [try+]]
-            [verschlimmbesserung.core :as v]))
+            [verschlimmbesserung.core :as v])
+  (:import (knossos.model Model)))
 ```
 
 Remember how we chose to model our operations as reads, writes, and cas operations?
@@ -71,6 +72,7 @@ like locks and registers. Here's one for [a compare-and-set register](https://gi
                (inconsistent (str "can't read " (:value op)
                                   " from register " value))))))
 ```
+
 We don't need to write these in our tests, as long as `knossos` provides a
 model for the type of thing we're checking. This is just so you can see how
 things work under the hood.
@@ -89,11 +91,11 @@ through. This allows us to satisfy histories which include reads that never
 returned.
 
 To analyze the history, we'll specify a `:checker` for the test, and provide a
-`:model` to specify how the system *should* behave.
-`checker/linearizable` uses the Knossos linearizability checker to verify that
-every operation appears to take place atomically between its invocation and
-completion. The linearizable checker requires a model and to specify a particular
-algorithm which we pass to it in an options map.
+`:model` to specify how the system *should* behave. `checker/linearizable` uses
+the Knossos linearizability checker to verify that every operation appears to
+take place atomically between its invocation and completion. The linearizable
+checker requires a model and to specify a particular algorithm which we pass to
+it in an options map.
 
 ```clj
 (defn etcd-test
@@ -102,17 +104,18 @@ algorithm which we pass to it in an options map.
   [opts]
   (merge tests/noop-test
          opts
-         {:name       "etcd"
-          :os         debian/os
-          :db         (db "v3.1.5")
-          :client     (Client. nil)
-          :checker    (checker/linearizable {:model     (model/cas-register)
-                                             :algorithm :linear})
-          :generator  (->> (gen/mix [r w cas])
-                           (gen/stagger 1)
-                           (gen/nemesis nil)
-                           (gen/time-limit 15))}))
-
+         {:pure-generators true
+          :name            "etcd"
+          :os              debian/os
+          :db              (db "v3.1.5")
+          :client          (Client. nil)
+          :checker         (checker/linearizable
+                             {:model     (model/cas-register)
+                              :algorithm :linear})
+          :generator       (->> (gen/mix [r w cas])
+                                (gen/stagger 1)
+                                (gen/nemesis nil)
+                                (gen/time-limit 15))}))
 ```
 
 Running the test, we can confirm the checker's results:
@@ -125,14 +128,14 @@ INFO [2019-04-17 17:38:16,861] jepsen worker 0 - jepsen.util 0  :ok :write  1
 ...
 INFO [2019-04-18 03:53:32,714] jepsen test runner - jepsen.core {:valid? true,
  :configs
- ({:model {:value 1},
+ ({:model #knossos.model.CASRegister{:value 3},
    :last-op
-   {:process 3,
+   {:process 1,
     :type :ok,
     :f :write,
-    :value 1,
-    :index 151,
-    :time 14796541900},
+    :value 3,
+    :index 29,
+    :time 14105346871},
    :pending []}),
  :analyzer :linear,
  :final-paths ()}
@@ -179,8 +182,9 @@ And add that checker to the test:
 ```clj
           :checker (checker/compose
                      {:perf   (checker/perf)
-                      :linear (checker/linearizable {:model     (model/cas-register)
-                                                     :algorithm :linear})
+                      :linear (checker/linearizable
+                                {:model     (model/cas-register)
+                                 :algorithm :linear})
                       :timeline (timeline/html)})
 ```
 

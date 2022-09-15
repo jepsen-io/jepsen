@@ -9,10 +9,11 @@
             [jepsen [client         :as client]
                     [nemesis        :as nemesis]
                     [util           :as util]]
-            [jepsen.generator.pure :as gen]
+            [jepsen.generator :as gen]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent ArrayBlockingQueue
-                                 TimeUnit)))
+                                 TimeUnit)
+           (io.lacuna.bifurcan Set)))
 
 
 (defprotocol Worker
@@ -33,16 +34,19 @@
                        ^:unsynchronized-mutable process
                        ^:unsynchronized-mutable client]
   Worker
-  (open [this test id] this)
+  (open [this test id]
+    this)
 
   (invoke! [this test op]
-    (if (not= process (:process op))
+    (if (and (not= process (:process op))
+             (not (client/is-reusable? client test)))
       ; New process, new client!
       (do (close! this test)
           ; Try to open new client
           (let [err (try
                       (set! (.client this)
-                            (client/open! (:client test) test node))
+                            (client/open! (client/validate (:client test))
+                                          test node))
                       (set! (.process this) (:process op))
                      nil
                      (catch Exception e
@@ -76,6 +80,7 @@
 (defrecord ClientNemesisWorker []
   Worker
   (open [this test id]
+    ;(locking *out* (prn :spawn id))
     (if (integer? id)
       (let [nodes (:nodes test)]
         (ClientWorker. (nth nodes (mod id (count nodes))) nil nil))
@@ -180,8 +185,13 @@
   or (:nemesis test), as appropriate. Invocations and completions are journaled
   to a history, which is returned at the end of `run`.
 
-  Generators are automatically wrapped in friendly-exception and validate."
+  Generators are automatically wrapped in friendly-exception and validate.
+  Clients are wrapped in a validator as well.
+
+  Automatically initializes the generator system, which, on first invocation,
+  extends the Generator protocol over some dynamic classes like (promise)."
   [test]
+  (gen/init!)
   (let [ctx         (gen/context test)
         worker-ids  (gen/all-threads ctx)
         completions (ArrayBlockingQueue. (count worker-ids))
@@ -209,17 +219,24 @@
                 ; Update op with new timestamp
                 op'     (assoc op' :time time)
                 ; Update context with new time and thread being free
-                ctx     (-> ctx
-                            (assoc :time time)
-                            (update :free-threads conj thread))
-                ; Workers that crash (other than the nemesis) should be assigned
-                ; new thread identifiers.
-                ctx     (if (or (= :nemesis thread) (not= :info (:type op')))
-                          ctx
-                          (update ctx :workers assoc thread
-                                  (gen/next-process ctx thread)))
-                ; Let generator know about our completion
+                ctx     (assoc ctx
+                              :time         time
+                              :free-threads (.add ^Set (:free-threads ctx)
+                                                  thread))
+                ; Let generator know about our completion. We use the context
+                ; with the new time and thread free, but *don't* assign a new
+                ; process here, so that thread->process recovers the right
+                ; value for this event.
                 gen     (gen/update gen test ctx op')
+                ; Threads that crash (other than the nemesis), or which
+                ; explicitly request a new process, should be assigned new
+                ; process identifiers.
+                ctx     (if (and (not= :nemesis thread)
+                                 (or (= :info (:type op'))
+                                     (:end-process? op')))
+                          (update ctx :workers assoc thread
+                                  (gen/next-process ctx thread))
+                          ctx)
                 history (if (goes-in-history? op')
                           (conj! history op')
                           history)]
@@ -265,9 +282,11 @@
                       ; Dispatch it to a worker as quick as we can
                       _ (.put ^ArrayBlockingQueue (get invocations thread) op)
                       ; Update our context to reflect
-                      ctx (-> ctx
-                              (assoc :time (:time op)) ; Use time instead?
-                              (update :free-threads disj thread))
+                      ctx (assoc ctx
+                                 :time (:time op) ; Use time instead?
+                                 :free-threads (.remove
+                                                 ^Set (:free-threads ctx)
+                                                 thread))
                       ; Let the generator know about the invocation
                       gen' (gen/update gen' test ctx op)
                       history (if (goes-in-history? op)

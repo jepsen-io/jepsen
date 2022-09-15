@@ -232,12 +232,10 @@
 
 (defn interval->times
   "Given an interval of two operations [a b], returns the times [time-a time-b]
-  covering the interval. If b is missing, uses the maximum from (:xrange plot)."
-  [plot [a b]]
+  covering the interval. If b is missing, yields [time-a nil]."
+  [[a b]]
   [(double (util/nanos->secs (:time a)))
-   (if b
-     (double (util/nanos->secs (:time b)))
-     (second (:xrange plot)))])
+   (when b (double (util/nanos->secs (:time b))))])
 
 (defn nemesis-regions
   "Given nemesis activity, emits a sequence of gnuplot commands rendering
@@ -259,11 +257,12 @@
                                     (* height (inc i)))
                  top             (+ bot height)]
              (->> (:intervals n)
-                  (map (partial interval->times plot))
+                  (map interval->times)
                   (map (fn [[start stop]]
                          [:set :obj :rect
                           :from (g/list start [:graph (+ bot padding)])
-                          :to   (g/list stop  [:graph (- top padding)])
+                          :to   (g/list (or stop [:graph 1])
+                                        [:graph (- top padding)])
                           :fillcolor :rgb color
                           :fillstyle :transparent :solid transparency
                           :noborder]))))))
@@ -300,7 +299,7 @@
   [plot nemeses]
   (->> nemeses
        (map (fn [n]
-              {:title     (:name n)
+              {:title     (str (:name n))
                :with      :lines
                :linecolor ['rgb (or (:fill-color n)
                                     (:color n)
@@ -435,7 +434,7 @@
   "
   [opts]
   ; (info :plotting (with-out-str (pprint opts)))
-  (assert (every? seq (map :data (:series opts)))
+  (assert (every? sequential? (map :data (:series opts)))
           (str "Series has no :data points\n"
                (with-out-str (pprint (remove (comp seq :data)
                                              (:series opts))))))

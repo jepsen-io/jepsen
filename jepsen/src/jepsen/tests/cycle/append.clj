@@ -12,21 +12,19 @@
   "Full checker for append and read histories. See elle.list-append for
   options."
   ([]
-   (checker {:anomalies [:G1 :G2]}))
+   (checker {}))
   ([opts]
    (reify checker/Checker
      (check [this test history checker-opts]
        (la/check (assoc opts :directory
                         (.getCanonicalPath
-                          (store/path! test (:subdirectory opts) "elle")))
+                          (store/path! test (:subdirectory checker-opts) "elle")))
                  history)))))
 
 (defn gen
   "Wrapper for elle.list-append/gen; as a Jepsen generator."
   [opts]
-  (gen/stateful+pure
-    (gen/seq (la/gen opts))
-    (la/gen opts)))
+  (la/gen opts))
 
 (defn test
   "A partial test, including a generator and checker. You'll need to provide a
@@ -36,22 +34,13 @@
 
   and return completions like:
 
-      {:type :invoke, :f :txn, :value [[:r 3 [1]] [:append 3 2] [:r 3 [1 2]]]}
+      {:type :ok, :f :txn, :value [[:r 3 [1]] [:append 3 2] [:r 3 [1 2]]]}
 
   where the key 3 identifies some list, whose value is initially [1], and
   becomes [1 2].
 
-  Options are:
-
-      :key-count            Number of distinct keys at any point
-      :min-txn-length       Minimum number of operations per txn
-      :max-txn-length       Maximum number of operations per txn
-      :max-writes-per-key   Maximum number of operations per key
-      :anomalies            A list (e.g. [:G-single]) of anomalies to check for
-      :additional-graphs    A list of functions constructing graphs over txns
-                            (e.g. [cycle/realtime-graph])
-
-  For defaults, see wr-txns."
+  Options are passed directly to elle.list-append/check and
+  elle.list-append/gen; see their docs for full options."
   [opts]
   {:generator (gen opts)
    :checker   (checker opts)})

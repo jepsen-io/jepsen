@@ -124,8 +124,10 @@ CLI.
   (let [quorum (boolean (:quorum opts))]
     (merge tests/noop-test
            opts
-           {:name       (str "etcd q=" quorum)
-            :quorum     quorum
+           {:pure-generators true
+            :name            (str "etcd q=" quorum)
+            :quorum          quorum
+
             ...
 ```
 
@@ -164,41 +166,40 @@ as a rate per second, and change our hardcoded limit on each key's generator to 
 ```clj
 (defn etcd-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
-  :concurrency ...), constructs a test map. Special options:
-
-      :quorum       Whether to use quorum reads
-      :rate         Approximate number of requests per second, per thread
-      :ops-per-key  Maximum number of operations allowed on any given key."
+  :concurrency ...), constructs a test map."
   [opts]
   (let [quorum (boolean (:quorum opts))]
     (merge tests/noop-test
            opts
-           {:name       (str "etcd q=" quorum)
-            :quorum     quorum
-            :os         debian/os
-            :db         (db "v3.1.5")
-            :client     (Client. nil)
-            :nemesis    (nemesis/partition-random-halves)
-            :checker    (checker/compose
-                          {:perf  (checker/perf)
-                           :indep (independent/checker
-                                    (checker/compose
-                                      {:linear   (checker/linearizable {:model     (model/cas-register)
-                                                                        :algorithm :linear})
-                                       :timeline (timeline/html)}))})
-            :generator  (->> (independent/concurrent-generator
-                               10
-                               (range)
-                               (fn [k]
-                                 (->> (gen/mix [r w cas])
-                                      (gen/stagger (/ (:rate opts)))
-                                      (gen/limit (:ops-per-key opts)))))
-                             (gen/nemesis
-                               (gen/seq (cycle [(gen/sleep 5)
-                                                {:type :info, :f :start}
-                                                (gen/sleep 5)
-                                                {:type :info, :f :stop}])))
-                             (gen/time-limit (:time-limit opts)))})))
+           {:pure-generators true
+            :name            (str "etcd q=" quorum)
+            :quorum          quorum
+            :os              debian/os
+            :db              (db "v3.1.5")
+            :client          (Client. nil)
+            :nemesis         (nemesis/partition-random-halves)
+            :checker         (checker/compose
+                               {:perf   (checker/perf)
+                                :indep (independent/checker
+                                         (checker/compose
+                                           {:linear   (checker/linearizable
+                                                        {:model (model/cas-register)
+                                                         :algorithm :linear})
+                                            :timeline (timeline/html)}))})
+            :generator       (->> (independent/concurrent-generator
+                                    10
+                                    (range)
+                                    (fn [k]
+                                      (->> (gen/mix [r w cas])
+                                           (gen/stagger (/ (:rate opts)))
+                                           (gen/limit (:ops-per-key opts)))))
+                                  (gen/nemesis
+                                    (->> [(gen/sleep 5)
+                                          {:type :info, :f :start}
+                                          (gen/sleep 5)
+                                          {:type :info, :f :stop}]
+                                         cycle))
+                                  (gen/time-limit (:time-limit opts)))})))
 ```
 
 And add corresponding command-line options
@@ -230,7 +231,7 @@ from passing strings, negative numbers, zero rates, etc.
 Now, if we want to run a less aggressive test, we can try
 
 ```bash
-$ lein run test --time-limit 10 --concurrency 10 --ops-per-key 10 -r 1/5
+$ lein run test --time-limit 10 --concurrency 10 --ops-per-key 10 -r 1
 ...
 Everything looks good! ヽ(‘ー`)ノ
 ```

@@ -16,8 +16,12 @@
                         "jepsen.db"           :error
                         "jepsen.core"         :error
                         "jepsen.control.util" :error
+                        "jepsen.independent"  :error
                         "jepsen.generator"    :error
+                        "jepsen.lazyfs"       :error
+                        "jepsen.os.debian"    :error
+                        "jepsen.store"        :error
                         "jepsen.util"         :error
-                        "jepsen.independent"  :error})})
+                        })})
   (f)
   (store/stop-logging!))

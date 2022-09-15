@@ -147,6 +147,7 @@
 
     (catch RuntimeException e
       (condp re-find (.getMessage e)
+        #"Could not locate the leader master"     (retry (dec tries))
         #"Timed out"                              (retry (dec tries))
         #"Leader not yet ready to serve requests" (retry (dec tries))
         #"Could not locate the leader master"     (retry (dec tries))

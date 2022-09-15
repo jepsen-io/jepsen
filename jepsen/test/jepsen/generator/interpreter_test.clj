@@ -1,6 +1,7 @@
 (ns jepsen.generator.interpreter-test
   (:refer-clojure :exclude [run!])
-  (:require [jepsen.generator.pure :as gen]
+  (:require [clojure.tools.logging :refer [info warn]]
+            [jepsen.generator :as gen]
             [jepsen.generator.interpreter :refer :all]
             [jepsen [client :refer [Client]]
                     [nemesis :refer [Nemesis]]
@@ -33,7 +34,7 @@
     (teardown! [this test])))
 
 (deftest run!-test
-  (let [time-limit 1
+  (let [time-limit     1
         sleep-duration 1/10
         test (assoc base-test
               :client (reify Client
@@ -42,7 +43,6 @@
                         (invoke! [this test op]
                           ; We actually have to sleep here, or else it runs so
                           ; fast that reserve starves some threads.
-                          (Thread/sleep 1)
                           (assoc op :type (rand-nth [:ok :info :fail])
                                  :value :foo))
                         (teardown! [this test])
@@ -50,14 +50,13 @@
               :nemesis  (reify Nemesis
                           (setup! [this test] this)
                           (invoke! [this test op]
-                            (Thread/sleep 1)
                             (assoc op :type :info, :value :broken))
                           (teardown! [this test]))
               :generator
               (gen/phases
                 (->> (gen/reserve 2 (->> (range)
                                          (map (fn [x] {:f :write, :value x})))
-                                  5 (fn cas-gen []
+                                  5 (fn cas-gen [test ctx]
                                       {:f      :cas
                                        :value  [(rand-int 5) (rand-int 5)]})
                                   (repeat {:f :read}))
@@ -112,7 +111,7 @@
 
           (let [by-f (group-by :f mixed-clients)
                 n    (count mixed-clients)]
-            ; (pprint (util/map-vals (comp float #(/ % n) count) by-f))
+            ;(pprint (util/map-vals (comp float #(/ % n) count) by-f))
             (testing "writes"
               (is (< 1/10 (/ (count (by-f :write)) n) 3/10))
               (is (distinct? (map :value (filter (comp #{:invoke} :type)
@@ -136,11 +135,34 @@
           (is (pos? (count (filter (comp #{:ok} :type) final)))))))
 
     (testing "fast enough"
-      ; On my box, 25-28K ops/sec is typical with a sleep time of 0; with 1ms
-      ; sleeps, 17K.
-      ; (prn (float (/ (count h) time-limit)))
-      (is (< 10000 (float (/ (count h) time-limit)))))
+      ; On my box, ~18K ops/sec. This is a good place to profile, I
+      ; think--there's some low-hanging fruit in OnThreads `update`, which
+      ; calls process->thread with a linear cost.
+      ;(prn (float (/ (count h) time-limit)))
+      (is (< 5000 (float (/ (count h) time-limit)))))
     ))
+
+(deftest run!-end-process-test
+  ; When a client explicitly signifies that it'd like to end the process, we
+  ; should spawn a new one.
+  (let [test (assoc base-test
+                    :concurrency 1
+                    :client (reify Client
+                              (open! [this test node] this)
+                              (setup! [this test])
+                              (invoke! [this test op]
+                                (assoc op :type :fail, :end-process? true))
+                              (teardown! [this test])
+                              (close! [this test]))
+                    :generator (->> {:f :wag}
+                                    (repeat 3)
+                                    gen/clients))
+        h (util/with-relative-time (run! test))
+        completions (remove op/invoke? h)]
+    (is (= [[0 :fail :wag]
+            [1 :fail :wag]
+            [2 :fail :wag]]
+           (map (juxt :process :type :f) completions)))))
 
 (deftest run!-throw-test
   (testing "worker throws"
@@ -188,9 +210,9 @@
                       :generator  gen)
             e (try+ (util/with-relative-time (run! test))
                     :nope
-                    (catch [:type :jepsen.generator.pure/op-threw] e e))]
+                    (catch [:type :jepsen.generator/op-threw] e e))]
         (is (= 1 @call-count))
-        (is (= :jepsen.generator.pure/op-threw (:type e)))
+        (is (= :jepsen.generator/op-threw (:type e)))
         (is (= (dissoc (gen/context test) :time)
                (dissoc (:context e) :time)))))
 
@@ -211,14 +233,15 @@
                         :generator gen)
             e (try+ (util/with-relative-time (run! test))
                     :nope
-                    (catch [:type :jepsen.generator.pure/update-threw] e e))]
-        (is (= (-> (gen/context test)
-                   (assoc :time (:time (:context e)))
-                   (update :free-threads disj 0))
+                    (catch [:type :jepsen.generator/update-threw] e e))]
+        (is (= (let [ctx (gen/context test)]
+                 (assoc ctx
+                        :time     (:time (:context e))
+                        :free-threads (.remove (:free-threads ctx) (:process (:event e)))))
                (:context e)))
         (is (= {:f        :write
                 :value    2
                 :time     (:time (:context e))
-                :process  0
+                :process  (:process (:event e))
                 :type     :invoke}
                (:event e))))))

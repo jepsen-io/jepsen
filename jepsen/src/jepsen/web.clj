@@ -6,7 +6,10 @@
             [clojure.java.io :as io]
             [clojure.tools.logging :refer :all]
             [clojure.pprint :refer [pprint]]
-            [clj-time.format :as timef]
+            [clj-time [coerce :as time.coerce]
+                      [core :as time]
+                      [local :as time.local]
+                      [format :as timef]]
             [hiccup.core :as h]
             [ring.util.response :as response]
             [org.httpkit.server :as server])
@@ -45,28 +48,67 @@
   [x]
   (str/replace (java.net.URLEncoder/encode x "UTF-8") #"%2F" "/"))
 
+(def test-cache
+  "An in-memory cache of {:name, :start-time, :valid?} maps, indexed by an
+  ordered map of [:start-time :name]. Earliest start times at the front."
+  (atom (sorted-map-by (comp - compare))))
+
+(def test-cache-key
+  "Function which extracts the key for the test cache from a map."
+  (juxt :start-time :name))
+
+(def test-cache-mutable-window
+  "How far back in the test cache do we refresh on every page load?"
+  2)
+
+(def page-limit
+  "How many test rows per page?"
+  128)
+
+(def basic-date-time (timef/formatters :basic-date-time))
+
+(defn parse-time
+  "Parses a time from a string"
+  [t]
+  (-> (timef/parse-local basic-date-time t)
+      time.coerce/to-date-time))
+
 (defn fast-tests
-  "Abbreviated set of tests"
+  "Abbreviated set of tests: just name, start-time, results. Memoizes
+  (partially) via test-cache."
   []
-  (->> (store/tests)
-       (mapcat (fn [[test-name runs]]
-                 (keep (fn [[test-time full-test]]
-                         (try
-                           {:name        test-name
-                            :start-time  test-time
-                            :results     (store/memoized-load-results test-name test-time)}
-                           (catch java.io.FileNotFoundException e
-                             ; Incomplete test
-                             {:name       test-name
-                              :start-time test-time
-                              :results    {:valid? :incomplete}})
-                           (catch java.lang.RuntimeException e
-                             ; Um???
-                             (warn e "Unable to parse" test-name test-time)
-                             {:name       test-name
-                              :start-time test-time
-                              :results    {:valid? :incomplete}})))
-                       runs)))))
+  (let [cached @test-cache
+        ; Drop the most recent n keys from the cache--these we assume may have
+        ; changed recently.
+        cached (->> (keys cached)
+                    (take test-cache-mutable-window)
+                    (reduce dissoc cached))]
+    (->> (for [[name runs] (store/tests)
+               [time test] runs]
+           (let [t {:name           name,
+                    :start-time     (parse-time time)}]
+             (or (get cached (test-cache-key t))
+                 ; Fetch from disk if not cached. Note that we construct a new
+                 ; map so we can release the filehandle associated with the lazy
+                 ; test map.
+                 (try
+                   (let [results {:valid? (:valid? (store/load-results
+                                                     name time)
+                                                   :incomplete)}
+                         t (-> t (assoc :results results))]
+                     (swap! test-cache assoc (test-cache-key t) t)
+                     t)
+                   (catch java.io.EOFException e
+                     (assoc t :results {:valid? :incomplete}))
+                   (catch java.io.FileNotFoundException e
+                     (assoc t :results {:valid? :incomplete}))
+                   (catch java.lang.RuntimeException e
+                     ; Um???
+                     (warn e "Unable to parse" (str name "/" time))
+                     (assoc t :results {:valid? :incomplete}))))))
+         (sort-by :start-time)
+         reverse
+         vec)))
 
 (defn test-header
   []
@@ -101,13 +143,13 @@
   (url-encode-path-components
     (str "/files/" (->> f io/file .toPath (relative-path store/base-dir)))))
 
+
 (defn test-row
   "Turns a test map into a table row."
   [t]
   (let [r    (:results t)
         time (->> t
                   :start-time
-                  (timef/parse   (timef/formatters :basic-date-time))
                   (timef/unparse (timef/formatters :date-hour-minute-second)))]
     [:tr
      [:td [:a {:href (url t "")} (:name t)]]
@@ -119,19 +161,46 @@
      [:td [:a {:href (url t "jepsen.log")}     "jepsen.log"]]
      [:td [:a {:href (str (url t) ".zip")} "zip"]]]))
 
+(defn params
+  "Parses a query params map from a request."
+  [req]
+  (when-let [q (:query-string req)]
+    (->> (str/split q #"&")
+         (keep (fn [pair]
+                 (when (not= "" pair)
+                   (let [[k v] (str/split pair #"=")]
+                     [(keyword k) v]))))
+         (into {}))))
+
 (defn home
   "Home page"
   [req]
-  {:status 200
-   :headers {"Content-Type" "text/html"}
-   :body (h/html [:h1 "Jepsen"]
-                 [:table {:cellspacing 3
-                          :cellpadding 3}
-                  [:thead (test-header)]
-                  [:tbody (->> (fast-tests)
-                               (sort-by :start-time)
-                               reverse
-                               (map test-row))]])})
+  (let [params (params req)
+        after (if-let [a (:after params)]
+                (parse-time a)
+                (time.local/local-now))
+        tests (->> (fast-tests)
+                   (drop-while (fn [t]
+                                 (->> (:start-time t)
+                                      (time/after? after)
+                                      not))))
+        more? (< page-limit (count tests))
+        tests (take page-limit tests)]
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body (h/html
+             [:h1 "Jepsen"]
+             [:table {:cellspacing 3
+                      :cellpadding 3}
+              [:thead (test-header)]
+              [:tbody (map test-row tests)]]
+             (when more?
+               [:p [:a {:href (str "/?after="
+                                   (->> (last tests)
+                                        :start-time
+                                        time.coerce/to-date-time
+                                        (timef/unparse basic-date-time)))}
+                    "Older tests..."]]))}))
 
 (defn dir-cell
   "Renders a File (a directory) for a directory view."
@@ -139,21 +208,25 @@
   (let [results-file  (io/file f "results.edn")
         valid?        (try (with-open [r (java.io.PushbackReader.
                                            (io/reader results-file))]
-                             (:valid? (clojure.edn/read r)))
+                             (:valid?
+                               (clojure.edn/read
+                                 {:default vector}
+                                 r)))
                            (catch java.io.FileNotFoundException e
                              nil)
                            (catch RuntimeException e
+                             (info e :caught)
                              :unknown))]
-  [:a {:href (file-url f)
-       :style "text-decoration: none;
-              color: #000;"}
-   [:div {:style (str "background: " (valid-color valid?) ";\n"
-                      "display: inline-block;
-                      margin: 10px;
-                      padding: 10px;
-                      overflow: hidden;
-                      width: 280px;")}
-    (.getName f)]]))
+    [:a {:href (file-url f)
+         :style "text-decoration: none;
+                color: #000;"}
+     [:div {:style (str "background: " (valid-color valid?) ";\n"
+                        "display: inline-block;
+                        margin: 10px;
+                        padding: 10px;
+                        overflow: hidden;
+                        width: 280px;")}
+      (.getName f)]]))
 
 (defn file-cell
   "Renders a File for a directory view."
@@ -198,11 +271,18 @@
     (sort files)))
 
 (defn js-escape
-  "Escape a javascript string."
+  "Escape a Javascript string."
   [s]
   (-> s
+      (str/replace "\\" "\\\\")
       (str/replace "'" "\\x27")
       (str/replace "\"" "\\x22")))
+
+(defn clj-escape
+  "Escape a Clojure string."
+  [s]
+  (-> (str/escape s {\" "\\\""
+                     \\ "\\\\"})))
 
 (defn dir
   "Serves a directory."
@@ -229,7 +309,8 @@
                              "jepsen"])
                       (interpose "/"))
                  ; Title
-                 (let [path (js-escape (str \' (.getCanonicalPath dir) \'))]
+                 (let [path (js-escape
+                              (str \" (clj-escape (.getCanonicalPath dir)) \"))]
                    ; You can click to copy the full local path
                    [:h1 {:onclick (str "navigator.clipboard.writeText('"
                                        path "')")}

@@ -90,7 +90,6 @@
             [jepsen [generator :as gen]
                     [checker :as checker]
                     [util :refer [rand-nth-empty]]]
-            [jepsen.generator.pure :as gen.pure]
             [jepsen.txn.micro-op :as mop]
             [knossos.op :as op]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -116,7 +115,7 @@
 ; next-key is the next free key we have to allocate.
 ; workers is a map of worker numbers to the last key that worker wrote.
 (defrecord Generator [n next-key workers]
-  gen.pure/Generator
+  gen/Generator
   (update [this test ctx event] this)
 
   (op [this test ctx]
@@ -125,12 +124,12 @@
     ; generates a fresh integer from next-key. and writes it, recording that
     ; key in the workers map. If it *is* present in the map, it issues a read
     ; to the group covering that key.
-    (let [worker (first (gen.pure/free-threads ctx))
-          process (gen.pure/thread->process ctx worker)]
+    (let [process (gen/some-free-process ctx)
+          worker  (gen/process->thread ctx process)]
       (if worker
         (if-let [k (get workers worker)]
           ; We wrote a key; produce a read and clear our last written key.
-          [(gen.pure/fill-in-op
+          [(gen/fill-in-op
              {:process process, :f :read, :value (read-txn-for n k)}
              ctx)
            (Generator. n next-key (assoc workers worker nil))]
@@ -138,75 +137,23 @@
           (if-let [k (and (< (rand) 0.5)
                           (rand-nth-empty (keep val workers)))]
             ; Read some other active group
-            [(gen.pure/fill-in-op
+            [(gen/fill-in-op
                {:process process, :f :read, :value (read-txn-for n k)}
                ctx)
              this]
 
             ; Write a fresh key
-            [(gen.pure/fill-in-op
+            [(gen/fill-in-op
                {:process process, :f :write, :value [[:w next-key 1]]}
                ctx)
              (Generator. n (inc next-key) (assoc workers worker next-key))]))
         [:pending this]))))
 
-(defn pure-generator
-  "Generates single inserts followed by group reads, mixed with reads of other
-  concurrent groups, just for grins. Takes a group size n."
-  [n]
-  (Generator. n 0 {}))
-
-(defn stateful-generator
-  "Generates single inserts followed by group reads, mixed with reads of other
-  concurrent groups, just for grins. Takes a group size n."
-  [n]
-  ; We need to issue reads *after* writes, and from the *same* worker threads
-  ; that made the write; hoping to catch each one before propagation occurs.
-  ; Our state:
-  ;
-  ;    {:next-key key-num
-  ;     :workers  {worker-num last-written-key}
-  ;
-  ; If a worker's last written key is nil, it can either issue a read for a
-  ; write in progress, or it can perform a write itself. To write, it generates
-  ; a fresh integer from next-key. and writes it, recording that key in the
-  ; workers map. If it *is* present in the map, it issues a read to the group
-  ; covering that key.
-  (let [state (atom {:next-key 0
-                     :workers {}})]
-    (reify gen/Generator
-      (op [this test process]
-        (let [op (atom nil)
-              worker (gen/process->thread test process)]
-          (swap! state (fn [{:keys [next-key workers] :as s}]
-                         (if-let [k (get workers worker)]
-                           ; Compute upper and lower bounds for this group
-                           (do (reset! op {:f     :read
-                                           :value (read-txn-for n k)})
-                               (update s :workers assoc worker nil))
-
-                           (if-let [k (and (< (rand) 0.5)
-                                           (rand-nth-empty (keep val workers)))]
-                             ; Read another active group
-                             (do (reset! op {:f     :read
-                                             :value (read-txn-for n k)})
-                                 s)
-
-                             ; Write a fresh key
-                             (do (reset! op {:f :write,
-                                             :value [[:w next-key 1]]})
-                                 {:next-key (inc next-key)
-                                  :workers (assoc workers
-                                                  worker next-key)})))))
-          (assoc @op :type :invoke))))))
-
 (defn generator
   "Generates single inserts followed by group reads, mixed with reads of other
   concurrent groups, just for grins. Takes a group size n."
   [n]
-  (gen/stateful+pure
-    (stateful-generator n)
-    (pure-generator n)))
+  (Generator. n 0 {}))
 
 (defn read-compare
   "Given two maps of keys to values, a and b, returns -1 if a dominates, 0 if

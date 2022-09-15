@@ -53,11 +53,10 @@
       2
       (range)
       (fn [k]
-        (gen/seq
-          [(fn [_  _]
-             {:type :invoke :f :insert :value [nil (swap! ids inc)]})
-           (fn [_  _]
-             {:type :invoke :f :insert :value [(swap! ids inc) nil]})])))))
+        [(gen/once (fn [_  _]
+                     {:type :invoke :f :insert :value [nil (swap! ids inc)]}))
+         (gen/once (fn [_  _]
+                     {:type :invoke :f :insert :value [(swap! ids inc) nil]}))]))))
 
 (defn g2-checker
   "Verifies that at most one :insert completes successfully for any given key."

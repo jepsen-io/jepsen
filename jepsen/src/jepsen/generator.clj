@@ -1,228 +1,791 @@
 (ns jepsen.generator
-  "Generates operations for a test. Generators are composable, stateful objects
-  which emit operations for processes until they are exhausted, at which point
-  they return nil. Generators may sleep when generating operations, to delay
-  the rate at which the test proceeds
+  "# In a Nutshell
 
-  Generators do *not* have to emit a :process for their operations; test
-  workers will take care of that.
+  Generators tell Jepsen what to do during a test. Generators are purely
+  functional objects which support two functions: `op` and `update`. `op`
+  produces operations for Jepsen to perform: it takes a test and context
+  object, and yields:
 
-  Every object may act as a generator, and constantly yields itself.
+  - nil if the generator is exhausted
+  - :pending if the generator doesn't know what to do yet
+  - [op, gen'], where op' is the next operation this generator would like to
+  execute, and `gen'` is the state of the generator that would result if `op`
+  were evaluated.
 
-  Big ol box of monads, really."
-  (:refer-clojure :exclude [map concat delay seq filter await])
-  (:require [dom-top.core :refer [assert+]]
-            [jepsen.util :as util]
-            [jepsen.generator.pure :as gen.pure]
-            [knossos.history :as history]
-            [clojure.core :as c]
-            [clojure.walk :as walk]
-            [clojure.pprint :refer [pprint]]
-            [clojure.tools.logging :refer [warn info]]
-            [slingshot.slingshot :refer [throw+]]
-            [tea-time.core :as tt])
-  (:import (java.util.concurrent.atomic AtomicBoolean)
-           (java.util.concurrent.locks LockSupport)
-           (java.util.concurrent BrokenBarrierException
-                                 CyclicBarrier)))
+  `update` allows generators to evolve as events occur--for instance, when an
+  operation is invoked or completed. For instance, `update` allows a generator
+  to emit read operations *until* at least one succeeds.
+
+  Maps, sequences, and functions are all generators, allowing you to write all
+  kinds of generators using existing Clojure tooling. This namespace provides
+  additional transformations and combinators for complex transformations.
+
+  # Migrating From Classic Generators
+
+  The old jepsen.generator namespace used mutable state everywhere, and was
+  plagued by race conditions. jepsen.generator.pure provides a similar API, but
+  its purely functional approach has several advantages:
+
+  - Pure generators shouldn't deadlock or throw weird interrupted exceptions.
+    These issues have plagued classic generators; I've done my best to make
+    incremental improvements, but the problems seem unavoidable.
+
+  - Pure generators can respond to completion operations, which means you can
+    write things like 'keep trying x until y occurs' without sharing complex
+    mutable state with clients.
+
+  - Sequences are pure generators out of the box; no more juggling gen/seq
+    wrappers. Use existing Clojure sequence transformations to build complex
+    behaviors.
+
+  - Pure generators provide an explicit 'I don't know yet' state, which is
+    useful when you know future operations might come, but don't know when or
+    what they are.
+
+  - Pure generators do not rely on dynamic state; their arguments are all
+    explicit. They are deterministically testable.
+
+  - Pure generators allow new combinators like (any gen1 gen2 gen3), which
+    returns the first operation from any of several generators; this approach
+    was impossible in classic generators.
+
+  - Pure generators have an explicit, deterministic model of time, rather than
+    relying on thread scheduler constructs like Thread/sleep.
+
+  - Certain constructs, like gen/sleep and gen/log in classic generators, could
+    not be composed in sequences readily; pure generators provide a regular
+    composition language.
+
+  - Constructs like gen/each, which were fragile in classic generators and
+    relied on macro magic, are now simple functions.
+
+  - Pure generators are significantly simpler to implement and test than
+    classic generators, though they do require careful thought.
+
+  There are some notable tradeoffs, including:
+
+  - Pure generators perform all generator-related computation on a single
+    thread, and create additional garbage due to their pure functional approach.
+    However, realistic generator tests yield rates over 20,000 operations/sec,
+    which seems more than sufficient for Jepsen's purposes.
+
+  - The API is subtly different. In my experience teaching hundreds of
+    engineers to write Jepsen tests, users typically cite the generator API as
+    one of Jepsen's best features. I've tried to preserve as much of its shape
+    as possible, while sanding off rough edges and cleaning up inconsistencies.
+    Some functions have the same shape but different semantics: `stagger`, for
+    instance, now takes a *total* rather than a `*per-thread*` rate. Some
+    infrequently-used generators have not been ported, to keep the API smaller.
+
+  - `update` and contexts are not a full replacement for mutable state. We
+    think they should suffice for most practical uses, and controlled use of
+    mutable shared state is still possible.
+
+  - You can (and we encourage!) the use of impure functions, e.g. randomness,
+    as impure generators. However, it's possible I haven't fully thought
+    through the implications of this choice; the semantics may evolve over
+    time.
+
+  When migrating old to new generators, keep in mind:
+
+  - `gen/seq` and `gen/seq-all` are unnecessary; any Clojure sequence is
+    already a pure generator. `gen/seq` didn't just turn sequences into
+    generators; it also ensured that only one operation was consumed from each.
+    This is now explicit: use `(map gen.pure/once coll)` instead of (gen/seq
+    coll)`, and `coll` instead of `(gen/seq-all coll)`. Where the sequence is
+    of one-shot generators already, there's no need to wrap elements with
+    gen/once: instead of `(gen/seq [{:f :read} {:f :write}])`), you can write
+    [{:f :read} {:f :write}] directly.
+
+  - Functions return generators, not just operations, which makes it easier to
+    express sequences of operations like 'pick the current leader, isolate it,
+    then kill that same node, then restart that node.' Use `#(gen/once {:f
+    :write, :value (rand-int 5))` instead of `(fn [] {:f :write, :value
+    (rand-int 5)})`.
+
+  - `stagger`, `delay`, etc. now take total rates, rather than the rate per
+    thread.
+
+  - `delay-til` is gone. It should come back; I just haven't written it yet.
+    Defining what exactly delay-til means is... surprisingly tricky.
+
+  - `each` used to mean 'on each process', but in practice what users generally
+    wanted was 'on each thread'--on each process had a tendency to result in
+    unexpected infinite loops when ops crashed. `each-thread` is probably what
+    you want instead.
+
+  - Instead of using *jepsen.generator/threads*, etc, use helper functions like
+    some-free-process.
+
+  - Functions now take zero args (f) or a test and context map (f test ctx),
+    rather than (f test process).
+
+  - Maps are one-shot generators by default, rather than emitting themselves
+    indefinitely. This streamlines the most common use cases:
+
+      - (map (fn [x] {:f :write, :value x}) (range)) produces a series of
+        distinct, monotonically increasing writes
+
+      - (fn [] {:f :inc, :value (rand-nth 5)}) produces a series of random
+        increments, rather than a series where every value is the *same*
+        (randomly selected) value.
+
+    When migrating, you can drop most uses of gen/once around maps, and
+    introduce (repeat ...) where you want to repeat an operation more than once.
+
+  # In More Detail
+
+  A Jepsen history is a list of operations--invocations and completions. A
+  generator's job is to specify what invocations to perform, and when. In a
+  sense, a generator *becomes* a history as Jepsen incrementally applies it to
+  a database.
+
+  Naively, we might define a history as a fixed sequence of invocations to
+  perform at certain times, but this is impossible: we have only a fixed set of
+  threads, and they may not be free to perform our operations. A thread must be
+  *free* in order to perform an operation.
+
+  Time, too, is a dependency. When we schedule an operation to occur once per
+  second, we mean that only once a certain time has passed can the next
+  operation begin.
+
+  There may also be dependencies between threads. Perhaps only after a nemesis
+  has initiated a network partition does our client perform a particular read.
+  We want the ability to hold until a certain operation has begun.
+
+  Conceptually, then, a generator is a *graph* of events, some of which have
+  not yet occurred. Some events are invocations: these are the operations the
+  generator will provide to clients. Some events are completions: these are
+  provided by clients to the generator. Other events are temporal: a certain
+  time has passed.
+
+  This graph has some invocations which are *ready* to perform. When we have a
+  ready invocation, we apply the invocation using the client, obtain a
+  completion, and apply the completion back to the graph, obtaining a new
+  graph.
+
+  ## By Example
+
+  Perform a single read
+
+    {:f :read}
+
+  Perform a single random write:
+
+    (fn [] {:f :write, :value (rand-int 5))
+
+  Perform 10 random writes. This is regular clojure.core/repeat:
+
+    (repeat 10 (fn [] {:f :write, :value (rand-int 5)))
+
+  Perform a sequence of 50 unique writes. We use regular Clojure sequence
+  functions here:
+
+    (->> (range)
+         (map (fn [x] {:f :write, :value (rand-int 5)}))
+         (take 50))
+
+  Write 3, then (possibly concurrently) read:
+
+    [{:f :write, :value 3} {:f :read}]
+
+  Since these might execute concurrently, the read might not observe the write.
+  To wait for the write to complete first:
+
+    (gen/phases {:f :write, :value 3}
+                {:f :read})
+
+  Have each thread independently perform a single increment, then read:
+
+    (gen/each-thread [{:f :inc} {:f :read}])
+
+  Reserve 5 threads for reads, 10 threads for increments, and the remaining
+  threads reset a counter.
+
+    (gen/reserve 5  (repeat {:f :read})
+                 10 (repeat {:f :inc})
+                    (repeat {:f :reset}))
+
+  Perform a random mixture of unique writes and reads, randomly timed, at
+  roughly 10 Hz, for 30 seconds:
+
+    (->> (gen/mix [(repeat {:f :read})
+                   (map (fn [x] {:f :write, :value x}) (range))])
+         (gen/stagger 1/10)
+         (gen/time-limit 30))
+
+  While that's happening, have the nemesis alternate between
+  breaking and repairing something roughly every 5 seconds:
+
+    (->> (gen/mix [(repeat {:f :read})
+                   (map (fn [x] {:f :write, :value x}) (range))])
+         (gen/stagger 1/10)
+         (gen/nemesis (->> (cycle [{:f :break}
+                                   {:f :repair}])
+                           (gen/stagger 5)))
+         (gen/time-limit 30))
+
+  Follow this by a single nemesis repair (along with an informational log
+  message), wait 10 seconds for recovery, then have each thread perform reads
+  until that thread sees at least one OK operation.
+
+    (gen/phases (->> (gen/mix [(repeat {:f :read})
+                               (map (fn [x] {:f :write, :value x}) (range))])
+                     (gen/stagger 1/10)
+                     (gen/nemesis (->> (cycle [{:f :break}
+                                               {:f :repair}])
+                                       (gen/stagger 5)))
+                     (gen/time-limit 30))
+                (gen/log \"Recovering\")
+                (gen/nemesis {:f :repair})
+                (gen/sleep 10)
+                (gen/log \"Final read\")
+                (gen/clients (gen/each-thread (gen/until-ok {:f :read}))))
+
+  ## Contexts
+
+  A *context* is a map which provides information about the state of the world
+  to generators. For instance, a generator might need to know the number of
+  threads which will ask it for operations. It can get that number from the
+  *context*. Users can add their own values to the context map, which allows
+  two generators to share state. When one generator calls another, it can pass
+  a modified version of the context, which allows us to write generators that,
+  say, run two independent workloads, each with their own concurrency and
+  thread mappings.
+
+  The standard context mappings, which are provided by Jepsen when invoking the
+  top-level generator, and can be expected by every generator, are:
+
+      :time           The current Jepsen linear time, in nanoseconds
+      :free-threads   A collection of idle threads which could perform work
+      :workers        A map of thread identifiers to process identifiers
+
+  ## Fetching an operation
+
+  We use `(op gen test context)` to ask the generator for the next invocation
+  that we can process.
+
+  The operation can have three forms:
+
+  - The generator may return `nil`, which means the generator is done, and
+    there is nothing more to do. Once a generator does this, it must never
+    return anything other than `nil`, even if the context changes.
+  - The generator may return :pending, which means there might be more
+    ops later, but it can't tell yet.
+  - The generator may return an operation, in which case:
+    - If its time is in the past, we can evaluate it now
+    - If its time is in the future, we wait until either:
+      - The time arrives
+      - Circumstances change (e.g. we update the generator)
+
+  But (op gen test context) returns more than just an operation; it also
+  returns the *subsequent state* of the generator, if that operation were to be
+  performed. The two are bundled into a tuple.
+
+  (op gen test context) => [op gen']      ; known op
+                           [:pending gen] ; unsure
+                           nil            ; exhausted
+
+  The analogous operations for sequences are (first) and (next); why do we
+  couple them here? Why not use the update mechanism strictly to evolve state?
+  Because the behavior in sequences is relatively simple: next always moves
+  forward one item, whereas only *some* updates actually cause systems to move
+  forward. Seqs always do the same thing in response to `next`, whereas
+  generators may do different things depending on context. Moreover, Jepsen
+  generators are often branched, rather than linearly wrapped, as sequences
+  are, resulting in questions about *which branch* needs to be updated.
+
+  When I tried to strictly separate implementations of (op) and (update), it
+  resulted in every update call attempting to determine whether this particular
+  generator did or did not emit the given invocation event. This is
+  *remarkably* tricky to do well, and winds up relying on all kinds of
+  non-local assumptions about the behavior of the generators you wrap, and
+  those which wrap you.
+
+  ## Updating a generator
+
+  We still want the ability to respond to invocations and completions, e.g. by
+  tracking that information in context variables. Therefore, in addition to
+  (op) returning a new generator, we have a separate function, (update gen test
+  context event), which allows generators to react to changing circumstances.
+
+  - We invoke an operation (e.g. one that the generator just gave us)
+  - We complete an operation
+
+  Updates use a context with a specific relationship to the event:
+
+  - The context :time is equal to the event :time
+  - The free processes set reflects the state after the event has taken place;
+    e.g. if the event is an invoke, the thread is listed as no longer free; if
+    the event is a completion, the thread is listed as free.
+  - The worker map reflects the process which that thread worker was executing
+    at the time the event occurred.
+
+  ## Default implementations
+
+  Nil is a valid generator; it ignores updates and always yields nil for
+  operations.
+
+  IPersistentMaps are generators which ignore updates and return exactly one
+  operation which looks like the map itself, but with default values for time,
+  process, and type provided based on the context. This means you can write a
+  generator like
+
+    {:f :write, :value 2}
+
+  and it will generate a single op like
+
+    {:type :invoke, :process 3, :time 1234, :f :write, :value 2}
+
+  To produce an infinite series of ops drawn from the same map, use
+
+    (repeat {:f :write, :value 2}).
+
+  Sequences are generators which assume the elements of the sequence are
+  themselves generators. They ignore updates, and return all operations from
+  the first generator in the sequence, then all operations from the second, and
+  so on.
+
+  Functions are generators which ignore updates and can take either test and
+  context as arguments, or no args. Functions should be *mostly* pure, but some
+  creative impurity is probably OK. For instance, returning randomized :values
+  for maps is probably all right. I don't know the laws! What is this, Haskell?
+
+  When a function is used as a generator, its return value is used as a
+  generator; that generator is used until exhausted, and then the function is
+  called again to produce a new generator. For instance:
+
+    ; Produces a series of different random writes, e.g. 1, 5, 2, 3...
+    (fn [] {:f :write, :value (rand-int 5)})
+
+    ; Alternating write/read ops, e.g. write 2, read, write 5, read, ...
+    (fn [] (map gen/once [{:f :write, :value (rand-int 5)}
+                          {:f :read}]))
+
+  Promises and delays are generators which ignore updates, yield :pending until
+  realized, then are replaced by whatever generator they contain. Delays are
+  not evaluated until they *could* produce an op, so you can include them in
+  sequences, phases, etc., and they'll be evaluated only once prior ops have
+  been consumed."
+  (:refer-clojure :exclude [await concat cycle delay filter map repeat run! update])
+  (:require [clojure [core :as c]
+                     [datafy :refer [datafy]]
+                     [set :as set]]
+            [clojure.core.reducers :as r]
+            [clojure.tools.logging :refer [info warn error]]
+            [clojure.pprint :as pprint :refer [pprint]]
+            [fipp.ednize :as fipp.ednize]
+            [jepsen [util :as util]]
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import (io.lacuna.bifurcan Set)))
 
 (defprotocol Generator
-  (op [gen test process] "Yields an operation to apply."))
+  (update [gen test context event]
+          "Updates the generator to reflect an event having taken place.
+          Returns a generator (presumably, `gen`, perhaps with some changes)
+          resulting from the update.")
 
-(defrecord StatefulPure [stateful pure]
-  Generator
-  (op [_ test process] (op stateful test process)))
+  (op [gen test context]
+      "Obtains the next operation from this generator. Returns an pair
+      of [op gen'], or [:pending gen], or nil if this generator is exhausted."))
 
-(extend-protocol gen.pure/Generator
-  StatefulPure
-  (op [this test ctx]
-    (gen.pure/op (:pure this) test ctx))
+;; Pretty-printing
 
-  (update [this test ctx event]
-    (gen.pure/update (:pure this) test ctx event)))
+(defmethod pprint/simple-dispatch jepsen.generator.Generator
+  [gen]
+  (if (map? gen)
+    (do (.write ^java.io.Writer *out* (str (.getName (class gen)) "{"))
+        (pprint/pprint-newline :mandatory)
+        (let [prefix "  "
+              suffix "}"]
+          (pprint/pprint-logical-block :prefix prefix :suffix suffix
+            (pprint/print-length-loop [aseq (seq gen)]
+              (when aseq
+                (pprint/pprint-logical-block
+                  (pprint/write-out (key (first aseq)))
+                  (.write ^java.io.Writer *out* " ")
+                  (pprint/pprint-newline :miser)
+                  (pprint/write-out (fnext (first aseq))))
+                (when (next aseq)
+                  (.write ^java.io.Writer *out* ", ")
+                  (pprint/pprint-newline :linear)
+                  (recur (next aseq))))))))
 
-; Compatibility layers for the stateful->pure transition
-(defn stateful+pure
-  "A wrapper which combines a stateful generator and a pure generator
-  (hopefully with the same semantics) into one package. For pure generators,
-  this wrapper disappears as soon as ops/updates occur."
-  [stateful pure]
-  (StatefulPure. stateful pure))
+    ; Probably a reify or something weird we can't print
+    (prn gen)))
 
-(defn stateful?
-  "Can this object be considered a stateful generator?"
-  [x]
-  (satisfies? Generator x))
+(prefer-method pprint/simple-dispatch
+               jepsen.generator.Generator clojure.lang.IRecord)
+(prefer-method pprint/simple-dispatch
+               jepsen.generator.Generator clojure.lang.IPersistentMap)
 
-(defn pure?
-  "Can this object be considered a pure generator?"
-  [x]
-  (satisfies? gen.pure/Generator x))
+(extend-protocol fipp.ednize/IOverride (:on-interface Generator))
+(extend-protocol fipp.ednize/IEdn (:on-interface Generator)
+  (-edn [gen]
+    (if (record? gen)
+      ; Ugh this is such a hack but Fipp's extension points are sort of a
+      ; mess--you can't override the document generation behavior on a
+      ; per-class basis. Probably sensible for perf reasons, but makes our life
+      ; hard.
+      ;
+      ; Convert records (which respond to map?) into maps.
+      (list (symbol (.getName (class gen)))
+            (into {} gen))
+      ; We can't return a reify without entering an infinite loop (ugh) so uhhh
+      (tagged-literal 'unprintable (str gen))
+      )))
 
-(defn gen-type-
-  "Returns :stateful, :pure, :both, or nil, based on what the given generator
-  supports."
-  [x]
-  (if (stateful? x)
-    (if (pure? x)
-      :both
-      :stateful)
-    (if (pure? x)
-      :pure
-      nil)))
+;; Fair sets
+;
+; Our contexts need a set of free threads which supports an efficient way of
+; getting a single thread. An easy solution is to use `first` to get the first
+; element of the set, but if a thread executes quickly, it's possible that the
+; thread will go right *back* into the set at the first position immediately,
+; which can lead to thread starvation: some workers never execute requests. We
+; want a more fair scheduler, which gives each thread a uniform chance of
+; executing.
+;
+; To do this, we use a Set from ztellman's Bifurcan collections, which supports
+; efficient nth.
 
-(defn gen-type
-  "Returns :stateful, :pure, :both, or nil, based on what the given generator
-  can definitely support while remaining compatible with stateful generators.
-  For instance, functions are both stateful and pure generators, but their
-  behavior is incompatible, so we only consider them as stateful generators for
-  now."
-  [x]
-  (if (or (instance? clojure.lang.APersistentMap x)
-          (instance? clojure.lang.AFunction x))
-    :stateful
-    (gen-type- x)))
+;; Helpers
 
-(defn gens-type
-  "Given a collection of generators, returns :stateful if they're all stateful
-  generators, :pure if they're all pure generators, and :both if they're all
-  both. Throws if there's a mix."
-  [gens]
-  (if (c/seq gens)
-    (let [types (c/map gen-type gens)]
-      (assert+ (apply = types)
-               {:type   ::mixed-generator-types
-                :gens   gens
-                :types  types})
-      (first types))
-    :both))
+(defn context
+  "Constructs a new context from a test."
+  [test]
+  (let [threads (->> (range (:concurrency test))
+                     (cons :nemesis))
+        threads (.forked (Set/from ^Iterable threads))]
+    {:time          0
+     :free-threads  threads
+     :workers       (->> threads
+                         (c/map (partial c/repeat 2))
+                         (c/map vec)
+                         (into {}))}))
 
-(defn op-and-validate
-  "Wraps `op` to ensure we produce a valid operation for our
-  worker. Re-throws any exception we catch from the generator."
-  [gen test process]
-  (let [op (op gen test process)]
-    (when-not (or (nil? op) (map? op))
-      (throw+ {:type :invalid-op
-               :gen  gen
-               :op   op}))
-    op))
+(defn rand-int-seq
+  "Generates a reproducible sequence of random longs, given a random seed. If
+  seed is not provided, taken from (rand-int))."
+  ([] (rand-int-seq (rand-int Integer/MAX_VALUE)))
+  ([seed]
+   (let [gen (java.util.Random. seed)]
+     (repeatedly #(.nextLong gen)))))
+
+(defn free-processes
+  "Given a context, returns a collection of processes which are not actively
+  processing invocations."
+  [context]
+  (c/map (:workers context) (:free-threads context)))
+
+(defn some-free-process
+  "Given a context, returns a random free process."
+  [context]
+  (let [free-threads ^Set (:free-threads context)
+        n                 (.size free-threads)]
+    (when-not (zero? n)
+      (let [thread (.nth free-threads (rand-int n))]
+        (get (:workers context) thread)))))
+
+(defn all-processes
+  "Given a context, returns all processes currently being executed by threads."
+  [context]
+  (vals (:workers context)))
+
+(defn ^Set free-threads
+  "Given a context, returns a collection of threads that are not actively
+  processing invocations."
+  [context]
+  (:free-threads context))
+
+(defn all-threads
+  "Given a context, returns a collection of all threads."
+  [context]
+  (keys (:workers context)))
+
+(defn process->thread
+  "Takes a context and a process, and returns the thread which is executing
+  that process."
+  [context process]
+  (->> (:workers context)
+       (keep (fn [[t p]] (when (= process p) t)))
+       first))
+
+(defn thread->process
+  "Takes a context and a thread, and returns the process this thread is
+  currently executing."
+  [context thread]
+  (get (:workers context) thread))
+
+(defn next-process
+  "When a process being executed by a thread crashes, this function returns the
+  next process for a given thread. You should probably only use this with the
+  *global* context, because it relies on the size of the `:workers` map."
+  [context thread]
+  (if (number? thread)
+    (+ (get (:workers context) thread)
+       (count (c/filter number? (all-processes context))))
+    thread))
+
+;; Generators!
+
+(defn fill-in-op
+  "Takes an operation and fills in missing fields for :type, :process, and
+  :time using context. Returns :pending if no process is free."
+  [op ctx]
+  (if-let [p (some-free-process ctx)]
+    ; Automatically assign type, time, and process from the context, if not
+    ; provided.
+    (persistent!
+      (cond-> (transient op)
+        (nil? (:time op))     (assoc! :time (:time ctx))
+        (nil? (:process op))  (assoc! :process p)
+        (nil? (:type op))     (assoc! :type :invoke)))
+    :pending))
 
 (extend-protocol Generator
   nil
-  (op [this test process] nil)
+  (update [gen test ctx event] nil)
+  (op [this test ctx] nil)
 
-  Object
-  (op [this test process] this)
+  clojure.lang.APersistentMap
+  (update [this test ctx event] this)
+  (op [this test ctx]
+    (let [op (fill-in-op this ctx)]
+      [op (if (= :pending op) this nil)]))
 
-  ; Fns can generate ops by being called with test and process, or with no args
   clojure.lang.AFunction
-  (op [f test process]
+  (update [f test ctx event] f)
+
+  (op [f test ctx]
+    (when-let [x (if (= 2 (first (util/arities (class f))))
+                   (f test ctx)
+                   (f))]
+      (op [x f] test ctx)))
+
+  clojure.lang.Delay
+  (update [d test ctx event] d)
+
+  (op [d test ctx]
+    (op @d test ctx))
+
+  clojure.lang.Seqable
+  (update [this test ctx event]
+    (when (seq this)
+      ; Updates are passed to the first generator in the sequence.
+      (cons (update (first this) test ctx event) (next this))))
+
+  (op [this test ctx]
+    ;(binding [*print-length* 3] (prn :op this))
+    (when (seq this) ; Once we're out of generators, we're done
+      (let [gen (first this)]
+        (if-let [[op gen'] (op gen test ctx)]
+          ; OK, our first gen has an op for us. If there's something following
+          ; us, we generate a cons cell as our resulting generator; otherwise,
+          ; just whatever this first element's next gen state is.
+          [op (if-let [nxt (next this)]
+                (cons gen' (next this))
+                gen')]
+
+          ; This generator is exhausted; move on
+          (recur (next this) test ctx))))))
+
+(defmacro extend-protocol-runtime
+  "Extends a protocol to a runtime-defined class. Helpful because some Clojure
+  constructs, like promises, use reify rather than classes, and have no
+  distinct interface we can extend."
+  [proto klass & specs]
+  (let [cn (symbol (.getName ^Class (eval klass)))]
+    `(extend-protocol ~proto ~cn ~@specs)))
+
+(defonce initialized?
+  (atom false))
+
+(defn init!
+  "We do some magic to extend the Generator protocol over promises etc, but
+  it's fragile and could break with... I think AOT compilation, but also
+  apparently plain old dependencies? I'm not certain. It's weird. Just to be
+  safe, we move this into a function that gets called by
+  jepsen.generator.interpreter, so that we observe the *real* version of the
+  promise reify auto-generated class."
+  []
+  (when (compare-and-set! initialized? false true)
+    (eval
+      `(extend-protocol-runtime Generator
+                                (class (promise))
+                                (update [p# test# ctx# event#] p#)
+
+                                (op [p# test# ctx#]
+                                    (if (realized? p#)
+                                      (op @p# test# ctx#)
+                                      [:pending p#]))))))
+
+(defrecord Validate [gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [res (op gen test ctx)]
+      (let [problems
+            (if-not (and (vector? res) (= 2 (count res)))
+              [(str "should return a vector of two elements.")]
+              (let [[op gen'] res]
+                  (if (= :pending op)
+                    []
+                    (cond-> []
+                      (not (map? op))
+                      (conj "should be either :pending or a map")
+
+                      (not (#{:invoke :info :sleep :log} (:type op)))
+                      (conj ":type should be :invoke, :info, :sleep, or :log")
+
+                      (not (number? (:time op)))
+                      (conj ":time should be a number")
+
+                      (not (:process op))
+                      (conj "no :process")
+
+                      (not-any? #{(:process op)}
+                                (free-processes ctx))
+                      (conj (str "process " (pr-str (:process op))
+                                 " is not free"))))))]
+        (when (seq problems)
+            (throw+ {:type      ::invalid-op
+                     :context   ctx
+                     ;:res       res
+                     :problems  problems}
+                    nil
+                    (with-out-str
+                      (println "Generator produced an invalid [op, gen'] tuple when asked for an operation:\n")
+                      (binding [*print-length* 10]
+                        (pprint res))
+                      (println "\nSpecifically, this is a problem because:\n")
+                      (doseq [p problems]
+                        (println " -" p))
+                      (println "Generator:\n")
+                      (binding [*print-length* 10]
+                        (pprint gen))
+                      (println "\nContext:\n")
+                      (pprint ctx)))))
+      [(first res) (Validate. (second res))]))
+
+  (update [this test ctx event]
+    (Validate. (update gen test ctx event))))
+
+(defn validate
+  "Validates the well-formedness of operations emitted from the underlying
+  generator."
+  [gen]
+  (Validate. gen))
+
+(defrecord FriendlyExceptions [gen]
+  Generator
+  (op [this test ctx]
     (try
-      (f test process)
-      (catch clojure.lang.ArityException e
-        (f)))))
+      (when-let [[op gen'] (op gen test ctx)]
+        [op (FriendlyExceptions. gen')])
+      (catch Throwable t
+        (throw+ {:type    ::op-threw
+                 :context ctx}
+                t
+                (with-out-str
+                  (print "Generator threw" (class t) "-" (.getMessage t) "when asked for an operation. Generator:\n")
+                  (binding [*print-length* 10]
+                    (pprint gen))
+                  (println "\nContext:\n")
+                  (pprint ctx))))))
 
-(def ^:dynamic *threads*
-  "The ordered collection of threads which will execute a particular generator.
-  The special thread :nemesis is used for the nemesis; other threads are 0-n,
-  where n is the test concurrency. Processes map to threads: process mod n is
-  the thread ID.
+  (update [this test ctx event]
+    (try
+      (when-let [gen' (update gen test ctx event)]
+        (FriendlyExceptions. gen'))
+      (catch Throwable t
+        (throw+ {:type    ::update-threw
+                 :context ctx
+                 :event   event}
+                t
+                  (with-out-str
+                    (print "Generator threw " t " when updated with an event. Generator:\n")
+                    (binding [*print-length* 10]
+                      (pprint gen))
+                    (println "\nContext:\n")
+                    (pprint ctx)
+                    (println "Event:\n")
+                    (pprint event)))))))
 
-  The set of threads is used where multiple parts of a test must synchronize."
-  nil)
+(defn friendly-exceptions
+  "Wraps a generator, so that exceptions thrown from op and update are wrapped
+  with a :type ::op-threw or ::update-threw Slingshot exception map, including
+  the generator, context, and event which caused the exception."
+  [gen]
+  (FriendlyExceptions. gen))
 
-(defmacro with-threads
-  "Binds *threads* for duration of body. Safety check: asserts threads are
-  sorted."
-  [threads & body]
-  `(let [threads# ~threads]
-     (assert (= threads# (history/sort-processes threads#)))
-     (binding [*threads* threads#]
-       ~@body)))
+(defrecord Trace [k gen]
+  Generator
+  (op [_ test ctx]
+    (binding [*print-length* 8]
+      (try (let [[op gen'] (op gen test ctx)]
+             (info k :op (with-out-str
+                           (println "\nContext:" ctx)
+                           (println "Operation:" op)
+                           (println "Generator:")
+                           (pprint gen)))
+             (when op
+               [op (when gen' (Trace. k gen'))]))
+           (catch Throwable t
+             (info k :op :threw
+                   (with-out-str
+                     (println "\nContext:" ctx)
+                     (println "Operation:" op)
+                     (println "Generator:")
+                     (pprint gen)))
+             (throw t)))))
 
-(defn process->thread
-  "Given a process identifier, return the corresponding thread identifier."
-  [test process]
-  (if (integer? process)
-    (mod process (:concurrency test))
-    process))
+  (update [_ test ctx event]
+    (binding [*print-length* 8]
+      (try (let [gen' (update gen test ctx event)]
+             (info k :update (with-out-str
+                               (println "\nContext:" ctx)
+                               (println "Event:" event)
+                               (println "Generator:")
+                               (pprint gen)))
+             (when gen' (Trace. k gen')))
+           (catch Throwable t
+             (info k :update :threw (with-out-str
+                                      (println "\nContext:" ctx)
+                                      (println "Event:" event)
+                                      (println "Generator:")
+                                      (pprint gen)))
+             (throw t))))))
 
-(defn process->node
-  "Given a test and a process identifier, returns the corresponding node this
-  process is likely (clients aren't required to respect the node they're given)
-  talking to, if process is an integer. Otherwise, nil."
-  [test process]
-  (let [thread (process->thread test process)]
-    (when (integer? thread)
-      (nth (:nodes test) (mod thread (count (:nodes test)))))))
+(defn trace
+  "Wraps a generator, logging calls to op and update before passing them on to
+  the underlying generator. Takes a key k, which is included in every log
+  line."
+  [k gen]
+  (Trace. k gen))
 
-;; Define lots of generators! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord Map [f gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      [(if (= :pending op) op (f op))
+       (Map. f gen')]))
 
-(defmacro defgenerator
-  "Like deftype, but the fields spec is followed by a vector of expressions
-  which are used to print the datatype, and the Generator protocol is implicit.
-  For instance:
+  (update [_ test ctx event]
+    (Map. f (update gen test ctx event))))
 
-      (defgenerator Delay [dt]
-        [(str dt \" seconds\")] ; For pretty-printing
-        (op [this test process] ; Function body
-          ...))
-
-  Inside the print-forms vector, every occurrence of a field name is replaced
-  by (.some-field a-generator), so don't get fancy with let bindings or
-  anything."
-  [name fields print-forms & protocols-and-functions]
-  (let [field-set (set fields)
-        this-sym  (gensym "this")
-        w-sym     (gensym "w")]
-    `(do ; Standard deftype, just insert the generator and drop the print forms
-         (deftype ~name ~fields Generator ~@protocols-and-functions)
-
-         ; For prn/str, we'll generate a defmethod
-         (defmethod print-method ~name
-           [~this-sym ^java.io.writer ~w-sym]
-           (.write ~w-sym
-                   ~(str "(gen/" (.toLowerCase (clojure.core/name name))))
-           ~@(mapcat (fn [field]
-                       ; Rewrite field expression, changing field names to
-                       ; instance variable getters
-                       (let [field (walk/prewalk
-                                     (fn [form]
-                                       (if (field-set form)
-                                         ; This was a field
-                                         (list (symbol (str "." form))
-                                               this-sym)
-                                         ; Something else
-                                         form))
-                                     field)]
-                         ; Spaces between fields
-                         [`(.write ~w-sym " ")
-                          `(print-method ~field ~w-sym)]))
-                 print-forms)
-           (.write ~w-sym ")")))))
-
-(defgenerator GVoid [] []
-  (op [gen test process]))
-
-(def void
-  "A generator which terminates immediately"
-  (GVoid.))
-
-(defgenerator Map [f g]
-  [f g]
-  (op [gen test process]
-      (when-let [op (op g test process)]
-        (try (f op test process)
-             (catch clojure.lang.ArityException e
-               (f op))))))
+(defn concat
+  "Where your generators are sequences, you can use Clojure's `concat` to make
+  them a generator. This `concat` is useful when you're trying to concatenate
+  arbitrary generators. Right now, (concat a b c) is simply '(a b c)."
+  [& gens]
+  (seq gens))
 
 (defn map
   "A generator which wraps another generator g, transforming operations it
-  generates with (f op test process), of if that fails, (f op). When the
-  underlying generator yields nil, this generator also returns nil."
-  [f g]
-  (Map. f g))
+  generates with (f op). When the underlying generator yields :pending or nil,
+  this generator does too, without calling `f`. Passes updates to underlying
+  generator."
+  [f gen]
+  (Map. f gen))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,
@@ -230,480 +793,270 @@
   according to `f-map`. Useful for composing generators together for use with a
   composed nemesis."
   [f-map g]
-  (map (fn [op] (update op :f f-map)) g))
+  (map (fn transform [op] (c/update op :f f-map)) g))
 
-(defn sleep-til-nanos
-  "High-resolution sleep; takes a time in nanos, relative to System/nanotime."
-  [t]
-  (while (< (+ (System/nanoTime) 10000) t)
-    (LockSupport/parkNanos (- t (System/nanoTime)))))
+(defrecord Filter [f gen]
+  Generator
+  (op [_ test ctx]
+    (loop [gen gen]
+      (when-let [[op gen'] (op gen test ctx)]
+        (if (or (= :pending op) (f op))
+          ; We can let this through
+          [op (Filter. f gen')]
+          ; Next op!
+          (recur gen')))))
 
-(defn sleep-nanos
-  "High-resolution sleep; takes a (possibly fractional) time in nanos."
-  [dt]
-  (sleep-til-nanos (+ dt (System/nanoTime))))
-
-(defgenerator DelayFn [f gen]
-  [f gen]
-  (op [_ test process]
-      (Thread/sleep (* 1000 (f)))
-      (op gen test process)))
-
-(defn delay-fn
-  "Every operation from the underlying generator takes (f) seconds longer."
-  [f gen]
-  (DelayFn. f gen))
-
-(defn delay
-  "Every operation from the underlying generator takes dt seconds to return."
-  [dt gen]
-  (assert (pos? dt))
-  (delay-fn (constantly dt) gen))
-
-(defn sleep
-  "Takes dt seconds, and always produces a nil."
-  [dt]
-  (delay dt void))
-
-(defn stagger
-  "Introduces uniform random timing noise with a mean delay of dt seconds for
-  every operation. Delays range from 0 to 2 * dt."
-  [dt gen]
-  (assert (pos? dt))
-  (delay-fn (partial rand (* 2 dt)) gen))
-
-(defn next-tick-nanos
-  "Given a period `dt` (in nanos), beginning at some point in time `anchor`
-  (also in nanos), finds the next tick after time `now`, such that the next
-  tick is separate from anchor by an exact multiple of dt. If now is omitted,
-  defaults to the current time."
-  ([anchor dt]
-   (next-tick-nanos anchor dt (util/linear-time-nanos)))
-  ([anchor dt now]
-   (+ now (- dt (mod (- now anchor) dt)))))
-
-(defgenerator DelayTil
-  [dt precache? anchor gen]
-  [(util/nanos->secs dt) precache? gen]
-  (op [_ test process]
-     (if precache?
-       (let [op (op gen test process)]
-         (sleep-til-nanos (next-tick-nanos anchor dt))
-         op)
-       (do (sleep-til-nanos (next-tick-nanos anchor dt))
-           (op gen test process)))))
-
-(defn delay-til
-  "Operations are emitted as close as possible to multiples of dt seconds from
-  some epoch. Where `delay` introduces a fixed delay between completion and
-  invocation, delay-til attempts to schedule invocations as close as possible
-  to the same time. This is useful for triggering race conditions.
-
-  If precache? is true (the default), will pre-emptively request the next
-  operation from the underlying generator, to eliminate jitter from that
-  generator."
-  ([dt gen]
-   (delay-til dt true gen))
-  ([dt precache? gen]
-   (let [anchor (System/nanoTime)
-         dt     (util/secs->nanos dt)]
-     (DelayTil. dt precache? anchor gen))))
-
-(defgenerator Once [source emitted]
-  [(if (.get emitted) :done :pending) source]
-  (op [gen test process]
-      (when-not (.get emitted)
-        (when-not (.getAndSet emitted true)
-          (op source test process)))))
-
-(defn once
-  "Wraps another generator, invoking it only once."
-  [source]
-  (Once. source (AtomicBoolean. false)))
-
-(defgenerator Derefer [dgen]
-  [dgen]
-  (op [this test process]
-      (let [gen @dgen]
-        (op gen test process))))
-
-(defn derefer
-  "Sometimes you need to build a generator not *now*, but *later*; e.g. because
-  it depends on state that won't be available until the generator is actually
-  invoked. Wrap a derefable returning a generator in this, and it'll be
-  deref'ed every time an op is requested. For instance:
-
-      (derefer (delay (gen/once {:type :drain-key, :value @key})))
-
-  Looks up the key to drain only once an operation is requested."
-  [dgen]
-  (Derefer. dgen))
-
-(defgenerator Log [msg]
-  [msg]
-  (op [gen test process]
-      (info msg)
-      nil))
-
-(defn log*
-  "Logs a message every time invoked, and yields nil."
-  [msg]
-  (Log. msg))
-
-(defn log
-  "Logs a message only once, and yields nil."
-  [msg]
-  (once (log* msg)))
-
-(defgenerator Each [gen-fn processes]
-  ; Sorry, this is a bit of a copout; I don't know how to render this *at all*.
-  [gen-fn]
-  (op [this test process]
-    (if-let [gen (get @processes process)]
-      (op gen test process)
-      (do
-        (swap! processes (fn [processes]
-                           (if (contains? processes process)
-                             processes
-                             (assoc processes process (gen-fn)))))
-        (recur test process)))))
-
-(defn each-
-  "Takes a function that yields a generator. Invokes that function to
-  create a new generator for each distinct process."
-  [gen-fn]
-  (Each. gen-fn (atom {})))
-
-(defmacro each
-  "Takes an expression evaluating to a generator. Captures that expression as a
-  function, and constructs a generator that invokes that expression once for
-  each process, as new processes arrive, such that each process sees an
-  independent copy of the underlying generator."
-  [gen-expr]
-  `(each- (fn [] ~gen-expr)))
-
-(defgenerator SeqOne [elements]
-  ; Don't try to render an infinite sequence
-  [(let [es (take 8 (next @elements))]
-     (if (<= (count es) 8)
-       es
-       (c/concat es ['...])))]
-  (op [this test process]
-    (when-let [gen (first (swap! elements next))]
-      (if-let [op (op gen test process)]
-        op
-        (recur test process)))))
-
-(defn seq
-  "Given a sequence of generators, emits one operation from the first, then one
-  from the second, then one from the third, etc. If a generator yields nil,
-  immediately moves to the next. Yields nil once coll is exhausted."
-  [coll]
-  (SeqOne. (atom (cons nil coll))))
-
-(defgenerator SeqAll [elements]
-  ; Don't try to render an infinite sequence
-  [(let [es (take 8 (next @elements))]
-     (if (<= (count es) 8)
-       es
-       (c/concat es ['...])))]
-  (op [this test process]
-      (let [es @elements]
-        (when-let [gen (first es)]
-          (if-let [op (op gen test process)]
-            op
-            ; This generator is exhausted; drop it and move to the next (if
-            ; nobody else has changed the generator already)
-            (do (compare-and-set! elements es (next es))
-                (recur test process)))))))
-
-(defn seq-all
-  "Given a sequence of generators, emits all operations from the first, then
-  all operations from the second, then all from the third, etc. If a generator
-  yields nil, immediately moves to the next. Yields nil once all generators in
-  coll are exhausted.
-
-  Be aware that providing an infinite sequence of generators to seq-all may
-  result in an infinite loop, if every generator returns `nil` immediately.
-  Ensure that at least some, if not all, generators in an infinite sequence
-  actually return operations. You *don't* want to seq-all over an infinite
-  sequence of the same stateful, limited generators; when those generators are
-  exhausted, you'll create an infinite loop going through each of them,
-  obtaining `nil`, and moving to the next."
-  [coll]
-  (SeqAll. (atom coll)))
-
-(defn start-stop
-  "A generator which emits a start after a t1 second delay, and then a stop
-  after a t2 second delay."
-  [t1 t2]
-  (seq (cycle [(sleep t1)
-               {:type :info :f :start}
-               (sleep t2)
-               {:type :info :f :stop}])))
-
-(defgenerator Mix [gens]
-  [gens]
-  (op [_ test process]
-      (op (rand-nth gens) test process)))
-
-(defn mix-
-  "A random mixture of operations. Takes a collection of generators and chooses
-  between them uniformly. If the collection is empty, generator returns nil."
-  [gens]
-  (let [gens (vec gens)]
-    (if (empty? gens)
-      void
-      (Mix. (vec gens)))))
-
-(defn mix
-  "A random mixture of operations. Takes a collection of generators and chooses
-  between them uniformly. If the collection is empty, generator returns nil."
-  [gens]
-  (case (gens-type gens)
-    :stateful (mix- gens)
-    :pure     (gen.pure/mix gens)
-    :both     (stateful+pure (mix- gens)
-                             (gen.pure/mix gens))))
-
-;; Test-specific generators -- should probably move these to jepsen.tests/*
-(def cas
-  "Random cas/read ops for a compare-and-set register over a small field of
-  integers."
-  (reify Generator
-    (op [generator test process]
-      (condp < (rand)
-        0.66 {:type  :invoke
-              :f     :read}
-        0.33 {:type  :invoke
-              :f     :write
-              :value (rand-int 5)}
-        {:type  :invoke
-         :f     :cas
-         :value [(rand-int 5) (rand-int 5)]}))))
-
-(defn queue
-  "A random mix of enqueue/dequeue operations over consecutive integers."
-  []
-  (let [i (atom -1)]
-    (reify Generator
-      (op [gen test process]
-        (if (< 0.5 (rand))
-          {:type  :invoke
-           :f     :enqueue
-           :value (swap! i inc)}
-          {:type  :invoke
-           :f     :dequeue})))))
-
-(defn drain-queue
-  "Wraps a generator, and keeps track of the balance of :enqueue and :dequeue
-  operations that pass through. When the underlying generator is exhausted,
-  emits enough :dequeue operations to dequeue every attempted enqueue."
-  [gen]
-  (let [outstanding (atom 0)]
-    (reify Generator
-      (op [_ test process]
-        (if-let [op (op gen test process)]
-          (do (when (= :enqueue (:f op))
-                (swap! outstanding inc))
-              op)
-
-          ; Exhausted
-          (when (pos? (swap! outstanding dec))
-            {:type :invoke :f :dequeue}))))))
-
-(defgenerator Limit [gen remaining]
-  [(dec @remaining) gen]
-  (op [_ test process]
-      (when (pos? (swap! remaining dec))
-        (op gen test process))))
-
-(defn limit
-  "Takes a generator and returns a generator which only produces n operations."
-  [n gen]
-  (Limit. gen (atom (inc n))))
-
-(defgenerator ProcessLimit [gen n procs]
-  [n gen]
-  (op [_ test process]
-      (when (<= (count (swap! procs conj process)) n)
-        (op gen test process))))
-
-(defn process-limit
-  "Takes a generator and returns a generator with bounded concurrency--it emits
-  operations for up to n distinct processes, but no more. Once n+1 processes
-  have requested an operation, emits nil forever."
-  [n gen]
-  (ProcessLimit. gen n (atom #{})))
-
-; T I M E   L I M I T S
-;
-; Our general approach here is to schedule a task which will interrupt
-; at the deadline. To figure out who to interrupt, we keep a set of
-; threads currently engaged in this time-limit; the deadline task
-; interrupts every thread in that set.
-;
-; To avoid a race condition where the deadline sees a thread that is
-; currently in the time-limit, that thread returns from the time-limit
-; and goes on to do something else, and we interrupt, it, we have a
-; *lock* on threads which prevents the deadline from killing threads once
-; they're on the way out.
-;
-; Now, the question is: what do we *do* with that interrupt? Our goal is
-; to return nil when we hit the time limit, but we *also* need to play
-; nicely with other potential causes of interrupts--for instance, nested
-; time-limits either enclosing us, or which we enclose.
-;
-; You might *think* that we could return nil on any interrupt, but this
-; might be incorrect. For instance, if we wrap a sequence of time-limited
-; operations, and the first one times out, the *second* one should get a
-; chance to execute--it should return nil, and we should never observe
-; its interruption.
-;
-; If an *enclosing* time limit fires and interrupts us, we have an
-; inverse problem: we might be surrounded by a generator that sees us run
-; out of operations and moves on to a new generator instead. Therefore we
-; *must* propagate interruptions triggered by our enclosing time limits.
-;
-; Essentially, we need a *side channel* to tell us: did *we* interrupt
-; ourselves, or did someone else? To do this, we store a local promise,
-; `interrupted?`, which the deadline task flips to `true` if it's going
-; to interrupt the thread. If we've interrupted ourselves, then we return
-; nil. If not, it might be some enclosing interrupt, which needs to
-; handle it instead; in that case, we rethrow.
-;
-; "Ah, but Kyle!? You exclaim, "What if two time limits fire
-; concurrently, and we are interrupted *while performing* this
-; bookkeeping!"
-;
-; This is a serious problem. You can be interrupted during `finally`. We
-; can't eliminate all concurrent interrupts, but we *can* eliminate our own.
-; We'll set up a *global* lock on the time-limit fn, and use the thread set to
-; make sure no other time-limit can interrupt a worker while the others are
-; triggering.
-(declare time-limit)
-(defgenerator TimeLimit [dt                 ; Time interval
-                         source             ; Underlying generator
-                         deadline           ; End time in micros
-                         threads            ; Atom: set of active threads
-                         interrupted?]      ; Atom: are we being interrupted?
-  [dt source]
-
-  (op [_ test process]
-      (try
-        ; Initialize start time on first run
-        (when (nil? @deadline)
-          (let [d' (+ (tt/linear-time-micros)
-                      (tt/seconds->micros dt))]
-            (when (compare-and-set! deadline nil d')
-              ; We won the CAS to initialize our deadline. Schedule task to
-              ; interrupt active threads later.
-              (tt/at-linear-micros! d' (fn []
-                                         (locking time-limit
-                                           ; Mark ourself as interrupting
-                                           (reset! interrupted? true)
-
-                                           ; Interrupt those threads
-                                           (locking threads
-                                             (doseq [t @threads]
-                                               (.interrupt t)))
-
-                                           ; Wait for interrupt processing to
-                                           ; complete
-                                           (while (pos? (count @threads))
-                                             (Thread/sleep 100))
-
-                                           ; Clean up so future interrupts
-                                           ; aren't trapped in our handler
-                                           (reset! interrupted? false)))))))
-
-        (when (<= (tt/linear-time-micros) @deadline)
-          ; We haven't passed the deadline yet. Register this thread in the
-          ; thread set
-          (try
-            (swap! threads conj (Thread/currentThread))
-            ; Grab an operation from the underlying generator
-            (op source test process)
-            (finally
-              (locking threads
-                (swap! threads disj (Thread/currentThread))))))
-
-        (catch InterruptedException sea-lion
-          ; Okay. SOMEONE interrupted us. We're definitely not executing any
-          ; more. We could have been interrupted FROM the finally block, so
-          ; we need to remove ourselves from the executing set again...
-          (locking threads
-            (swap! threads disj (Thread/currentThread)))
-          (if @interrupted?
-            nil
-            (throw sea-lion)))
-
-        ; Ugh this is SUCH a special case thing but BrokenBarrier is also a
-        ; sort of interrupted exception???
-        (catch BrokenBarrierException sea-lion
-          (locking threads
-            (swap! threads disj (Thread/currentThread)))
-          (if @interrupted?
-            nil
-            (throw sea-lion))))))
-
-(defn time-limit
-  "Yields operations from the underlying generator until dt seconds have
-  elapsed."
-  [dt source]
-  (TimeLimit. dt source (atom nil) (atom #{}) (atom false)))
-
-(defgenerator Filter [f gen]
-  [f gen]
-  (op [_ test process]
-      (loop []
-        (when-let [op' (op gen test process)]
-          (if (f op')
-            op'
-            (recur))))))
+  (update [_ test ctx event]
+    (Filter. f (update gen test ctx event))))
 
 (defn filter
-  "Takes a generator and yields a generator which emits only operations
-  satisfying `(f op)`."
+  "A generator which filters operations from an underlying generator, passing
+  on only those which match (f op). Like `map`, :pending and nil operations
+  bypass the filter."
   [f gen]
   (Filter. f gen))
 
-(defgenerator On [f source]
-  [f source]
-  (op [gen test process]
-      (when (f (process->thread test process))
-        (binding [*threads* (c/filter f *threads*)]
-          (op source test process)))))
+(defrecord IgnoreUpdates [gen]
+  Generator
+  (op [this test ctx]
+    (op gen test ctx))
 
-(defn on
-  "Forwards operations to source generator iff (f thread) is true. Rebinds
-  *threads* appropriately."
-  [f source]
-  (On. f source))
+  (update [this _ _ _]
+    this))
 
-(defgenerator Reserve [gens default]
-  [gens default]
-  (op [_ test process]
-      (let [threads (vec *threads*)
-            thread  (process->thread test process)
-            ;_ (info threads thread)
-            ; If our thread is smaller than some upper bound in gens, we've
-            ; found our generator, since both *threads* and gens are ordered.
-            [lower upper gen] (or (some (fn [[lower upper gen :as tuple]]
-                                          (and (< thread (nth threads upper))
-                                               tuple))
-                                        gens)
-                                  ; Default fallback
-                                  [(second (peek gens))
-                                   (count threads)
-                                   default])]
-        (with-threads (subvec threads lower upper)
-          (op gen test process)))))
+(defrecord OnUpdate [f gen]
+  Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      [op (OnUpdate. f gen')]))
+
+  (update [this test ctx event]
+    (f this test ctx event)))
+
+(defn on-update
+  "Wraps a generator with an update handler function. When an update occurs,
+  calls (f this test ctx event), and returns whatever f does--presumably, a new
+  generator. Can also be helpful for side effects--for instance, to update some
+  shared mutable state when an update occurs."
+  [f gen]
+  (OnUpdate. f gen))
+
+(defn on-threads-context
+  "Helper function to transform contexts for OnThreads. Takes a function which
+  returns true if a thread should be included in the context."
+  [f ctx]
+  (let [; Filter free threads to just those we want
+        ctx (assoc ctx :free-threads
+                   (.forked ^Set
+                     (reduce (fn [^Set free-threads thread]
+                               (if (f thread)
+                                 (.add free-threads thread)
+                                 free-threads))
+                             (.linear (Set.))
+                             (:free-threads ctx))))
+        ; Update workers to remove threads we won't use
+        ctx (->> (:workers ctx)
+                 (c/filter (comp f key))
+                 (into {})
+                 (assoc ctx :workers))]
+    ctx))
+
+(defrecord OnThreads [f gen]
+  Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (op gen test (on-threads-context f ctx))]
+      [op (OnThreads. f gen')]))
+
+  (update [this test ctx event]
+    (if (f (process->thread ctx (:process event)))
+      (OnThreads. f (update gen test (on-threads-context f ctx) event))
+      this)))
+
+(defn on-threads
+  "Wraps a generator, restricting threads which can use it to only those
+  threads which satisfy (f thread). Alters the context passed to the underlying
+  generator: it will only include free threads and workers satisfying f.
+  Updates are passed on only when the thread performing the update matches f."
+  [f gen]
+  (OnThreads. f gen))
+
+(def on "For backwards compatibility" on-threads)
+
+(defn soonest-op-map
+  "Takes a pair of maps wrapping operations. Each map has the following
+  structure:
+
+    :op       An operation
+    :weight   An optional integer weighting.
+
+  Returns whichever map has an operation which occurs sooner. If one map is
+  nil, the other happens sooner. If one map's op is :pending, the other happens
+  sooner. If one op has a lower :time, it happens sooner. If the two ops have
+  equal :times, resolves the tie randomly proportional to the two maps'
+  respective :weights. With weights 2 and 3, returns the first map 2/5 of the
+  time, and the second 3/5 of the time.
+
+  The :weight of the returned map is the *sum* of both weights if their times
+  are equal, which makes this function suitable for use in a reduction over
+  many generators.
+
+  Why is this nondeterministic? Because we use this function to decide between
+  several alternative generators, and always biasing towards an earlier or
+  later generator could lead to starving some threads or generators."
+  [m1 m2]
+  (condp = nil
+    m1 m2
+    m2 m1
+    (let [op1 (:op m1)
+          op2 (:op m2)]
+      (condp = :pending
+        op1 m2
+        op2 m1
+        (let [t1 (:time op1)
+              t2 (:time op2)]
+          (if (= t1 t2)
+            ; We have a tie; decide based on weights.
+            (let [w1 (:weight m1 1)
+                  w2 (:weight m2 1)
+                  w  (+ w1 w2)]
+              (assoc (if (< (rand-int w) w1) m1 m2)
+                     :weight w))
+            ; Not equal times; which comes sooner?
+            (if (< t1 t2)
+              m1
+              m2)))))))
+
+(defrecord Any [gens]
+  Generator
+  (op [this test ctx]
+    (when-let [{:keys [op gen' i]}
+               (->> gens
+                    (map-indexed
+                      (fn [i gen]
+                        (when-let [[op gen'] (op gen test ctx)]
+                          {:op    op
+                           :gen'  gen'
+                           :i     i})))
+                    (reduce soonest-op-map nil))]
+      [op (Any. (assoc gens i gen'))]))
+
+  (update [this test ctx event]
+    (Any. (mapv (fn updater [gen] (update gen test ctx event)) gens))))
+
+(defn any
+  "Takes multiple generators and binds them together. Operations are taken from
+  any generator. Updates are propagated to all generators."
+  [& gens]
+  (condp = (count gens)
+    0 nil
+    1 (first gens)
+      (Any. (vec gens))))
+
+(defrecord EachThread [fresh-gen gens]
+  ; fresh-gen is a generator we use to initialize a thread's state, the first
+  ; time we see it.
+  ; gens is a map of threads to generators.
+  Generator
+  (op [this test ctx]
+    (let [free-threads (free-threads ctx)
+          all-threads  (all-threads ctx)
+          {:keys [op gen' thread] :as soonest}
+          (->> free-threads
+               (keep (fn [thread]
+                      (let [gen     (get gens thread fresh-gen)
+                            process (get (:workers ctx) thread)
+                            ; Give this generator a context *just* for one
+                            ; thread
+                            threads (.. (Set.)
+                                        (add thread))
+                            ctx (assoc ctx
+                                       :free-threads threads
+                                       :workers      {thread process})]
+                        (when-let [[op gen'] (op gen test ctx)]
+                          {:op      op
+                           :gen'    gen'
+                           :thread  thread}))))
+               (reduce soonest-op-map nil))]
+      (cond ; A free thread has an operation
+            soonest [op (EachThread. fresh-gen (assoc gens thread gen'))]
+
+            ; Some thread is busy; we can't tell what to do just yet
+            (not= (.size free-threads) (count all-threads))
+            [:pending this]
+
+            ; Every thread is exhausted
+            true
+            nil)))
+
+  (update [this test ctx event]
+    (let [process (:process event)
+          thread (process->thread ctx process)
+          gen    (get gens thread fresh-gen)
+          ctx    (-> ctx
+                     (c/update :free-threads (partial c/filter #{thread}))
+                     (assoc :workers {thread process}))
+          gen'   (update gen test ctx event)]
+      (EachThread. fresh-gen (assoc gens thread gen')))))
+
+(defn each-thread
+  "Takes a generator. Constructs a generator which maintains independent copies
+  of that generator for every thread. Each generator sees exactly one thread in
+  its free process list. Updates are propagated to the generator for the thread
+  which emitted the operation."
+  [gen]
+  (EachThread. gen {}))
+
+(defrecord Reserve [ranges all-ranges gens]
+  ; ranges is a collection of sets of threads engaged in each generator.
+  ; all-ranges is the union of all ranges.
+  ; gens is a vector of generators corresponding to ranges, followed by the
+  ; default generator.
+  Generator
+  (op [_ test ctx]
+    (let [{:keys [op gen' i] :as soonest}
+          (->> ranges
+               (map-indexed
+                 (fn [i threads]
+                   (let [gen (nth gens i)
+                         ; Restrict context to this range of threads
+                         ctx (on-threads-context threads ctx)]
+                     ; Ask this range's generator for an op
+                     (when-let [[op gen'] (op gen test ctx)]
+                       ; Remember our index
+                       {:op     op
+                        :gen'   gen'
+                        :weight (count threads)
+                        :i      i}))))
+               ; And for the default generator, compute a context without any
+               ; threads from defined ranges...
+               (cons (let [ctx (on-threads-context (complement all-ranges) ctx)]
+                       ; And construct a triple for the default generator
+                       (when-let [[op gen'] (op (peek gens) test ctx)]
+                         {:op     op
+                          :gen'   gen'
+                          :weight (count (:workers ctx))
+                          :i      (count ranges)})))
+               (reduce soonest-op-map nil))]
+      (when soonest
+        ; A range has an operation to do!
+        [op (Reserve. ranges all-ranges (assoc gens i gen'))])))
+
+  (update [this test ctx event]
+    (let [process (:process event)
+          thread  (process->thread ctx process)
+          ; Find generator whose thread produced this event.
+          i (reduce (fn red [i range-]
+                      (if (range- thread)
+                        (reduced i)
+                        (inc i)))
+                    0
+                    ranges)]
+      (Reserve. ranges all-ranges (c/update gens i update test ctx event)))))
 
 (defn reserve
   "Takes a series of count, generator pairs, and a final default generator.
 
-      (reserve 5 write 10 cas read)
+  (reserve 5 write 10 cas read)
 
   The first 5 threads will call the `write` generator, the next 10 will emit
   CAS operations, and the remaining threads will perform reads. This is
@@ -712,127 +1065,517 @@
   blocking, you might like reads to proceed concurrently without every thread
   getting tied up in a write.
 
-  Rebinds *threads* appropriately. Assumes that every invocation of this
-  generator arrives with the same binding for *threads*."
+  Each generator sees a context which only includes the worker threads which
+  will execute that particular generator. Updates from a thread are propagated
+  only to the generator which that thread executes."
   [& args]
   (let [gens (->> args
-                   drop-last
-                   (partition 2)
-                   ; Construct [lower upper gen] tuples defining the range of
-                   ; thread indices covering a given generator, lower
-                   ; inclusive, upper exclusive.
-                   (reduce (fn [[n gens] [thread-count gen]]
-                             (let [n' (+ n thread-count)]
-                               [n' (conj gens [n n' gen])]))
-                           [0 []])
-                   second)
-        default (last args)]
+                  drop-last
+                  (partition 2)
+                  ; Construct [thread-set gen] tuples defining the range of
+                  ; thread indices covering a given generator, lower
+                  ; inclusive, upper exclusive.
+                  (reduce (fn [[n gens] [thread-count gen]]
+                            (let [n' (+ n thread-count)]
+                              [n' (conj gens [(set (range n n')) gen])]))
+                          [0 []])
+                  second)
+        ranges      (mapv first gens)
+        all-ranges  (reduce set/union ranges)
+        gens        (mapv second gens)
+        default     (last args)
+        gens        (conj gens default)]
     (assert default)
-    (Reserve. gens default)))
+    (Reserve. ranges all-ranges gens)))
 
-; processes is a map of process to the index of the source they're currently on.
-(defgenerator Concat [sources processes]
-  [sources]
-  (op [gen test process]
-    (let [i (get @processes process 0)]
-      (when (< i (count sources))
-        (let [source (nth sources i)]
-          (if-let [op (op source test process)]
-            op
-            (do (swap! processes (fn [processes]
-                                   (if (= i (get processes process 0))
-                                     ; Good, nobody else has changed us
-                                     (assoc processes process (inc i))
-                                     ; Someone else beat us
-                                     processes)))
-                (recur test process))))))))
+(declare nemesis)
 
-(defn concat
-  "Takes n generators and yields the first non-nil operation from any, in
-  order."
-  [& sources]
-  (Concat. (vec sources) (atom {})))
+(defn clients
+  "In the single-arity form, wraps a generator such that only clients
+  request operations from it. In its two-arity form, combines a generator of
+  client operations and a generator for nemesis operations into one. When the
+  process requesting an operation is :nemesis, routes to the nemesis generator;
+  otherwise to the client generator."
+  ([client-gen]
+   (on (complement #{:nemesis}) client-gen))
+  ([client-gen nemesis-gen]
+   (any (clients client-gen)
+        (nemesis nemesis-gen))))
 
 (defn nemesis
-  "Combines a generator of normal operations and a generator for nemesis
-  operations into one. When the process requesting an operation is :nemesis,
-  routes to the nemesis generator; otherwise to the normal generator."
+  "In the single-arity form, wraps a generator such that only the nemesis
+  requests operations from it. In its two-arity form, combines a generator of
+  client operations and a generator for nemesis operations into one. When the
+  process requesting an operation is :nemesis, routes to the nemesis generator;
+  otherwise to the client generator."
   ([nemesis-gen]
    (on #{:nemesis} nemesis-gen))
   ([nemesis-gen client-gen]
-   (concat (on #{:nemesis} nemesis-gen)
-           (on (complement #{:nemesis}) client-gen))))
+   (any (nemesis nemesis-gen)
+        (clients client-gen))))
 
-(defn clients
-  "Executes generator only on clients."
-  ([client-gen]
-   (on (complement #{:nemesis}) client-gen)))
+(defn dissoc-vec
+  "Cut a single index out of a vector, returning a vector one shorter, without
+  the element at that index."
+  [v i]
+  (into (subvec v 0 i)
+        (subvec v (inc i))))
 
-(defgenerator Await [f gen state]
-  [f @state gen]
-  (op [_ test process]
-      (when (= @state :waiting)
-        (locking state
-          (when (= @state :waiting)
-            (f)
-            (reset! state :ready))))
-      (op gen test process)))
+(defrecord Mix [i gens]
+  ; i is the next generator index we intend to work with; we reset it randomly
+  ; when emitting ops.
+  Generator
+  (op [_ test ctx]
+    (when (seq gens)
+      (if-let [[op gen'] (op (nth gens i) test ctx)]
+        ; Good, we have an op
+        [op (Mix. (rand-int (count gens)) (assoc gens i gen'))]
+        ; Oh, we're out of ops on this generator. Compact and recur.
+        (op (Mix. (rand-int (dec (count gens))) (dissoc-vec gens i))
+            test ctx))))
 
-(defn await
-  "Blocks until the given fn returns, then allows [gen] to proceed. If no gen
-  is given, yields nil. Only invokes fn once."
-  ([f] (await f nil))
-  ([f gen]
-   (Await. f gen (atom :waiting))))
+  (update [this test ctx event]
+    this))
 
-(defgenerator Synchronize [gen state]
-  [@state gen]
-  (op [_ test process]
-    (when (not= :clear @state)
-      ; Ensure a barrier exists
-      (compare-and-set! state :fresh
-                        (CyclicBarrier. (count *threads*)
-                                        (partial reset! state :clear)))
+(defn mix
+  "A random mixture of several generators. Takes a collection of generators and
+  chooses between them uniformly. Ignores updates; some users create broad
+  (hundreds of generators) mixes.
 
-      ; Block on barrier
-      (.await ^CyclicBarrier @state))
-    (op gen test process)))
+  To be precise, a mix behaves like a sequence of one-time, randomly selected
+  generators from the given collection. This is efficient and prevents multiple
+  generators from competing for the next slot, making it hard to control the
+  mixture of operations.
+
+  TODO: This can interact badly with generators that return :pending; gen/mix
+  won't let other generators (which could help us get unstuck!) advance. We
+  should probably cycle on :pending."
+  [gens]
+  (Mix. (rand-int (count gens)) (vec gens)))
+
+(defrecord Limit [remaining gen]
+  Generator
+  (op [_ test ctx]
+    (when (pos? remaining)
+      (when-let [[op gen'] (op gen test ctx)]
+        [op (Limit. (dec remaining) gen')])))
+
+  (update [this test ctx event]
+    (Limit. remaining (update gen test ctx event))))
+
+(defn limit
+  "Wraps a generator and ensures that it returns at most `limit` operations.
+  Propagates every update to the underlying generator."
+  [remaining gen]
+  (Limit. remaining gen))
+
+(defn once
+  "Emits only a single item from the underlying generator."
+  [gen]
+  (limit 1 gen))
+
+(defn log
+  "A generator which, when asked for an operation, logs a message and yields
+  nil. Occurs only once; use `repeat` to repeat."
+  [msg]
+  {:type :log, :value msg})
+
+(defrecord Repeat [remaining gen]
+  ; Remaining is positive for a limit, or -1 for infinite repeats.
+  Generator
+  (op [_ test ctx]
+    (when-not (zero? remaining)
+      (when-let [[op gen'] (op gen test ctx)]
+        ; If you actually hit MIN_INT doing this... you probably have bigger
+        ; problems on your hands.
+        [op (Repeat. (dec remaining) gen)])))
+
+  (update [this test ctx event]
+    (Repeat. remaining (update gen test ctx event))))
+
+(defn repeat
+  "Wraps a generator so that it emits operations infinitely, or, with an
+  initial limit, up to `limit` times. Think of this as the inverse of `once`:
+  where `once` takes a generator that emits many things and makes it emit one,
+  this takes a generator that emits (presumably) one thing, and makes it emit
+  many.
+
+  The state of the underlying generator is unchanged as `repeat` yields
+  operations, but `repeat` does *not* memoize its results; repeating a
+  nondeterministic generator results in a sequence of *different* operations."
+  ([gen]
+   (Repeat. -1 gen))
+  ([limit gen]
+   (assert (not (neg? limit)))
+   (Repeat. limit gen)))
+
+(defrecord Cycle [remaining original-gen gen]
+  Generator
+  (op [_ test ctx]
+    (when-not (zero? remaining)
+      (if-let [[op gen'] (op gen test ctx)]
+        ; We've got operations still. Emit them and let the generator evolve.
+        [op (Cycle. remaining original-gen gen')]
+        ; Out of operations. Recycle! If you actually hit MIN_INT doing this...
+        ; you probably have bigger problems on your hands.
+        (op (Cycle. (dec remaining) original-gen original-gen)
+            test
+            ctx))))
+
+  (update [this test ctx event]
+    (Cycle. remaining original-gen (update gen test ctx event))))
+
+(defn cycle
+  "Wraps a finite generator so that once it completes (e.g. emits nil), it
+  begins again. With an optional integer limit, repeats the generator that many
+  times. When the generator returns nil, it is reset to its original value and
+  the cycle repeats. Updates are propagated to the current generator, but do
+  not affect the original. Not sure if this is the right call--might change
+  that later."
+  ([gen]
+   (Cycle. -1 gen gen))
+  ([limit gen]
+   (Cycle. limit gen gen)))
+
+(defrecord ProcessLimit [n procs gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      (if (= :pending op)
+        [op (ProcessLimit. n procs gen')]
+        (let [procs' (into procs (all-processes ctx))]
+          (when (<= (count procs') n)
+            [op (ProcessLimit. n procs' gen')])))))
+
+  (update [_ test ctx event]
+    (ProcessLimit. n procs (update gen test ctx event))))
+
+(defn process-limit
+  "Takes a generator and returns a generator with bounded concurrency--it emits
+  operations for up to n distinct processes, but no more.
+
+  Specifically, we track the set of all processes in a context's `workers` map:
+  the underlying generator can return operations only from contexts such that
+  the union of all processes across all such contexts has cardinality at most
+  `n`. Tracking the union of all *possible* processes, rather than just those
+  processes actually performing operations, prevents the generator from
+  \"trickling\" at the end of a test, i.e. letting only one or two processes
+  continue to perform ops, rather than the full concurrency of the test."
+  [n gen]
+  (ProcessLimit. n #{} gen))
+
+(defrecord TimeLimit [limit cutoff gen]
+  Generator
+  (op [_ test ctx]
+    (let [[op gen'] (op gen test ctx)]
+      (case op
+        ; We're exhausted
+        nil       nil
+        ; We're pending!
+        :pending  [:pending (TimeLimit. limit cutoff gen')]
+        ; We have an op; lazily initialize our cutoff and check to see if it's
+        ; past.
+        (let [cutoff (or cutoff (+ (:time op) limit))]
+          (when-not (:time op) (warn "No time for op:" op))
+          (when (< (:time op) cutoff)
+            [op (TimeLimit. limit cutoff gen')])))))
+
+  (update [this test ctx event]
+    (TimeLimit. limit cutoff (update gen test ctx event))))
+
+(defn time-limit
+  "Takes a time in seconds, and an underlying generator. Once this emits an
+  operation (taken from that underlying generator), will only emit operations
+  for dt seconds."
+  [dt gen]
+  (TimeLimit. (long (util/secs->nanos dt)) nil gen))
+
+(defrecord Stagger [dt next-time gen]
+  Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      (let [now       (:time ctx)
+            next-time (or next-time now)]
+        (cond ; No need to do anything to pending ops
+              (= :pending op)
+              [op this]
+
+              ; We're ready to issue this operation.
+              (<= next-time (:time op))
+              [op (Stagger. dt (+ (:time op) (long (rand dt))) gen')]
+
+              ; Not ready yet
+              true
+              [(assoc op :time next-time)
+               (Stagger. dt (+ next-time (long (rand dt))) gen')]))))
+
+  (update [_ test ctx event]
+    (Stagger. dt next-time (update gen test ctx event))))
+
+(defn stagger
+  "Wraps a generator. Operations from that generator are scheduled at uniformly
+  random intervals between 0 to 2 * (dt seconds).
+
+  Unlike Jepsen's original version of `stagger`, this actually *means*
+  'schedule at roughly every dt seconds', rather than 'introduce roughly dt
+  seconds of latency between ops', which makes this less sensitive to request
+  latency variations.
+
+  Also note that unlike Jepsen's original version of `stagger`, this delay
+  applies to *all* operations, not to each thread independently. If your old
+  stagger dt is 10, and your concurrency is 5, your new stagger dt should be
+  2."
+  [dt gen]
+  (let [dt (long (util/secs->nanos (* 2 dt)))]
+    (Stagger. dt nil gen)))
+
+; This isn't actually DelayTil. It spreads out *all* requests evenly. Feels
+; like it might be useful later.
+;(defrecord DelayTil [dt anchor wait-til gen]
+;  Generator
+;  (op [_ test ctx]
+;    (when-let [[op gen'] (op gen test ctx)]
+;      (if (= :pending op)
+;        ; You can't delay what's pending!
+;        [op (DelayTil. dt anchor wait-til gen')]
+
+;        ; OK we have an actual op
+;        (let [; The next op should occur at time t
+;              t         (if wait-til
+;                          (max wait-til (:time op))
+;                          (:time op))
+;              ; Update op
+;              op'       (assoc op :time t)
+;              ; Initialize our anchor if we don't have one
+;              anchor'   (or anchor t)
+;              ; And compute the next wait-til time after t
+;              wait-til' (+ t (- dt (mod (- t anchor') dt)))
+;              ; Our next generator state
+;              gen'      (DelayTil. dt anchor' wait-til' gen')]
+;          [op' gen']))))
+
+;  (update [this test ctx event]
+;    (DelayTil. dt anchor wait-til (update gen test ctx event))))
+
+;(defn delay-til
+;  "Given a time dt in seconds, and an underlying generator gen, constructs a
+;  generator which emits operations such that successive invocations are at
+;  least dt seconds apart."
+;  [dt gen]
+;  (DelayTil. (long (util/secs->nanos dt)) nil nil gen))
+
+; dt is our interval between ops in nanos
+; next-time is the next timestamp we plan to emit.
+(defrecord Delay [dt next-time gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      (if (= op :pending)
+        ; Just pass these through; we don't know when they'll occur!
+        [op (Delay. dt next-time gen')]
+
+        ; OK we have an actual op. Compute its new event time.
+        (let [next-time (or next-time (:time op))
+              op        (c/update op :time max next-time)]
+          [op (Delay. dt (+ (:time op) dt) gen')]))))
+
+  (update [this test ctx event]
+    (Delay. dt next-time (update gen test ctx event))))
+
+(defn delay
+  "Given a time dt in seconds, and an underlying generator gen, constructs a
+  generator which tries to emit operations exactly dt seconds apart. Emits
+  operations more frequently if it falls behind. Like `stagger`, this should
+  result in histories where operations happen roughly every dt seconds.
+
+  Note that this definition of delay differs from its stateful cousin delay,
+  which a.) introduced dt seconds of delay between *completion* and subsequent
+  invocation, and b.) emitted 1/dt ops/sec *per thread*, rather than globally."
+  [dt gen]
+  (Delay. (long (util/secs->nanos dt)) nil gen))
+
+(defn sleep
+  "Emits exactly one special operation which causes its receiving process to do
+  nothing for dt seconds. Use (repeat (sleep 10)) to sleep repeatedly."
+  [dt]
+  {:type :sleep, :value dt})
+
+(defrecord Synchronize [gen]
+  Generator
+  (op [this test ctx]
+    (let [free (free-threads ctx)
+          all  (all-threads ctx)]
+      (if (and (= (.size free)
+                  (count all))
+               (= (set free)
+                  (set all)))
+        ; We're ready, replace ourselves with the generator
+        (op gen test ctx)
+        ; Not yet
+        [:pending this])))
+
+  (update [_ test ctx event]
+    (Synchronize. (update gen test ctx event))))
 
 (defn synchronize
-  "Blocks until all nodes are blocked awaiting operations from this generator,
-  then allows them to proceed. Only synchronizes a single time; subsequent
-  operations on this generator proceed freely."
+  "Takes a generator, and waits for all workers to be free before it begins."
   [gen]
-  (Synchronize. gen (atom :fresh)))
+  (Synchronize. gen))
 
 (defn phases
-  "Like concat, but requires that all threads finish the first generator before
-  moving to the second, and so on."
+  "Takes several generators, and constructs a generator which evaluates
+  everything from the first generator, then everything from the second, and so
+  on."
   [& generators]
-  (apply concat (c/map synchronize generators)))
+  (c/map synchronize generators))
 
 (defn then
-  "Generator B, synchronize, then generator A. Why is this backwards? Because
-  it reads better in ->> composition."
+  "Generator A, synchronize, then generator B. Note that this takes its
+  arguments backwards: b comes before a. Why? Because it reads better in ->>
+  composition. You can say:
+
+      (->> (fn [] {:f :write :value 2})
+           (limit 3)
+           (then (once {:f :read})))"
   [a b]
-  (concat b (synchronize a)))
+  [b (synchronize a)])
 
-(defn singlethreaded
-  "Obtaining an operation from the underlying generator requires an exclusive
-  lock. TODO: is this actually used by anyone? Feels kind of silly given
-  everythng else is concurrency-safe."
-  [gen]
-  (reify Generator
-    (op [this test process]
-      (locking this
-        (op gen test process)))))
+(defrecord UntilOk [gen done? active-processes]
+  Generator
+  (op [this test ctx]
+    (when-not done?
+      (when-let [[op gen'] (op gen test ctx)]
+        (if (= :pending op)
+          [op (assoc this :gen gen')]
+          [op (UntilOk. gen' done? (conj active-processes (:process op)))]))))
 
-(defn barrier
-  "When the given generator completes, synchronizes, then yields nil."
+  (update [this test ctx event]
+    (let [gen' (update gen test ctx event)
+          p    (:process event)]
+      (if (contains? active-processes p)
+        ; This is an update related to one of our operations.
+        (case (:type event)
+          ; We're finished; no need to update any more!
+          :ok (UntilOk. gen' true (disj active-processes p))
+
+          ; Crashed or failed; process no longer active, but we're not done.
+          (:info, :fail) (UntilOk. gen' done? (disj active-processes p))
+
+          ; Pass through
+          (UntilOk. gen' done? active-processes))
+        ; Some unrelated update
+        (UntilOk. gen' done? active-processes)))))
+
+(defn until-ok
+  "Wraps a generator, yielding operations from it until one of those operations
+  completes with :type :ok."
   [gen]
-  (->> gen (then void)))
+  (UntilOk. gen false #{}))
+
+(defrecord FlipFlop [gens i]
+  Generator
+  (op [this test ctx]
+    (when-let [[op gen'] (op (nth gens i) test ctx)]
+      [op (FlipFlop. (assoc gens i gen')
+                     (mod (inc i) (count gens)))]))
+
+  (update [this test ctx event]
+    this))
 
 (defn flip-flop
-  "Alternates between operations from two generators: a, b, a, b, ..."
+  "Emits an operation from generator A, then B, then A again, then B again,
+  etc. Stops as soon as any gen is exhausted. Updates are ignored."
   [a b]
-  (seq (cycle [a b])))
+  (FlipFlop. [a b] 0))
+
+(defrecord CycleTimes [period    ; Total period of the cycle, in nanos
+                       t0        ; Starting time, in nanos (initially nil)
+                       intervals ; Vector of durations in nanos that each
+                                 ; generator should last for.
+                       cutoffs   ; Vector of times in nanos below which that
+                                 ; particular generator starts. Omits the last
+                                 ; generator.
+                       gens]     ; Vector of generators
+  Generator
+  (op [this test ctx]
+    ; We start by figuring out the current generator based on the context time.
+    (let [now       (:time ctx)
+          ; When's the zero point of our timeline?
+          t0        (or t0 (:time ctx))
+          ; How far are we into the current cycle?
+          in-period (mod (- now t0) period)
+          ; When was the start of the current cycle?
+          cycle-start (- now in-period)
+          ; What generator do we think is most likely to have an operation for
+          ; us?
+          i         (loop [i 0]
+                      (if (or (= i (count cutoffs))
+                              (< in-period (nth cutoffs i)))
+                        i
+                        (recur (inc i))))]
+      ; Now we cycle through the generators in order, looking for one which can
+      ; produce an operation which falls before the end of its window.
+      (loop [i i
+             ; When we ask a later generator for an operation, we don't want to
+             ; ask it for an operation with the *current* time, because that
+             ; generator won't actually be valid until *later*. Instead we're
+             ; going to pretend its time t had arrived already, and see what
+             ; the answer *would* be at that time.
+             t (reduce + cycle-start (take i intervals))]
+        (let [gen      (nth gens i)
+              interval (nth intervals i)
+              ; When does the next generator start?
+              t'       (+ t interval)
+              ; Ask this generator for an operation. We use the current time,
+              ; or the start of the generator's window, whichever is higher.
+              [op gen'] (op gen test (assoc ctx :time (max now t)))]
+          (cond ; Ah, this generator is exhausted. So are we.
+                (nil? op)
+                nil
+
+                ; We're pending--we might choose to emit an operation before
+                ; this window is over.
+                (= :pending op)
+                [:pending (CycleTimes. period t0 intervals cutoffs
+                                       (assoc gens i gen'))]
+
+                ; This operation falls before the generator's window ends.
+                (< (:time op) t')
+                [op (CycleTimes. period t0 intervals cutoffs
+                                 (assoc gens i gen'))]
+
+                ; This operation falls after the generator's window ends; try
+                ; the next generator.
+                true
+                (recur (mod (inc i) (count gens))
+                       t'))))))
+
+  (update [this test ctx event]
+    (CycleTimes. period t0 intervals cutoffs
+                 (mapv (fn updater [gen] (update gen test ctx event)) gens))))
+
+(defn cycle-times
+  "Cycles between several generators on a rotating schedule. Takes a flat
+  series of [time, generator] pairs, like so:
+
+      (cycle-times 5  {:f :write}
+                   10 (gen/stagger 1 {:f :read}))
+
+  This generator emits writes for five seconds, then staggered reads for ten
+  seconds, then goes back to writes, and so on. Generator state is preserved
+  from cycle to cycle, which makes this suitable for e.g. interleaving quiet
+  periods into a nemesis generator which needs to perform a specific sequence
+  of operations like :add-node, :remove-node, :add-node ...
+
+  Updates are propagated to all generators."
+  [& specs]
+  (when (seq specs)
+    (assert (even? (count specs)))
+    (let [intervals       (->> specs
+                               (partition 1 2)
+                               (mapcat identity)
+                               (mapv (comp long util/secs->nanos)))
+          gens            (->> specs next (partition 1 2) vec)
+          period          (reduce + intervals)
+          cutoffs         (vec (reductions + intervals))]
+      (CycleTimes. period nil intervals cutoffs gens))))

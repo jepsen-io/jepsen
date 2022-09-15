@@ -29,27 +29,29 @@ test. This one partitions the network into two halves, selected randomly, when
 it receives a `:start` op, and heals the network when it receives a `:stop`.
 
 ```clj
+
 (defn etcd-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
   :concurrency ...), constructs a test map."
   [opts]
   (merge tests/noop-test
          opts
-         {:name       "etcd"
-          :os         debian/os
-          :db         (db "v3.1.5")
-          :client     (Client. nil)
-          :nemesis    (nemesis/partition-random-halves)
-          :checker    (checker/compose
-                        {:perf      (checker/perf)
-                         :linear    (checker/linearizable {:model     (model/cas-register)
-                                                           :algorithm :linear})
-                         :timeline  (timeline/html)})
-          :generator  (->> (gen/mix [r w cas])
-                           (gen/stagger 1)
-                           (gen/nemesis nil)
-                           (gen/time-limit 15))}))
-
+         {:pure-generators true
+          :name            "etcd"
+          :os              debian/os
+          :db              (db "v3.1.5")
+          :client          (Client. nil)
+          :nemesis         (nemesis/partition-random-halves)
+          :checker         (checker/compose
+                             {:perf   (checker/perf)
+                              :linear (checker/linearizable
+                                        {:model     (model/cas-register)
+                                         :algorithm :linear})
+                              :timeline (timeline/html)})
+          :generator       (->> (gen/mix [r w cas])
+                                (gen/stagger 1)
+                                (gen/nemesis nil)
+                                (gen/time-limit 15))}))
 ```
 
 Like regular clients, the nemesis draws operations from the generator. Right
@@ -61,16 +63,16 @@ dedicated generator for nemesis operations. We're also going to increase the tim
           :generator (->> (gen/mix [r w cas])
                           (gen/stagger 1)
                           (gen/nemesis
-                            (gen/seq (cycle [(gen/sleep 5)
-                                             {:type :info, :f :start}
-                                             (gen/sleep 5)
-                                             {:type :info, :f :stop}])))
+                            (cycle [(gen/sleep 5)
+                              {:type :info, :f :start}
+                              (gen/sleep 5)
+                              {:type :info, :f :stop}]))
                           (gen/time-limit 30))}
 ```
 
-`gen/seq` takes a sequence of generators and emits a single op from each one.
-We use `cycle` to construct an infinite loop of sleep, start, sleep, stop, ...,
-which ends once the time limit is up.
+Clojure sequences can act as generators, so we can use regular Clojure
+functions to construct them. Here, we use `cycle` to construct an infinite loop
+of sleep, start, sleep, stop, ..., which ends once the time limit is up.
 
 The network partition causes some operations to crash:
 
@@ -112,12 +114,12 @@ Now that we can run tests for shorter or longer, let's speed up the request rate
 
 ```clj
           :generator (->> (gen/mix [r w cas])
-                          (gen/stagger 1/10)
+                          (gen/stagger 1/50)
                           (gen/nemesis
-                            (gen/seq (cycle [(gen/sleep 5)
-                                             {:type :info, :f :start}
-                                             (gen/sleep 5)
-                                             {:type :info, :f :stop}])))
+                           (cycle [(gen/sleep 5)
+                            {:type :info, :f :start}
+                            (gen/sleep 5)
+                            {:type :info, :f :stop}]))
                           (gen/time-limit (:time-limit opts)))}
 ```
 

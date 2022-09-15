@@ -1,11 +1,13 @@
 (ns jepsen.checker
   "Validates that a history is correct with respect to some model."
   (:refer-clojure :exclude [set])
-  (:require [clojure.stacktrace :as trace]
-            [clojure.core :as c]
+  (:require [clojure [core :as c]
+                     [set :as set]
+                     [stacktrace :as trace]
+                     [string :as str]]
             [clojure.core.reducers :as r]
-            [clojure.set :as set]
-            [clojure.java.io :as io]
+            [clojure.java [io :as io]
+                          [shell :refer [sh]]]
             [clojure.tools.logging :refer [info warn]]
             [potemkin :refer [definterface+]]
             [jepsen.util :as util :refer [meh fraction map-kv]]
@@ -20,7 +22,8 @@
                      [linear :as linear]
                      [wgl :as wgl]
                      [history :as history]]
-            [knossos.linear.report :as linear.report])
+            [knossos.linear.report :as linear.report]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent Semaphore)))
 
 (def valid-priorities
@@ -61,13 +64,7 @@
          Opts is a map of options controlling checker execution. Keys include:
 
          :subdirectory - A directory within this test's store directory where
-                         output files should be written. Defaults to nil.
-
-          DEPRECATED Checkers should now implement the 4-arity check method
-          without model. If the checker still needs a model, provide it at
-          construction rather than as an argument to `Checker/check`. See the
-          queue and linearizable checkers for examples."))
-
+                         output files should be written. Defaults to nil."))
 (defn noop
   "An empty checker that only returns nil."
   []
@@ -740,9 +737,11 @@
 (defn counter
   "A counter starts at zero; add operations should increment it by that much,
   and reads should return the present value. This checker validates that at
-  each read, the value is greater than the sum of all :ok increments and
-  attempted decrements, and lower than the sum of all attempted increments and
-  :ok decrements.
+  each read, the value is greater than the sum of all :ok increments, and lower
+  than the sum of all attempted increments.
+
+  Note that this counter verifier assumes the value monotonically increases:
+  decrements are not allowed.
 
   Returns a map:
 
@@ -787,7 +786,8 @@
                          (conj reads (conj r upper))))
 
                 [:invoke :add]
-                (recur history lower (+ upper (:value op)) pending-reads reads)
+                (do (assert (not (neg? (:value op))))
+                    (recur history lower (+ upper (:value op)) pending-reads reads))
 
                 [:ok :add]
                 (recur history (+ lower (:value op)) upper pending-reads reads)
@@ -808,8 +808,8 @@
          {:valid? true})))))
 
 (defn rate-graph
-  "Spits out graphs of throughput over time. Checker options take precedence over
-  those passed in with this constructor."
+  "Spits out graphs of throughput over time. Checker options take precedence
+  over those passed in with this constructor."
   ([]
    (rate-graph {}))
   ([opts]
@@ -835,3 +835,47 @@
     (check [_ test history opts]
       (clock/plot! test history opts)
       {:valid? true})))
+
+(defn log-file-pattern
+  "Takes a PCRE regular expression pattern (as a Pattern or string) and a
+  filename. Checks the store directory for this test, and in each node
+  directory (e.g. n1), examines the given file to see if it contains instances
+  of the pattern. Returns :valid? true if no instances are found, and :valid?
+  false otherwise, along with a :count of the number of matches, and a :matches
+  list of maps, each with the node and matching string from the file.
+
+    (log-file-pattern-checker #\"panic: (\\w+)$\" \"db.log\")
+
+    {:valid? false
+     :count  5
+     :matches {:node \"n1\"
+               :line \"panic: invariant violation\" \"invariant violation\"
+               ...]}}"
+  [pattern filename]
+  (reify Checker
+    (check [this test history opts]
+      (let [matches
+            (->> (:nodes test)
+                 (pmap (fn search [node]
+                         (let [{:keys [exit out err]}
+                               (->> (store/path test node filename)
+                                    .getCanonicalPath
+                                    (sh "grep" "--text" "-P" (str pattern)))]
+                           (case exit
+                             0 (->> out
+                                    str/split-lines
+                                    (map (fn [line]
+                                           {:node node, :line line})))
+                             ; No match
+                             1 nil
+                             2 (condp re-find err
+                                 #"No such file" nil
+                                 (throw+ {:type :grep-error
+                                        :exit exit
+                                        :cmd (str "grep -P " pattern)
+                                        :err err
+                                        :out out}))))))
+                 (mapcat identity))]
+        {:valid? (empty? matches)
+         :count  (count matches)
+         :matches matches}))))

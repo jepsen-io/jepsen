@@ -1,7 +1,8 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
   (:require [jepsen.control :refer :all]
-            [jepsen.util :refer [meh name+]]
+            [jepsen.control.core :as core]
+            [jepsen.util :as util :refer [meh name+ timeout]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
@@ -9,6 +10,24 @@
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
+
+(defn await-tcp-port
+  "Blocks until a local TCP port is bound. Options:
+
+  :retry-interval   How long between retries, in ms. Default 1s.
+  :log-interval     How long between logging that we're still waiting, in ms.
+                    Default `retry-interval.
+  :timeout          How long until giving up and throwing :type :timeout, in
+                    ms. Default 60 seconds."
+  ([port]
+   (await-tcp-port port {}))
+  ([port opts]
+   (util/await-fn
+     (fn check-port []
+       (exec :nc :-z :localhost port)
+       nil)
+     (merge {:log-message "Waiting for port " port " ..."}
+            opts))))
 
 (defn file?
   [filename]
@@ -41,6 +60,21 @@
          ls
          (map (partial str dir)))))
 
+(defn tmp-file!
+  "Creates a random, temporary file under tmp-dir-base, and returns its path."
+  []
+  (let [file (str tmp-dir-base "/" (rand-int Integer/MAX_VALUE))]
+    (if (exists? file)
+      (recur)
+      (do
+        (try+
+          (exec :touch file)
+          (catch [:exit 1] _
+            ; Parent dir might not exist
+            (exec :mkdir :-p tmp-dir-base)
+            (exec :touch file)))
+        file))))
+
 (defn tmp-dir!
   "Creates a temporary directory under /tmp/jepsen and returns its path."
   []
@@ -50,6 +84,22 @@
       (do
         (exec :mkdir :-p dir)
         dir))))
+
+(defn write-file!
+  "Writes a string to a filename."
+  [string file]
+  (let [cmd (->> [:cat :> file]
+                 (map escape)
+                 (str/join " "))
+        action {:cmd cmd
+                :in  string}]
+    (-> action
+        wrap-cd
+        wrap-sudo
+        wrap-trace
+        ssh*
+        core/throw-on-nonzero-exit)
+    file))
 
 (def std-wget-opts
   "A list of standard options we pass to wget"
@@ -94,8 +144,8 @@
   ([url opts]
    (let [filename (.getName (file url))
          wget-opts std-wget-opts
-         ; second parameter was changed from a boolean flag (force?) to an options map
-         ; this check is here for backwards compatibility
+         ; second parameter was changed from a boolean flag (force?) to an
+         ; options map this check is here for backwards compatibility
          opts (if (map? opts) opts {:force? opts})]
      (when (:force? opts)
       (exec :rm :-f filename))
@@ -133,7 +183,7 @@
   ([url opts]
    (let [encoded-url (encode url)
          dest-file   (str wget-cache-dir "/" encoded-url)
-         wget-opts   (if (empty? (:user? opts)) 
+         wget-opts   (if (empty? (:user? opts))
                        (concat std-wget-opts [:-O dest-file])
                        (concat std-wget-opts [:-O dest-file :--user (:user? opts) :--password (:pw? opts)]))]
      (when (:force? opts)
@@ -158,7 +208,7 @@
   foolib-1.2.3-amd64/my.file becomes dest/my.file. If the tarball includes
   multiple files, those files are moved to dest, so my.file becomes
   dest/my.file.
-  
+
   Options:
 
     :force?      Even if we have this cached, download the tarball again anyway.
@@ -203,7 +253,8 @@
        (catch [:type :jepsen.control/nonzero-exit] e
          (let [err (:err e)]
            (if (or (re-find #"tar: Unexpected EOF" err)
-                   (re-find #"This does not look like a tar archive" err))
+                   (re-find #"This does not look like a tar archive" err)
+                   (re-find #"cannot find zipfile directory" err))
              (if local-file
                ; Nothing we can do to recover here
                (throw (RuntimeException.
@@ -222,13 +273,6 @@
          ; Clean up tmpdir
          (exec :rm :-rf tmpdir))))
    dest))
-
-(defn install-tarball!
-  ([node url dest]
-   (install-tarball! node url dest false))
-  ([node url dest force?]
-   (warn "DEPRECATED: jepsen.control.util/install-tarball! is now named jepsen.control.util/install-archive!, and the `node` argument is no longer required.")
-   (install-archive! url dest force?)))
 
 (defn ensure-user!
   "Make sure a user exists."
@@ -250,10 +294,11 @@
    ; bash wrapper (`bash -c "pkill ..."`), we'd end up matching the bash wrapper
    ; and killing that as WELL, so... grep and awk it is! The grep -v makes sure
    ; we don't kill the grep process OR the bash process executing it.
-   (try+ (exec :ps :aux
-               | :grep pattern
-               | :grep :-v "grep"
-               | :awk "{print $2}"
+   (try+ (exec ;:ps :aux
+               ;| :grep pattern
+               ;| :grep :-v "grep"
+               ;| :awk "{print $2}"
+               :pgrep pattern
                | :xargs :--no-run-if-empty :kill (str "-" (name+ signal)))
          (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
            nil)
@@ -267,35 +312,65 @@
   "Starts a daemon process, logging stdout and stderr to the given file.
   Invokes `bin` with `args`. Options are:
 
+  :env                  Environment variables for the invocation of
+                        start-stop-daemon. Should be a Map of env var names to
+                        string values, like {:SEEDS \"flax, cornflower\"}. See
+                        jepsen.control/env for alternative forms.
   :background?
   :chdir
+  :exec                 Sets a custom executable to check for.
   :logfile
   :make-pidfile?
-  :match-executable?
-  :match-process-name?
-  :pidfile
-  :process-name"
+  :match-executable?    Helpful for cases where the daemon is a wrapper script
+                        that execs another process, so that pidfile management
+                        doesn't work right. When this option is true, we ask
+                        start-stop-daemon to check for any process running the
+                        given executable program: either :exec or the `bin`
+                        argument.
+  :match-process-name?  Helpful for cases where the daemon is a wrapper script
+                        that execs another process, so that pidfile management
+                        doesn't work right. When this option is true, we ask
+                        start-stop-daemon to check for any process with a COMM
+                        field matching :process-name (or the name of the bin).
+  :pidfile              Where should we write (and check for) the pidfile? If
+                        nil, doesn't use the pidfile at all.
+  :process-name         Overrides the process name for :match-process-name?
+
+  Returns :started if the daemon was started, or :already-running if it was
+  already running, or throws otherwise."
   [opts bin & args]
-  (info "starting" (.getName (file (name bin))))
-  (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
-        "Jepsen starting" bin (escape args)
-        :>> (:logfile opts))
-  (apply exec :start-stop-daemon :--start
-         (when (:background? opts true) [:--background :--no-close])
-         (when (:make-pidfile? opts true) :--make-pidfile)
-         (when (:match-executable? opts true) [:--exec bin])
-         (when (:match-process-name? opts false)
-           [:--name (:process-name opts (.getName (file bin)))])
-         :--pidfile  (:pidfile opts)
-         :--chdir    (:chdir opts)
-         :--oknodo
-         :--startas  bin
-         :--
-         (concat args [:>> (:logfile opts) (lit "2>&1")])))
+  (let [env  (env (:env opts))
+        ssd-args [:--start
+                  (when (:background? opts true) [:--background :--no-close])
+                  (when (and (:pidfile opts) (:make-pidfile? opts true))
+                    :--make-pidfile)
+                  (when (:match-executable? opts true)
+                    [:--exec (or (:exec opts) bin)])
+                  (when (:match-process-name? opts false)
+                    [:--name (:process-name opts (.getName (file bin)))])
+                  (when (:pidfile opts)
+                    [:--pidfile (:pidfile opts)])
+                  :--chdir    (:chdir opts)
+                  :--startas  bin
+                  :--
+                  args
+                  :>> (:logfile opts) (lit "2>&1")]]
+    (info "Starting" (.getName (file (name bin))))
+    (exec :echo (lit "`date +'%Y-%m-%d %H:%M:%S'`")
+          (str "Jepsen starting " (escape env) " " bin " " (escape args))
+          :>> (:logfile opts))
+    (try+
+      ;(info "start-stop-daemon" (escape ssd-args))
+      (exec env :start-stop-daemon ssd-args)
+      :started
+      (catch [:type   :jepsen.control/nonzero-exit
+              :exit   1] e
+        :already-running))))
 
 (defn stop-daemon!
   "Kills a daemon process by pidfile, or, if given a command name, kills all
-  processes with that command name, and cleans up pidfile."
+  processes with that command name, and cleans up pidfile. Pidfile may be nil
+  in the two-argument case, in which case it is ignored."
   ([pidfile]
    (when (exists? pidfile)
      (info "Stopping" pidfile)
@@ -305,8 +380,12 @@
 
   ([cmd pidfile]
    (info "Stopping" cmd)
-   (meh (exec :killall :-9 :-w cmd))
-   (meh (exec :rm :-rf pidfile))))
+   (timeout 30000 (throw+ {:type    ::kill-timed-out
+                           :cmd     cmd
+                           :pidfile pidfile})
+            (meh (exec :killall :-9 :-w cmd)))
+   (when pidfile
+     (meh (exec :rm :-rf pidfile)))))
 
 (defn daemon-running?
   "Given a pidfile, returns true if the pidfile is present and the process it

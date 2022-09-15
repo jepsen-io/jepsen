@@ -94,7 +94,7 @@
                    ; look for them in $PATH, not the working directory
                    (let [bin (.getCanonicalPath (io/file bin))
                          v   (:out (sh bin "version"))]
-                     (if-let [m (re-find #"Dgraph version   : (v[0-9a-z\.-]+)" v)]
+                     (if-let [m (re-find #"Dgraph version   : (v[0-9a-zA-Z\.-]+)" v)]
                        (m 1)
                        "unknown"))
                    (if-let [p (:package-url opts)]

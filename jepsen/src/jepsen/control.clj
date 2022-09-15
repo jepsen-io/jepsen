@@ -5,34 +5,40 @@
 
   Note that a whole bunch of this namespace refers to things as 'ssh',
   although they really can apply to any remote, not just SSH."
-  (:import java.io.File)
-  (:require [clj-ssh.ssh    :as ssh]
-            [jepsen.util    :as util :refer [real-pmap with-thread-name]]
-            [dom-top.core :refer [with-retry]]
-            [jepsen.reconnect :as rc]
+  (:require [jepsen.util    :as util :refer [real-pmap with-thread-name]]
+            [jepsen.control [clj-ssh :as clj-ssh]
+                            [core :as core
+                             :refer [connect
+                                     disconnect!
+                                     execute!
+                                     upload!
+                                     download!]]
+                            [sshj :as sshj]]
+            [potemkin :refer [import-vars]]
             [clojure.string :as str]
+            [clojure.java.io :as io]
             [clojure.tools.logging :refer [warn info debug error]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import java.io.File
+           (java.util.concurrent Semaphore)))
 
+; These used to be in jepsen.control, but have been moved to
+; jepsen.control.core as a part of the polymorphic Remote protocol work. We
+; preserve them here for backwards compatibility.
+(import-vars
+  [jepsen.control.core
+   env
+   escape
+   lit
+   throw-on-nonzero-exit])
 
-(defprotocol Remote
-  (connect [this host]
-    "Set up the remote to work with a particular node. Returns a Remote which
-    is ready to accept actions via `execute!` and `upload!` and `download!`.")
-  (disconnect! [this]
-    "Disconnect a remote that has been connected to a host.")
-  (execute! [this action]
-    "Execute the specified action in a remote connected a host.")
-  (upload! [this local-paths remote-path rest]
-    "Copy the specified local-path to the remote-path on the connected host.
-    The `rest` argument is a sequence of additional arguments to be
-    interpreted by the underlying implementation; for example, with a clj-ssh
-    remote, these args are the remainder args to `scp-to`.")
-  (download! [this remote-paths local-path rest]
-    "Copy the specified remote-paths to the local-path on the connected host.
-    The `rest` argument is a sequence of additional arguments to be
-    interpreted by the underlying implementation; for example, with a clj-ssh
-    remote, these args are the remainder args to `scp-from`."))
+(def clj-ssh
+  "The clj-ssh SSH remote. This used to be the default."
+  (clj-ssh/remote))
+
+(def ssh
+  "The default (SSHJ-backed) remote."
+  (sshj/remote))
 
 ; STATE STATE STATE STATE
 (def ^:dynamic *dummy*    "When true, don't actually use SSH" nil)
@@ -41,13 +47,39 @@
 (def ^:dynamic *trace*    "Shall we trace commands?"        false)
 (def ^:dynamic *dir*      "Working directory"               "/")
 (def ^:dynamic *sudo*     "User to sudo to"                 nil)
+(def ^:dynamic *sudo-password* "Password for sudo, if needed" nil)
 (def ^:dynamic *username* "Username"                        "root")
-(def ^:dynamic *password* "Password (for login and sudo)"   "root")
+(def ^:dynamic *password* "Password (for login)"            "root")
 (def ^:dynamic *port*     "SSH listening port"              22)
 (def ^:dynamic *private-key-path*         "SSH identity file"     nil)
 (def ^:dynamic *strict-host-key-checking* "Verify SSH host keys"  :yes)
+(def ^:dynamic *remote*   "The remote to use for remote control actions" ssh)
 (def ^:dynamic *retries*  "How many times to retry conns"   5)
 
+(defn conn-spec
+  "jepsen.control originally stored everything--host, post, etc.--in separate
+  dynamic variables. Now, we store these things in a conn-spec map, which can
+  be passed to remotes without creating cyclic dependencies. This function
+  exists to support the transition from those variables to a conn-spec, and
+  constructs a conn spec from current var bindings."
+  []
+  {; TODO: pull this out of conn-spec and the clj-ssh remote, and create
+   ; a specialized remote for it.
+   :dummy                    *dummy*
+   :host                     *host*
+   :port                     *port*
+   :username                 *username*
+   :password                 *password*
+   :private-key-path         *private-key-path*
+   :strict-host-key-checking *strict-host-key-checking*})
+
+(defn cmd-context
+  "Constructs a context map for a command's execution from dynamically bound
+  vars."
+  []
+  {:dir           *dir*
+   :sudo          *sudo*
+   :sudo-password *sudo-password*})
 
 (defn debug-data
   "Construct a map of SSH data for debugging purposes."
@@ -57,77 +89,25 @@
    :session                  *session*
    :dir                      *dir*
    :sudo                     *sudo*
+   :sudo-password            *sudo-password*
    :username                 *username*
    :password                 *password*
    :port                     *port*
    :private-key-path         *private-key-path*
    :strict-host-key-checking *strict-host-key-checking*})
 
-(defrecord Literal [string])
-
-(defn lit
-  "A literal string to be passed, unescaped, to the shell."
-  [s]
-  (Literal. s))
-
 (def |
   "A literal pipe character."
   (lit "|"))
 
-(defn escape
-  "Escapes a thing for the shell.
-
-  Nils are empty strings.
-
-  Literal wrappers are passed through directly.
-
-  The special keywords :>, :>>, and :< map to their corresponding shell I/O
-  redirection operators.
-
-  Named things like keywords and symbols use their name, escaped. Strings are
-  escaped like normal.
-
-  Sequential collections and sets have each element escaped and
-  space-separated."
-  [s]
-  (cond
-    (nil? s)
-    ""
-
-    (instance? Literal s)
-    (:string s)
-
-    (#{:> :>> :<} s)
-    (name s)
-
-    (or (sequential? s) (set? s))
-    (str/join " " (map escape s))
-
-    :else
-    (let [s (if (instance? clojure.lang.Named s)
-              (name s)
-              (str s))]
-      (cond
-        ; Empty string
-        (= "" s)
-        "\"\""
-
-        (re-find #"[\\\$`\"\s\(\)\{\}\[\]\*\?<>&;]" s)
-        (str "\""
-             (str/replace s #"([\\\$`\"])" "\\\\$1")
-             "\"")
-
-        :else s))))
+(def &&
+  "A literal &&"
+  (lit "&&"))
 
 (defn wrap-sudo
   "Wraps command in a sudo subshell."
   [cmd]
-  (if *sudo*
-    (merge cmd {:cmd (str "sudo -S -u " *sudo* " bash -c " (escape (:cmd cmd)))
-                :in  (if *password*
-                       (str *password* "\n" (:in cmd))
-                       (:in cmd))})
-    cmd))
+  (core/wrap-sudo (cmd-context) cmd))
 
 (defn wrap-cd
   "Wraps command by changing to the current bound directory first."
@@ -142,24 +122,6 @@
   (do (when *trace* (info "Host:" *host* "arg:" arg))
       arg))
 
-(defn throw-on-nonzero-exit
-  "Throws when an SSH result has nonzero exit status."
-  [{:keys [exit action] :as result}]
-  (if (zero? exit)
-    result
-    (throw+
-      (merge {:type ::nonzero-exit
-              :cmd (:cmd action)}
-             result)
-      nil ; cause
-      "Command exited with non-zero status %d on node %s:\n%s\n\nSTDIN:\n%s\n\nSTDOUT:\n%s\n\nSTDERR:\n%s"
-      exit
-      (:host result)
-      (:cmd action)
-      (:in result)
-      (:out result)
-      (:err result))))
-
 (defn just-stdout
   "Returns the stdout from an ssh result, trimming any newlines at the end."
   [result]
@@ -169,24 +131,13 @@
   "Evaluates an SSH action against the current host. Retries packet corrupt
   errors."
   [action]
-  (with-retry [tries *retries*]
-    (when (nil? *session*)
-      (throw+ (merge {:type ::no-session-available
-                      :message "Unable to perform a control action because no session for this host is available."}
-                     (debug-data))))
-
-    (rc/with-conn [s *session*]
-      (assoc (execute! s action)
-             :host   *host*
-             :action action))
-    (catch com.jcraft.jsch.JSchException e
-      (if (and (pos? tries)
-               (or (= "session is down" (.getMessage e))
-                   (= "Packet corrupt" (.getMessage e))))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (merge {:type ::ssh-failed}
-                       (debug-data)))))))
+  (when (nil? *session*)
+    (throw+ (merge {:type ::no-session-available
+                    :message "Unable to perform a control action because no session for this host is available."}
+                   (debug-data))))
+  (assoc (execute! *session* (cmd-context) action)
+         :host   *host*
+         :action action))
 
 (defn exec*
   "Like exec, but does not escape."
@@ -198,7 +149,7 @@
        wrap-sudo
        wrap-trace
        ssh*
-       throw-on-nonzero-exit
+       core/throw-on-nonzero-exit
        just-stdout))
 
 (defn exec
@@ -209,13 +160,6 @@
        (map escape)
        (apply exec*)))
 
-(defn scp*
-  "Evaluates an SCP from the current host to the node."
-  [current-path node-path]
-  (warn "scp* is deprecated: use (upload current-path node-path) instead.")
-  (rc/with-conn [s *session*]
-    (upload! s current-path node-path [])))
-
 (defn file->path
   "Takes an object, if it's an instance of java.io.File, gets the path, otherwise
   returns the object"
@@ -225,47 +169,28 @@
     x))
 
 (defn upload
-  "Copies local path(s) to remote node and returns the remote path.
-  Takes arguments for clj-ssh/scp-to."
-  [& [local-paths remote-path & remaining]]
-  (with-retry [tries *retries*]
-    (rc/with-conn [s *session*]
-      (let [local-paths (if (sequential? local-paths)
-                          (map file->path local-paths)
-                          (file->path local-paths))]
-        (upload! s local-paths remote-path remaining)
-        remote-path))
-    (catch com.jcraft.jsch.JSchException e
-      (if (and (pos? tries)
-               (or (= "session is down" (.getMessage e))
-                   (= "Packet corrupt" (.getMessage e))))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (merge {:type ::upload-failed}
-                       (debug-data)))))))
+  "Copies local path(s) to remote node and returns the remote path."
+  [local-paths remote-path]
+  (let [s *session*
+        local-paths (map file->path (util/coll local-paths))]
+    (upload! s (cmd-context) local-paths remote-path {})
+    remote-path))
+
+(defn upload-resource!
+  "Uploads a local JVM resource (as a string) to the given remote path."
+  [resource-name remote-path]
+  (with-open [reader (io/reader (io/resource resource-name))]
+    (let [tmp-file (File/createTempFile "jepsen-resource" ".upload")]
+      (try
+        (io/copy reader tmp-file)
+        (upload (.getCanonicalPath tmp-file) remote-path)
+        (finally
+          (.delete tmp-file))))))
 
 (defn download
-  "Copies remote paths to local node. Takes arguments for clj-ssh/scp-from.
-  Retres failures."
-  [& [remote-paths local-path & remaining]]
-  (with-retry [tries *retries*]
-    (rc/with-conn [s *session*]
-      (download! s remote-paths local-path remaining))
-    (catch clojure.lang.ExceptionInfo e
-      (if (and (pos? tries)
-               (re-find #"disconnect error" (.getMessage e)))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (assoc (debug-data)
-                       :type ::download-failed))))
-    (catch com.jcraft.jsch.JSchException e
-      (if (and (pos? tries)
-               (or (= "session is down" (.getMessage e))
-                   (= "Packet corrupt" (.getMessage e))))
-        (do (Thread/sleep (+ 1000 (rand-int 1000)))
-            (retry (dec tries)))
-        (throw+ (merge {:type ::download-failed}
-                       (debug-data)))))))
+  "Copies remote paths to local node."
+  [remote-paths local-path]
+  (download! *session* (cmd-context) remote-paths local-path {}))
 
 (defn expand-path
   "Expands path relative to the current directory."
@@ -302,80 +227,15 @@
   `(binding [*trace* true]
      ~@body))
 
-(defn check-name
-  "Ensures a given hostname is string. Warns user if legacy behavior passes in a
-  keyword host.
-  TODO This can be removed when tests no tests generate keyword hosts. CLI already
-       refuses keyword hostnames."
-  [host]
-  (when (keyword? host)
-    (warn (str "DEPRECATED: Host "
-               host
-               " is a keyword; please provide node hostnames as strings. Support for keyword hosts will be removed in future versions of jepsen.")))
-  (name host))
-
-(defn clj-ssh-session
-  "Opens a raw session to the given host."
-  [host]
-  (let [host  (check-name host)
-        agent (ssh/ssh-agent {})
-        _     (when *private-key-path*
-                (ssh/add-identity agent
-                                  {:private-key-path *private-key-path*}))]
-    (doto (ssh/session agent
-                       host
-                       {:username *username*
-                        :password *password*
-                        :port *port*
-                        :strict-host-key-checking *strict-host-key-checking*})
-      (ssh/connect))))
-
-
-(defrecord SSHRemote [session]
-  Remote
-  (connect [this host]
-    (assoc this :session (if *dummy*
-                           {:dummy true}
-                           (try+
-                            (clj-ssh-session host)
-                            (catch com.jcraft.jsch.JSchException _
-                              (throw+ (merge {:type ::session-error
-                                              :message "Error opening SSH session. Verify username, password, and node hostnames are correct."
-                                              :host host}
-                                             (debug-data))))))))
-
-  (disconnect! [_]
-    (when-not (:dummy session) (ssh/disconnect session)))
-
-  (execute! [_ action]
-    (when-not (:dummy session) (ssh/ssh session action)))
-
-  (upload! [_ local-paths remote-path rest]
-    (when-not (:dummy session)
-      (apply ssh/scp-to session local-paths remote-path rest)))
-
-  (download! [_ remote-paths local-path rest]
-    (when-not (:dummy session)
-      (apply ssh/scp-from session remote-paths local-path rest))))
-
-(def ssh "A remote that does things via clj-ssh." (SSHRemote. nil))
-
-(def ^:dynamic *remote* "The remote to use for remote control actions." ssh)
-
 (defn session
-  "Wraps control session in a wrapper for reconnection."
+  "Returns a Remote bound to the given host."
   [host]
-  (let [remote *remote*]
-    (rc/open!
-     (rc/wrapper {:open  (fn [] (connect remote host))
-                  :name  [:control host]
-                  :close disconnect!
-                  :log?  true}))))
+  (connect *remote* (assoc (conn-spec) :host host)))
 
 (defn disconnect
-  "Close a session"
-  [session]
-  (rc/close! session))
+  "Close a Remote session."
+  [remote]
+  (core/disconnect! remote))
 
 (defmacro with-remote
   "Takes a remote and evaluates body with that remote in that scope."
@@ -386,14 +246,18 @@
   "Takes a map of SSH configuration and evaluates body in that scope. Catches
   JSchExceptions and re-throws with all available debugging context. Options:
 
-  :dummy?
-  :username
-  :password
-  :private-key-path
-  :strict-host-key-checking"
+    :dummy?
+    :username
+    :password
+    :sudo-password
+    :private-key-path
+    :strict-host-key-checking"
   [ssh & body]
+  ; TODO: move this into a single *conn-spec* variable. Some external code
+  ; reads *host*, so we're not doing this just yet.
   `(binding [*dummy*            (get ~ssh :dummy?           *dummy*)
              *username*         (get ~ssh :username         *username*)
+             *sudo-password*    (get ~ssh :sudo-password    *sudo-password*)
              *password*         (get ~ssh :password         *password*)
              *port*             (get ~ssh :port             *port*)
              *private-key-path* (get ~ssh :private-key-path *private-key-path*)
@@ -403,9 +267,9 @@
 
 (defmacro with-session
   "Binds a host and session and evaluates body. Does not open or close session;
-  this is just for the namespace dynamics state."
+  this is just for the namespace dynamic state."
   [host session & body]
-  `(binding [*host*    (name ~host)
+  `(binding [*host*    ~host
              *session* ~session]
      ~@body))
 

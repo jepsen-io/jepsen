@@ -34,7 +34,7 @@
 (defn update!
   "Apt-get update."
   []
-  (c/su (c/exec :apt-get :update)))
+  (c/su (c/exec :apt-get :--allow-releaseinfo-change :update)))
 
 (defn maybe-update!
   "Apt-get update if we haven't done so recently."
@@ -80,25 +80,38 @@
 (defn install
   "Ensure the given packages are installed. Can take a flat collection of
   packages, passed as symbols, strings, or keywords, or, alternatively, a map
-  of packages to version strings."
-  [pkgs]
-  (if (map? pkgs)
-    ; Install specific versions
-    (dorun
-      (for [[pkg version] pkgs]
-        (when (not= version (installed-version pkg))
-          (info "Installing" pkg version)
-          (c/exec :env "DEBIAN_FRONTEND=noninteractive" :apt-get :install :-y :--force-yes
-                  (str (name pkg) "=" version)))))
+  of packages to version strings. Can optionally take a collection of
+  additional CLI options to be passed to apt-get."
+  ([pkgs]
+   (install pkgs []))
+  ([pkgs apt-opts]
+   (if (map? pkgs)
+     ; Install specific versions
+     (dorun
+       (for [[pkg version] pkgs]
+         (when (not= version (installed-version pkg))
+           (info "Installing" pkg version)
+           (c/exec :env "DEBIAN_FRONTEND=noninteractive"
+                   :apt-get :install
+                   :-y
+                   :--allow-downgrades
+                   :--allow-change-held-packages
+                   apt-opts
+                   (str (name pkg) "=" version)))))
 
-    ; Install any version
-    (let [pkgs    (set (map name pkgs))
-          missing (set/difference pkgs (installed pkgs))]
-      (when-not (empty? missing)
-        (c/su
-          (info "Installing" missing)
-          (apply c/exec :env "DEBIAN_FRONTEND=noninteractive"
-                 :apt-get :install :-y :--force-yes missing))))))
+     ; Install any version
+     (let [pkgs    (set (map name pkgs))
+           missing (set/difference pkgs (installed pkgs))]
+       (when-not (empty? missing)
+         (c/su
+           (info "Installing" missing)
+           (apply c/exec :env "DEBIAN_FRONTEND=noninteractive"
+                  :apt-get :install
+                  :-y
+                  :--allow-downgrades
+                  :--allow-change-held-packages
+                  apt-opts
+                  missing)))))))
 
 (defn add-key!
   "Receives an apt key from the given keyserver."
@@ -152,17 +165,18 @@
     (info node "setting up debian")
 
     (setup-hostfile!)
-
     (maybe-update!)
 
     (c/su
       ; Packages!
       (install [:apt-transport-https
+                :libzip4
                 :wget
                 :curl
                 :vim
                 :man-db
                 :faketime
+                :netcat
                 :ntpdate
                 :unzip
                 :iptables
@@ -174,11 +188,7 @@
                 :rsyslog
                 :logrotate
                 :dirmngr
-                :tcpdump])
-      (try+ (install [:libzip4])
-            (catch [:exit 100] _
-              ; Wrong package name; let's use the old one for jessie
-              (install [:libzip2]))))
+                :tcpdump]))
 
     (meh (net/heal! (:net test) test)))
 

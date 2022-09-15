@@ -1,10 +1,12 @@
 (ns jepsen.nemesis
   (:require [clojure.set :as set]
             [clojure.tools.logging :refer [info warn]]
+            [fipp.ednize :as fipp.ednize]
             [jepsen [client   :as client]
                     [control  :as c]
                     [net      :as net]
                     [util     :as util]]
+            [jepsen.control [util :as cu]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol Nemesis
@@ -16,15 +18,34 @@
 
 (defprotocol Reflection
   "Optional protocol for reflecting on nemeses."
-  (fs [this] "What :f functions does this nemesis support? Helpful for
-             composition."))
+  (fs [this] "What :f functions does this nemesis support? Returns a set.
+             Helpful for composition."))
+
+(extend-protocol fipp.ednize/IOverride (:on-interface Nemesis))
+(extend-protocol fipp.ednize/IEdn (:on-interface Nemesis)
+  (-edn [gen]
+    (if (record? gen)
+      ; Ugh this is such a hack but Fipp's extension points are sort of a
+      ; mess--you can't override the document generation behavior on a
+      ; per-class basis. Probably sensible for perf reasons, but makes our life
+      ; hard.
+      ;
+      ; Convert records (which respond to map?) into (RecordName {:some map
+      ; ...), so they pretty-print with fewer indents.
+      (list (symbol (.getName (class gen)))
+            (into {} gen))
+      ; We can't return a reify without entering an infinite loop (ugh) so uhhh
+      (tagged-literal 'unprintable (str gen))
+      )))
 
 (def noop
   "Does nothing."
   (reify Nemesis
     (setup! [this test] this)
     (invoke! [this test op] op)
-    (teardown! [this test] this)))
+    (teardown! [this test] this)
+    Reflection
+    (fs [this] #{})))
 
 (defrecord Validate [nemesis]
   Nemesis
@@ -36,7 +57,7 @@
                 nil
                 "expected setup! to return a Nemesis, but got %s instead"
                 (pr-str res)))
-      res))
+      (Validate. res)))
 
   (invoke! [this test op]
     (let [op' (invoke! nemesis test op)
@@ -58,7 +79,7 @@
                  :op        op
                  :op'       op'
                  :problems  problems}))
-      op))
+      op'))
 
   (teardown! [this test]
     (teardown! nemesis test)))
@@ -68,39 +89,6 @@
   correctly."
   [nemesis]
   (Validate. nemesis))
-
-(defn setup-compat!
-  "Calls `jepsen.nemesis/setup!`, if possible, falling back to
-  `jepsen.client/setup!`. Warns users that nemeses implementing `jepsen.client`
-  have been deprecated."
-  [nemesis test node]
-  (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (try
-      (setup! nemesis test)
-      (catch AbstractMethodError e
-        nemesis))
-    (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, calling `jepsen.client/setup!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
-        (client/setup! nemesis test node))))
-
-(defn invoke-compat!
-  "Calls `jepsen.nemesis/invoke!`, if possible, falling back to `jepsen.client/invoke!`."
-  [nemesis test op]
-  (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (invoke! nemesis test op)
-    ;; DEPRECATED
-    (client/invoke! nemesis test op)))
-
-(defn teardown-compat!
-  "Calls `jepsen.nemesis/teardown!`, if possible, falling back to
-  `jepsen.client/teardown!`. Warns users that nemeses implementing
-  `jepsen.client` have been deprecated."
-  [nemesis test]
-  (if (instance? jepsen.nemesis.Nemesis nemesis)
-    (try (teardown! nemesis test)
-         (catch AbstractMethodError e
-           nemesis))
-    (do (warn "DEPRECATED: Nemesis does not implement protocol `jepsen.nemesis/Nemesis`, falling back to `jepsen.client/teardown!`. You should migrate to `jepsen.nemesis/Nemesis` to avoid compatibility issues. See the jepsen.nemesis documentation for details.")
-        (client/teardown! nemesis test))))
 
 (defn timeout
   "Sometimes nemeses are unreliable. If you wrap them in this nemesis, it'll
@@ -143,6 +131,16 @@
                       component))
             {}
             components)))
+
+(defn invert-grudge
+  "Takes a universe of nodes and a map of nodes to nodes they should be
+  connected to, and returns a map of nodes to nodes they should NOT be
+  connected to."
+  [nodes conns]
+  (let [nodes (set nodes)]
+    (->> nodes
+         (map (fn [a] [a (set/difference nodes (conns a #{}))]))
+         (into (sorted-map)))))
 
 (defn bridge
   "A grudge which cuts the network in half, but preserves a node in the middle
@@ -202,9 +200,8 @@
   []
   (partitioner (comp complete-grudge split-one)))
 
-(defn majorities-ring
-  "A grudge in which every node can see a majority, but no node sees the *same*
-  majority as any other."
+(defn majorities-ring-perfect
+  "The perfect variant of majorities-ring, used for 5-node clusters."
   [nodes]
   (let [U (set nodes)
         n (count nodes)
@@ -219,11 +216,171 @@
                  (set/difference U (set majority))]))
          (into {}))))
 
+(defn majorities-ring-stochastic
+  "The stochastic variant of majorities-ring, used for larger clusters."
+  [nodes]
+  (let [n (count nodes)
+        m (util/majority n)
+        U (set nodes)]
+    (loop [; We're going to build up a connection graph incrementally
+           conns (->> nodes (map (juxt identity hash-set)) (into {}))
+           ; By connecting the least-connected nodes to other least-connected
+           ; nodes.
+           by-degree (sorted-map 1 (set nodes))]
+      (let [; Construct a shuffled, in-degree-order seq of [degree, node] pairs
+            dns (mapcat (fn [[degree nodes]]
+                          (map vector (repeat degree) (shuffle nodes)))
+                        by-degree)
+            ; Pick a node `a` with minimal degree.
+            [a-degree a] (first dns)]
+        (if (<= m a-degree)
+          ; Every node has a majority
+          (invert-grudge nodes conns)
+
+          ; Link a to some other minimally-connected node b which a is *not*
+          ; already connected to.
+          (let [[b-degree b] (->> dns
+                                  (remove (comp (conns a) second))
+                                  first)
+                ; Link a to b
+                conns' (-> conns
+                            (update a conj b)
+                            (update b conj a))
+                ; Conj which creates a set if necessary
+                conj-set (fn [s x] (if s (conj s x) #{x}))
+                ; And increment their counts
+                ad' (inc a-degree)
+                bd' (inc b-degree)
+                by-degree' (-> by-degree
+                               (update a-degree disj a)
+                               (update b-degree disj b)
+                               (update ad' conj-set a)
+                               (update bd' conj-set b))]
+            (recur conns' by-degree')))))))
+
+(defn majorities-ring
+  "A grudge in which every node can see a majority, but no node sees the *same*
+  majority as any other. There are nice, exact solutions where the topology
+  *does* look like a ring: these are possible for 4, 5, 6, 8, etc nodes. Seven,
+  however, does *not* work so cleanly--some nodes must be connected to *more*
+  than four others. We therefore offer two algorithms: one which provides an
+  exact ring for 5-node clusters (generally common in Jepsen), and a stochastic
+  one which doesn't guarantee efficient ring structures, but works for larger
+  clusters.
+
+  Wow this actually is *shockingly* complicated. Wonder if there's a better
+  way?"
+  [nodes]
+  (if (<= (count nodes) 5)
+    (majorities-ring-perfect nodes)
+    (majorities-ring-stochastic nodes)))
+
 (defn partition-majorities-ring
   "Every node can see a majority, but no node sees the *same* majority as any
   other. Randomly orders nodes into a ring."
   []
   (partitioner majorities-ring))
+
+(declare f-map)
+
+(defrecord FMap [lift unlift nem]
+  Nemesis
+  (setup! [this test]
+    (f-map lift (setup! nem test)))
+
+  (invoke! [this test op]
+    (-> nem
+        (invoke! test (update op :f unlift))
+        (update :f lift)))
+
+  (teardown! [this test]
+    (teardown! nem test))
+
+  Reflection
+  (fs [this]
+    (set (map lift (fs nem)))))
+
+(defn f-map
+  "Remaps the :f values that a nemesis accepts. Takes a function (presumably
+  injective) which transforms `:f` values: `(lift f) -> g`, and a nemesis which
+  accepts operations like `{:f f}`. The nemesis must support Reflection/fs.
+  Returns a new nemesis which takes `{:f g}` instead. For example:
+
+    (f-map (fn [f] [:foo f]) (partition-random-halves))
+
+  ... yields a nemesis which takes ops like `{:f [:foo :start] ...}` and calls
+  the underlying partitioner nemesis with `{:f :start ...}`. This is designed
+  for symmetry with generator/f-map, so you can say:
+
+    (gen/f-map lift gen)
+    (nem/f-map lift gen)
+
+  and get a generator and nemesis that work together. Particularly handy for
+  building up complex nemesis packages using nemesis.combined!
+
+  If you know all of your fs in advance, you can also do this with `compose`,
+  but it turns out to be handy to have this as a separate function."
+  [lift nem]
+  ; Construct the inverse of `lift` by materializing the whole f domain
+  ; into a map.
+  (let [fs (fs nem)
+        unlift (zipmap (map lift fs) fs)]
+    (FMap. lift unlift nem)))
+
+(declare compose)
+
+; This version of a composed nemesis uses the Reflection protocol to identify
+; which fs map to which nemeses. fm is a map of fs to indices in the nemesis
+; vector--this cuts down on pprint amplification.
+(defrecord ReflCompose [fm nemeses]
+  Nemesis
+  (setup! [this test]
+    (compose (map #(setup! % test) nemeses)))
+
+  (invoke! [this test op]
+    (if-let [n (nth nemeses (get fm (:f op)))]
+      (invoke! n test op)
+      (throw (IllegalArgumentException.
+               (str "No nemesis can handle :f " (pr-str (:f op))
+                    " (expected one of " (pr-str (keys fm)) ")")))))
+
+  (teardown! [this test]
+    (mapv #(teardown! % test) nemeses))
+
+  Reflection
+  (fs [this]
+    (reduce into #{} (map fs nemeses))))
+
+; This version of a composed nemesis uses an explicit map of fs to nemeses.
+(defrecord MapCompose [nemeses]
+  Nemesis
+  (setup! [this test]
+    (compose (util/map-vals #(setup! % test) nemeses)))
+
+  (invoke! [this test op]
+    (let [f (:f op)]
+      (loop [nemeses nemeses]
+        (if-not (seq nemeses)
+          (throw (IllegalArgumentException.
+                   (str "no nemesis can handle " (:f op))))
+          (let [[fs- nemesis] (first nemeses)]
+            (if-let [f' (fs- f)]
+              (assoc (invoke! nemesis test (assoc op :f f')) :f f)
+              (recur (next nemeses))))))))
+
+  (teardown! [this test]
+    (util/map-vals #(teardown! % test) nemeses))
+
+  Reflection
+  (fs [this]
+    (->> (keys nemeses)
+         (mapcat (fn [f-map]
+                   (cond (map? f-map) (keys f-map)
+                         (set? f-map) f-map
+                         true
+                         (throw+ {:type    ::can't-infer-fs
+                                  :message "We can only infer fs from compose nemeses built with maps or sets as their f mapping objects."}))))
+         (into #{}))))
 
 (defn compose
   "Combines multiple Nemesis objects into one. If all, or all but one, nemesis
@@ -251,64 +408,25 @@
   partition-random-halves."
   [nemeses]
   (if (map? nemeses)
-    (reify Nemesis
-      (setup! [this test]
-        (compose (util/map-vals #(setup-compat! % test nil) nemeses)))
-
-      (invoke! [this test op]
-        (let [f (:f op)]
-          (loop [nemeses nemeses]
-            (if-not (seq nemeses)
-              (throw (IllegalArgumentException.
-                       (str "no nemesis can handle " (:f op))))
-              (let [[fs- nemesis] (first nemeses)]
-                (if-let [f' (fs- f)]
-                  (assoc (invoke-compat! nemesis test (assoc op :f f')) :f f)
-                  (recur (next nemeses))))))))
-
-      (teardown! [this test]
-        (util/map-vals #(teardown-compat! % test) nemeses))
-
-      Reflection
-      (fs [this]
-        (->> (keys nemeses)
-             (mapcat (fn [f-map]
-                       (cond (map? f-map) (keys f-map)
-                             (set? f-map) f-map
-                             true
-                             (throw+ {:type    ::can't-infer-fs
-                                      :message "We can only infer fs from compose nemeses built with maps or sets as their f mapping objects."}))))
-             (into #{}))))
-
+    (MapCompose. nemeses)
     ; A collection; use reflection to compute a map of :fs to nemeses.
-    (let [fm (reduce (fn [fm n]
-                       (reduce (fn [fm f]
-                                 (assert (not (get fm f))
-                                         (str "Nemeses " (pr-str n) " and "
-                                              (pr-str (get fm f))
-                                              " are mutually incompatible; both"
-                                              " use :f " (pr-str f)))
-                                 (assoc fm f n))
-                               fm
-                               (fs n)))
-                     {}
-                     nemeses)]
-      (reify Nemesis
-        (setup! [this test]
-          (compose (map #(setup-compat! % test nil) nemeses)))
-
-        (invoke! [this test op]
-          (if-let [n (get fm (:f op))]
-            (invoke-compat! n test op)
-            (throw (IllegalArgumentException.
-                     (str "No nemesis can handle " (pr-str (:f op)))))))
-
-        (teardown! [this test]
-          (map #(teardown-compat! % test) nemeses))
-
-        Reflection
-        (fs [this]
-          (reduce into #{} (map fs nemeses)))))))
+    (let [nemeses (vec nemeses)
+          [_ fm]
+          (reduce (fn [[i fm] n]
+                    ; For the i'th nemesis, our fmap is...
+                    [(inc i)
+                     (reduce (fn [fm f]
+                               (assert (not (get fm f))
+                                       (str "Nemeses " (pr-str n) " and "
+                                            (pr-str (get fm f))
+                                            " are mutually incompatible;"
+                                            " both use :f " (pr-str f)))
+                               (assoc fm f i))
+                             fm
+                             (fs n))])
+                  [0 {}]
+                  nemeses)]
+      (ReflCompose. fm nemeses))))
 
 (defn set-time!
   "Set the local node time in POSIX seconds."
@@ -411,7 +529,7 @@
       (let [plan (:value op)]
         (c/on-nodes test
                     (keys plan)
-                    (fn [node]
+                    (fn [_ node]
                       (let [{:keys [file drop]} (plan node)]
                         (assert (string? file))
                         (assert (integer? drop))
@@ -419,4 +537,53 @@
                           (c/exec :truncate :-c :-s (str "-" drop) file))))))
       op)
 
-    (teardown! [this test])))
+    (teardown! [this test])
+
+    Reflection
+    (fs [this]
+      #{:truncate})))
+
+(def bitflip-dir
+  "Where do we install the bitflip utility?"
+  "/opt/jepsen/bitflip")
+
+(defrecord Bitflip []
+  Nemesis
+  (setup! [this test]
+    (c/with-test-nodes test
+      (c/su
+        (cu/install-archive! "https://github.com/aybabtme/bitflip/releases/download/v0.2.0/bitflip_0.2.0_Linux_x86_64.tar.gz" bitflip-dir))
+      this)
+    this)
+
+  (invoke! [this test {:keys [value] :as op}]
+    (->> (c/on-nodes test (keys value)
+                     (fn flip [test node]
+                       (let [{:keys [file probability]} (get value node)
+                             _ (when-not file
+                                 (throw+ {:type ::no-file}))
+                             probability (or probability 0.01)
+                             percent (* 100 probability)]
+                         (c/su
+                           (c/exec (str bitflip-dir "/bitflip")
+                                   :spray
+                                   (format "percent:%.32f" percent)
+                                   file)))))
+         (assoc op :value)))
+
+  (teardown! [this test])
+
+  Reflection
+  (fs [this]
+    #{:bitflip}))
+
+(defn bitflip
+  "A nemesis which introduces random bitflips in files. Takes operations like:
+
+    {:f     :bitflip
+     :value {\"some-node\" {:file         \"/path/to/file\"
+                            :probability  1e-3}}}
+
+  This flips 1 x 10^-3 of the bits in `/path/to/file` on `some-node`."
+  []
+  (Bitflip.))
