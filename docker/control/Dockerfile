@@ -1,4 +1,4 @@
-FROM debian:buster
+FROM debian:bullseye
 MAINTAINER jake@apache.org
 
 ENV LEIN_ROOT true
@@ -7,7 +7,7 @@ ENV LEIN_ROOT true
 # Jepsen dependencies
 #
 RUN apt-get -y -q update && \
-    apt-get install -qy openjdk-11-jdk-headless \
+    apt-get install -qy openjdk-17-jdk-headless \
     libjna-java \
     vim \
     emacs \
