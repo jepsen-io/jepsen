@@ -529,6 +529,6 @@
   File corruption options:
     
     :targets     A collection of node specs, e.g. [:one, :all]
-    :corruptions A collection of file corruptions, e.g. [{:bitflip \"/data/dir\" :probability 1e-3}]"
+    :corruptions A collection of file corruptions, e.g. [{:type :bitflip, :file \"/path/to/file\" :probability 1e-3}]"
   [opts]
   (compose-packages (nemesis-packages opts)))
