@@ -22,6 +22,7 @@
                     [net :as net]
                     [util :as util :refer [majority
                                            minority-third
+                                           rand-distribution
                                            random-nonempty-subset]]]
             [jepsen.nemesis.time :as nt]))
 
@@ -367,18 +368,24 @@
    {:file-corruption
     {:targets     [...] ; A collection of node specs, e.g. [:one, [\"n1\", \"n2\"], :all]
      :corruptions [     ; A collection of file corruptions, e.g.:
-      {:bitflip \"/path/to/file\"
+      {:type :bitflip
+       :file \"/path/to/file\"
        :probability 1e-3},
-      {:bitflip \"path/to/dir\"
-       :probability [1e-3 1e-4 1e-5]},
-      {:truncate \"path/to/file/or/dir\"
-       :drop (range 1 1025)}]}}
+      {:type :bitflip
+       :file \"path/to/dir\"
+       :probability {:distribution :one-of :values [1e-3 1e-4 1e-5]}},
+      {:type :truncate
+       :file \"path/to/file/or/dir\"
+       :drop {:distribution :geometric :p 1e-3}}]}}
    ```
    
-   If a directory is given to `:bitflip` or `:truncate`,
+   `:type` can be `:bitflip` or `:truncate`.
+
+   If `:file` is a directory,
    a new random file is selected from that directory on each target node for each operation.
 
-   If `:probability` or `:drop` is a collection, a new `rand-nth` value is chosen for each operation.
+   `:probability` or `:drop` can be specified as a single value or a `distribution-map`.
+   Use a `distribution-map` to generate a new random value for each operation using [[jepsen.util/rand-distribution]].
    
    See [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]].
 
@@ -388,17 +395,20 @@
         targets     (:targets     file-corruption (node-specs db))
         corruptions (:corruptions file-corruption)
         gen (->> (fn gen [_test _context]
-                   (let [targets     (->> (rand-nth targets)
-                                          (db-nodes {:nodes nodes} db))
-                         corruption  (rand-nth corruptions)
-                         {:keys [bitflip truncate probability drop]} corruption
-                         probability (->> probability (util/coll) (rand-nth))
-                         drop        (->> drop        (util/coll) (rand-nth))
-                         [f corruption] (cond
-                                          bitflip  [:bitflip  {:file bitflip  :probability probability}]
-                                          truncate [:truncate {:file truncate :drop        drop}])]
+                   (let [targets (->> (rand-nth targets)
+                                      (db-nodes {:nodes nodes} db))
+                         {:keys [type file probability drop]} (rand-nth corruptions)
+                         corruption (case type
+                                      :bitflip  (let [probability (cond
+                                                                    (number? probability) probability
+                                                                    (map? probability) (rand-distribution probability))]
+                                                  {:file file :probability probability})
+                                      :truncate (let [drop (cond
+                                                             (number? drop) drop
+                                                             (map? drop) (rand-distribution drop))]
+                                                  {:file file :drop drop}))]
                      {:type  :info
-                      :f     f
+                      :f     type
                       :value (->> targets
                                   (reduce (fn [plan node]
                                             (assoc plan node corruption))
