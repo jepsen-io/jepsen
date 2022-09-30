@@ -18,6 +18,7 @@
            (net.schmizz.sshj.connection ConnectionException)
            (net.schmizz.sshj.connection.channel OpenFailException)
            (net.schmizz.sshj.connection.channel.direct Session)
+           (net.schmizz.sshj.transport.verification PromiscuousVerifier)
            (net.schmizz.sshj.userauth UserAuthException)
            (net.schmizz.sshj.userauth.method AuthMethod)
            (net.schmizz.sshj.xfer FileSystemFile)
