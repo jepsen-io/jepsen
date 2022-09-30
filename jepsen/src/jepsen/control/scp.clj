@@ -64,6 +64,8 @@
          "-P" (str (:port conn-spec))
          (concat (when-let [k (:private-key-path conn-spec)]
                    ["-i" k])
+                 (if-not (:strict-host-key-checking conn-spec)
+                   ["-o StrictHostKeyChecking=no"])
                  sources
                  [dest]))
   nil)
