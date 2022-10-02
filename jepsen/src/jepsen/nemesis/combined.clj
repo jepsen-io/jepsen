@@ -249,10 +249,12 @@
 (defn packet-nemesis
   "A nemesis to disrupt packets, e.g. delay, loss, corruption, etc.
    Takes a db to work with [[db-nodes]].
+
+   The network behavior is applied to all traffic to and from the target nodes.
    
   This nemesis responds to:
   ```
-  {:f :start-packet :value [:node-spec   ; as interpreted by db-nodes
+  {:f :start-packet :value [:node-spec   ; target nodes as interpreted by db-nodes
                             {:delay {},  ; behaviors that disrupt packets
                              :loss  {:percent :33%},...}]} 
   {:f :stop-packet  :value nil}
@@ -266,21 +268,21 @@
 
     n/Nemesis
     (setup! [this {:keys [net] :as test}]
-      ;; start from known reliable state
-      (net/shape! net test nil)
+      ; start from known good state, no shaping
+      (net/shape! net test nil nil)
       this)
 
     (invoke! [_this {:keys [net] :as test} {:keys [f value] :as op}]
       (let [result (case f
-                     :start-packet (let [[node-spec behaviors] value
-                                         nodes (db-nodes test db node-spec)]
-                                     (net/shape! net (assoc test :nodes nodes) behaviors))
-                     :stop-packet  (net/shape! net test nil))]
+                     :start-packet (let [[targets behaviors] value
+                                         targets (db-nodes test db targets)]
+                                     (net/shape! net test targets behaviors))
+                     :stop-packet  (net/shape! net test nil nil))]
         (assoc op :value result)))
 
-    (teardown! [_this _test]
-      ;; leave network state as is
-      )))
+    (teardown! [_this {:keys [net] :as test}]
+       ; leave in known good state, no shaping
+      (net/shape! net test nil nil))))
 
 (defn packet-package
   "A nemesis and generator package that disrupts packets,
@@ -288,15 +290,15 @@
    
    Opts:
    ```clj
-     {:packet
-      {:targets      ; A collection of node specs, e.g. [:one, :all]
-       :behaviors [  ; A collection of network behaviors that disrupt packets, e.g.:
-        {}                         ; no disruptions
-        {:delay {}}                ; delay packets by default amount
-        {:corrupt {:percent :33%}} ; corrupt 33% of packets
-        ;; delay packets by default values, plus duplicate 25% of packets
-        {:delay {},
-         :duplicate {:percent :25% :correlation :80%}}]}}
+   {:packet
+    {:targets      ; A collection of node specs, e.g. [:one, :all]
+     :behaviors [  ; A collection of network behaviors that disrupt packets, e.g.:
+      {}                         ; no disruptions
+      {:delay {}}                ; delay packets by default amount
+      {:corrupt {:percent :33%}} ; corrupt 33% of packets
+      ; delay packets by default values, plus duplicate 25% of packets
+      {:delay {},
+       :duplicate {:percent :25% :correlation :80%}}]}}
   ```
   See [[jepsen.net/all-packet-behaviors]].
 
