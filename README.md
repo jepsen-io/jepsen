@@ -46,7 +46,8 @@ An independent translation is available in [Chinese](https://jaydenwen123.gitboo
 
 ## Setting up a Jepsen Environment
 
-So, you've got a Jepsen test, and you'd like to run it! Or maybe you'd like to start learning how to write tests. You've got several options:
+So, you've got a Jepsen test, and you'd like to run it! Or maybe you'd like to
+start learning how to write tests. You've got several options:
 
 ### AWS
 
@@ -66,7 +67,8 @@ which helps fund Jepsen development.
 You can set up your DB nodes as LXC containers, and use your local machine as
 the control node. See the [LXC documentation](doc/lxc.md) for guidelines. This
 might be the easiest setup for hacking on tests: you'll be able to edit source
-code, run profilers, etc on the local node. Containers don't have real clocks, so you generally can't use them to test clock skew.
+code, run profilers, etc on the local node. Containers don't have real clocks,
+so you generally can't use them to test clock skew.
 
 ### VMs, Real Hardware, etc.
 
@@ -141,6 +143,105 @@ INFO  jepsen.core - Analysis invalid! (ﾉಥ益ಥ）ﾉ ┻━┻
    [253 255 256]
    ...}}
 ```
+
+## Working With the REPL
+
+Jepsen tests emit `.jepsen` files in the `store/` directory. You can use these
+to investigate a test at the repl. Run `lein repl` in the test directory (which
+should contain `store...`, then load a test using `store/test`:
+
+```clj
+user=> (def t (store/test -1))
+```
+
+-1 is the last test run, -2 is the second-to-last. 0 is the first, 1 is the
+second, and so on. You can also load a by the string directory name. As a handy
+shortcut, clicking on the title of a test in the web interface will copy its
+path to the clipboard.
+
+```clj
+user=> (def t (store/test "/home/aphyr/jepsen.etcd/store/etcd append etcdctl kill/20221003T124714.485-0400"))
+```
+
+These have the same structure as the test maps you're used to working with in
+Jepsen, though without some fields that wouldn't make sense to serialize--no
+`:checker`, `:client`, etc.
+
+```clj
+jepsen.etcd=> (:name t)
+"etcd append etcdctl kill"
+jepsen.etcd=> (:ops-per-key t)
+200
+```
+
+These test maps are also lazy: to speed up working at the REPL, they won't load
+the history or results until you ask for them. Then they're loaded from disk
+and cached.
+
+```clj
+jepsen.etcd=> (count (:history t))
+52634
+```
+
+You can use all the usual Clojure tricks to introspect results and histories.
+Here's an aborted read (G1a) anomaly--we'll pull out the ops which wrote and
+read the aborted read:
+
+```clj
+jepsen.etcd=> (def writer (-> t :results :workload :anomalies :G1a first :writer))
+#'jepsen.etcd/writer
+jepsen.etcd=> (def reader (-> t :results :workload :anomalies :G1a first :op))
+#'jepsen.etcd/reader
+```
+
+The writer appended 11 and 12 to key 559, but failed, returning a duplicate key
+error:
+
+```clj
+jepsen.etcd=> (:value writer)
+[[:r 559 nil] [:r 558 nil] [:append 559 11] [:append 559 12]]
+jepsen.etcd=> (:error writer)
+[:duplicate-key "rpc error: code = InvalidArgument desc = etcdserver: duplicate key given in txn request"]
+```
+
+The reader, however, observed a value for 559 beginning with 12!
+
+```clj
+jepsen.etcd=> (:value reader)
+[[:r 559 [12]] [:r 557 [1]]]
+```
+
+Let's find all successful transactions:
+
+```clj
+jepsen.etcd=> (def txns (->> t :history (filter #(and (= :txn (:f %)) (= :ok (:type %)))) (map :value)))
+#'jepsen.etcd/txns
+```
+
+And restrict those to just operations which affected key 559:
+
+```clj
+jepsen.etcd=> (->> txns (filter (partial some (comp #{559} second))) pprint)
+([[:r 559 [12]] [:r 557 [1]]]
+ [[:r 559 [12]] [:append 559 1] [:r 559 [12 1]]]
+ [[:append 556 32]
+  [:r 556 [1 18 29 32]]
+  [:r 556 [1 18 29 32]]
+  [:r 559 [12 1]]]
+ [[:r 559 [12 1]]]
+ [[:append 559 9] [:r 557 [1 5]] [:r 558 [1]] [:r 558 [1]]]
+ [[:r 559 [12 1 9]] [:r 559 [12 1 9]]]
+ [[:append 559 17]]
+ [[:r 559 [12 1 9 17]] [:append 558 5]]
+ [[:r 559 [12 1 9 17]]
+  [:append 557 22]
+  [:append 559 27]
+  [:r 557 [1 5 12 22]]])
+```
+
+Sure enough, no OK appends of 12 to key 559!
+
+You'll find more functions for slicing-and-dicing tests in `jepsen.store`.
 
 ## FAQ
 
