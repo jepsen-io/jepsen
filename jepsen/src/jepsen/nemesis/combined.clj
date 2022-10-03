@@ -22,6 +22,7 @@
                     [net :as net]
                     [util :as util :refer [majority
                                            minority-third
+                                           rand-distribution
                                            random-nonempty-subset]]]
             [jepsen.nemesis.time :as nt]))
 
@@ -359,6 +360,69 @@
                            :fs    #{:strobe-clock}
                            :color "#A0E9E3"}}}))
 
+(defn file-corruption-package
+  "A nemesis and generator package that corrupts files.
+   
+   Opts:
+   ```clj
+   {:file-corruption
+    {:targets     [...] ; A collection of node specs, e.g. [:one, [\"n1\", \"n2\"], :all]
+     :corruptions [     ; A collection of file corruptions, e.g.:
+      {:type :bitflip
+       :file \"/path/to/file\"
+       :probability 1e-3},
+      {:type :bitflip
+       :file \"path/to/dir\"
+       :probability {:distribution :one-of :values [1e-3 1e-4 1e-5]}},
+      {:type :truncate
+       :file \"path/to/file/or/dir\"
+       :drop {:distribution :geometric :p 1e-3}}]}}
+   ```
+   
+   `:type` can be `:bitflip` or `:truncate`.
+
+   If `:file` is a directory,
+   a new random file is selected from that directory on each target node for each operation.
+
+   `:probability` or `:drop` can be specified as a single value or a `distribution-map`.
+   Use a `distribution-map` to generate a new random value for each operation using [[jepsen.util/rand-distribution]].
+   
+   See [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]].
+
+   Additional options as for [[nemesis-package]]."
+  [{:keys [faults db file-corruption interval nodes] :as _opts}]
+  (let [needed?     (:file-corruption faults)
+        targets     (:targets     file-corruption (node-specs db))
+        corruptions (:corruptions file-corruption)
+        gen (->> (fn gen [_test _context]
+                   (let [targets (->> (rand-nth targets)
+                                      (db-nodes {:nodes nodes} db))
+                         {:keys [type file probability drop]} (rand-nth corruptions)
+                         corruption (case type
+                                      :bitflip  (let [probability (cond
+                                                                    (number? probability) probability
+                                                                    (map? probability) (rand-distribution probability))]
+                                                  {:file file :probability probability})
+                                      :truncate (let [drop (cond
+                                                             (number? drop) drop
+                                                             (map? drop) (rand-distribution drop))]
+                                                  {:file file :drop drop}))]
+                     {:type  :info
+                      :f     type
+                      :value (->> targets
+                                  (reduce (fn [plan node]
+                                            (assoc plan node corruption))
+                                          {}))}))
+                 (gen/stagger (or interval default-interval)))]
+    {:generator (when needed? gen)
+     :nemesis   (n/compose {#{:bitflip}  (n/bitflip)
+                            #{:truncate} (n/truncate-file)})
+     :perf      #{{:name  "file-corruption"
+                   :fs    #{:bitflip :truncate}
+                   :start #{}
+                   :stop  #{}
+                   :color "#99F2E2"}}}))
+
 (defn f-map-perf
   "Takes a perf map, and transforms the fs in it using `lift`."
   [lift perf]
@@ -399,10 +463,11 @@
   "Just like nemesis-package, but returns a collection of packages, rather than
   the combined package, so you can manipulate it further before composition."
   [opts]
-  (let [faults   (set (:faults opts [:partition :packet :kill :pause :clock]))
+  (let [faults   (set (:faults opts [:partition :packet :kill :pause :clock :file-corruption]))
         opts     (assoc opts :faults faults)]
     [(partition-package opts)
      (packet-package opts)
+     (file-corruption-package opts)
      (clock-package opts)
      (db-package opts)]))
 
@@ -437,6 +502,7 @@
     :packet     Controls network packet behavior
     :kill       Controls process kills
     :pause      Controls process pauses and restarts
+    :file-corruption Controls file corruption
 
   Possible faults:
 
@@ -445,6 +511,7 @@
     :kill
     :pause
     :clock
+    :file-corruption
 
   Partition options:
 
@@ -457,6 +524,11 @@
     
   Kill and Pause options:
 
-    :targets    A collection of node specs, e.g. [:one, :all]"
+    :targets    A collection of node specs, e.g. [:one, :all]
+
+  File corruption options:
+    
+    :targets     A collection of node specs, e.g. [:one, :all]
+    :corruptions A collection of file corruptions, e.g. [{:type :bitflip, :file \"/path/to/file\" :probability 1e-3}]"
   [opts]
   (compose-packages (nemesis-packages opts)))

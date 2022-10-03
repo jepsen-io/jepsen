@@ -513,13 +513,13 @@
 
 (defn truncate-file
   "A nemesis which responds to
-
-  {:f         :truncate
-   :value     {\"some-node\" {:file \"/path/to/file\"
-                              :drop 64}}}
-
-  where the value is a map of nodes to {:file, :drop} maps, on those nodes,
-  drops the last :drop bytes from the given file."
+  ```clj
+  {:f     :truncate
+   :value {\"some-node\" {:file \"/path/to/file or /path/to/dir\"
+                        :drop 64}}}
+  ```
+  where the value is a map of nodes to `{:file, :drop}` maps, on those nodes,
+  drops the last `:drop` bytes from the given file, or a random file from the given directory."
   []
   (reify Nemesis
     (setup! [this test] this)
@@ -527,15 +527,19 @@
     (invoke! [this test op]
       (assert (= (:f op) :truncate))
       (let [plan (:value op)]
-        (c/on-nodes test
-                    (keys plan)
-                    (fn [_ node]
-                      (let [{:keys [file drop]} (plan node)]
-                        (assert (string? file))
-                        (assert (integer? drop))
-                        (c/su
-                          (c/exec :truncate :-c :-s (str "-" drop) file))))))
-      op)
+        (->> (c/on-nodes test
+                         (keys plan)
+                         (fn [_ node]
+                           (let [{:keys [file drop]} (plan node)
+                                 _ (assert (string? file))
+                                 _ (assert (integer? drop))
+                                 file (if (cu/file? file)
+                                        file
+                                        (rand-nth (cu/ls-full file)))]
+                             (c/su
+                              (c/exec :truncate :-c :-s (str "-" drop) file))
+                             {:file file :drop drop})))
+             (assoc op :value))))
 
     (teardown! [this test])
 
@@ -562,13 +566,17 @@
                        (let [{:keys [file probability]} (get value node)
                              _ (when-not file
                                  (throw+ {:type ::no-file}))
+                             file (if (cu/file? file)
+                                    file
+                                    (rand-nth (cu/ls-full file)))
                              probability (or probability 0.01)
                              percent (* 100 probability)]
                          (c/su
                            (c/exec (str bitflip-dir "/bitflip")
                                    :spray
                                    (format "percent:%.32f" percent)
-                                   file)))))
+                                  file))
+                         {:file file :probability probability})))
          (assoc op :value)))
 
   (teardown! [this test])
@@ -579,11 +587,11 @@
 
 (defn bitflip
   "A nemesis which introduces random bitflips in files. Takes operations like:
-
-    {:f     :bitflip
-     :value {\"some-node\" {:file         \"/path/to/file\"
-                            :probability  1e-3}}}
-
-  This flips 1 x 10^-3 of the bits in `/path/to/file` on `some-node`."
+  ```clj
+  {:f     :bitflip
+   :value {\"some-node\" {:file         \"/path/to/file or /path/to/dir\"
+                        :probability  1e-3}}}
+  ```
+  This flips 1 x 10^-3 of the bits in `/path/to/file`, or a random file in `/path/to/dir`, on \"some-node\"."
   []
   (Bitflip.))
