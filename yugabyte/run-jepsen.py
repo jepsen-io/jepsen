@@ -22,6 +22,7 @@ A script to run multiple YugaByte DB Jepsen tests in a loop and organize the res
 """
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -33,6 +34,8 @@ import errno
 import sys
 import time
 from itertools import zip_longest, chain
+
+import requests
 from junit_xml import TestCase, TestSuite, to_xml_report_string
 
 CmdResult = namedtuple('CmdResult',
@@ -109,6 +112,7 @@ SCRIPT_DIR = os.path.abspath(os.path.dirname(sys.argv[0]))
 STORE_DIR = os.path.join(SCRIPT_DIR, "store")
 LOGS_DIR = os.path.join(SCRIPT_DIR, "logs")
 SORT_RESULTS_SH = os.path.join(SCRIPT_DIR, "sort-results.sh")
+REGEX_MAJOR_VERSION = r"^(\d+)\.(\d+)"
 
 child_processes = []
 
@@ -145,9 +149,8 @@ def truncate_line(line, max_chars=500):
     if len(line) <= max_chars:
         return line
     res_candidate = line[:max_chars] + "... (skipped %d chars)" % (len(line) - max_chars)
-    if len(line) <= len(res_candidate):
-        return line
-    return res_candidate
+
+    return line if len(line) <= len(res_candidate) else res_candidate
 
 
 def get_last_lines(file_path, n_lines):
@@ -172,6 +175,69 @@ def show_last_lines(file_path, n_lines):
         file_path,
         "\n".join([truncate_line(line) for line in lines])
     )
+
+
+def send_report_to_reportportal(
+        xml_report_name,
+        xml_report_content,
+        reportportal_base_url,
+        reportportal_project_name,
+        reportportal_api_token,
+        version,
+        jenkins_url,
+):
+    full_version = version.split("-b")[0]
+    major_version = ".".join(re.findall(REGEX_MAJOR_VERSION, version)[0])
+    build_version = version.split("-b")[1]
+
+    url = f"{reportportal_base_url}/api/v1/{reportportal_project_name}/launch/import"
+
+    response = requests.post(
+        url,
+        files={
+            'file': (f"{major_version}-{xml_report_name}", xml_report_content),
+            'type': 'text/xml'},
+        headers={"accept": "*/*",
+                 "Authorization": f"bearer {reportportal_api_token}"}
+    )
+
+    if response.status_code == 200:
+        launch_uuid = re.search('(?<=id = )[^ ]+', json.loads(response.text)["message"])[0]
+        logging.info(f"Successfully posted launch {launch_uuid}")
+    else:
+        logging.error(
+            f"Can't send data to the ReportPortal {reportportal_base_url} due to {response.text} "
+            f"(code {response.status_code})")
+        return False
+
+    # Need to translate UUID to launch-specific ID
+    url = f"{reportportal_base_url}/api/v1/{reportportal_project_name}/launch/uuid/{launch_uuid}"
+
+    response = requests.get(url, headers={"accept": "*/*",
+                                          "Authorization": f"bearer {reportportal_api_token}"})
+
+    if response.status_code == 200:
+        launch_id = json.loads(response.text)["id"]
+        logging.info(f"Successfully found launch ID {launch_id}")
+    else:
+        logging.error(f"Can't find launch ID for uuid {launch_uuid}")
+        logging.error(f"Code: {response.status_code} Text: {response.text}")
+        return False
+
+    url = f"{reportportal_base_url}/api/v1/{reportportal_project_name}/launch/{launch_id}/update"
+
+    response = requests.put(url, json={"attributes": [{"key": "version", "value": full_version},
+                                                      {"key": "build", "value": build_version},
+                                                      {"key": "jenkins", "value": jenkins_url}]},
+                            headers={"accept": "*/*", "Content-Type": "application/json",
+                                     "Authorization": f"bearer {reportportal_api_token}"})
+
+    if response.status_code == 200:
+        logging.info(f"Successfully updated attributes for launch {launch_id}")
+    else:
+        logging.error(f"Could not update attributes for launch {launch_id}")
+        logging.error(f"Code: {response.status_code} Text: {response.text}")
+        return False
 
 
 def run_cmd(cmd,
@@ -229,7 +295,8 @@ def run_cmd(cmd,
         if everything_looks_good:
             keep_output_log_file = False
         return CmdResult(
-            output=None if everything_looks_good else "\n".join([truncate_line(line) for line in last_lines_of_output]),
+            output=None if everything_looks_good else "\n".join(
+                [truncate_line(line) for line in last_lines_of_output]),
             returncode=returncode,
             timed_out=timed_out,
             everything_looks_good=everything_looks_good)
@@ -259,6 +326,18 @@ def parse_args():
         '--build_url',
         default="",
         help='Jenkins build URL')
+    parser.add_argument(
+        '--reportportal_base_url',
+        default="",
+        help='ReportPortal base URL')
+    parser.add_argument(
+        '--reportportal_project_name',
+        default="",
+        help='ReportPortal project name')
+    parser.add_argument(
+        '--reportportal_api_token',
+        default="",
+        help='ReportPortal API token')
     parser.add_argument(
         '--url',
         default=DEFAULT_TARBALL_URL,
@@ -475,9 +554,20 @@ def main():
 
     logging.warning(f"Skipped workloads because of version incompatibility {workloads_to_skip}")
 
-    logging.info("Generating JUnit XML report")
+    logging.info("Sending JUnit XML report")
     ts = TestSuite(f"Jepsen {nemeses.replace(',', '-')} {version}", test_cases.values())
+    if args.reportportal_base_url and args.reportportal_project_name and args.reportportal_api_token:
+        send_report_to_reportportal(f"jepsen-junit-{nemeses.replace(',', '-')}.xml",
+                                    to_xml_report_string([ts]),
+                                    args.reportportal_base_url,
+                                    args.reportportal_project_name,
+                                    args.reportportal_api_token,
+                                    version,
+                                    args.build_url)
+    else:
+        logging.warning("Skipped ReportPortal reporting due to missing args")
 
+    logging.info("Storing JUnit XML reports locally")
     with open(f"jepsen-junit-{nemeses.replace(',', '-')}.xml", "w") as xml_report:
         xml_report.write(to_xml_report_string([ts]))
 
