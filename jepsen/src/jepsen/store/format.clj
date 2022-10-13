@@ -128,33 +128,56 @@
   When rest-ptr is 0, that indicates there is no more data remaining.
 
 
+  ## FressianStream (Type 4)
+  
+  A FressianStream block allows us to write multiple Fressian-encoded values into a single block. We represent it as:
+  
+    | fressian data 1 ... | fressian data 2 ... | ...
+    
+  Writers can write any number of Fressian-encoded values to the stream one after the next. Readers start at the beginning and read values until the block is exhausted. There is no count associated with this block type; it must be inferred by reading all elements. We generally deserialize streams as vectors to enable O(1) access and faster reductions over elements.
+
+  ## BigVector (Type 5)
+  
+  Histories are chonky boys. 100K operations (each a map) are common, and it's conceivable we might want to work with histories of tens of millions of operations. We also want to write them incrementally, so that we can recover from crashes. It's also nice to be able to deserialize small bits of the history, or to reduce over it in parallel. To do this, we need a streaming format for large vectors.
+  
+  We write each chunk of the vector as a separate block. Then we refer to those chunks with a BigVector, which stores some basic metadata about the vector as a whole, and then pointers to each block. Its format is:
+  
+  
+       64        64        32          64         32
+    | count | index 1 | pointer 1 | index 2 | pointer 2 | ...
+    
+  Count is the number of elements in the vector overall. Index 1 is always 0--the offset of the first element in the first chunk. Pointer 1 is the block ID of the Fressian block which contains the first chunk's data. Index 2 is the index of the first element in the second chunk, and pointer 2 is the block ID of the second chunk's data, and so on.
+  
+  Chunk data can be stored in a Fressian block, a FressianStream block, or another BigVector.
+  
+  Access to BigVectors looks very much like a regular Clojure vector. We deserialize chunks on-demand, caching results as they're accessed. We can offer O(1) `count` through the count field. We implement `nth` by finding the chunk a given index belongs to and then looking up the index in that chunk. Assoc works by assoc'ing into that particular chunk, leaving other chunks unchanged.
+  
   ## That's It
 
   There's a lot of obvious stuff I've left out here--metadata, top-level
-  integrity checks, garbage collection, large vector indices for
-  parallelization, etc etc... but I think we can actually skip almost all of it
-  and get a ton of benefit for the limited use case Jepsen needs.
+  integrity checks, garbage collection, etc etc... but I think we can
+  actually skip almost all of it and get a ton of benefit for the limited
+  use case Jepsen needs.
 
   1. Write the header.
 
-  2. Write the initial test map as a PartialMap block to block 1, with no
-  history or results. Write an index block pointing to 1 as the root.
+  2. Write an empty BigVector as block 1, for the history.
 
-  3. Write the history as a Fressian block to block 2.
+  3. Write the initial test map as a PartialMap block to block 2, pointing to block 1 as the history. Write an index block pointing to 2 as the root.
 
-  4. Write a new PartialMap at block 3 with {:history (block-ref 2)}, and
-  rest-ptr 1. Write a new index block with block 3 as the root. This ensures
-  that if we crash after completing the history, but before starting the
-  analysis, we'll still be able to recover the history itself and retry the
-  analysis.
+  4. Write the history incrementally as the test proceeds. Write operations as they occur to a new FressianStream block. Periodically, and at the end of the history:
+  
+    a. Seal that FressianStream block, writing the headers. Call that block id B.
+    b. Write a new version of the history block with a new chunk appended: B.
+    c. Write a new index block with the new history block version.
+    
+    This ensures that if we crash during the run, we can recover at least some of the history up to the most recent checkpoint.
 
   5. Write the results as a PartialMap to blocks 4 and 5: 4 containing the
   :valid? field, and 5 containing the rest of the results.
 
   6. The test may contain state which changed by the end of the test, and we
-  might want to save that state. Write the entire test map again as block 6: a
-  Fressian block now referencing blocks 3 and 4 for the history and results.
-  Write a new index block with block 6 as the root.
+  might want to save that state. Write the entire test map again as block 6, again using block 1 as the history, and now block 5 as the results map. Write a new index block with block 6 as the root.
 
   To read this file, we:
 
@@ -216,8 +239,12 @@
   0)
 
 (def version
-  "The current file version."
-  0)
+  "The current file version.
+  
+  Version 0 was the first version of the file format.
+  
+  Version 1 added support for FressianStream and BigVector blocks."  
+  1)
 
 (def version-size
   "Bytes it takes to store a version."
@@ -273,7 +300,9 @@
   "A map of integers to block types."
   {(short 1) :block-index
    (short 2) :fressian
-   (short 3) :partial-map})
+   (short 3) :partial-map
+   (short 4) :fressian-stream
+   (short 5) :bigvector})
 
 (def block-type->short
   "A map of block types to integer codes."
@@ -282,6 +311,14 @@
 (def block-header-size
   "How long is a block header?"
   (+ block-len-size block-checksum-size block-type-size))
+
+(def big-vector-count-size
+  "How many bytes do we use to store a bigvector's count?"
+  8)
+  
+(def big-vector-index-size
+  "How many bytes do we use to store a bigvector element's index?"
+  8)
 
 ;; Perf tuning
 
@@ -306,12 +343,13 @@
    block-index        ; An atom to a block index: a map of block IDs to offsets
    written?           ; An atom: have we written to this file yet?
    read?              ; An atom: have we read this file yet?
+   write-stream       ; An atom containing a map of information
    ]
 
   Closeable
   (close [this]
     (reset! block-index :closed)
-    (.close file)))
+    (.close file))) 
 
 (defn ^Handle open
   "Constructs a new handle for a Jepsen file of the given path (anything which
@@ -330,7 +368,7 @@
 (defn close!
   "Closes a Handle"
   [handle]
-  (.close ^FileChannel (:file handle))
+  (.close handle)
   nil)
 
 (defn flush!
@@ -412,6 +450,7 @@
         buf  (ByteBuffer/allocate version-size)]
     (let [read-bytes (.read file buf version-offset)
           fversion   (.getInt buf 0)]
+      ; TODO: what's up with this conditional? We should accept 0 and 1 now too
       (when-not (= version-size read-bytes)
                 (= version fversion)
         (throw+ {:type      ::version-mismatch
@@ -669,9 +708,10 @@
      :offset offset
      :length (block-header-length header)
      :data   (case type
-               :block-index (read-block-index-block handle data)
-               :fressian    (read-fressian-block    handle data)
-               :partial-map (read-partial-map-block handle data))}))
+               :block-index     (read-block-index-block     handle data)
+               :fressian        (read-fressian-block        handle data)
+               :fressian-stream (read-fressian-stream-block handle data)
+               :partial-map     (read-partial-map-block     handle data))}))
 
 ;; Block indices
 
@@ -966,6 +1006,7 @@
         data-size   (write-fressian-to-file!
                       (:file handle) data-offset checksum data)
         ; Construct a ByteBuffer over the region we just wrote
+        ;TODO: unused?
         data-buf    (read-file (:file handle) data-offset data-size)
         ; And build our header
         header      (block-header-for-length-and-checksum!
@@ -995,6 +1036,222 @@
                 r  ^Closeable (jsf/reader
                                 is {:handlers fressian-read-handlers})]
       (fress/read-object r))))
+
+(defn read-fressian-stream-block
+  "Takes a handle and a ByteBuffer of data from a FressianStream block. Returns its contents as a vector."
+  [handle ^ByteBuffer data]
+  (jsf/postprocess-fressian
+    (with-open [is (bs/to-input-stream data)
+                r  ^Closeable (jsf/reader is {:handlers fressian-read-handlers})]
+      (loop [v (transient [])]
+        (let [element (fress/read-object r)]
+          (if element
+            (recur (conj! v element))
+            (persistent! v))))))) 
+
+;; Fressian stream blocks
+
+(defn fressian-stream-block-writer!
+  "Takes a handle. Creates a new block ID, and prepares to write a new FressianStream block at the end of the file. Returns a FressianStreamBlockWriter which can be used to write elements to the FressianStream. When closed, the writer writes the block header and updates the handle's block index to refer to the new block."
+  [handle]
+  (let [offset      (next-block-offset handle)
+        data-offset (+ offset block-header-size)
+        block-id    (new-block-id! handle)
+        checksum    (CRC32.)
+        file        (:file handle)
+        foos        (FileOffsetOutputStream. file data-offset checksum)
+        bos         (BufferedOutputStream. foos fressian-buffer-size)
+        fw          (jsf/writer bos {:handlers fressian-write-handlers})]
+    (FressianStreamBlockWriter. handle block-id offset checksum bos fw))
+
+(defrecord FressianStreamBlockWriter
+  [handle
+   ^int block-id
+   ^long offset
+   ^CRC32 checksum
+   ^FileOffsetOutputStream file-offset-output-stream
+   ^BufferedOutputStream buffered-output-stream
+   ^Closeable fressian-writer]
+  
+  java.lang.Closeable
+  (close [this]
+    (.close fressian-writer)
+    ; We have to make sure anything we wrote to the stream is actually flushed
+    (.flush buffered-output-stream)
+    (.close file-offset-output-stream))
+    ; Now we write the block header
+    (let [data-size (.bytesWritten file-offset-output-stream)
+          header    (block-header-for-length-and-checksum!
+                      :fressian-stream data-size checksum)]
+      (write-block-header! handle offset header)
+      (assoc-block! handle id offset)))
+    
+(defn append-to-fressian-stream-block!
+  "Takes a FressianStreamBlockWriter and a Clojure value. Appends that value as Fressian to the stream."
+  [^FressianStreamBlockWriter writer data]
+  (fress/write-object (:writer writer) data)))
+
+;; BigVector blocks
+
+(defn write-big-vector-block!
+  "Takes a handle, a block ID, a count, and a vector of [initial-index block-id] chunks. Writes a BigVector block with the given count and chunks to the end of the file. Records the freshly written block in the handle's block index, and returns ID."
+  [handle id element-count chunks]
+  (let [offset (next-block-offset handle)
+        data-size (+ big-vector-count-size
+                     (* (count chunks)
+                        (+ big-vector-index-size block-id-size)))
+        buf (ByteBuffer/allocate data-size)]
+    ; Write element count
+    (.putLong buf element-count)
+    ; Write chunks
+    (doseq [[initial-index block-id] chunks]
+      (.putLong buf initial-index)
+      (.putInt buf block-id))
+    (.flip buf)
+    (write-block! handle offset :big-vector buf)
+    (assoc-block! id offset)
+    id))           
+
+(defrecord BigVectorBlockWriter
+  [^Queue queue, worker])   
+
+(defn big-vector-block-writer!
+  "Takes a handle, a block ID, and the maximum number of elements per chunk. Returns a  BigVectorBlockWriter which can have elements appended to it via append-to-big-vector-block!. Those elements, in turn, are appended to a series of newly created FressianStream blocks, each of which is stitched together into a BigVector block with the given ID. As each chunk of writes is finished, the writer automatically writes a new block index, ensuring we can recover at least part of the history from crashes.
+  
+  The writer is asynchronous: it internally spawns a thread for serialization and IO. Appends to the writer are transferred to the IO thread via a LinkedTransferQueue; the IO thread then writes them to disk. Closing the writer blocks until the transfer queue is exhausted."
+  [handle block-id elements-per-chunk]
+  (let [queue (LinkedTransferQueue. (* 2 elements-per-chunk))
+        io (future
+             (try
+               (loop []
+                 (let [element (.take queue)]
+                   
+                     
+  )
+  
+(defn append-to-big-vector-block!
+  "Appends an element to a BigVector block writer. This function is asynchronous and returns as soon as the writer's queue has accepted the element. Close the writer to complete the process. Returns writer."
+  [^BigVectorBlockWriter w element]
+  (.put (.queue w) element)
+  w)
+  
+(declare load-big-vector-chunk!)
+
+(defn load-big-vector-chunk!
+  "Takes a BigVector and loads the given chunk, by chunk number. Updates the chunks array. Returns chunk."
+  [^BigVector v, ^long chunk-id]
+  (let [block-id (aget (.block-ids v) chunk-id)
+        chunk    (read-block-by-id (.handle v) block-id)]
+    (aset (.chunks v) chunk-id chunk)
+    chunk))
+
+(defn big-vector-chunk
+  "Takes a BigVector and a chunk ID. Returns the chunk for that chunk ID, loading it if it's not yet in cache."
+  [^BigVector v, ^long chunk-id]
+  (or (aget (.chunks v) chunk-id)
+      (load-big-vector-chunk! v chunk-id)))
+
+(defn ^long big-vector-chunk-id
+  "Takes a BigVector and an index in it, and returns the chunk ID for that index. Throws ArrayIndexOutOfBoundsException if the index is too large."
+  [^BigVector v ^long target]
+  (when-not (< 0 target (.count v))
+    (throw (ArrayIndexOutOfBoundsException. (str "Index " target "Out of bounds for BigVector of " (.count v) " elements"))))
+  ; Binary search through indices
+  (let [indices (.indices v)
+        n       (alength offsets)]
+    ; TODO: double-check this against Knossos search
+    ))
+
+(defn big-vector-seq
+  "Takes a BigVector and returns a lazy seq of its elements."
+  ([^BigVector v]
+   (when-not (= (.count v) 0)
+     (big-vector-seq v 0)))
+  ([^BigVector v, ^long chunk-id]
+   (when (< chunk-id (alength (.chunks v)))
+     (concat (big-vector-chunk v chunk-id) 
+             (lazy-seq (big-vector-seq this (inc i)))))))
+
+; This provides a lazy view of a BigVector. It includes a handle, a count of elements, a long array of the initial index for each chunk (which we use to look up which chunk owns a given index), an int array of the IDs for each chunk, and an array of chunks--each itself a vector (or similar). Chunks are loaded lazily on first access, after which they're cached in the chunk array.
+(defrecord BigVector [handle ^long count ^longs indices ^ints block-ids ^objects chunks]
+  clojure.lang.Counted
+  (count [this]
+    count)
+  
+  clojure.lang.IReduce
+  (reduce [this f init]
+    (loop [acc      init
+           chunk-id 0]
+      (if (< chunk-id (alength chunks))
+        (recur (reduce f acc (big-vector-chunk this chunk-id))
+               (inc chunk-id))
+        acc))) 
+  
+  clojure.lang.IPersistentVector
+  (nth [this i]
+    (let [chunk-id (big-vector-chunk-id this i)
+          first-index    (aget indices chunk-id)
+          chunk    (big-vector-chunk this chunk-id)]
+      (nth chunk (- i first-index))))
+  
+  (assoc [this i value]
+    (let [chunk-id    (big-vector-chunk-id this i)
+          first-index (aget indices chunk-id)
+          chunk       (big-vector-chunk this chunk-id)
+          chunk'      (assoc chunk (- i first-index) value)
+          chunks'     (assoc-array chunks i chunk')]
+      (BigVector. handle count indices block-ids chunks')))
+  
+  (conj [this value]
+    ; Maybe a hack, but really the only time you're gonna want to conj onto one
+    ; of these puppies is to add a few completions, and I'm OK with somewhat unbalanced
+    ; chunks
+    (if (= count 0)
+      [value]
+      (let [last-chunk-id (dec (alength chunks))
+            last-chunk    (big-vector-chunk this last-chunk-id)))
+            last-chunk'   (conj last-chunk value)
+            chunks'       (assoc-array chunks last-chunk-id last-chunk')]
+        (BigVector. handle (inc count) indices block-ids chunks'))))
+    
+  ; lower is inclusive, upper exclusive
+  (subvec [this lower upper]
+    ; TODO: look at impl for this; might just be a wrapper
+    (let [; Which range of chunks do we need to preserve?
+          lower-chunk-id (big-vector-chunk-id this lower)
+          upper-chunk-id (big-vector-chunk-id this (dec upper))
+          ; Where in those chunks do we cut?
+          lower-index    (- lower (aget indices lower-chunk-id))
+          upper-index    (- upper (aget indices upper-chunk-id))]
+      (if (= lower-chunk-id upper-chunk-id)
+        ; This actually falls inside a single chunk; yield that directly.
+        (subvec (big-vector-chunk this lower-chunk-id) lower-index upper-index)
+        ; Crosses multiple chunks
+        (let [lower-chunk  (big-vector-chunk this lower-chunk-id)
+              upper-chunk  (big-vector-chunk this upper-chunk-id)
+              lower-chunk' (subvec lower-chunk lower-index)))))
+  
+  clojure.lang.Seqable
+  (seq [this]
+    (big-vector-seq this)))
+  
+(defn read-big-vector-block
+  "Takes a handle and a ByteBuffer for a BigVector block. Returns a lazy vector representing its data."
+  [handle ^ByteBuffer buf]
+  (let [count       (.getLong buf)
+        chunk-count (div (- (.size buf) big-vector-count-size)
+                         (+ big-vector-offset-size block-id-size))
+        indices   (long-array chunk-count)
+        block-ids (int-array chunk-count)
+        chunks    (array-of IPersistentVector chunk-count)]
+    ; Read chunk indices and block IDs
+    (loop [i 0]
+      (if (= i chunk-count)
+        (BigVector. handle count indices block-ids chunks)
+        (do (aset-long indices   i (.getLong buf))
+            (aset-int  block-ids i (.getInt buf))
+            (recur (inc i)))))))
+
 
 ;; Partial map blocks
 
