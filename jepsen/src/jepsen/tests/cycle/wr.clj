@@ -1,6 +1,7 @@
 (ns jepsen.tests.cycle.wr
   "A test which looks for cycles in write/read transactions. Writes are assumed
   to be unique, but this is the only constraint. See elle.rw-register for docs."
+  (:refer-clojure :exclude [test])
   (:require [elle [rw-register :as r]]
             [jepsen [checker :as checker]
                     [generator :as gen]
