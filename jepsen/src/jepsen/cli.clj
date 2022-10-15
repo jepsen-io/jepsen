@@ -399,36 +399,46 @@ Options:\n")
                              :unknown (System/exit 2)
                              nil))))}
 
-   "analyze" {:opt-spec opt-spec
-              :opt-fn   opt-fn
-              :usage    (:usage opts test-usage)
-              :run      (fn [{:keys [options]}]
-                          (info "Test options:\n"
-                                (with-out-str (pprint options)))
-                          (let [cli-test    (test-fn options)
-                                stored-test (store/latest)
-                                test (-> cli-test
-                                         (merge (dissoc stored-test :results))
-                                         (vary-meta merge (meta stored-test)))]
-                            (assert+ stored-test IllegalStateException
-                                     "Not sure what the last test was")
-                            (assert+ (= (:name stored-test)
-                                        (:name cli-test))
-                                     IllegalStateException
-                                     (str "Stored test (" (:name stored-test)
-                                          ") and CLI test (" (:name cli-test)
-                                          ") have different names; aborting"))
+   "analyze"
+   {:opt-spec [["-t" "--test INDEX_OR_PATH" "Index (e.g. -1 for most recent) or path to a Jepsen test file."
+                :default  -1
+                :parse-fn (fn [s]
+                            (if (re-find #"^-?\d+$" s)
+                              (Long/parseLong s)
+                              s))]]
+    :opt-fn   identity
+    :usage    (:usage opts test-usage)
+    :run      (fn [{:keys [options]}]
+                (let [stored-test (store/test (:test options))
+                      _ (info "Analyzing" (.getPath (store/path stored-test)))
+                      argv (:argv stored-test)
+                      _ (info "CLI args were" argv)
+                      _ (assert+ (#{"test" "test-all"} (first argv))
+                                 IllegalArgumentException
+                                 (str "Not sure how to reconstruct test map from CLI args " (str/join " " argv)))
+                      _ (assert+ (map? stored-test)
+                                 IllegalStateException
+                                 "Unable to load test")
+                      ; Reparse original CLI options as if it had been a test
+                      ; cmd
+                      {:keys [options arguments summary errors] :as parsed-opts}
+                      (-> (next argv) (cli/parse-opts opt-spec) opt-fn)
+                      ; And construct a test from those opts
+                      cli-test    (test-fn options)
+                      test (-> cli-test
+                               (merge (dissoc stored-test :results))
+                               (vary-meta merge (meta stored-test)))]
 
-                            (binding [*print-length* 32]
-                              (info "Combined test:\n"
-                                    (-> test
-                                        (update :history (partial take 5))
-                                        (update :history vector)
-                                        (update :history conj '...)
-                                        pprint
-                                        with-out-str)))
-                            (store/with-handle [test test]
-                              (jepsen/analyze! test))))}}))
+                  (binding [*print-length* 32]
+                    (info "Combined test:\n"
+                          (-> test
+                              (update :history (partial take 5))
+                              (update :history vector)
+                              (update :history conj '...)
+                              pprint
+                              with-out-str)))
+                  (store/with-handle [test test]
+                    (jepsen/analyze! test))))}}))
 
 (defn test-all-run-tests!
   "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,
