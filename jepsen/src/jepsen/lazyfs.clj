@@ -61,7 +61,7 @@ blocks_per_page=1"))
 (defn install!
   "Installs lazyfs on the currently-bound remote node."
   []
-  (info "Installing lazyfs")
+  (info "Installing lazyfs" commit)
   (c/su
     ; Dependencies
     (debian/install [:g++ :cmake :libfuse3-dev :libfuse3-3 :fuse3 :git])
