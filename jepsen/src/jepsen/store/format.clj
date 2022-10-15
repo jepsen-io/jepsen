@@ -1674,8 +1674,6 @@
 
 ;; Garbage collection
 
-(declare partial-map-rest-id)
-
 (defn find-references
   "A little helper function for finding BlockRefs in a nested data structure.
   Returns the IDs of all BlockRefs."
