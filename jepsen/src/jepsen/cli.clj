@@ -427,8 +427,8 @@ Options:\n")
                                         (update :history conj '...)
                                         pprint
                                         with-out-str)))
-                            (store/with-writer test [w]
-                              (jepsen/analyze! test w))))}}))
+                            (store/with-handle [test test]
+                              (jepsen/analyze! test))))}}))
 
 (defn test-all-run-tests!
   "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,

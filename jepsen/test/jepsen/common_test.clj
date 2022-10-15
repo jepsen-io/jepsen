@@ -22,6 +22,7 @@
                         "jepsen.os.debian"    :error
                         "jepsen.store"        :error
                         "jepsen.util"         :error
+                        "net.schmizz.sshj.transport" :error
                         })})
   (f)
   (store/stop-logging!))

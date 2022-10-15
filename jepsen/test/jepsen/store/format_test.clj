@@ -2,6 +2,7 @@
   (:require [byte-streams :as bs]
             [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
+            [clojure.core.reducers :as r]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.store.format :refer :all]
@@ -35,7 +36,7 @@
                    :actual   :eof]
                   (check-magic h2))
 
-      (is-thrown+ [:type :jepsen.store.format/version-mismatch]
+      (is-thrown+ [:type :jepsen.store.format/version-incomplete]
                   (check-version h2)))
 
     ; Write header
@@ -61,13 +62,21 @@
              @(:block-index h2))))))
 
 (deftest read-block-by-id-test
-  (with-open [h1 (open file)
-              h2 (open file)]
+  (with-open [w (open file)]
     (testing "empty file"
-      (is-thrown+ [:type            :jepsen.store.format/block-not-found
-                   :id              (int 1)
-                   :known-block-ids []]
-                  (read-block-by-id h1 (int 1))))))
+      (with-open [r (open file)]
+        (is-thrown+ [:type            :jepsen.store.format/magic-mismatch
+                     :expected        "JEPSEN"
+                     :actual          :eof]
+                    (read-block-by-id r (int 1)))))
+
+    (testing "file with no blocks"
+      (write-block-index! w)
+      (with-open [r (open file)]
+        (is-thrown+ [:type            :jepsen.store.format/block-not-found
+                     :id              (int 4)
+                     :known-block-ids [1]]
+                    (read-block-by-id r (int 4)))))))
 
 (deftest fressian-block-test
   (with-open [h1 (open file)
@@ -107,6 +116,49 @@
           (is (= "lore" (:deep m)))
           (is (= (merge deep shallow) m)))))))
 
+(defn write-big-vector!
+  "Takes a vector and writes it to the file as a big vector. Returns the block
+  ID of the written block."
+  [v]
+  (with-open [h (open file)]
+    ; Just to mess with offsets
+    (write-block-index! h)
+    (let [w (big-vector-block-writer! h 5)]
+      (reduce append-to-big-vector-block! w v)
+      (.close w)
+      (:block-id w))))
+
+(defn roundtrip-big-vector!
+  "Writes and reads a bigvector, ensuring it's equal."
+  [v]
+  (let [id (write-big-vector! v)]
+    (with-open [h (open file)]
+      (let [v2 (:data (read-block-by-id h id))]
+        ;(info :read-bigvec v2)
+        ; Count
+        (is (= (count v) (count v2)))
+        ; Via reduce
+        (is (= v (into [] v2)))
+        ; Via seq
+        (is (= v v2))
+        ; Via parallel reducers/fold
+        (is (= v (into [] (r/foldcat v2))))
+        ; Via nth
+        (doseq [i (range (count v))]
+          (is (= (nth v i) (nth v2 i))))
+        ; Hash
+        (is (= (hash v) (hash v2)))))))
+
+(deftest big-vector-test
+  (testing "empty"
+    (roundtrip-big-vector! []))
+  (testing "one"
+    (roundtrip-big-vector! [:x]))
+  (testing "six"
+    (roundtrip-big-vector! [:a :b :c :d :e :f]))
+  (testing "lots"
+    (roundtrip-big-vector! (vec (range 128)))))
+
 (deftest write-test-test
   (let [test {:history [:a :b :c]
               :results {:valid? false
@@ -122,10 +174,17 @@
 
 ;; Test-specific tests
 (let [base-test  {:name  "a test"
-                  :state :base}
-      history    [{:type :invoke} {:type :ok}]
+                  :state :base
+                  :history nil}
+      history-size        12
+      history-chunk-size  5
+      history    (->> (range history-size)
+                      (mapcat (fn [i]
+                                [{:type :invoke, :process i}
+                                 {:type :ok, :process i}]))
+                      vec)
       run-test   (assoc base-test
-                        :state  :run
+                        :state   :run
                         :history history)
       results    {:valid? false, :vent-cores :frog-blasted}
       final-test (assoc run-test
@@ -145,7 +204,12 @@
                       (read-test)))
 
         (testing "base test"
-          (let [id (write-fressian-block! w base-test)]
+          ; First write an empty history block
+          (deliver history-id (write-fressian-block! w nil))
+          (info :history-id @history-id)
+
+          (let [base-test' (assoc base-test :history (block-ref @history-id))
+                id (write-fressian-block! w base-test')]
             (is-thrown+ [:type :jepsen.store.format/no-block-index]
                         (read-test))
 
@@ -154,19 +218,44 @@
             (is (= base-test (read-test)))))
 
         (testing "history"
-          ; Write history; test should be unchanged.
-          (deliver history-id (write-fressian-block! w history))
-          (is (= base-test (read-test)))
-
-          ; Write new test referencing that history; test still unchanged.
-          (let [test-id (write-fressian-block!
-                          w (assoc run-test :history (block-ref @history-id)))]
+          (let [hw (big-vector-block-writer! w @history-id history-chunk-size)
+                ; Intermediate indices in the history where we check the state
+                first-cut  1
+                second-cut (+ history-chunk-size 1)]
+            ; Stream the first op into the history. Test should be unchanged.
+            (reduce append-to-big-vector-block! hw (subvec history 0 first-cut))
             (is (= base-test (read-test)))
 
-            ; Once we write the block index with the new root, test should
-            ; reflect the history.
-            (-> w (set-root! test-id) write-block-index!)
-            (is (= run-test (read-test)))))
+            ; Stream the first block. Test should now have a partial history up
+            ; to the first chunk.
+            (reduce append-to-big-vector-block! hw
+                    (subvec history 1 (inc history-chunk-size)))
+            (let [t (loop []
+                      ; Writing is async, so we do a little spinloop here
+                      (let [t (read-test)]
+                        (if (seq (:history t))
+                          t
+                          (do (Thread/sleep 5)
+                              (recur)))))]
+              (is (= (assoc base-test :history
+                            (subvec history 0 history-chunk-size))
+                     t)))
+
+            ; Stream the remainder of the history and close the writer; the
+            ; test should now have the full history.
+            (reduce append-to-big-vector-block! hw (subvec history second-cut))
+            (.close hw)
+            (is (= (assoc base-test :history history)
+                   (read-test)))))
+
+        (testing "run test"
+          ; Write the run test version--it might have different fields than the
+          ; original.
+          (let [id (write-fressian-block! w (assoc run-test :history
+                                                   (block-ref @history-id)))]
+            (set-root! w id)
+            (write-block-index! w))
+          (is (= run-test (read-test))))
 
         (testing "analysis"
           ; Write more results
@@ -191,45 +280,53 @@
             (is (= final-test (read-test))))))))
 
   (deftest incremental-test-write-test
+    ; This checks the write-initial-test, write-results, etc. functions
     (is-thrown+ [:type :jepsen.store.format/magic-mismatch] (read-test))
 
     ; Write initial test
     (with-open [w (open file)]
-      (write-initial-test! w base-test)
-      (is (= base-test (read-test)))
+      (let [base-test' (write-initial-test! w base-test)]
+        (is (= base-test (read-test)))
 
-      ; Write history
-      (let [run-test' (write-history! w run-test)]
-        (is (= run-test (read-test)))
+        ; Write history
+        (with-open [hw (test-history-writer! w base-test')]
+          (reduce append-to-big-vector-block! hw history))
+        (is (= (assoc base-test :history history) (read-test)))
 
-        ; Write results
-        (let [final-test' (merge run-test' final-test)]
-          (is-thrown+ [:type :jepsen.store.format/no-history-id-in-meta]
-                      (write-results! w final-test))
-          (write-results! w final-test')
-          (is (= final-test (read-test)))
+        ; Rewrite test
+        (let [run-test' (merge base-test' run-test)
+              run-test' (write-test-with-history! w run-test')]
+          (is (= run-test (read-test)))
 
-          ; Write NEW results on top of old ones
-          (let [final-test' (assoc final-test' :results {:valid?   :unknown
-                                                         :whoopsie :daisy})]
-            (write-results! w final-test')
-            (is (= final-test' (read-test)))
+          ; Write results
+          (let [final-test' (merge run-test' final-test)]
+            (is-thrown+ [:type :jepsen.store.format/no-history-id-in-meta]
+                        (write-test-with-results! w final-test))
+            (write-test-with-results! w final-test')
+            (is (= final-test (read-test)))
 
-            ; GC that!
-            (let [size1 (.size ^java.nio.channels.FileChannel (:file w))
-                  _     (close! w)
-                  _     (gc! file)
-                  size2 (with-open [r (open file)] (.size ^java.nio.channels.FileChannel (:file r)))]
+            ; Write NEW results on top of old ones
+            (let [final-test' (assoc final-test' :results {:valid?   :unknown
+                                                           :whoopsie :daisy})]
+              (write-test-with-results! w final-test')
               (is (= final-test' (read-test)))
-              (is (= 1128 size1))
-              (is (= 383 size2))
 
-              ; Now we should be able to open up this test, update its
-              ; analysis, and write it back *re-using* the existing history.
-              (with-open [r (open file)
-                          w (open file)]
-                (let [test  (jepsen.store.format/read-test r)
-                      test' (assoc test :results {:valid? :rewritten
-                                                  :new    :findings})]
-                  (write-results! w test')
-                  (is (= test' (read-test))))))))))))
+              ; GC that!
+              (let [size1 (.size ^java.nio.channels.FileChannel (:file w))
+                    _     (close! w)
+                    _     (gc! file)
+                    size2 (with-open [r (open file)]
+                            (.size ^java.nio.channels.FileChannel (:file r)))]
+                (is (= final-test' (read-test)))
+                (is (= 1685 size1))
+                (is (= 722 size2))
+
+                ; Now we should be able to open up this test, update its
+                ; analysis, and write it back *re-using* the existing history.
+                (with-open [r (open file)
+                            w (open file)]
+                  (let [test  (jepsen.store.format/read-test r)
+                        test' (assoc test :results {:valid? :rewritten
+                                                    :new    :findings})]
+                    (write-test-with-results! w test')
+                    (is (= test' (read-test)))))))))))))

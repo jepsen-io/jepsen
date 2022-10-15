@@ -4,12 +4,14 @@
   (:require [clojure.data.fressian :as fress]
             [clojure.string :as str]
             [fipp.edn :refer [pprint]]
-            [jepsen.store :refer :all]
-            [jepsen [common-test :refer [quiet-logging]]]
-            [jepsen.core-test :as core-test]
-            [jepsen.core :as core]
-            [multiset.core :as multiset]
-            [jepsen.tests :refer [noop-test]])
+            [jepsen [common-test :refer [quiet-logging]]
+                    [core :as core]
+                    [core-test :as core-test]
+                    [generator :as gen]
+                    [store :refer :all]
+                    [tests :refer [noop-test]]]
+            [jepsen.store.format :as store.format]
+            [multiset.core :as multiset])
   (:import (org.fressian.handlers WriteHandler ReadHandler)))
 
 (use-fixtures :once quiet-logging)
@@ -19,6 +21,8 @@
 (def base-test (assoc noop-test
                       :pure-generators true
                       :name     "store-test"
+                      :generator (->> [{:f :trivial}]
+                                      gen/clients)
                       :record   (Kitten. "fluffy" "smol")
                       :multiset (into (multiset/multiset)
                                       [1 1 2 3 5 8])
@@ -61,14 +65,19 @@
         _    (delete! name)
         t (-> base-test
               core/run!)
+        ; At this juncture we've run the test, and the history should be
+        ; written.
+        _ (is (= (:history t)
+                 (:history (load t))))
+
+        ; Now we're going to rewrite the results, adding a kitten
         [t serialized-t]
-        (with-writer t [writer]
+        (with-handle [t t]
           (let [t (-> t
-                      (save-1! writer)
                       (assoc-in [:results :kitten] (Kitten. "hi" "there"))
-                      (save-2! writer))
+                      save-2!)
                 serialized-t (dissoc t :db :os :net :client :checker :nemesis
-                                     :generator :model :remote)]
+                                     :generator :model :remote :store)]
             [t serialized-t]))
         ts        (tests name)
         [time t'] (first ts)]
@@ -77,8 +86,6 @@
 
     (testing "generic test load"
       (is (= serialized-t @t')))
-    (testing "test.fressian"
-      (is (= serialized-t (load-fressian-file (fressian-file t)))))
     (testing "test.jepsen"
       (is (= serialized-t (load-jepsen-file (jepsen-file t)))))
     (testing "load-results"

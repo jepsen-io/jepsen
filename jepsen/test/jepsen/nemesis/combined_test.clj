@@ -2,6 +2,7 @@
   (:require [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
             [jepsen [common-test :refer [quiet-logging]]
+                    [core :as jepsen]
                     [db :as db]
                     [util :as util]
                     [generator :as gen]]
@@ -33,11 +34,12 @@
                          n   10 ; Op count
                          gen (gen/nemesis (gen/limit n (:generator pkg)))
                          test (assoc it/base-test
+                                     :name       "nemesis.combined partition-package-gen-test"
                                      :client     (it/ok-client)
                                      :nemesis    (it/info-nemesis)
                                      :generator  gen)
                          ; Generate some ops
-                         h   (util/with-relative-time (interpreter/run! test))]
+                         h   (:history (jepsen/run! test))]
                      ; Should be alternating start/stop ops
                      (is (= (take (* 2 n)
                                   (cycle [:start-partition :start-partition

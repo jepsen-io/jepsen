@@ -91,7 +91,8 @@
 
 (def default-nonserializable-keys
   "What keys in a test can't be serialized to disk, by default?"
-  #{:barrier :db :os :net :client :checker :nemesis :generator :model :remote})
+  #{:barrier :db :os :net :client :checker :nemesis :generator :model :remote
+    :store})
 
 (defn nonserializable-keys
   "What keys in a test can't be serialized to disk? The union of default
@@ -401,56 +402,66 @@
 
 ; Top-level API for writing tests
 
-(defmacro with-writer
-  "Opens a *writer* for saving test data. Evaluates body with that writer bound
-  to the given symbol, and ensures that writer is closed at the end of the
-  with-writer form. This writer is passed to save-0, save-1, etc, to write each
-  phase of the test run."
-  [test [writer-sym] & body]
-  `(with-open [~writer-sym (store.format/open (jepsen-file! ~test))]
-     ~@body))
+(defn close!
+  "Takes a test map and closes its store handle, if one exists. Returns test
+  without store handle."
+  [test]
+  (when-let [handle (:handle (:store test))]
+    (store.format/close! handle))
+  (update test :store dissoc :handle))
+
+(defmacro with-handle
+  "Takes a binding symbol and a test expression. Opens a store.format handle
+  for writing and reading test data, and evaluates body with that handle open,
+  closing it automatically at the end of the block. Within block, test-sym is
+  bound to test-expr, but with a special key :store :handle being the writer
+  handle. Returns the value of the body.
+
+  The generator interpreter, save-0, save-1, etc. use this handle to
+  write and read test data as the test is run."
+  [[test-sym test-expr] & body]
+  `(with-open [handle# (store.format/open (jepsen-file! ~test-expr))]
+     (let [~test-sym (assoc-in ~test-expr [:store :handle] handle#)]
+       ~@body)))
 
 (defn save-0!
   "Writes a test at the start of a test run. Updates symlinks. Returns a new
   version of test which should be used for subsequent writes."
-  [test writer]
+  [test]
   (let [stest  (serializable-test test)
-        stest' (store.format/write-initial-test! writer stest)]
+        stest' (store.format/write-initial-test! (:handle (:store test))
+                                                 stest)]
     (update-current-symlink! test)
     (vary-meta test merge (meta stest'))))
 
 (defn save-1!
-  "Writes test.jepsen, the history, and fressian files to disk and updates
-  latest symlinks. Returns test with metadata which should be preserved for
-  calls to save-2!"
-  [test writer]
+  "Phase 1: after completing the history, writes test.jepsen and history files
+  to disk and updates latest symlinks. Returns test with metadata which should
+  be preserved for calls to save-2!"
+  [test]
   (let [stest   (serializable-test test)
         jepsen  (future (util/with-thread-name "jepsen format"
-                          (store.format/write-history! writer stest)))
+                          (store.format/write-test-with-history!
+                            (:handle (:store test)) stest)))
         history (future (util/with-thread-name "jepsen history"
-                          (write-history! stest)))
-        fressian (future (util/with-thread-name "jepsen fressian"
-                           (write-fressian! stest)))]
-    @jepsen @history @fressian
+                          (write-history! stest)))]
+    @jepsen @history
     (update-symlinks! test)
     ; We want to merge the jepsen writer's metadata back into the original test.
     (vary-meta test merge (meta @jepsen))))
 
 (defn save-2!
-  "Phase 2: after computing results, we re-write the fressian file, histories,
-  and also dump results as edn. Returns test with metadata that should be
-  preserved for future save calls."
-  [test writer]
+  "Phase 2: after computing results, we update the .jepsen file and write
+  results as EDN. Returns test with metadata that should be preserved for
+  future save calls."
+  [test]
   (let [stest   (serializable-test test)
         jepsen  (future (util/with-thread-name "jepsen format"
-                          (store.format/write-results! writer stest)))
+                          (store.format/write-test-with-results!
+                            (:handle (:store test)) stest)))
         results (future (util/with-thread-name "jepsen results"
-                          (write-results! stest)))
-        history (future (util/with-thread-name "jepsen history"
-                          (write-history! stest)))
-        fressian (future (util/with-thread-name "jepsen fressian"
-                           (write-fressian! stest)))]
-    @jepsen @results @history @fressian
+                          (write-results! stest)))]
+    @jepsen @results
     (update-symlinks! test)
     ; Return the Jepsen writer's results; it's got metadata.
     (vary-meta test merge (meta @jepsen))))
