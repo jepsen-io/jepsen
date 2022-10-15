@@ -846,20 +846,37 @@
   returns true if a thread should be included in the context."
   [f ctx]
   (let [; Filter free threads to just those we want
-        ctx (assoc ctx :free-threads
-                   (.forked ^Set
-                     (reduce (fn [^Set free-threads thread]
-                               (if (f thread)
-                                 (.add free-threads thread)
-                                 free-threads))
-                             (.linear (Set.))
-                             (:free-threads ctx))))
-        ; Update workers to remove threads we won't use
-        ctx (->> (:workers ctx)
-                 (c/filter (comp f key))
-                 (into {})
-                 (assoc ctx :workers))]
-    ctx))
+        free-threads  ^Set (:free-threads ctx)
+        free-threads' ^Set (.forked ^Set
+                                    (reduce (fn free-threads
+                                              [^Set free-threads thread]
+                                              (if (f thread)
+                                                (.add free-threads thread)
+                                                free-threads))
+                                            (.linear (Set.))
+                                            free-threads))
+        ; Update workers to remove threads we won't use. Logically this is just
+        ; select-keys, but a.) that doesn't use transients (!), and b.) we can
+        ; do better when we're dealing with only a few keys removed vs a lot.
+        workers  (:workers ctx)
+        workers' (if (< (.size free-threads') (/ (.size free-threads) 2))
+                   ; Guess: f only selects a few threads. Build empty map up
+                   (persistent!
+                     (reduce-kv (fn workers-sparse [workers' thread process]
+                                  (if (f thread)
+                                    (assoc! workers' thread process)
+                                    workers'))
+                                (transient {})
+                                workers))
+                   ; Guess: f selects most threads. Winnow existing map down
+                   (persistent!
+                     (reduce-kv (fn workers-dense [workers' thread process]
+                                  (if (f thread)
+                                    workers'
+                                    (dissoc! workers' thread)))
+                                (transient workers)
+                                workers)))]
+  (assoc ctx :free-threads free-threads', :workers workers')))
 
 (defrecord OnThreads [f gen]
   Generator

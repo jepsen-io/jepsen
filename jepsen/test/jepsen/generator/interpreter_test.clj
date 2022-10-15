@@ -3,7 +3,8 @@
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen.generator :as gen]
             [jepsen.generator.interpreter :refer :all]
-            [jepsen [core :as jepsen]
+            [jepsen [common-test :refer [quiet-logging]]
+                    [core :as jepsen]
                     [client :refer [Client]]
                     [nemesis :refer [Nemesis]]
                     [util :as util]
@@ -12,6 +13,8 @@
             [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
             [slingshot.slingshot :refer [try+ throw+]]))
+
+(use-fixtures :once quiet-logging)
 
 (def base-test
   (assoc tests/noop-test
@@ -143,7 +146,7 @@
       ; On my box, ~18K ops/sec. This is a good place to profile, I
       ; think--there's some low-hanging fruit in OnThreads `update`, which
       ; calls process->thread with a linear cost.
-      ;(prn (float (/ (count h) time-limit)))
+      ; (prn (float (/ (count h) time-limit)))
       (is (< 5000 (float (/ (count h) time-limit)))))
     ))
 
