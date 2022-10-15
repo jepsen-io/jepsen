@@ -182,6 +182,17 @@
             (is (= "jepsen.store.format.BigVector" (.getName (class e))))
             (is (= 0 (count e)))
             (is (= [] e))))
+
+        (testing "subvec"
+          (when (pos? (count v))
+            (let [i (dec (count v))]
+              (testing "after first"
+                (is (= (subvec v 1)   (subvec v2 1))))
+              (testing "up to last"
+                (is (= (subvec v 0 i) (subvec v2 0 i))))
+              (when (< 1 (count v))
+                (testing "after first, up to last"
+                  (is (= (subvec v 1 i) (subvec v2 1 i))))))))
         ))))
 
 (deftest ^:focus big-vector-test

@@ -1145,7 +1145,8 @@
 (declare big-vector-chunk
          big-vector-chunk-id
          big-vector-chunks
-         big-vector-seq)
+         big-vector-seq
+         big-vector-parallel-load)
 
 (defn assoc-array
   "Takes an object array a, an index i, and an object x. Returns a copy of a
@@ -1207,7 +1208,7 @@
     (nth this k))
 
   (assoc [this k v]
-    (assoc (vec this) k v))
+    (assoc (vec (big-vector-parallel-load this)) k v))
 
   clojure.lang.Counted
   (count [this]
@@ -1215,11 +1216,12 @@
 
   clojure.lang.IHashEq
   (hasheq [this]
-    (hash (vec this)))
+    ; If this actually gets used, we should memoize.
+    (hash (vec (big-vector-parallel-load this))))
 
   clojure.lang.IPersistentCollection
   (cons [this x]
-    (conj (vec this) x))
+    (conj (vec (big-vector-parallel-load this)) x))
 
   ; Sure, I guess?
   (empty [this]
@@ -1231,8 +1233,7 @@
 
   (equiv [this other]
     (or (identical? this other)
-        (when-not (nil? other)
-          (= (seq this) other))))
+        (= (vec (big-vector-parallel-load this)) other)))
 
   clojure.lang.IPersistentStack
   (peek [this]
@@ -1240,14 +1241,14 @@
       (nth this (dec count))))
 
   (pop [this]
-    (pop (vec this)))
+    (pop (vec (big-vector-parallel-load this))))
 
   clojure.lang.IPersistentVector
   (length [this]
     count)
 
   (assocN [this i x]
-    (assoc (vec this) i x))
+    (assoc (vec (big-vector-parallel-load this)) i x))
 
   clojure.lang.IReduce
   (reduce [this f]
@@ -1312,11 +1313,11 @@
   ; like, figure out a streaming hashcode equivalent to however seqs/vectors
   ; work, and maintain it during the writing process.
   (hashCode [this]
-    (.hashCode (vec this)))
+    (.hashCode (vec (big-vector-parallel-load this))))
 
   ; Again, if you call this for anything other than debugging, what the fuck
   (toString [this]
-    (str (vec this))))
+    (str (vec (big-vector-parallel-load this)))))
 
 (defmethod print-method BigVector [v ^java.io.Writer w]
   (.write w (str v)))
@@ -1384,6 +1385,15 @@
    (when (< chunk-id (alength (.chunks v)))
      (concat (big-vector-chunk v chunk-id)
              (lazy-seq (big-vector-seq v (inc chunk-id)))))))
+
+(defn big-vector-parallel-load
+  "Takes a BigVector and loads all its chunks in parallel. Noop if already
+  realized. Returns the BigVector."
+  [^BigVector v]
+  (->> (range (alength (.chunks v)))
+       (pmap (partial big-vector-chunk v))
+       dorun)
+  v)
 
 (defn read-big-vector-block
   "Takes a handle and a ByteBuffer for a BigVector block. Returns a lazy vector
