@@ -195,7 +195,7 @@
                   (is (= (subvec v 1 i) (subvec v2 1 i))))))))
         ))))
 
-(deftest ^:focus big-vector-test
+(deftest big-vector-test
   (testing "0"
     (check-big-vector! []))
   (testing "1"

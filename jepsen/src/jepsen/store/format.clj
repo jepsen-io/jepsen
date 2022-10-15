@@ -233,7 +233,8 @@
             [clojure.core.reducers :as r]
             [clojure.java.io :as io]
             [dom-top.core :refer [assert+]]
-            [jepsen [util :as util :refer [map-vals]]
+            [jepsen [util :as util :refer [map-vals
+                                           with-thread-name]]
                     [fs-cache :refer [write-atomic!]]]
             [jepsen.store.fressian :as jsf]
             [potemkin :refer [def-map-type
@@ -251,9 +252,9 @@
            (java.nio.channels FileChannel
                               FileChannel$MapMode)
            (java.nio.file StandardOpenOption)
-           (java.util Arrays
-                      Queue)
+           (java.util Arrays)
            (java.util.concurrent ArrayBlockingQueue
+                                 BlockingQueue
                                  ForkJoinTask)
            (java.util.function Consumer)
            (java.util.zip CRC32)
@@ -275,10 +276,10 @@
 
 (def version
   "The current file version.
-  
+
   Version 0 was the first version of the file format.
-  
-  Version 1 added support for FressianStream and BigVector blocks."  
+
+  Version 1 added support for FressianStream and BigVector blocks."
   1)
 
 (def version-size
@@ -350,7 +351,7 @@
 (def big-vector-count-size
   "How many bytes do we use to store a bigvector's count?"
   8)
-  
+
 (def big-vector-index-size
   "How many bytes do we use to store a bigvector element's index?"
   8)
@@ -406,7 +407,7 @@
 
 (defn close!
   "Closes a Handle"
-  [handle]
+  [^Closeable handle]
   (.close handle)
   nil)
 
@@ -1052,7 +1053,7 @@
     id))
 
 (defrecord BigVectorBlockWriter
-  [^int block-id, ^Queue queue, worker]
+  [^int block-id, ^BlockingQueue queue, worker]
   Closeable
   (close [this]
     (.put queue ::finished)
@@ -1060,7 +1061,7 @@
 
 (defn big-vector-block-writer-worker!
   "Loop which writes values from a BigVectorBlockWriter's queue to disk."
-  [handle block-id elements-per-chunk ^Queue queue]
+  [handle block-id elements-per-chunk ^BlockingQueue queue]
   (try
     (loop [; Number of elements written to completed blocks. We use
            ; this for the initial block index of each streaming
@@ -1128,10 +1129,12 @@
    ; of the writer *too* far, but we definitely need to buffer at least a full
    ; chunk while the previous chunk is being sealed off.
    (let [queue (ArrayBlockingQueue. (* 2 elements-per-chunk))
-         worker (future (big-vector-block-writer-worker! handle
-                                                         block-id
-                                                         elements-per-chunk
-                                                         queue))]
+         worker (future
+                  (with-thread-name "jepsen history writer"
+                    (big-vector-block-writer-worker! handle
+                                                     block-id
+                                                     elements-per-chunk
+                                                     queue)))]
      (BigVectorBlockWriter. block-id queue worker))))
 
 (defn append-to-big-vector-block!
@@ -1139,7 +1142,7 @@
   asynchronous and returns as soon as the writer's queue has accepted the
   element. Close the writer to complete the process. Returns writer."
   [^BigVectorBlockWriter w element]
-  (.put (.queue w) element)
+  (.put ^BlockingQueue (.queue w) element)
   w)
 
 (declare big-vector-chunk
@@ -1151,7 +1154,7 @@
 (defn assoc-array
   "Takes an object array a, an index i, and an object x. Returns a copy of a
   with i = x. Like assoc on vectors, but for arrays, basically."
-  [a i x]
+  [^objects a i x]
   (let [n  (alength a)
         a' (object-array n)]
     (System/arraycopy a 0 a' 0 n)
@@ -1296,13 +1299,13 @@
   ; some obvious things we can do to make them faster.
   Iterable
   (forEach [this consumer]
-    (.forEach (seq this) consumer))
+    (.forEach ^Iterable (seq this) consumer))
 
   (iterator [this]
-    (.iterator (seq this)))
+    (.iterator ^Iterable (seq this)))
 
   (spliterator [this]
-    (.spliterator (seq this)))
+    (.spliterator ^Iterable (seq this)))
 
   Object
   (equals [this other]
@@ -1313,7 +1316,7 @@
   ; like, figure out a streaming hashcode equivalent to however seqs/vectors
   ; work, and maintain it during the writing process.
   (hashCode [this]
-    (.hashCode (vec (big-vector-parallel-load this))))
+    (.hashCode ^Object (vec (big-vector-parallel-load this))))
 
   ; Again, if you call this for anything other than debugging, what the fuck
   (toString [this]
@@ -1325,9 +1328,8 @@
 (defn big-vector-load-chunk
   "Takes a BigVector and loads the given chunk, by chunk number."
   [^BigVector v, ^long chunk-id]
-  (let [block-id (aget (.block-ids v) chunk-id)
-        chunk    (:data (read-block-by-id (.handle v) block-id))
-        chunks   (.chunks v)]
+  (let [block-id (aget ^ints (.block-ids v) chunk-id)
+        chunk    (:data (read-block-by-id (.handle v) block-id))]
     chunk))
 
 (defn big-vector-chunk
@@ -1335,9 +1337,9 @@
   loading it if it's not yet in cache. May be invoked concurrently on the same
   chunk ID; only a single thread will actually decode the chunk."
   [^BigVector v, ^long chunk-id]
-  (let [chunks (.chunks v)]
+  (let [chunks ^objects (.chunks v)]
     (or (aget chunks chunk-id)
-        (let [locks (.chunk-locks v)]
+        (let [locks ^objects (.chunk-locks v)]
           (locking (aget locks chunk-id)
             ; Might have been loaded while we were waiting for the lock
             (or (aget chunks chunk-id)
@@ -1356,7 +1358,7 @@
     (throw (ArrayIndexOutOfBoundsException.
              (str "Index " target " out of bounds for BigVector of " (.count v)
                   " elements"))))
-  (let [indices (.indices v)
+  (let [indices ^longs (.indices v)
         i       (Arrays/binarySearch indices target)]
     (if (<= 0 i)
       ; We found an exact hit
@@ -1372,7 +1374,7 @@
    (when-not (= (.count v) 0)
      (big-vector-chunks v 0)))
   ([^BigVector v, ^long chunk-id]
-   (when (< chunk-id (alength (.chunks v)))
+   (when (< chunk-id (alength ^objects (.chunks v)))
      (cons (big-vector-chunk v chunk-id)
            (lazy-seq (big-vector-chunks v (inc chunk-id)))))))
 
@@ -1382,7 +1384,7 @@
    (when-not (= (.count v) 0)
      (big-vector-seq v 0)))
   ([^BigVector v, ^long chunk-id]
-   (when (< chunk-id (alength (.chunks v)))
+   (when (< chunk-id (alength ^objects (.chunks v)))
      (concat (big-vector-chunk v chunk-id)
              (lazy-seq (big-vector-seq v (inc chunk-id)))))))
 
@@ -1390,7 +1392,7 @@
   "Takes a BigVector and loads all its chunks in parallel. Noop if already
   realized. Returns the BigVector."
   [^BigVector v]
-  (->> (range (alength (.chunks v)))
+  (->> (range (alength ^objects (.chunks v)))
        (pmap (partial big-vector-chunk v))
        dorun)
   v)
