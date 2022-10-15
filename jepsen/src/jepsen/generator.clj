@@ -436,6 +436,17 @@
       (tagged-literal 'unprintable (str gen))
       )))
 
+;; One thing we do often, and which is expensive, is stripping out the nemesis
+;; from the set of active threads using (complement #{:nemesis}). This type
+;; encapsulates that notion of "all but x", and allows us to specialize some
+;; expensive functions for speed.
+(defrecord AllBut [element]
+  clojure.lang.IFn
+  (invoke [_ x]
+    (if (= element x)
+      nil
+      x)))
+
 ;; Fair sets
 ;
 ; Our contexts need a set of free threads which supports an efficient way of
@@ -507,9 +518,11 @@
   "Takes a context and a process, and returns the thread which is executing
   that process."
   [context process]
-  (->> (:workers context)
-       (keep (fn [[t p]] (when (= process p) t)))
-       first))
+  (reduce-kv (fn [_ thread process2]
+               (when (= process process2)
+                 (reduced thread)))
+             nil
+             (:workers context)))
 
 (defn thread->process
   "Takes a context and a thread, and returns the process this thread is
@@ -899,13 +912,23 @@
                   :free-threads (.forked free-threads')
                   :workers      (persistent! workers')))))
 
+(defn on-threads-context-all-but
+  "A version of on-threads-context specialized for AllBut, removing a single
+  element--usually the nemesis."
+  [^AllBut all-but ctx]
+  (let [thread (.element all-but)]
+    (assoc ctx
+           :free-threads (.remove ^Set (:free-threads ctx) thread)
+           :workers      (dissoc (:workers ctx) thread))))
+
 (defn on-threads-context
   "Helper function to transform contexts for OnThreads. Takes a function or set
-  which returns true if a thread should be included in the context."
+  which returns true if a thread should be included in the context, or an
+  AllBut with a thread to remove."
   [f ctx]
-  (if (set? f)
-    (on-threads-context-set f ctx)
-    (on-threads-context-fn  f ctx)))
+  (cond (set? f)             (on-threads-context-set f ctx)
+        (instance? AllBut f) (on-threads-context-all-but f ctx)
+        true                 (on-threads-context-fn  f ctx)))
 
 (defrecord OnThreads [f gen]
   Generator
@@ -1038,9 +1061,7 @@
     (let [process (:process event)
           thread (process->thread ctx process)
           gen    (get gens thread fresh-gen)
-          ctx    (-> ctx
-                     (c/update :free-threads (partial c/filter #{thread}))
-                     (assoc :workers {thread process}))
+          ctx    (on-threads-context #{thread} ctx)
           gen'   (update gen test ctx event)]
       (EachThread. fresh-gen (assoc gens thread gen')))))
 
@@ -1143,7 +1164,7 @@
   process requesting an operation is :nemesis, routes to the nemesis generator;
   otherwise to the client generator."
   ([client-gen]
-   (on (complement #{:nemesis}) client-gen))
+   (on (AllBut. :nemesis) client-gen))
   ([client-gen nemesis-gen]
    (any (clients client-gen)
         (nemesis nemesis-gen))))
