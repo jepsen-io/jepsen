@@ -128,36 +128,71 @@
       (.close w)
       (:block-id w))))
 
-(defn roundtrip-big-vector!
+(defn check-big-vector!
   "Writes and reads a bigvector, ensuring it's equal."
   [v]
   (let [id (write-big-vector! v)]
     (with-open [h (open file)]
       (let [v2 (:data (read-block-by-id h id))]
-        ;(info :read-bigvec v2)
-        ; Count
-        (is (= (count v) (count v2)))
-        ; Via reduce
-        (is (= v (into [] v2)))
-        ; Via seq
-        (is (= v v2))
-        ; Via parallel reducers/fold
-        (is (= v (into [] (r/foldcat v2))))
-        ; Via nth
-        (doseq [i (range (count v))]
-          (is (= (nth v i) (nth v2 i))))
-        ; Hash
-        (is (= (hash v) (hash v2)))))))
+        (testing "equality"
+          ;(info :read-bigvec v2)
+          ; Count
+          (is (= (count v) (count v2)))
+          ; Via reduce
+          (is (= v (into [] v2)))
+          ; Via seq
+          (is (= v v2))
+          ; Via parallel reducers/fold
+          (is (= v (into [] (r/foldcat v2))))
+          ; Via nth
+          (doseq [i (range (count v))]
+            (is (= (nth v i) (nth v2 i)))))
 
-(deftest big-vector-test
-  (testing "empty"
-    (roundtrip-big-vector! []))
-  (testing "one"
-    (roundtrip-big-vector! [:x]))
-  (testing "six"
-    (roundtrip-big-vector! [:a :b :c :d :e :f]))
-  (testing "lots"
-    (roundtrip-big-vector! (vec (range 128)))))
+        (testing "hashing"
+          (is (= (hash v) (hash v2))))
+
+        (testing "conj"
+          (is (= (conj v ::x) (conj v2 ::x))))
+
+        (testing "assoc"
+          (when (pos? (count v))
+            (is (= (assoc v 0 ::x) (assoc v2 0 ::x)))
+            (let [i (dec (count v))]
+              (is (= (assoc v i ::x) (assoc v2 i ::x))))))
+
+        (testing "contains?"
+          (is (false? (contains? v2 -1)))
+          (when (pos? (count v))
+            (is (true? (contains? v2 0)))
+            (is (true? (contains? v2 (dec (count v))))))
+          (is (false? (contains? v2 (count v)))))
+
+        (testing "rseq"
+          (is (= (rseq v) (rseq v2))))
+
+        (testing "peek"
+          (is (= (peek v) (peek v2))))
+
+        (testing "pop"
+          (when (pos? (count v))
+            (is (= (pop v) (pop v2)))))
+
+        (testing "empty"
+          (let [e (empty v2)]
+            (is (= "jepsen.store.format.BigVector" (.getName (class e))))
+            (is (= 0 (count e)))
+            (is (= [] e))))
+        ))))
+
+(deftest ^:focus big-vector-test
+  (testing "0"
+    (check-big-vector! []))
+  (testing "1"
+    (check-big-vector! [:x]))
+  (testing "6"
+    (check-big-vector! [:a :b :c :d :e :f]))
+  (testing "128"
+    (check-big-vector! (vec (range 128)))))
 
 (deftest write-test-test
   (let [test {:history [:a :b :c]

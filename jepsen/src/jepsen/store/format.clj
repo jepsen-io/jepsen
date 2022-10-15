@@ -1040,7 +1040,6 @@
                      (* (count chunks)
                         (+ big-vector-index-size block-id-size)))
         buf (ByteBuffer/allocate data-size)]
-    (info :write-bigvec id :count element-count :chunks chunks)
     ; Write element count
     (.putLong buf element-count)
     ; Write chunks
@@ -1096,8 +1095,7 @@
                        chunks
                        chunk-writer))
             ; Chunk full; seal and start a fresh one
-            (do (info :sealing-chunk)
-                (.close chunk-writer)
+            (do (.close chunk-writer)
                 (let [chunks (conj chunks [completed-count
                                            (:block-id chunk-writer)])
                       completed-count (+ completed-count uncompleted-count)]
@@ -1201,6 +1199,16 @@
                        (combinef acc (fjjoin task)))
                      (combinef))))))
 
+  clojure.lang.Associative
+  (containsKey [this k]
+    (< -1 k count))
+
+  (entryAt [this k]
+    (nth this k))
+
+  (assoc [this k v]
+    (assoc (vec this) k v))
+
   clojure.lang.Counted
   (count [this]
     count)
@@ -1208,6 +1216,38 @@
   clojure.lang.IHashEq
   (hasheq [this]
     (hash (vec this)))
+
+  clojure.lang.IPersistentCollection
+  (cons [this x]
+    (conj (vec this) x))
+
+  ; Sure, I guess?
+  (empty [this]
+    (BigVector. handle 0
+                (long-array 0)
+                (int-array 0)
+                (object-array 0)
+                (object-array 0)))
+
+  (equiv [this other]
+    (or (identical? this other)
+        (when-not (nil? other)
+          (= (seq this) other))))
+
+  clojure.lang.IPersistentStack
+  (peek [this]
+    (when (pos? count)
+      (nth this (dec count))))
+
+  (pop [this]
+    (pop (vec this)))
+
+  clojure.lang.IPersistentVector
+  (length [this]
+    count)
+
+  (assocN [this i x]
+    (assoc (vec this) i x))
 
   clojure.lang.IReduce
   (reduce [this f]
@@ -1237,6 +1277,12 @@
           first-index    (aget indices chunk-id)
           chunk          (big-vector-chunk this chunk-id)]
       (nth chunk (- i first-index) not-found)))
+
+  clojure.lang.Reversible
+  (rseq [this]
+    (when-not (= 0 count)
+      (->> (range (dec (alength chunks)) -1 -1)
+           (mapcat (comp rseq (partial big-vector-chunk this))))))
 
   clojure.lang.Seqable
   (seq [this]
