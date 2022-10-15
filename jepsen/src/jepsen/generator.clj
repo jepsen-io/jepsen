@@ -374,6 +374,7 @@
             [clojure.core.reducers :as r]
             [clojure.tools.logging :refer [info warn error]]
             [clojure.pprint :as pprint :refer [pprint]]
+            [dom-top.core :refer [loopr]]
             [fipp.ednize :as fipp.ednize]
             [jepsen [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]])
@@ -841,9 +842,9 @@
   [f gen]
   (OnUpdate. f gen))
 
-(defn on-threads-context
-  "Helper function to transform contexts for OnThreads. Takes a function which
-  returns true if a thread should be included in the context."
+(defn on-threads-context-fn
+  "A version of on-threads-context which takes an arbitrary filtering function.
+  Runs in linear time."
   [f ctx]
   (let [; Filter free threads to just those we want
         free-threads  ^Set (:free-threads ctx)
@@ -877,6 +878,34 @@
                                 (transient workers)
                                 workers)))]
   (assoc ctx :free-threads free-threads', :workers workers')))
+
+(defn on-threads-context-set
+  "A version of on-threads-context which is optimized for explicit sets. Runs
+  in time proportional to the set, rather than the context size. This makes
+  e.g. Reserve more efficient."
+  [thread-set ctx]
+  (let [^Set free-threads (:free-threads ctx)
+        workers           (:workers ctx)]
+    (loopr [^Set free-threads' (.linear (Set.))
+            workers'           (transient {})]
+           [thread thread-set]
+           (recur (if (.contains free-threads thread)
+                    (.add free-threads' thread)
+                    free-threads')
+                  (if-let [process (get workers thread)]
+                    (assoc! workers' thread process)
+                    workers'))
+           (assoc ctx
+                  :free-threads (.forked free-threads')
+                  :workers      (persistent! workers')))))
+
+(defn on-threads-context
+  "Helper function to transform contexts for OnThreads. Takes a function or set
+  which returns true if a thread should be included in the context."
+  [f ctx]
+  (if (set? f)
+    (on-threads-context-set f ctx)
+    (on-threads-context-fn  f ctx)))
 
 (defrecord OnThreads [f gen]
   Generator
