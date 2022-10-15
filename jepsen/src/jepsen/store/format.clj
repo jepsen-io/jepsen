@@ -128,33 +128,84 @@
   When rest-ptr is 0, that indicates there is no more data remaining.
 
 
+  ## FressianStream (Type 4)
+
+  A FressianStream block allows us to write multiple Fressian-encoded values
+  into a single block. We represent it as:
+
+    | fressian data 1 ... | fressian data 2 ... | ...
+
+  Writers can write any number of Fressian-encoded values to the stream one
+  after the next. Readers start at the beginning and read values until the
+  block is exhausted. There is no count associated with this block type; it
+  must be inferred by reading all elements. We generally deserialize streams as
+  vectors to enable O(1) access and faster reductions over elements.
+
+  ## BigVector (Type 5)
+
+  Histories are chonky boys. 100K operations (each a map) are common, and it's
+  conceivable we might want to work with histories of tens of millions of
+  operations. We also want to write them incrementally, so that we can recover
+  from crashes. It's also nice to be able to deserialize small bits of the
+  history, or to reduce over it in parallel. To do this, we need a streaming
+  format for large vectors.
+
+  We write each chunk of the vector as a separate block. Then we refer to those
+  chunks with a BigVector, which stores some basic metadata about the vector as
+  a whole, and then pointers to each block. Its format is:
+
+       64        64        32          64         32
+    | count | index 1 | pointer 1 | index 2 | pointer 2 | ...
+
+  Count is the number of elements in the vector overall. Index 1 is always
+  0--the offset of the first element in the first chunk. Pointer 1 is the block
+  ID of the Fressian block which contains the first chunk's data. Index 2 is
+  the index of the first element in the second chunk, and pointer 2 is the
+  block ID of the second chunk's data, and so on.
+
+  Chunk data can be stored in a Fressian block, a FressianStream block, or
+  another BigVector.
+
+  Access to BigVectors looks very much like a regular Clojure vector. We
+  deserialize chunks on-demand, caching results as they're accessed. We can
+  offer O(1) `count` through the count field. We implement `nth` by finding the
+  chunk a given index belongs to and then looking up the index in that chunk.
+  Assoc works by assoc'ing into that particular chunk, leaving other chunks
+  unchanged.
+
   ## That's It
 
   There's a lot of obvious stuff I've left out here--metadata, top-level
-  integrity checks, garbage collection, large vector indices for
-  parallelization, etc etc... but I think we can actually skip almost all of it
-  and get a ton of benefit for the limited use case Jepsen needs.
+  integrity checks, garbage collection, etc etc... but I think we can
+  actually skip almost all of it and get a ton of benefit for the limited
+  use case Jepsen needs.
 
   1. Write the header.
 
-  2. Write the initial test map as a PartialMap block to block 1, with no
-  history or results. Write an index block pointing to 1 as the root.
+  2. Write an empty vector as block 1, for the history.
 
-  3. Write the history as a Fressian block to block 2.
+  3. Write the initial test map as a PartialMap block to block 2, pointing to
+  block 1 as the history. Write an index block pointing to 2 as the root.
 
-  4. Write a new PartialMap at block 3 with {:history (block-ref 2)}, and
-  rest-ptr 1. Write a new index block with block 3 as the root. This ensures
-  that if we crash after completing the history, but before starting the
-  analysis, we'll still be able to recover the history itself and retry the
-  analysis.
+  4. Write the history incrementally as the test proceeds. Write operations as
+  they occur to a new FressianStream block. Periodically, and at the end of the
+  history:
+
+    a. Seal that FressianStream block, writing the headers. Call that block id
+       B.
+    b. Write a new version of the history block with a new chunk appended: B.
+    c. Write a new index block with the new history block version.
+
+    This ensures that if we crash during the run, we can recover at least some
+  of the history up to the most recent checkpoint.
 
   5. Write the results as a PartialMap to blocks 4 and 5: 4 containing the
   :valid? field, and 5 containing the rest of the results.
 
   6. The test may contain state which changed by the end of the test, and we
-  might want to save that state. Write the entire test map again as block 6: a
-  Fressian block now referencing blocks 3 and 4 for the history and results.
-  Write a new index block with block 6 as the root.
+  might want to save that state. Write the entire test map again as block 6,
+  again using block 1 as the history, and now block 5 as the results map. Write
+  a new index block with block 6 as the root.
 
   To read this file, we:
 
@@ -164,7 +215,7 @@
 
   3. Read the index block into memory.
 
-  3. Look up the root block ID, use the index to work out its offset, read that
+  4. Look up the root block ID, use the index to work out its offset, read that
   block, and decode it into a lazy map structure.
 
   When it comes time to reference the results or history in that lazy map, we
@@ -179,6 +230,7 @@
                      [walk :as walk]]
             [clojure.data.fressian :as fress]
             [clojure.tools.logging :refer [info warn]]
+            [clojure.core.reducers :as r]
             [clojure.java.io :as io]
             [dom-top.core :refer [assert+]]
             [jepsen [util :as util :refer [map-vals]]
@@ -189,6 +241,7 @@
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io BufferedOutputStream
                     Closeable
+                    EOFException
                     File
                     InputStream
                     OutputStream
@@ -198,6 +251,11 @@
            (java.nio.channels FileChannel
                               FileChannel$MapMode)
            (java.nio.file StandardOpenOption)
+           (java.util Arrays
+                      Queue)
+           (java.util.concurrent ArrayBlockingQueue
+                                 ForkJoinTask)
+           (java.util.function Consumer)
            (java.util.zip CRC32)
            (jepsen.store.format FileOffsetOutputStream)
            (org.fressian.handlers WriteHandler
@@ -216,8 +274,12 @@
   0)
 
 (def version
-  "The current file version."
-  0)
+  "The current file version.
+  
+  Version 0 was the first version of the file format.
+  
+  Version 1 added support for FressianStream and BigVector blocks."  
+  1)
 
 (def version-size
   "Bytes it takes to store a version."
@@ -273,7 +335,9 @@
   "A map of integers to block types."
   {(short 1) :block-index
    (short 2) :fressian
-   (short 3) :partial-map})
+   (short 3) :partial-map
+   (short 4) :fressian-stream
+   (short 5) :big-vector})
 
 (def block-type->short
   "A map of block types to integer codes."
@@ -282,6 +346,14 @@
 (def block-header-size
   "How long is a block header?"
   (+ block-len-size block-checksum-size block-type-size))
+
+(def big-vector-count-size
+  "How many bytes do we use to store a bigvector's count?"
+  8)
+  
+(def big-vector-index-size
+  "How many bytes do we use to store a bigvector element's index?"
+  8)
 
 ;; Perf tuning
 
@@ -294,7 +366,12 @@
   "How many bytes should we buffer before writing Fressian data to disk?"
   16384) ; 16K
 
-(defrecord BlockRef [id])
+(def big-vector-chunk-size
+  "How many elements should we write to a chunk of a BigVector before starting
+  a new one?"
+  16384)
+
+(defrecord BlockRef [^int id])
 
 (defn block-ref
   "Constructs a new BlockRef object pointing to the given block ID."
@@ -330,7 +407,7 @@
 (defn close!
   "Closes a Handle"
   [handle]
-  (.close ^FileChannel (:file handle))
+  (.close handle)
   nil)
 
 (defn flush!
@@ -406,14 +483,19 @@
   handle)
 
 (defn check-version
-  "Takes a Handle and reads the version, ensuring it matches."
+  "Takes a Handle and reads the version, ensuring it's a version we can
+  decode."
   [handle]
   (let [file ^FileChannel (:file handle)
         buf  (ByteBuffer/allocate version-size)]
     (let [read-bytes (.read file buf version-offset)
           fversion   (.getInt buf 0)]
+      ; TODO: what's up with this conditional?
       (when-not (= version-size read-bytes)
-                (= version fversion)
+        (throw+ {:type     ::version-incomplete
+                 :expected version-size
+                 :actual   read-bytes}))
+      (when-not (contains? #{0 1} fversion)
         (throw+ {:type      ::version-mismatch
                  :expected  version
                  :actual    (if (= -1 read-bytes)
@@ -650,7 +732,9 @@
 
 (declare read-block-index-block
          read-fressian-block
-         read-partial-map-block)
+         read-partial-map-block
+         read-fressian-stream-block
+         read-big-vector-block)
 
 (defn read-block-by-offset
   "Takes a Handle and the offset of a block. Reads the block header, validates
@@ -669,9 +753,11 @@
      :offset offset
      :length (block-header-length header)
      :data   (case type
-               :block-index (read-block-index-block handle data)
-               :fressian    (read-fressian-block    handle data)
-               :partial-map (read-partial-map-block handle data))}))
+               :block-index     (read-block-index-block     handle data)
+               :fressian        (read-fressian-block        handle data)
+               :partial-map     (read-partial-map-block     handle data)
+               :fressian-stream (read-fressian-stream-block handle data)
+               :big-vector      (read-big-vector-block      handle data))}))
 
 ;; Block indices
 
@@ -775,12 +861,13 @@
   handle)
 
 (defn read-block-by-id
-  "Takes a handle and a logical block id. Assumes that the handle has a
-  loaded block id. Looks up the offset for the given block and reads it using
-  read-block-by-offset (which includes verifying the checksum)."
+  "Takes a handle and a logical block id. Looks up the offset for the given
+  block and reads it using read-block-by-offset (which includes verifying the
+  checksum)."
   [handle id]
   (assert (instance? Integer id)
           (str "Block ids are integers, not " (class id) " - " (pr-str id)))
+  (prep-read! handle)
   (if-let [offset (get-in @(:block-index handle) [:blocks id])]
     (read-block-by-offset handle offset)
     (throw+ {:type             ::block-not-found
@@ -794,127 +881,6 @@
   (prep-read! handle)
   (when-let [root (:root @(:block-index handle))]
     (read-block-by-id handle root)))
-
-;; Garbage collection
-
-(declare partial-map-rest-id)
-
-(defn block-references
-  "Takes a handle and a block ID, and returns the set of all block IDs which
-  that block references. Right now we do this by parsing the block data; later
-  we might want to move references into block headers. With no block ID,
-  returns references from the root."
-  ([handle]
-   (if-let [root (:root @(:block-index handle))]
-     (conj (block-references handle root) root)
-     #{}))
-  ([handle block-id]
-   (let [block (read-block-by-id handle block-id)
-         shallow-refs
-         (case (:type block)
-           :block-index #{}
-           :fressian    (let [refs (atom #{})]
-                          (walk/postwalk (fn finder [x]
-                                           (when (instance? BlockRef x)
-                                             (swap! refs conj (:id x)))
-                                           x)
-                                         (:data block))
-                          @refs)
-           :partial-map (if-let [id (partial-map-rest-id (:data block))]
-                          #{(partial-map-rest-id (:data block))}
-                          #{}))]
-     (->> shallow-refs
-          (map (partial block-references handle))
-          (cons shallow-refs)
-          (reduce set/union)))))
-
-(defn copy!
-  "Takes two handles: a reader and a writer. Copies the root and any other
-  referenced blocks from reader to writer."
-  [r w]
-  (prep-read! r)
-  (prep-write! w)
-  (when-let [root (:root @(:block-index r))]
-    (let [r-file ^FileChannel (:file r)
-          w-file ^FileChannel (:file w)
-          block-index @(:block-index r)
-          ; What blocks are reachable from the root?
-          block-ids (block-references r)
-          ; Fetch lengths and offsets for those block IDs
-          headers (->> block-ids
-                       (map (fn get-header [block-id]
-                              (let [offset (get-in block-index
-                                                   [:blocks block-id])
-                                    header (read-block-header r offset)]
-                                [block-id
-                                 {:length (block-header-length header)
-                                  :offset offset}])))
-                       (into {}))
-          ; Order these: root first, then by size, small blocks first
-          block-ids (->> (disj block-ids root)
-                         (sort-by (comp :length headers))
-                         (cons root))
-          ; Work out new block index. Bit of a hack here: we want to write our
-          ; block index at the start of the file, which means all the other
-          ; offsets depend on it, so we need to know exactly how big it is.
-          ; We'll use block-index-size, which doesn't actually care about the
-          ; blocks themselves; just how many there are. We add an extra `nil`
-          ; block for the block index block itself.
-          block-index-size (+ block-header-size
-                              (block-index-data-size
-                                {:blocks (cons nil block-ids)}))
-          ; Now work out the IDS and offsets for our new index
-          block-index'
-          (loop [; Offset in new file
-                 offset       (+ first-block-offset
-                                 block-index-size)
-                 ; Remaining old block IDs
-                 block-ids    block-ids
-                 ; New block index
-                 block-index' {:blocks {}}]
-            (if-not (seq block-ids)
-              block-index'
-              (let [block-id (first block-ids)
-                    length   (:length (get headers block-id))
-                    offset'  (+ offset length)]
-                (recur (+ offset length)
-                       (next block-ids)
-                       (cond-> (assoc-in block-index'
-                                         [:blocks block-id]
-                                         offset)
-                         ; If this is the root block, update root too
-                         (= root block-id) (assoc :root block-id))))))]
-          ; Clobber writer's block index
-          (reset! (:block-index w) block-index')
-          ; Write block index. Make sure we're actually starting where we think
-          ; we are...
-          (assert (= first-block-offset (next-block-offset w)))
-          (write-block-index! w)
-          ; And that we finish at the offset we thought we would...
-          (assert+ (= (+ first-block-offset block-index-size)
-                        (next-block-offset w))
-                     {:type     ::unexpected-block-index-size
-                      :expected block-index-size
-                      :actual   (- (next-block-offset w) first-block-offset)})
-
-          ; Copy remaining blocks in order
-          (.position w-file ^long (+ first-block-offset
-                                     block-index-size))
-          (doseq [block-id block-ids]
-            (let [{:keys [offset length]} (get headers block-id)
-                  copied (.transferTo r-file offset length w-file)]
-              (when-not (= length copied)
-                (throw+ {:type            ::copy-failed
-                         :expected-bytes  length
-                         :copied-bytes    copied})))))))
-
-(defn gc!
-  "Garbage-collects a file (anything that works with io/file) in-place."
-  [file]
-  (write-atomic! [tmp (io/file file)]
-    (with-open [r ^Closeable (open file)
-                w ^Closeable (open tmp)]
-      (copy! r w))))
 
 ;; Fressian blocks
 
@@ -966,6 +932,7 @@
         data-size   (write-fressian-to-file!
                       (:file handle) data-offset checksum data)
         ; Construct a ByteBuffer over the region we just wrote
+        ;TODO: unused?
         data-buf    (read-file (:file handle) data-offset data-size)
         ; And build our header
         header      (block-header-for-length-and-checksum!
@@ -975,16 +942,17 @@
   handle))
 
 (defn write-fressian-block!
-  "Takes a handle and some Clojure data. Writes that data to a Fressian block
-  at the end of the file, records the new block in the handle's block index,
-  and returns the ID of the newly written block."
-  [handle data]
-  (let [offset (next-block-offset handle)
-        id     (new-block-id! handle)]
-    (-> handle
-        (write-fressian-block!* offset data)
-        (assoc-block! id offset))
-    id))
+  "Takes a handle, an optional block ID, and some Clojure data. Writes that
+  data to a Fressian block at the end of the file, records the new block in the
+  handle's block index, and returns the ID of the newly written block."
+  ([handle data]
+   (write-fressian-block! handle (new-block-id! handle) data))
+  ([handle id data]
+   (let [offset (next-block-offset handle)]
+     (-> handle
+         (write-fressian-block!* offset data)
+         (assoc-block! id offset))
+     id)))
 
 (defn read-fressian-block
   "Takes a handle and a ByteBuffer of data from a Fressian block. Returns its
@@ -995,6 +963,400 @@
                 r  ^Closeable (jsf/reader
                                 is {:handlers fressian-read-handlers})]
       (fress/read-object r))))
+
+;; Fressian stream blocks
+
+(defrecord FressianStreamBlockWriter
+  [handle
+   ^int block-id
+   ^long offset
+   ^CRC32 checksum
+   ^FileOffsetOutputStream file-offset-output-stream
+   ^BufferedOutputStream buffered-output-stream
+   ^Closeable fressian-writer]
+
+  Closeable
+  (close [this]
+    (.close fressian-writer)
+    ; We have to make sure anything we wrote to the stream is actually flushed
+    (.flush buffered-output-stream)
+    (.close file-offset-output-stream)
+    ; Now we write the block header
+    (let [data-size (.bytesWritten file-offset-output-stream)
+          header    (block-header-for-length-and-checksum!
+                      :fressian-stream data-size checksum)]
+      (write-block-header! handle offset header)
+      (assoc-block! handle block-id offset))))
+
+(defn fressian-stream-block-writer!
+  "Takes a handle. Creates a new block ID, and prepares to write a new
+  FressianStream block at the end of the file. Returns a
+  FressianStreamBlockWriter which can be used to write elements to the
+  FressianStream. When closed, the writer writes the block header and updates
+  the handle's block index to refer to the new block."
+  [handle]
+  (let [offset      (next-block-offset handle)
+        data-offset (+ offset block-header-size)
+        block-id    (new-block-id! handle)
+        checksum    (CRC32.)
+        file        (:file handle)
+        foos        (FileOffsetOutputStream. file data-offset checksum)
+        bos         (BufferedOutputStream. foos fressian-buffer-size)
+        fw          (jsf/writer bos {:handlers fressian-write-handlers})]
+    (FressianStreamBlockWriter. handle block-id offset checksum foos bos fw)))
+
+(defn append-to-fressian-stream-block!
+  "Takes a FressianStreamBlockWriter and a Clojure value. Appends that value as
+  Fressian to the stream. Returns writer."
+  [^FressianStreamBlockWriter writer data]
+  (fress/write-object (.fressian-writer writer) data)
+  writer)
+
+(defn read-fressian-stream-block
+  "Takes a handle and a ByteBuffer of data from a FressianStream block. Returns
+  its contents as a vector."
+  [handle ^ByteBuffer data]
+  (jsf/postprocess-fressian
+    (with-open [is (bs/to-input-stream data)
+                r  ^Closeable (jsf/reader
+                                is {:handlers fressian-read-handlers})]
+      (loop [v (transient [])]
+        (let [element (try (fress/read-object r)
+                           (catch EOFException _ ::eof))]
+              (if (identical? element ::eof)
+                (persistent! v)
+                (recur (conj! v element))))))))
+
+;; BigVector blocks
+
+(defn write-big-vector-block!
+  "Takes a handle, a block ID, a count, and a vector of [initial-index
+  block-id] chunks. Writes a BigVector block with the given count and chunks to
+  the end of the file. Records the freshly written block in the handle's block
+  index, and returns ID."
+  [handle id element-count chunks]
+  (let [offset (next-block-offset handle)
+        data-size (+ big-vector-count-size
+                     (* (count chunks)
+                        (+ big-vector-index-size block-id-size)))
+        buf (ByteBuffer/allocate data-size)]
+    (info :write-bigvec id :count element-count :chunks chunks)
+    ; Write element count
+    (.putLong buf element-count)
+    ; Write chunks
+    (doseq [[initial-index block-id] chunks]
+      (.putLong buf initial-index)
+      (.putInt buf block-id))
+    (.flip buf)
+    (write-block! handle offset :big-vector buf)
+    (assoc-block! handle id offset)
+    id))
+
+(defrecord BigVectorBlockWriter
+  [^int block-id, ^Queue queue, worker]
+  Closeable
+  (close [this]
+    (.put queue ::finished)
+    @worker))
+
+(defn big-vector-block-writer-worker!
+  "Loop which writes values from a BigVectorBlockWriter's queue to disk."
+  [handle block-id elements-per-chunk ^Queue queue]
+  (try
+    (loop [; Number of elements written to completed blocks. We use
+           ; this for the initial block index of each streaming
+           ; block.
+           completed-count 0
+           ; How many elements have we written to the current,
+           ; uncompleted chunk?
+           uncompleted-count 0
+           ; Vector of [initial-index block-id] chunks
+           chunks []
+           ; Streaming block writer for current chunk
+           ^Closeable chunk-writer
+           (fressian-stream-block-writer! handle)]
+      ; Write elements
+      (let [element (.take queue)]
+        (if (= ::finished element)
+          ; Wrap up!
+          (do (.close chunk-writer)
+              (let [chunks (conj chunks [completed-count
+                                         (:block-id chunk-writer)])]
+                (write-big-vector-block! handle
+                                         block-id
+                                         (+ completed-count uncompleted-count)
+                                         chunks)
+                (write-block-index! handle)))
+          ; Write element
+          (if (< uncompleted-count elements-per-chunk)
+            ; Room in this chunk
+            (do (append-to-fressian-stream-block! chunk-writer element)
+                (recur completed-count
+                       (inc uncompleted-count)
+                       chunks
+                       chunk-writer))
+            ; Chunk full; seal and start a fresh one
+            (do (info :sealing-chunk)
+                (.close chunk-writer)
+                (let [chunks (conj chunks [completed-count
+                                           (:block-id chunk-writer)])
+                      completed-count (+ completed-count uncompleted-count)]
+                  (write-big-vector-block! handle
+                                           block-id
+                                           completed-count
+                                           chunks)
+                  (write-block-index! handle)
+                  (let [writer' (fressian-stream-block-writer! handle)]
+                    (append-to-fressian-stream-block! writer' element)
+                    (recur completed-count 1 chunks writer'))))))))))
+
+(defn big-vector-block-writer!
+  "Takes a handle, a optional block ID, and the maximum number of elements per
+  chunk. Returns a BigVectorBlockWriter which can have elements appended to it
+  via append-to-big-vector-block!. Those elements, in turn, are appended to a
+  series of newly created FressianStream blocks, each of which is stitched
+  together into a BigVector block with the given ID. As each chunk of writes is
+  finished, the writer automatically writes a new block index, ensuring we can
+  recover at least part of the history from crashes.
+
+  The writer is asynchronous: it internally spawns a thread for serialization
+  and IO. Appends to the writer are transferred to the IO thread via a
+  queue; the IO thread then writes them to disk. Closing the
+  writer blocks until the transfer queue is exhausted."
+  ([handle elements-per-chunk]
+   (big-vector-block-writer! handle (new-block-id! handle) elements-per-chunk))
+  ([handle block-id elements-per-chunk]
+   ; The queue here is twice the size of a chunk--we don't want to sprint ahead
+   ; of the writer *too* far, but we definitely need to buffer at least a full
+   ; chunk while the previous chunk is being sealed off.
+   (let [queue (ArrayBlockingQueue. (* 2 elements-per-chunk))
+         worker (future (big-vector-block-writer-worker! handle
+                                                         block-id
+                                                         elements-per-chunk
+                                                         queue))]
+     (BigVectorBlockWriter. block-id queue worker))))
+
+(defn append-to-big-vector-block!
+  "Appends an element to a BigVector block writer. This function is
+  asynchronous and returns as soon as the writer's queue has accepted the
+  element. Close the writer to complete the process. Returns writer."
+  [^BigVectorBlockWriter w element]
+  (.put (.queue w) element)
+  w)
+
+(declare big-vector-chunk
+         big-vector-chunk-id
+         big-vector-chunks
+         big-vector-seq)
+
+(defn assoc-array
+  "Takes an object array a, an index i, and an object x. Returns a copy of a
+  with i = x. Like assoc on vectors, but for arrays, basically."
+  [a i x]
+  (let [n  (alength a)
+        a' (object-array n)]
+    (System/arraycopy a 0 a' 0 n)
+    (aset a' i x)
+    a'))
+
+(defn fjjoin
+  "Join a ForkJoin task"
+  [^ForkJoinTask task]
+  (.join task))
+
+; This provides a lazy view of a BigVector. It includes a handle, a count of
+; elements, a long array of the initial index for each chunk (which we use to
+; look up which chunk owns a given index), an int array of the IDs for each
+; chunk, and an array of chunks--each itself a vector (or similar). Chunks are
+; loaded lazily on first access, after which they're cached in the chunk array.
+(deftype BigVector [handle
+                    ^long     count
+                    ; Each of these arrays is one per chunk
+                    ^longs    indices
+                    ^ints     block-ids
+                    ^objects  chunks
+                    ; We use this array to prevent concurrent readers from
+                    ; racing to load a single chunk.
+                    ^objects  chunk-locks]
+  ; We support parallel reduction over each chunk.
+  clojure.core.reducers.CollFold
+  (coll-fold [this n combinef reducef]
+    (if (zero? count)
+      (combinef)
+      ; Spawn forkjoin tasks for each chunk
+      (letfn [(chunk-task [chunk-id]
+                (doto (ForkJoinTask/adapt
+                        ^Callable (fn task []
+                                    (r/coll-fold (big-vector-chunk this
+                                                                   chunk-id)
+                                                 n
+                                                 combinef
+                                                 reducef)))
+                    .fork))]
+        ; Spawn forkjoin tasks for each chunk
+        (->> (range (alength chunks))
+             (mapv chunk-task)
+             ; Then combine results
+             (reduce (fn [acc task]
+                       (combinef acc (fjjoin task)))
+                     (combinef))))))
+
+  clojure.lang.Counted
+  (count [this]
+    count)
+
+  clojure.lang.IHashEq
+  (hasheq [this]
+    (hash (vec this)))
+
+  clojure.lang.IReduce
+  (reduce [this f]
+    (.reduce this f (f)))
+
+  clojure.lang.IReduceInit
+  (reduce [this f init]
+    (let [; We need to wrap f to determine if it terminated early due to
+          ; returning a reduced value. We *double* wrap these, then do a nested
+          ; reduce over chunks.
+          wrapped-f (fn wrapper [acc x]
+                      (let [res (f acc x)]
+                        (if (reduced? res)
+                          (reduced res)
+                          res)))]
+      (reduce (fn red [acc chunk]
+                (reduce wrapped-f acc chunk))
+              init
+              (big-vector-chunks this))))
+
+  clojure.lang.Indexed
+  (nth [this i]
+    (nth this i nil))
+
+  (nth [this i not-found]
+    (let [chunk-id       (big-vector-chunk-id this i)
+          first-index    (aget indices chunk-id)
+          chunk          (big-vector-chunk this chunk-id)]
+      (nth chunk (- i first-index) not-found)))
+
+  clojure.lang.Seqable
+  (seq [this]
+    (big-vector-seq this))
+
+  clojure.lang.Sequential
+
+  ; I'm not sure this will be heavily used, but it *does* seem basic enough
+  ; that we might as well. If these get used in ways that matter, there are
+  ; some obvious things we can do to make them faster.
+  Iterable
+  (forEach [this consumer]
+    (.forEach (seq this) consumer))
+
+  (iterator [this]
+    (.iterator (seq this)))
+
+  (spliterator [this]
+    (.spliterator (seq this)))
+
+  Object
+  (equals [this other]
+    (and (sequential? other)
+         (= (seq this) other)))
+
+  ; If you ever actually do this, uhhhhh, I have questions. I guess we could,
+  ; like, figure out a streaming hashcode equivalent to however seqs/vectors
+  ; work, and maintain it during the writing process.
+  (hashCode [this]
+    (.hashCode (vec this)))
+
+  ; Again, if you call this for anything other than debugging, what the fuck
+  (toString [this]
+    (str (vec this))))
+
+(defmethod print-method BigVector [v ^java.io.Writer w]
+  (.write w (str v)))
+
+(defn big-vector-load-chunk
+  "Takes a BigVector and loads the given chunk, by chunk number."
+  [^BigVector v, ^long chunk-id]
+  (let [block-id (aget (.block-ids v) chunk-id)
+        chunk    (:data (read-block-by-id (.handle v) block-id))
+        chunks   (.chunks v)]
+    chunk))
+
+(defn big-vector-chunk
+  "Takes a BigVector and a chunk ID. Returns the chunk for that chunk ID,
+  loading it if it's not yet in cache. May be invoked concurrently on the same
+  chunk ID; only a single thread will actually decode the chunk."
+  [^BigVector v, ^long chunk-id]
+  (let [chunks (.chunks v)]
+    (or (aget chunks chunk-id)
+        (let [locks (.chunk-locks v)]
+          (locking (aget locks chunk-id)
+            ; Might have been loaded while we were waiting for the lock
+            (or (aget chunks chunk-id)
+                ; Nope, let's load
+                (let [chunk (big-vector-load-chunk v chunk-id)]
+                  ; Cache
+                  (locking chunks
+                    (aset chunks chunk-id chunk))
+                  chunk)))))))
+
+(defn ^long big-vector-chunk-id
+  "Takes a BigVector and an index in it, and returns the chunk ID for that
+  index. Throws ArrayIndexOutOfBoundsException if the index is too large."
+  [^BigVector v ^long target]
+  (when-not (< -1 target (.count v))
+    (throw (ArrayIndexOutOfBoundsException.
+             (str "Index " target " out of bounds for BigVector of " (.count v)
+                  " elements"))))
+  (let [indices (.indices v)
+        i       (Arrays/binarySearch indices target)]
+    (if (<= 0 i)
+      ; We found an exact hit
+      i
+      ; We found (- insertion-point) - 1, where insertion point is the index of
+      ; the first element *greater* than the key. The chunk we want is the
+      ; chunk *before* that, so we add 2 to the negative index here.
+      (-> i (unchecked-add 2) unchecked-negate))))
+
+(defn big-vector-chunks
+  "Takes a BigVector and yields a lazy seq of its chunks."
+  ([^BigVector v]
+   (when-not (= (.count v) 0)
+     (big-vector-chunks v 0)))
+  ([^BigVector v, ^long chunk-id]
+   (when (< chunk-id (alength (.chunks v)))
+     (cons (big-vector-chunk v chunk-id)
+           (lazy-seq (big-vector-chunks v (inc chunk-id)))))))
+
+(defn big-vector-seq
+  "Takes a BigVector and returns a lazy seq of its elements."
+  ([^BigVector v]
+   (when-not (= (.count v) 0)
+     (big-vector-seq v 0)))
+  ([^BigVector v, ^long chunk-id]
+   (when (< chunk-id (alength (.chunks v)))
+     (concat (big-vector-chunk v chunk-id)
+             (lazy-seq (big-vector-seq v (inc chunk-id)))))))
+
+(defn read-big-vector-block
+  "Takes a handle and a ByteBuffer for a BigVector block. Returns a lazy vector
+  representing its data."
+  [handle ^ByteBuffer buf]
+  (let [count       (.getLong buf)
+        chunk-count (/ (- (.limit buf) big-vector-count-size)
+                       (+ big-vector-index-size block-id-size))
+        indices     (long-array chunk-count)
+        block-ids   (int-array chunk-count)
+        chunks      (object-array chunk-count)
+        chunk-locks (object-array (take chunk-count (repeatedly #(Object.))))]
+    ; Read chunk indices and block IDs
+    (loop [i 0]
+      (if (= i chunk-count)
+        (BigVector. handle count indices block-ids chunks chunk-locks)
+        (do (aset-long indices   i (.getLong buf))
+            (aset-int  block-ids i (.getInt buf))
+            (recur (inc i)))))))
 
 ;; Partial map blocks
 
@@ -1110,33 +1472,50 @@
 ;; Test-specific writing
 
 (defn write-initial-test!
-  "Writes an initial test to a handle, making the test the root. Called when we
-  first begin a test. Returns test."
+  "Writes an initial test to a handle, making the test the root. Creates an
+  (initially nil) block for the history. Called when we first begin a test.
+  Returns test with additional metadata, so we can write the history and
+  results later."
   [handle test]
-  (let [id (write-fressian-block! handle test)]
-    (-> handle (set-root! id) write-block-index!))
-  test)
-
-(defn write-history!
-  "Takes a handle and a test, and appends its :history as a block, then writes
-  the test using that history as the new root. Returns test with additional
-  metadata, so that future writes of this test can refer to this history
-  block."
-  [handle test]
-  (prep-read! handle)
-  (let [history    (:history test)
-        history-id (write-fressian-block! handle history)
-        test-id    (write-fressian-block!
+  (let [history-id (write-fressian-block! handle nil)
+        id         (write-fressian-block!
                      handle (assoc test :history (block-ref history-id)))]
-    (-> handle (set-root! test-id) write-block-index!)
+    (-> handle (set-root! id) write-block-index!)
     (vary-meta test assoc ::history-id history-id)))
 
-(defn write-results!
-  "Takes a handle and a test with a ::history-id metadata key (presumably
-  provided by write-history!), and appends its :results as a partial map block:
-  :valid? in the top tier, and other results below. Writes test using those
-  results and history blocks. Returns test, with ::results-id metadata pointing
-  to the block ID of these results."
+(defn ^BigVectorBlockWriter test-history-writer!
+  "Takes a handle and a test created with write-initial-test!, and returns a
+  BigVectorBlockWriter for writing operations to the history. Append elements
+  using `append-to-big-vector-block!`, and .close the writer when done."
+  ([handle test]
+   (test-history-writer! handle test big-vector-chunk-size))
+  ([handle test chunk-size]
+   (let [history-id  (::history-id (meta test))
+         _           (assert+ (integer? history-id)
+                              {:type ::no-history-id-in-meta})]
+     (big-vector-block-writer! handle
+                               history-id
+                               chunk-size))))
+
+(defn write-test-with-history!
+  "Takes a handle and a test created with write-initial-test!, and writes it
+  again as the root. Used for rewriting a test after running it, but before
+  analysis, in case there's state that changed. Returns test."
+  [handle test]
+  (let [history-id  (::history-id (meta test))
+        _           (assert+ (integer? history-id)
+                             {:type ::no-history-id-in-meta})
+        test-id     (write-fressian-block!
+                      handle
+                      (assoc test :history (block-ref history-id)))]
+    (-> handle (set-root! test-id) write-block-index!)
+    test))
+
+(defn write-test-with-results!
+  "Takes a handle and a test created with write-initial-test!, and appends its
+  :results as a partial map block: :valid? in the top tier, and other results
+  below. Writes test using those results and history blocks. Returns test, with
+  ::results-id metadata pointing to the block ID of these results."
   [handle test]
   (prep-read! handle)
   (let [history-id  (::history-id (meta test))
@@ -1157,7 +1536,8 @@
 
 (defn write-test!
   "Writes an entire test map to a handle, making the test the root. Useful for
-  re-writing a completed test that's already in memory. Returns handle."
+  re-writing a completed test that's already in memory, and migrating existing
+  Fressian tests to the new format. Returns handle."
   [handle test]
   (let [; Where will we store the remainder of the :results field?
         more-results-id (new-block-id! handle)
@@ -1232,3 +1612,133 @@
                results
                {::history-id (:id h)
                 ::results-id (:id r)})))
+
+
+;; Garbage collection
+
+(declare partial-map-rest-id)
+
+(defn find-references
+  "A little helper function for finding BlockRefs in a nested data structure.
+  Returns the IDs of all BlockRefs."
+  [x]
+  (let [refs (atom #{})]
+    (walk/postwalk (fn find [x]
+                     (when (instance? BlockRef x)
+                       (swap! refs conj (:id x)))
+                     x)
+                   x)
+    @refs))
+
+(defn block-references
+  "Takes a handle and a block ID, and returns the set of all block IDs which
+  that block references. Right now we do this by parsing the block data; later
+  we might want to move references into block headers. With no block ID,
+  returns references from the root."
+  ([handle]
+   (if-let [root (:root @(:block-index handle))]
+     (conj (block-references handle root) root)
+     #{}))
+  ([handle block-id]
+   (let [block (read-block-by-id handle block-id)
+         shallow-refs
+         (case (:type block)
+           :block-index #{}
+           :fressian (find-references (:data block))
+           :partial-map (if-let [id (partial-map-rest-id (:data block))]
+                          #{id}
+                          #{})
+           :fressian-stream (find-references (:data block))
+           :big-vector (set (.block-ids ^BigVector (:data block))))]
+     (->> shallow-refs
+          (map (partial block-references handle))
+          (cons shallow-refs)
+          (reduce set/union)))))
+
+(defn copy!
+  "Takes two handles: a reader and a writer. Copies the root and any other
+  referenced blocks from reader to writer."
+  [r w]
+  (prep-read! r)
+  (prep-write! w)
+  (when-let [root (:root @(:block-index r))]
+    (let [r-file ^FileChannel (:file r)
+          w-file ^FileChannel (:file w)
+          block-index @(:block-index r)
+          ; What blocks are reachable from the root?
+          block-ids (block-references r)
+          ; Fetch lengths and offsets for those block IDs
+          headers (->> block-ids
+                       (map (fn get-header [block-id]
+                              (let [offset (get-in block-index
+                                                   [:blocks block-id])
+                                    header (read-block-header r offset)]
+                                [block-id
+                                 {:length (block-header-length header)
+                                  :offset offset}])))
+                       (into {}))
+          ; Order these: root first, then by size, small blocks first
+          block-ids (->> (disj block-ids root)
+                         (sort-by (comp :length headers))
+                         (cons root))
+          ; Work out new block index. Bit of a hack here: we want to write our
+          ; block index at the start of the file, which means all the other
+          ; offsets depend on it, so we need to know exactly how big it is.
+          ; We'll use block-index-size, which doesn't actually care about the
+          ; blocks themselves; just how many there are. We add an extra `nil`
+          ; block for the block index block itself.
+          block-index-size (+ block-header-size
+                              (block-index-data-size
+                                {:blocks (cons nil block-ids)}))
+          ; Now work out the IDS and offsets for our new index
+          block-index'
+          (loop [; Offset in new file
+                 offset       (+ first-block-offset
+                                 block-index-size)
+                 ; Remaining old block IDs
+                 block-ids    block-ids
+                 ; New block index
+                 block-index' {:blocks {}}]
+            (if-not (seq block-ids)
+              block-index'
+              (let [block-id (first block-ids)
+                    length   (:length (get headers block-id))
+                    offset'  (+ offset length)]
+                (recur (+ offset length)
+                       (next block-ids)
+                       (cond-> (assoc-in block-index'
+                                         [:blocks block-id]
+                                         offset)
+                         ; If this is the root block, update root too
+                         (= root block-id) (assoc :root block-id))))))]
+          ; Clobber writer's block index
+          (reset! (:block-index w) block-index')
+          ; Write block index. Make sure we're actually starting where we think
+          ; we are...
+          (assert (= first-block-offset (next-block-offset w)))
+          (write-block-index! w)
+          ; And that we finish at the offset we thought we would...
+          (assert+ (= (+ first-block-offset block-index-size)
+                        (next-block-offset w))
+                     {:type     ::unexpected-block-index-size
+                      :expected block-index-size
+                      :actual   (- (next-block-offset w) first-block-offset)})
+
+          ; Copy remaining blocks in order
+          (.position w-file ^long (+ first-block-offset
+                                     block-index-size))
+          (doseq [block-id block-ids]
+            (let [{:keys [offset length]} (get headers block-id)
+                  copied (.transferTo r-file offset length w-file)]
+              (when-not (= length copied)
+                (throw+ {:type            ::copy-failed
+                         :expected-bytes  length
+                         :copied-bytes    copied})))))))
+
+(defn gc!
+  "Garbage-collects a file (anything that works with io/file) in-place."
+  [file]
+  (write-atomic! [tmp (io/file file)]
+    (with-open [r ^Closeable (open file)
+                w ^Closeable (open tmp)]
+      (copy! r w))))

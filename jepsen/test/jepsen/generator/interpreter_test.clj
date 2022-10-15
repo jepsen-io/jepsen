@@ -3,17 +3,19 @@
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen.generator :as gen]
             [jepsen.generator.interpreter :refer :all]
-            [jepsen [client :refer [Client]]
+            [jepsen [core :as jepsen]
+                    [client :refer [Client]]
                     [nemesis :refer [Nemesis]]
-                    [util :as util]]
+                    [util :as util]
+                    [tests :as tests]]
             [knossos.op :as op]
             [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def base-test
-  {:nodes  ["n1" "n2" "n3" "n4" "n5"]
-   :concurrency 10})
+  (assoc tests/noop-test
+         :concurrency 10))
 
 (defn ok-client
   []
@@ -37,6 +39,7 @@
   (let [time-limit     1
         sleep-duration 1/10
         test (assoc base-test
+              :name "interpreter-run-test"
               :client (reify Client
                         (open! [this test node] this)
                         (setup! [this test])
@@ -69,12 +72,14 @@
                 (gen/sleep sleep-duration)
                 (gen/log "Done recovering; final read")
                 (gen/clients (gen/until-ok (repeat {:f :read})))))
-        h    (util/with-relative-time (run! test))
+        h    (:history (jepsen/run! test))
         nemesis-ops (filter (comp #{:nemesis} :process) h)
         client-ops  (remove (comp #{:nemesis} :process) h)]
 
     (testing "general structure"
-      (is (vector? h))
+      (is (sequential? h))
+      (is (indexed? h))
+      (is (counted? h))
       (is (= #{:invoke :ok :info :fail} (set (map :type h))))
       (is (every? integer? (map :time h))))
 
@@ -146,6 +151,7 @@
   ; When a client explicitly signifies that it'd like to end the process, we
   ; should spawn a new one.
   (let [test (assoc base-test
+                    :name "interpreter-run-end-process-test"
                     :concurrency 1
                     :client (reify Client
                               (open! [this test node] this)
@@ -157,7 +163,7 @@
                     :generator (->> {:f :wag}
                                     (repeat 3)
                                     gen/clients))
-        h (util/with-relative-time (run! test))
+        h (:history (jepsen/run! test))
         completions (remove op/invoke? h)]
     (is (= [[0 :fail :wag]
             [1 :fail :wag]
@@ -167,6 +173,7 @@
 (deftest run!-throw-test
   (testing "worker throws"
     (let [test (assoc base-test
+                      :name "generator interpreter run!-throw-test"
                       :concurrency 1
                       :client (reify Client
                                 (open! [this test node] this)
@@ -182,7 +189,7 @@
                       (->> (repeat 2 {:f :read})
                            (gen/nemesis
                              (repeat 2 {:type :info, :f :break}))))
-          h           (util/with-relative-time (run! test))
+          h           (:history (jepsen/run! test))
           completions (remove op/invoke? h)
           err "indeterminate: Assert failed: false"]
         (is (= [[:nemesis :info :break nil]
@@ -208,7 +215,7 @@
                       :client     (ok-client)
                       :nemesis    (info-nemesis)
                       :generator  gen)
-            e (try+ (util/with-relative-time (run! test))
+            e (try+ (:history (jepsen/run! test))
                     :nope
                     (catch [:type :jepsen.generator/op-threw] e e))]
         (is (= 1 @call-count))
@@ -231,7 +238,7 @@
                         :client (ok-client)
                         :nemesis (info-nemesis)
                         :generator gen)
-            e (try+ (util/with-relative-time (run! test))
+            e (try+ (:history (jepsen/run! test))
                     :nope
                     (catch [:type :jepsen.generator/update-threw] e e))]
         (is (= (let [ctx (gen/context test)]
@@ -239,7 +246,8 @@
                         :time     (:time (:context e))
                         :free-threads (.remove (:free-threads ctx) (:process (:event e)))))
                (:context e)))
-        (is (= {:f        :write
+        (is (= {:index    0
+                :f        :write
                 :value    2
                 :time     (:time (:context e))
                 :process  (:process (:event e))
