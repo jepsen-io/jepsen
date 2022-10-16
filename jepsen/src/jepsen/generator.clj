@@ -656,6 +656,7 @@
                       (not (:process op))
                       (conj "no :process")
 
+                      ; This is a tad expensive, sadly
                       (not-any? #{(:process op)}
                                 (free-processes ctx))
                       (conj (str "process " (pr-str (:process op))
