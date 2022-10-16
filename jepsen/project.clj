@@ -8,7 +8,7 @@
                  [org.clojure/tools.logging "1.2.4"]
                  [org.clojure/tools.cli "1.0.206"]
                  [spootnik/unilog "0.7.30"]
-                 [elle "0.1.5"]
+                 [elle "0.1.6-SNAPSHOT"]
                  [clj-time "0.15.2"]
                  [jepsen.txn "0.1.2"]
                  [knossos "0.3.8"]
@@ -27,8 +27,7 @@
                  [dom-top "1.0.7"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.1.1"]
-                 [fipp "0.6.26"]
-                 [io.lacuna/bifurcan "0.1.0"]]
+                 [fipp "0.6.26"]]
   :java-source-paths ["src"]
   :javac-options ["-target" "11" "-source" "11"]
   :main jepsen.cli
