@@ -9,6 +9,7 @@
             [jepsen.store :as store]
             [jepsen.checker :refer [merge-valid check-safe Checker]]
             [jepsen.generator :as gen]
+            [jepsen.generator.context :as ctx]
             [clojure.tools.logging :refer :all]
             [clojure.core.reducers :as r]
             [clojure.pprint :refer [pprint]]
@@ -52,7 +53,7 @@
   [n ctx]
   ; Sanity checks
   (let [group-size   n
-        thread-count (count (gen/all-threads ctx))
+        thread-count (ctx/all-thread-count ctx)
         group-count (quot thread-count group-size)]
               (assert (<= group-size thread-count)
                       (str "With " thread-count " worker threads, this"
@@ -170,7 +171,7 @@
                 ; What's the generator for this group?
                 gen   (nth gens group)
                 ; We'll need a context for this group specifically
-                ctx   (gen/on-threads-context (group->threads group) ctx)
+                ctx   (ctx/on-threads-context (group->threads group) ctx)
                 ; OK, ask this gen for an op.
                 [op gen'] (gen/op gen test ctx)
                 ; If this generator is exhausted, we replace it.

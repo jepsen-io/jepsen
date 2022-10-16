@@ -573,11 +573,11 @@
         wa' (o 2 0 :ok     :send [[:send :x [0 :a]] [:send :y [1 :a]]])
         wb' (o 3 1 :ok     :send [[:send :x [1 :b]] [:send :y [0 :b]]])]
     (is (= [{:type  :G0
-             :cycle [wa' wb' wa']
-             :steps [{:type :ww, :key :x, :value :a, :value' :b,
-                      :a-mop-index 0, :b-mop-index 0}
-                     {:type :ww, :key :y, :value :b, :value' :a
-                      :a-mop-index 1, :b-mop-index 1}]}]
+             :cycle [wb' wa' wb']
+             :steps [{:type :ww, :key :y, :value :b, :value' :a
+                      :a-mop-index 1, :b-mop-index 1}
+                     {:type :ww, :key :x, :value :a, :value' :b,
+                      :a-mop-index 0, :b-mop-index 0}]}]
            (-> [wa wb wa' wb'] (analysis {:ww-deps true}) :errors :G0)))))
 
 (deftest g1c-pure-wr-test
@@ -587,10 +587,10 @@
         t1' (o 2 0 :ok :txn [[:send :x [0 :a]] [:poll {:y [[0 :b]]}]])
         t2' (o 3 1 :ok :txn [[:send :y [0 :b]] [:poll {:x [[0 :a]]}]])]
     (is (= [{:type :G1c
-             :cycle [t1' t2' t1']
-             :steps [{:type :wr, :key :x, :value :a
+             :cycle [t2' t1' t2']
+             :steps [{:type :wr, :key :y, :value :b,
                       :a-mop-index 0, :b-mop-index 1}
-                     {:type :wr, :key :y, :value :b,
+                     {:type :wr, :key :x, :value :a
                       :a-mop-index 0, :b-mop-index 1}]}]
            (-> [t1 t2 t1' t2'] analysis :errors :G1c)))))
 

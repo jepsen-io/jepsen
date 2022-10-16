@@ -6,7 +6,8 @@
   NOTE: While the `simulate` function is considered stable at this point, the
   others might still be subject to change -- use with care and expect possible
   breakage in future releases."
-  (:require [jepsen.generator :as gen])
+  (:require [jepsen.generator :as gen]
+            [jepsen.generator.context :as ctx])
   (:import (io.lacuna.bifurcan Set)))
 
 (def default-test
@@ -74,11 +75,11 @@
              ; We have an invocation that's not pending, and that invocation is
              ; before every in-flight completion
              (let [thread    (gen/process->thread ctx (:process invoke))
-                   ; Advance clock, mark thread as free
-                   ctx       (-> ctx
-                                 (update :time max (:time invoke))
-                                 (assoc :free-threads
-                                        (.remove ^Set (:free-threads ctx) thread)))
+                   ; Advance clock, mark thread as busy
+                   ctx       (ctx/busy-thread
+                               ctx
+                               (max (:time ctx) (:time invoke))
+                               thread)
                    ; Update the generator with this invocation
                    gen'      (gen/update gen' default-test ctx invoke)
                    ; Add the completion to the in-flight set
@@ -93,18 +94,13 @@
                    _      (assert op "generator pending and nothing in flight???")
                    thread (gen/process->thread ctx (:process op))
                    ; Advance clock, mark thread as free
-                   ctx    (-> ctx
-                              (update :time max (:time op))
-                              (assoc :free-threads
-                                     (.add ^Set (:free-threads ctx)
-                                           thread)))
+                   ctx    (ctx/free-thread ctx (:time op) thread)
                    ; Update generator with completion
                    gen'   (gen/update gen default-test ctx op)
                    ; Update worker mapping if this op crashed
                    ctx    (if (or (= :nemesis thread) (not= :info (:type op)))
                             ctx
-                            (update ctx :workers
-                                    assoc thread (gen/next-process ctx thread)))]
+                            (ctx/with-next-process ctx thread))]
                (recur (conj ops op) (rest in-flight) gen' ctx)))))))))
 
 (defn quick-ops

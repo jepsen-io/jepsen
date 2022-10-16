@@ -1,13 +1,16 @@
 (ns jepsen.generator-test
   (:require [jepsen.generator :as gen]
-            [jepsen.generator.test :as gen.test]
+            [jepsen.generator [context :as ctx]
+                              [test :as gen.test]]
             [jepsen.independent :as independent]
             [jepsen [util :as util]]
             [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
             [knossos.op :as op]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (io.lacuna.bifurcan Set)))
+  (:import (io.lacuna.bifurcan IMap
+                               Map
+                               Set)))
 
 (gen/init!)
 
@@ -183,10 +186,8 @@
             {:f :delayed, :time 30, :process 0, :type :invoke}]
            h))
     (is (realized? d))
-    (is (= {:time 20
-            :free-threads (Set/from [0 1])
-            :workers {0 0, 1 1}}
-           @eval-ctx))))
+    (is (= 20 (:time @eval-ctx)))
+    (is (= (Set/from [0 1]) (ctx/free-threads @eval-ctx)))))
 
 (deftest synchronize-test
   (is (= [{:f :a, :process 0, :time 2, :type :invoke}

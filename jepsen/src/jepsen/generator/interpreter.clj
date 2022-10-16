@@ -7,9 +7,10 @@
                      [pprint :refer [pprint]]]
             [clojure.tools.logging :refer [info warn error]]
             [jepsen [client         :as client]
+                    [generator      :as gen]
                     [nemesis        :as nemesis]
                     [util           :as util]]
-            [jepsen.generator :as gen]
+            [jepsen.generator.context :as context]
             [jepsen.store.format :as store.format]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent ArrayBlockingQueue
@@ -199,7 +200,8 @@
                                test)]
     (let [ctx         (gen/context test)
           worker-ids  (gen/all-threads ctx)
-          completions (ArrayBlockingQueue. (count worker-ids))
+          completions (ArrayBlockingQueue.
+                        (.size ^io.lacuna.bifurcan.ISet worker-ids))
           workers     (mapv (partial spawn-worker test completions
                                      (client-nemesis-worker))
                             worker-ids)
@@ -224,10 +226,7 @@
                   ; Update op with index and new timestamp
                   op'     (assoc op' :index op-index :time time)
                   ; Update context with new time and thread being free
-                  ctx     (assoc ctx
-                                 :time         time
-                                 :free-threads (.add ^Set (:free-threads ctx)
-                                                     thread))
+                  ctx     (context/free-thread ctx time thread)
                   ; Let generator know about our completion. We use the context
                   ; with the new time and thread free, but *don't* assign a new
                   ; process here, so that thread->process recovers the right
@@ -239,8 +238,7 @@
                   ctx     (if (and (not= :nemesis thread)
                                    (or (= :info (:type op'))
                                        (:end-process? op')))
-                            (update ctx :workers assoc thread
-                                    (gen/next-process ctx thread))
+                            (context/with-next-process ctx thread)
                             ctx)]
               ; Log completion and move on
               (if (goes-in-history? op')
@@ -301,11 +299,9 @@
                         ; Dispatch it to a worker
                         _ (.put ^ArrayBlockingQueue (get invocations thread) op)
                         ; Update our context to reflect
-                        ctx (assoc ctx
-                                   :time (:time op) ; Use time instead?
-                                   :free-threads (.remove
-                                                   ^Set (:free-threads ctx)
-                                                   thread))
+                        ctx (context/busy-thread ctx
+                                                 (:time op) ; Use time instead?
+                                                 thread)
                         ; Let the generator know about the invocation
                         gen' (gen/update gen' test ctx op)]
                     (recur ctx gen' op-index' (inc outstanding) 0)))))))
