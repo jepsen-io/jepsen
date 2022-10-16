@@ -397,8 +397,6 @@
               context
               free-processes
               free-threads
-              next-process
-              on-threads-context
               process->thread
               some-free-process
               thread->process])
@@ -598,14 +596,14 @@
                       (not (:process op))
                       (conj "no :process")
 
-                      ; This is a tad expensive, sadly
-                      (not (.contains ^Set (free-threads ctx)
-                                      (process->thread ctx (:process op))))
+                      (not (->> op :process
+                                (context/process->thread ctx)
+                                (context/thread-free? ctx)))
                       (conj (str "process " (pr-str (:process op))
                                  " is not free"))))))]
         (when (seq problems)
             (throw+ {:type      ::invalid-op
-                     :context   ctx
+                     :context   (datafy ctx)
                      ;:res       res
                      :problems  problems}
                     nil
@@ -640,14 +638,14 @@
         [op (FriendlyExceptions. gen')])
       (catch Throwable t
         (throw+ {:type    ::op-threw
-                 :context ctx}
+                 :context (datafy ctx)}
                 t
                 (with-out-str
                   (print "Generator threw" (class t) "-" (.getMessage t) "when asked for an operation. Generator:\n")
                   (binding [*print-length* 10]
                     (pprint gen))
                   (println "\nContext:\n")
-                  (pprint ctx))))))
+                  (pprint (datafy ctx)))))))
 
   (update [this test ctx event]
     (try
@@ -655,7 +653,7 @@
         (FriendlyExceptions. gen'))
       (catch Throwable t
         (throw+ {:type    ::update-threw
-                 :context ctx
+                 :context (datafy ctx)
                  :event   event}
                 t
                   (with-out-str
@@ -663,7 +661,7 @@
                     (binding [*print-length* 10]
                       (pprint gen))
                     (println "\nContext:\n")
-                    (pprint ctx)
+                    (pprint (datafy ctx))
                     (println "Event:\n")
                     (pprint event)))))))
 
@@ -798,15 +796,21 @@
   [f gen]
   (OnUpdate. f gen))
 
-(defrecord OnThreads [f gen]
+(defn on-threads-context
+  "For backwards compatibility; filters a context to just threads matching (f
+  thread). Use context/make-thread-filter for performance."
+  [f context]
+  ((context/make-thread-filter f context) context))
+
+(defrecord OnThreads [f context-filter gen]
   Generator
   (op [this test ctx]
-    (when-let [[op gen'] (op gen test (on-threads-context f ctx))]
-      [op (OnThreads. f gen')]))
+    (when-let [[op gen'] (op gen test (context-filter ctx))]
+      [op (OnThreads. f context-filter gen')]))
 
   (update [this test ctx event]
     (if (f (process->thread ctx (:process event)))
-      (OnThreads. f (update gen test (on-threads-context f ctx) event))
+      (OnThreads. f context-filter (update gen test (context-filter ctx) event))
       this)))
 
 (defn on-threads
@@ -815,7 +819,7 @@
   generator: it will only include free threads and workers satisfying f.
   Updates are passed on only when the thread performing the update matches f."
   [f gen]
-  (OnThreads. f gen))
+  (OnThreads. f (context/make-thread-filter f) gen))
 
 (def on "For backwards compatibility" on-threads)
 
@@ -889,26 +893,42 @@
     1 (first gens)
       (Any. (vec gens))))
 
-(defrecord EachThread [fresh-gen gens]
+(defn each-thread-ensure-context-filters!
+  "Ensures an EachThread has context filters for each thread."
+  [context-filters ctx]
+  (when-not (realized? context-filters)
+    (deliver context-filters
+             (reduce (fn compute-context-filters [cfs thread]
+                       (assoc cfs thread (context/make-thread-filter
+                                           #{thread}
+                                           ctx)))
+                     {}
+                     (context/all-threads ctx)))))
+
+(defrecord EachThread [fresh-gen context-filters gens]
   ; fresh-gen is a generator we use to initialize a thread's state, the first
   ; time we see it.
+  ; context-filters is a promise of a map of threads to context filters; lazily
+  ; initialized.
   ; gens is a map of threads to generators.
   Generator
   (op [this test ctx]
+    (each-thread-ensure-context-filters! context-filters ctx)
     (let [{:keys [op gen' thread] :as soonest}
           (->> (context/free-threads ctx)
                (keep (fn [thread]
                        (let [gen     (get gens thread fresh-gen)
                              ; Give this generator a context *just* for one
                              ; thread
-                             ctx     (on-threads-context #{thread} ctx)]
+                             ctx     ((@context-filters thread) ctx)]
                          (when-let [[op gen'] (op gen test ctx)]
                            {:op      op
                             :gen'    gen'
                             :thread  thread}))))
                (reduce soonest-op-map nil))]
       (cond ; A free thread has an operation
-            soonest [op (EachThread. fresh-gen (assoc gens thread gen'))]
+            soonest [op (EachThread. fresh-gen context-filters
+                                     (assoc gens thread gen'))]
 
             ; Some thread is busy; we can't tell what to do just yet
             (not= (context/free-thread-count ctx)
@@ -920,12 +940,13 @@
             nil)))
 
   (update [this test ctx event]
+    (each-thread-ensure-context-filters! context-filters ctx)
     (let [process (:process event)
           thread (process->thread ctx process)
           gen    (get gens thread fresh-gen)
-          ctx    (on-threads-context #{thread} ctx)
+          ctx    ((@context-filters thread) ctx)
           gen'   (update gen test ctx event)]
-      (EachThread. fresh-gen (assoc gens thread gen')))))
+      (EachThread. fresh-gen context-filters (assoc gens thread gen')))))
 
 (defn each-thread
   "Takes a generator. Constructs a generator which maintains independent copies
@@ -933,11 +954,13 @@
   its free process list. Updates are propagated to the generator for the thread
   which emitted the operation."
   [gen]
-  (EachThread. gen {}))
+  (EachThread. gen (promise) {}))
 
-(defrecord Reserve [ranges all-ranges gens]
+(defrecord Reserve [ranges all-ranges context-filters gens]
   ; ranges is a collection of sets of threads engaged in each generator.
   ; all-ranges is the union of all ranges.
+  ; context-filters is a vector of context filtering functions, one for each
+  ; range (and the default gen last).
   ; gens is a vector of generators corresponding to ranges, followed by the
   ; default generator.
   Generator
@@ -948,7 +971,7 @@
                  (fn [i threads]
                    (let [gen (nth gens i)
                          ; Restrict context to this range of threads
-                         ctx (on-threads-context threads ctx)]
+                         ctx ((nth context-filters i) ctx)]
                      ; Ask this range's generator for an op
                      (when-let [[op gen'] (op gen test ctx)]
                        ; Remember our index
@@ -956,9 +979,8 @@
                         :gen'   gen'
                         :weight (count threads)
                         :i      i}))))
-               ; And for the default generator, compute a context without any
-               ; threads from defined ranges...
-               (cons (let [ctx (on-threads-context (complement all-ranges) ctx)]
+               ; And for the default generator...
+               (cons (let [ctx ((peek context-filters) ctx)]
                        ; And construct a triple for the default generator
                        (when-let [[op gen'] (op (peek gens) test ctx)]
                          (assert ctx)
@@ -969,7 +991,7 @@
                (reduce soonest-op-map nil))]
       (when soonest
         ; A range has an operation to do!
-        [op (Reserve. ranges all-ranges (assoc gens i gen'))])))
+        [op (Reserve. ranges all-ranges context-filters (assoc gens i gen'))])))
 
   (update [this test ctx event]
     (let [process (:process event)
@@ -981,7 +1003,8 @@
                         (inc i)))
                     0
                     ranges)]
-      (Reserve. ranges all-ranges (c/update gens i update test ctx event)))))
+      (Reserve. ranges all-ranges context-filters
+                (c/update gens i update test ctx event)))))
 
 (defn reserve
   "Takes a series of count, generator pairs, and a final default generator.
@@ -1004,7 +1027,10 @@
                   (partition 2)
                   ; Construct [thread-set gen] tuples defining the range of
                   ; thread indices covering a given generator, lower
-                  ; inclusive, upper exclusive.
+                  ; inclusive, upper exclusive. TODO: I think there might be a
+                  ; bug here: if we construct nested reserves or otherwise
+                  ; restrict threads, an inner reserve might not understand
+                  ; that its threads don't start at 0.
                   (reduce (fn [[n gens] [thread-count gen]]
                             (let [n' (+ n thread-count)]
                               [n' (conj gens [(set (range n n')) gen])]))
@@ -1012,11 +1038,15 @@
                   second)
         ranges      (mapv first gens)
         all-ranges  (reduce set/union ranges)
+        ; Compute context filters for all ranges
+        context-filters (mapv context/make-thread-filter
+                              (c/concat ranges
+                                      [(complement all-ranges)]))
         gens        (mapv second gens)
         default     (last args)
         gens        (conj gens default)]
     (assert default)
-    (Reserve. ranges all-ranges gens)))
+    (Reserve. ranges all-ranges context-filters gens)))
 
 (declare nemesis)
 
@@ -1116,9 +1146,7 @@
   (op [_ test ctx]
     (when-not (zero? remaining)
       (when-let [[op gen'] (op gen test ctx)]
-        ; If you actually hit MIN_INT doing this... you probably have bigger
-        ; problems on your hands.
-        [op (Repeat. (dec remaining) gen)])))
+        [op (Repeat. (max -1 (dec remaining)) gen)])))
 
   (update [this test ctx event]
     (Repeat. remaining (update gen test ctx event))))
@@ -1333,7 +1361,8 @@
 (defrecord Synchronize [gen]
   Generator
   (op [this test ctx]
-    (if (= (context/free-threads ctx) (context/all-threads ctx))
+    (if (= (context/free-thread-count ctx)
+           (context/all-thread-count ctx))
       ; We're ready, replace ourselves with the generator
       (op gen test ctx)
       ; Not yet

@@ -1,6 +1,8 @@
 (ns jepsen.generator.interpreter-test
   (:refer-clojure :exclude [run!])
-  (:require [clojure.tools.logging :refer [info warn]]
+  (:require [clojure [data :refer [diff]]
+                     [datafy :refer [datafy]]]
+            [clojure.tools.logging :refer [info warn]]
             [jepsen.generator :as gen]
             [jepsen.generator.interpreter :refer :all]
             [jepsen [common-test :refer [quiet-logging]]
@@ -38,6 +40,53 @@
     (invoke! [this test op] op)
     (teardown! [this test])))
 
+(deftest ^:perf perf-test
+  (let [time-limit      15
+        concurrency     1024
+        test (assoc base-test
+                    :concurrency concurrency
+                    :client (reify Client
+                              (open! [this test node] this)
+                              (setup! [this test])
+                              (invoke! [this test op]
+                                (assoc op :type
+                                       (condp < (rand)
+                                         ; 1 in 10 ops crash
+                                         0.9 :info
+                                         ; 3 in 10 fail
+                                         0.6 :fail
+                                         ; 6 in 10 succeed
+                                         :ok)
+                                       :value :foo))
+                              (teardown! [this test])
+                              (close! [this test]))
+              :nemesis  (reify Nemesis
+                          (setup! [this test] this)
+                          (invoke! [this test op]
+                            (assoc op :type :info, :value :broken))
+                          (teardown! [this test]))
+              :generator
+              (gen/phases
+                (->> (gen/reserve (long (/ concurrency 4))
+                                  (->> (range)
+                                         (map (fn [x] {:f :write, :value x})))
+
+                                  (long (/ concurrency 2))
+                                  (fn cas-gen [test ctx]
+                                        {:f      :cas
+                                         :value  [(rand-int 5) (rand-int 5)]})
+
+                                  (repeat {:f :read}))
+                     (gen/nemesis
+                       (gen/mix [(gen/repeat {:type :info, :f :break})
+                                 (gen/repeat {:type :info, :f :repair})]))
+                     (gen/time-limit time-limit))
+                (gen/log "Recovering")))
+        h    (:history (jepsen/run! test))
+        rate (float (/ (count h) 2 time-limit))]
+    ;(prn :generator-interpeter-rate rate)
+    (is (< 10000 rate))))
+
 (deftest run!-test
   (let [time-limit     1
         sleep-duration 1/10
@@ -47,8 +96,6 @@
                         (open! [this test node] this)
                         (setup! [this test])
                         (invoke! [this test op]
-                          ; We actually have to sleep here, or else it runs so
-                          ; fast that reserve starves some threads.
                           (assoc op :type (rand-nth [:ok :info :fail])
                                  :value :foo))
                         (teardown! [this test])
@@ -73,7 +120,7 @@
                 (gen/log "Recovering")
                 (gen/nemesis {:type :info, :f :recover})
                 (gen/sleep sleep-duration)
-                (gen/log "Done recovering; final read")
+                (gen/log "done recovering; final read")
                 (gen/clients (gen/until-ok (repeat {:f :read})))))
         h    (:history (jepsen/run! test))
         nemesis-ops (filter (comp #{:nemesis} :process) h)
@@ -223,7 +270,7 @@
                     (catch [:type :jepsen.generator/op-threw] e e))]
         (is (= 1 @call-count))
         (is (= :jepsen.generator/op-threw (:type e)))
-        (is (= (dissoc (gen/context test) :time)
+        (is (= (dissoc (datafy (gen/context test)) :time)
                (dissoc (:context e) :time)))))
 
     (testing "generator update throws"
@@ -244,11 +291,13 @@
             e (try+ (:history (jepsen/run! test))
                     :nope
                     (catch [:type :jepsen.generator/update-threw] e e))]
-        (is (= (let [ctx (gen/context test)]
-                 (assoc ctx
-                        :time     (:time (:context e))
-                        :free-threads (.remove (:free-threads ctx) (:process (:event e)))))
-               (:context e)))
+        (testing "context map"
+          (let [expected-ctx (-> (datafy (gen/context test))
+                                 (assoc :time (:time (:context e))
+                                        :next-thread-index 1)
+                                 (update :free-threads disj
+                                         (:process (:event e))))]
+            (is (= expected-ctx (:context e)))))
         (is (= {:index    0
                 :f        :write
                 :value    2

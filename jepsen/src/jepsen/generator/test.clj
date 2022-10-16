@@ -6,7 +6,9 @@
   NOTE: While the `simulate` function is considered stable at this point, the
   others might still be subject to change -- use with care and expect possible
   breakage in future releases."
-  (:require [jepsen.generator :as gen]
+  (:require [clojure.datafy :refer [datafy]]
+            [dom-top.core :refer [assert+]]
+            [jepsen.generator :as gen]
             [jepsen.generator.context :as ctx])
   (:import (io.lacuna.bifurcan Set)))
 
@@ -91,7 +93,10 @@
              ; We need to complete something before we can apply the next
              ; invocation.
              (let [op     (first in-flight)
-                   _      (assert op "generator pending and nothing in flight???")
+                   _      (assert+ op
+                                   {:type :generator-pending-but-nothing-in-flight
+                                    :gen gen'
+                                    :ctx (datafy ctx)})
                    thread (gen/process->thread ctx (:process op))
                    ; Advance clock, mark thread as free
                    ctx    (ctx/free-thread ctx (:time op) thread)

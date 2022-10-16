@@ -49,7 +49,7 @@
 
 (defn group-threads
   "Given a group size and pure generator context, returns a collection of
-  collection of threads, each per group."
+  collections of threads, each per group."
   [n ctx]
   ; Sanity checks
   (let [group-size   n
@@ -101,24 +101,33 @@
                op))
             gen))
 
-(defrecord ConcurrentGenerator [n
-                                fgen
-                                group->threads
-                                thread->group
-                                keys
-                                gens]
-  ; n is the size of each group
-  ; fgen turns a key into a generator
-  ; group->threads is a vector mapping groups to sets of threads; lazily init.
-  ; thread->group is a map which takes threads to groups. Lazily initialized.
-  ; keys is our collection of remaining keys
-  ; gens is a vector of generators, one for each thread group.
+(defrecord ConcurrentGenerator
+  [; n is the size of each group
+   n
+   ; fgen turns a key into a generator
+   fgen
+   ; group->threads is a vector mapping groups to sets of threads; lazily init.
+   group->threads
+   ; thread->group is a map which takes threads to groups. Lazily initialized.
+   thread->group
+   ; A vector of context filters, one for each group. We use these to speed up
+   ; computing thread-restricted contexts for each group's generator. Lazily
+   ; initialized.
+   group->context-filter
+   ; keys is our collection of remaining keys
+   keys
+   ; gens is a vector of generators, one for each thread group.
+   gens]
+
   gen/Generator
   (op [this test ctx]
     ; (prn)
     ; (prn :op :=======================================)
-    (let [; Figure out our thread<->group mappings
+    (let [; Figure out our thread<->group mappings and context filters
           group->threads (or group->threads (make-group->threads n ctx))
+          group->context-filter (or group->context-filter
+                                    (mapv ctx/make-thread-filter
+                                          group->threads))
           thread->group  (or thread->group  (make-thread->group  n ctx))
           ; Lazily initialize our generators
           gens2 (or gens
@@ -157,6 +166,7 @@
             ; We have an operation to yield
             [(:op soonest)
              (ConcurrentGenerator. n fgen group->threads thread->group
+                                   group->context-filter
                                    keys (assoc gens (:group soonest)
                                                (:gen' soonest)))]
             ; We don't have an operation to yield given the current context,
@@ -164,14 +174,16 @@
             ; yield still. If there's a generator left... we're still pending.
             (when (some identity gens)
               [:pending (ConcurrentGenerator. n fgen group->threads
-                                              thread->group keys gens)]))
+                                              thread->group
+                                              group->context-filter keys
+                                              gens)]))
 
           ; OK, let's consider this group
           (let [group (first groups)
                 ; What's the generator for this group?
                 gen   (nth gens group)
                 ; We'll need a context for this group specifically
-                ctx   (ctx/on-threads-context (group->threads group) ctx)
+                ctx   ((group->context-filter group) ctx)
                 ; OK, ask this gen for an op.
                 [op gen'] (gen/op gen test ctx)
                 ; If this generator is exhausted, we replace it.
@@ -208,7 +220,7 @@
           thread  (gen/process->thread ctx process)
           group   (thread->group thread)]
       (ConcurrentGenerator.
-        n fgen group->threads thread->group keys
+        n fgen group->threads thread->group group->context-filter keys
         (update gens group gen/update test ctx event)))))
 
 (defn concurrent-generator
@@ -236,7 +248,7 @@
   ; Instead, we fold this into a custom generator.
   []
   (gen/clients
-    (ConcurrentGenerator. n fgen nil nil keys nil)))
+    (ConcurrentGenerator. n fgen nil nil nil keys nil)))
 
 (defn history-keys
   "Takes a history and returns the set of keys in it."

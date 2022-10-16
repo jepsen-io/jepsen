@@ -27,21 +27,24 @@
 
   (testing "concurrent"
     (is (= [{:type :invoke, :process 0, :f :write, :time 0}
-            {:type :invoke, :process :nemesis, :f :write, :time 0}
             {:type :invoke, :process 1, :f :write, :time 0}
-            {:type :invoke, :process 1, :f :write, :time 10}
+            {:type :invoke, :process :nemesis, :f :write, :time 0}
             {:type :invoke, :process :nemesis, :f :write, :time 10}
+            {:type :invoke, :process 1, :f :write, :time 10}
             {:type :invoke, :process 0, :f :write, :time 10}]
            (gen.test/perfect (repeat 6 {:f :write})))))
 
   (testing "all threads busy"
+    (let [c gen.test/default-context
+          c (reduce (fn [c thread] (ctx/busy-thread c 0 thread))
+                    c
+                    (ctx/all-threads c))]
     (is (= [:pending {:f :write}]
-           (gen/op {:f :write} {} (assoc gen.test/default-context
-                                         :free-threads (Set.)))))))
+           (gen/op {:f :write} {} c))))))
 
 (deftest limit-test
-  (is (= [{:type :invoke, :process 0,        :time 0, :f :write, :value 1}
-          {:type :invoke, :process :nemesis, :time 0, :f :write, :value 1}]
+  (is (= [{:type :invoke, :process 0, :time 0, :f :write, :value 1}
+          {:type :invoke, :process 1, :time 0, :f :write, :value 1}]
          (->> (repeat {:f :write :value 1})
               (gen/limit 2)
               gen.test/quick))))
@@ -56,12 +59,12 @@
 
 (deftest delay-test
   (is (= [{:type :invoke, :process 0, :time 0, :f :write}
-          {:type :invoke, :process :nemesis, :time 3, :f :write}
-          {:type :invoke, :process 1, :time 6, :f :write}
+          {:type :invoke, :process 1, :time 3, :f :write}
+          {:type :invoke, :process :nemesis, :time 6, :f :write}
           ; This would normally execute at 9 and 12, but every thread was busy
           ; for 10 nanos: they start as soon as they can.
           {:type :invoke, :process 0, :time 10, :f :write}
-          {:type :invoke, :process :nemesis, :time 13, :f :write}]
+          {:type :invoke, :process 1, :time 13, :f :write}]
           (->> {:f :write}
                repeat
                (gen/delay 3e-9)
@@ -162,8 +165,8 @@
                                                :value  (:value event)}))
                                  this))
                 (gen/limit 5)
-                (gen.test/quick (assoc gen.test/default-context :free-threads
-                              (Set/from [0 1]))))))))
+                (gen/on #{0 1})
+                gen.test/quick)))))
 
 
 (deftest clojure-delay-test
@@ -181,9 +184,9 @@
                gen.test/perfect)]
     (is (= [{:f :write, :time 0, :process 0, :type :invoke}
             {:f :read, :time 10, :process 1, :type :invoke}
-            {:f :delayed, :time 20, :process 1, :type :invoke}
             {:f :delayed, :time 20, :process 0, :type :invoke}
-            {:f :delayed, :time 30, :process 0, :type :invoke}]
+            {:f :delayed, :time 20, :process 1, :type :invoke}
+            {:f :delayed, :time 30, :process 1, :type :invoke}]
            h))
     (is (realized? d))
     (is (= 20 (:time @eval-ctx)))
@@ -193,10 +196,10 @@
   (is (= [{:f :a, :process 0, :time 2, :type :invoke}
           {:f :a, :process 1, :time 3, :type :invoke}
           {:f :a, :process :nemesis, :time 5, :type :invoke}
-          {:f :b, :process 1, :time 15, :type :invoke}
-          {:f :b, :process 0, :time 15, :type :invoke}]
+          {:f :b, :process 0, :time 15, :type :invoke}
+          {:f :b, :process 1, :time 15, :type :invoke}]
          (->> [(->> (fn [test ctx]
-                      (let [p     (first (gen/free-processes ctx))
+                      (let [p (ctx/some-free-process ctx)
                             ; This is technically illegal: we should return the
                             ; NEXT event by time. We're relying on the specific
                             ; order we get called here to do this. Fragile hack!
@@ -226,7 +229,7 @@
 (deftest phases-test
   (is (= [[:a 0 0]
           [:a 1 0]
-          [:b 1 10]
+          [:b 0 10]
           [:c 0 20]
           [:c 1 20]
           [:c 1 30]]
@@ -241,10 +244,10 @@
   ; We take two generators, each of which is restricted to a single process,
   ; and each of which takes time to schedule. When we bind them together with
   ; Any, they can interleave.
-  (is (= [[:b 1 0]
-          [:a 0 0]
-          [:a 0 20]
-          [:b 1 20]]
+  (is (= [[:a 0 0]
+          [:b 1 0]
+          [:b 1 20]
+          [:a 0 20]]
          (->> (gen/any (gen/on #{0} (gen/delay 20e-9 (repeat {:f :a})))
                        (gen/on #{1} (gen/delay 20e-9 (repeat {:f :b}))))
               (gen/limit 4)
@@ -252,12 +255,12 @@
               (map (juxt :f :process :time))))))
 
 (deftest each-thread-test
-  (is (= [[0 0 :a]
+  (is (= [[0 :nemesis :a]
           [0 1 :a]
-          [0 :nemesis :a]
-          [10 :nemesis :b]
+          [0 0 :a]
+          [10 0 :b]
           [10 1 :b]
-          [10 0 :b]]
+          [10 :nemesis :b]]
          ; Each thread now gets to evaluate [a b] independently.
          (->> (gen/each-thread [{:f :a} {:f :b}])
               gen.test/perfect
@@ -272,7 +275,7 @@
 (deftest stagger-test
   (let [n           1000
         dt          20
-        concurrency (count (:workers gen.test/default-context))
+        concurrency (ctx/all-thread-count gen.test/default-context)
         ops         (->> (range n)
                          (map (fn [x] {:f :write, :value x}))
                          (gen/stagger (util/nanos->secs dt))
@@ -349,37 +352,36 @@
 
 (deftest reserve-test
   ; TODO: can you nest reserves properly? I suspect no.
-
   (let [as (integers :f :a)
         bs (integers :f :b)
         cs (integers :f :c)]
     (testing "only a default"
       (is (= [{:f :a, :process 0,        :time 0, :type :invoke, :value 0}
-              {:f :a, :process :nemesis, :time 0, :type :invoke, :value 1}
-              {:f :a, :process 1,        :time 0, :type :invoke, :value 2}]
+              {:f :a, :process 1,        :time 0, :type :invoke, :value 1}
+              {:f :a, :process :nemesis, :time 0, :type :invoke, :value 2}]
              (->> (gen/reserve as)
                   (gen/limit 3)
                   gen.test/perfect))))
 
     (testing "three ranges"
-      (is (= [[0 1 :a 0]
-              [0 0 :a 1]
-              [0 3 :b 0]
-              [0 :nemesis :c 0]
-              [0 2 :b 1]
+      (is (= [[0 2 :b 0]
+              [0 3 :b 1]
               [0 4 :b 2]
-              [10 4 :b 3]
-              [10 2 :b 4]
+              [0 0 :a 0]
+              [0 1 :a 1]
+              [0 :nemesis :c 0]
               [10 :nemesis :c 1]
-              [10 3 :b 5]
-              [10 0 :a 2]
-              [10 1 :a 3]
-              [20 1 :a 4]
-              [20 0 :a 5]
-              [20 3 :b 6]]
-             (->> (gen/reserve 2 as
-                               3 bs
-                               cs)
+              [10 1 :a 2]
+              [10 0 :a 3]
+              [10 4 :b 3]
+              [10 3 :b 4]
+              [10 2 :b 5]
+              [20 2 :b 6]
+              [20 3 :b 7]
+              [20 4 :b 8]]
+             ; Relying on the fact that the nemesis comes after numeric
+             ; threads, and will route to cs.
+             (->> (gen/reserve 2 as, 3 bs, cs)
                   (gen/limit 15)
                   (gen.test/perfect (gen.test/n+nemesis-context 5))
                   (map (juxt :time :process :f :value))))))))
@@ -403,32 +405,33 @@
 
 (deftest independent-concurrent-test
   ; All 3 groups can concurrently execute the first 2 values from k0, k1, k2
-  (is (= [[0 0 [:k0 :v0]]
-          [0 1 [:k0 :v1]]
-          [0 4 [:k2 :v0]]
-          [0 2 [:k1 :v0]]
+  (is (= [[0 4 [:k2 :v0]]
           [0 5 [:k2 :v1]]
-          [0 3 [:k1 :v1]]
+          [0 0 [:k0 :v0]]
+          [0 3 [:k1 :v0]]
+          [0 2 [:k1 :v1]]
+          [0 1 [:k0 :v1]]
 
-          ; Worker 3 in group 1 finishes k1
-          [10 3 [:k1 :v2]]
-          ; And worker 5 finishes k2
-          [10 5 [:k2 :v2]]
-          ; Worker 2 in group 1 starts k3
-          [10 2 [:k3 :v0]]
-          ; And worker 4 in group 2 starts k4
-          [10 4 [:k4 :v0]]
           ; Worker 1 in group 0 finishes k0
           [10 1 [:k0 :v2]]
+          ; Worker 2 in group 1 finishes k1
+          [10 2 [:k1 :v2]]
+          ; Worker 3 in group 1 starts k3, since k1 is done
+          [10 3 [:k3 :v0]]
+          ; And worker 0 in group 0 starts k4, since k0 is done
+          [10 0 [:k4 :v0]]
+          ; And worker 5 in group 2 finishes k2
+          [10 5 [:k2 :v2]]
 
-          ; Worker 0 has no options left; there are no keys remaining for it to
-          ; start afresh, and other groups still has generators, so it holds
-          ; at :pending. Workers 2 & 3 finish k3, and workers 4 and 5 finish k4.
-          ; At the next timeslice, worker 4 in group 2 continues k4.
-          [20 4 [:k4 :v1]]
-          [20 2 [:k3 :v1]]
-          [20 5 [:k4 :v2]]
-          [20 3 [:k3 :v2]]]
+          ; All keys have now started execution. Group 1 (workers 2 and 3) is
+          ; free, but can't start a new key since there are none left pending.
+          ; Worker 0 in group 0 can continue k4
+          [20 0 [:k4 :v1]]
+          ; Workers 2 and 3 in group 1 finish off k3
+          [20 3 [:k3 :v1]]
+          [20 2 [:k3 :v2]]
+          ; Finally, process 1 in group 0 finishes k4
+          [20 1 [:k4 :v2]]]
          (->> (independent/concurrent-generator
                 2                     ; 2 threads per group
                 [:k0 :k1 :k2 :k3 :k4] ; 5 keys
@@ -439,11 +442,11 @@
               (map (juxt :time :process :value))))))
 
 (deftest independent-deadlock-case
-  (is (= [[0 1 :meow [0 nil]]
-          [0 0 :meow [0 nil]]
+  (is (= [[0 0 :meow [0 nil]]
+          [0 1 :meow [0 nil]]
           [10 1 :meow [1 nil]]
           [10 0 :meow [1 nil]]
-          [20 0 :meow [2 nil]]]
+          [20 1 :meow [2 nil]]]
           (->> (independent/concurrent-generator
                 2
                 (range)
