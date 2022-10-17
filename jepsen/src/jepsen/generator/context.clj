@@ -21,7 +21,8 @@
                                IMap
                                Map
                                Set)
-           (java.util BitSet)))
+           (java.util BitSet)
+           (jepsen.generator.translation_table TranslationTable)))
 
 ;; Just for debugging
 (extend-protocol Datafiable
@@ -98,7 +99,7 @@
    ^int next-thread-index
    ; A translation table for thread names. May include threads not in this
    ; context.
-   translation-table
+   ^TranslationTable translation-table
    ; A bitset of thread indices which are active in this context
    ^BitSet all-threads
    ; A bitset of thread indices which are not busy evaluating anything

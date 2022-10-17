@@ -496,6 +496,28 @@
         (nil? (:type op))     (assoc! :type :invoke)))
     :pending))
 
+(defrecord Fn
+  [; We memoize the function's arity so we don't have to reflect
+   ^long arity
+   ; The function itself
+   f]
+  Generator
+  (update [this test ctx event] this)
+
+  ; When asked for an op, we invoke f to produce a generator, then exhaust that
+  ; before coming back to ourselves.
+  (op [this test ctx]
+    (when-let [gen (if (= arity 2)
+                     (f test ctx)
+                     (f))]
+      (op [gen this] test ctx))))
+
+(defn fn-wrapper
+  "Wraps a function into a wrapper which makes it more efficient to invoke. We
+  memoize the function's arity, in particular, to reduce reflection."
+  [f]
+  (Fn. (first (util/arities (class f))) f))
+
 (extend-protocol Generator
   nil
   (update [gen test ctx event] nil)
@@ -508,13 +530,11 @@
       [op (if (= :pending op) this nil)]))
 
   clojure.lang.AFunction
-  (update [f test ctx event] f)
+  (update [f test ctx event]
+    (update (fn-wrapper f) test ctx event))
 
   (op [f test ctx]
-    (when-let [x (if (= 2 (first (util/arities (class f))))
-                   (f test ctx)
-                   (f))]
-      (op [x f] test ctx)))
+    (op (fn-wrapper f) test ctx))
 
   clojure.lang.Delay
   (update [d test ctx event] d)
