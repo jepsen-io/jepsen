@@ -110,8 +110,7 @@
   [file]
   (with-open [is (io/input-stream file)
               in ^Closeable (jsf/reader is)]
-    (-> (fress/read-object in)
-        jsf/postprocess-fressian)))
+    (fress/read-object in)))
 
 (defn load-jepsen-file
   "Loads a test from an arbitrary Jepsen file. This is lazy, and retains a

@@ -959,11 +959,10 @@
   "Takes a handle and a ByteBuffer of data from a Fressian block. Returns its
   parsed contents."
   [handle ^ByteBuffer data]
-  (jsf/postprocess-fressian
-    (with-open [is (bs/to-input-stream data)
-                r  ^Closeable (jsf/reader
-                                is {:handlers fressian-read-handlers})]
-      (fress/read-object r))))
+  (with-open [is (bs/to-input-stream data)
+              r  ^Closeable (jsf/reader
+                              is {:handlers fressian-read-handlers})]
+    (fress/read-object r)))
 
 ;; Fressian stream blocks
 
@@ -1017,16 +1016,15 @@
   "Takes a handle and a ByteBuffer of data from a FressianStream block. Returns
   its contents as a vector."
   [handle ^ByteBuffer data]
-  (jsf/postprocess-fressian
-    (with-open [is (bs/to-input-stream data)
-                r  ^Closeable (jsf/reader
-                                is {:handlers fressian-read-handlers})]
-      (loop [v (transient [])]
-        (let [element (try (fress/read-object r)
-                           (catch EOFException _ ::eof))]
-              (if (identical? element ::eof)
-                (persistent! v)
-                (recur (conj! v element))))))))
+  (with-open [is (bs/to-input-stream data)
+              r  ^Closeable (jsf/reader
+                              is {:handlers fressian-read-handlers})]
+    (loop [v (transient [])]
+      (let [element (try (fress/read-object r)
+                         (catch EOFException _ ::eof))]
+        (if (identical? element ::eof)
+          (persistent! v)
+          (recur (conj! v element)))))))
 
 ;; BigVector blocks
 
@@ -1512,8 +1510,7 @@
         ; And read map
         m (with-open [is (bs/to-input-stream data)
                       r  ^Closeable (jsf/reader is)]
-            (-> (fress/read-object r)
-                (jsf/postprocess-fressian)))
+            (fress/read-object r))
         ; Construct a lazy delay for the rest of the partialmap. Zero denotes
         ; there's no more.
         rest-map (delay

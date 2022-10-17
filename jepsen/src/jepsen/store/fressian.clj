@@ -11,9 +11,14 @@
             [multiset.core :as multiset]
             [jepsen.util :as util]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (java.util AbstractList)
+  (:import (java.util AbstractList
+                      Collections
+                      HashMap)
            (java.time Instant)
-           (org.fressian.handlers WriteHandler ReadHandler)
+           (jepsen.store FressianReader)
+           (org.fressian.handlers ConvertList
+                                  WriteHandler
+                                  ReadHandler)
            (multiset.core MultiSet)))
 
 (def write-handlers*
@@ -108,7 +113,11 @@
 
        "instant" (reify ReadHandler
                    (read [_ rdr tag component-count]
-                     (Instant/parse (.readObject rdr))))}
+                     (Instant/parse (.readObject rdr))))
+
+       "vec" (reify ReadHandler
+               (read [_ rdr tag component-count]
+                 (vec (.readObject rdr))))}
 
       (merge fress/clojure-read-handlers)))
 
@@ -116,11 +125,17 @@
   (fress/associative-lookup read-handlers*))
 
 (defn postprocess-fressian
-  "Fressian likes to give us ArrayLists, which are kind of a PITA when you're
-  used to working with vectors. We map those back to vectors again."
+  "DEPRECATED: we now decode vectors directly in the Fressian reader.
+
+  Fressian likes to give us ArrayLists, which are kind of a PITA when you're
+  used to working with vectors.
+
+  We now write sequential types as their own vector wrappers, which means this
+  is not necessary going forward, but I'm leaving this in place in case you
+  have historical tests you need to re-process."
   [obj]
+  (info "jepsen.store.fressian/postprocess-fressian is no longer necessary; our reader decodes lists directly as vectors.")
   (walk/prewalk (fn transform [x]
-                  ; (prn :x (class x) (instance? AbstractList x))
                   (cond (instance? clojure.lang.Atom x)
                         (atom (postprocess-fressian @x))
 
@@ -137,8 +152,9 @@
   ([input-stream]
    (reader input-stream {}))
   ([input-stream opts]
-   (fress/create-reader input-stream
-                        :handlers (:handlers opts read-handlers))))
+   (FressianReader. input-stream
+                    (:handlers opts read-handlers)
+                    false)))
 
 (defn writer
   "Creates a Fressian writer given an OutputStream. Options:

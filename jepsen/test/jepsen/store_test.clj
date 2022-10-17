@@ -10,7 +10,8 @@
                     [generator :as gen]
                     [store :refer :all]
                     [tests :refer [noop-test]]]
-            [jepsen.store.format :as store.format]
+            [jepsen.store [format :as store.format]
+                          [fressian :as store.fressian]]
             [multiset.core :as multiset])
   (:import (org.fressian.handlers WriteHandler ReadHandler)))
 
@@ -51,7 +52,9 @@
   [x]
   (let [b (fress/write x :handlers write-handlers)
         ;_  (hexdump/print-dump (.array b))
-        x' (fress/read b :handlers read-handlers)]
+        x' (with-open [in (fress/to-input-stream b)
+                       r  (store.fressian/reader in)]
+             (fress/read-object r))]
     x'))
 
 (deftest fressian-test
@@ -59,6 +62,13 @@
        #{1 2 3}
        [#{5 6}
         #{:foo}]))
+
+(deftest fressian-vector-test
+  ; Make sure we decode these as vecs, not arraylists.
+  (is (vector? (fr [])))
+  (is (vector? (fr [1])))
+  (is (vector? (fr [:x :y])))
+  (is (vector? (:foo (fr {:foo [:x :y]})))))
 
 (deftest ^:integration roundtrip-test
   (let [name (:name base-test)
