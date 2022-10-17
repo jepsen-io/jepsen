@@ -28,8 +28,8 @@ import static org.fressian.impl.Fns.*;
 
 public class FressianReader implements org.fressian.Reader, Closeable {
     private final RawInput is;
-    private ArrayList priorityCache;
-    private ArrayList structCache;
+    private ArrayList<Object> priorityCache;
+    private ArrayList<Object> structCache;
     public final Map standardExtensionHandlers;
     private final ILookup<Object, ReadHandler> handlerLookup;
     private byte[] byteBuffer;
@@ -769,7 +769,7 @@ public class FressianReader implements org.fressian.Reader, Closeable {
     }
 
     private byte[] internalReadChunkedBytes() throws IOException {
-        ArrayList<byte[]> chunks = new ArrayList();
+        ArrayList<byte[]> chunks = new ArrayList<byte[]>();
         int code = Codes.BYTES_CHUNK;
         while (code == Codes.BYTES_CHUNK) {
             chunks.add(internalReadBytes(readCount()));
@@ -828,7 +828,7 @@ public class FressianReader implements org.fressian.Reader, Closeable {
     }
 
     private Object[] readClosedList() throws IOException {
-        ArrayList objects = new ArrayList();
+        ArrayList<Object> objects = new ArrayList<Object>();
         while (true) {
             int code = readNextCode();
             if (code == Codes.END_COLLECTION) {
@@ -839,7 +839,7 @@ public class FressianReader implements org.fressian.Reader, Closeable {
     }
 
     private Object[] readOpenList() throws IOException {
-        ArrayList objects = new ArrayList();
+        ArrayList<Object> objects = new ArrayList<Object>();
         int code;
         while (true) {
             try {
@@ -912,13 +912,13 @@ public class FressianReader implements org.fressian.Reader, Closeable {
         resetCaches();
     }
 
-    private ArrayList getPriorityCache() {
-        if (priorityCache == null) priorityCache = new ArrayList();
+    private ArrayList<Object> getPriorityCache() {
+        if (priorityCache == null) priorityCache = new ArrayList<Object>();
         return priorityCache;
     }
 
-    private ArrayList getStructCache() {
-        if (structCache == null) structCache = new ArrayList();
+    private ArrayList<Object> getStructCache() {
+        if (structCache == null) structCache = new ArrayList<Object>();
         return structCache;
     }
 
@@ -937,7 +937,7 @@ public class FressianReader implements org.fressian.Reader, Closeable {
         return is.readRawByte();
     }
 
-    private Object readAndCacheObject(ArrayList cache) throws IOException {
+    private Object readAndCacheObject(ArrayList<Object> cache) throws IOException {
         int index = cache.size();
         cache.add(UNDER_CONSTRUCTION);
         Object o = readObject();
@@ -948,7 +948,7 @@ public class FressianReader implements org.fressian.Reader, Closeable {
     public static final Map coreHandlers;
 
     static {
-        HashMap handlers = new HashMap();
+        HashMap<String, Object> handlers = new HashMap<String, Object>();
         handlers.put("list", new ConvertList() {
             public List convertList(Object[] items) {
               return PersistentVector.create(items);
