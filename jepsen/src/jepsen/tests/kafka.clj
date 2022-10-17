@@ -1604,11 +1604,12 @@
                    (info :row row)
                    (if-let [cells (-> row next next)]
                      (do (info :cells cells)
-                         (let [max-y (->> cells first second :y (max max-y))
-                               _ (info :seconds (->> cells (map (comp :x second))))
+                         (let [max-y (->> cells first second :y long
+                                          (max max-y))
                                max-x (->> cells
                                           (map (comp :x second))
-                                          (reduce max max-x))]
+                                          (reduce max max-x)
+                                          long)]
                            (recur (inc i)
                                   max-x
                                   max-y
