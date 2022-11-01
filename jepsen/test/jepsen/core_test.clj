@@ -15,6 +15,7 @@
             [jepsen.store :as store]
             [jepsen.checker :as checker]
             [jepsen.nemesis :as nemesis]
+            [jepsen.generator.context :as gen.ctx]
             [knossos [model :as model]
                      [op :as op]]))
 
@@ -238,7 +239,7 @@
                                       (gen/each-thread
                                         (gen/once
                                           (fn [test ctx]
-                                            (if (= [0] (seq (:free-threads ctx)))
+                                            (if (= [0] (seq (gen.ctx/free-threads ctx)))
                                               (/ 1 0)
                                               {:type :invoke, :f :meow}))))
                                       (gen/once {:type :invoke, :f :done})))))))

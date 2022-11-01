@@ -37,9 +37,8 @@
 
   Jepsen files begin with the magic UTF8 string JEPSEN, followed by a 32-byte
   big-endian unsigned integer version field, which we use to read old formats
-  when necessary. This is version 0. Then there is a 64-bit offset into the
-  file where the *block index*--the metadata structure--lives. There follows a
-  series of *blocks*:
+  when necessary. Then there is a 64-bit offset into the file where the *block
+  index*--the metadata structure--lives. There follows a series of *blocks*:
 
          6            32             64
     | \"JEPSEN\" | version | block-index-offset | block 1 | block 2 | ...
@@ -233,9 +232,11 @@
             [clojure.core.reducers :as r]
             [clojure.java.io :as io]
             [dom-top.core :refer [assert+]]
-            [jepsen [util :as util :refer [map-vals
+            [jepsen [history :as history]
+                    [util :as util :refer [map-vals
                                            with-thread-name]]
                     [fs-cache :refer [write-atomic!]]]
+            [jepsen.history.core :refer [soft-chunked-vector]]
             [jepsen.store.fressian :as jsf]
             [potemkin :refer [def-map-type
                               definterface+]]
@@ -258,6 +259,7 @@
                                  ForkJoinTask)
            (java.util.function Consumer)
            (java.util.zip CRC32)
+           (jepsen.history.core SoftChunkedVector)
            (jepsen.store.format FileOffsetOutputStream)
            (org.fressian.handlers WriteHandler
                                   ReadHandler)))
@@ -274,7 +276,7 @@
   "Where the magic is written"
   0)
 
-(def version
+(def current-version
   "The current file version.
 
   Version 0 was the first version of the file format.
@@ -381,6 +383,7 @@
 
 (defrecord Handle
   [^FileChannel file  ; The filechannel we use for reads and writes
+   version            ; An atom: what version is this file? Initially nil.
    block-index        ; An atom to a block index: a map of block IDs to offsets
    written?           ; An atom: have we written to this file yet?
    read?              ; An atom: have we read this file yet?
@@ -390,6 +393,11 @@
   (close [this]
     (reset! block-index :closed)
     (.close file)))
+
+(defn version
+  "Returns the version of a Handle."
+  [^Handle handle]
+  @(.version handle))
 
 (defn ^Handle open
   "Constructs a new handle for a Jepsen file of the given path (anything which
@@ -403,7 +411,7 @@
                                              StandardOpenOption/WRITE]))
         block-index (atom {:root   nil
                            :blocks {}})]
-    (Handle. f block-index (atom false) (atom false))))
+    (Handle. f (atom nil) block-index (atom false) (atom false))))
 
 (defn close!
   "Closes a Handle"
@@ -455,13 +463,23 @@
 ; General file headers
 
 (defn write-header!
-  "Takes a Handle and writes the initial magic bytes and version number. Returns handle."
-  [handle]
+  "Takes a Handle and writes the initial magic bytes and version number.
+  Initializes the handle's version to current-version if it hasn't already been
+  set. Returns handle."
+  [^Handle handle]
+  (swap! (.version handle) (fn [v]
+                             (if (or (nil? v)
+                                     (= v current-version))
+                               current-version
+                               (throw+
+                                 {:type ::can't-write-old-version
+                                  :current-version current-version
+                                  :handle-version  v}))))
   (let [buf  (ByteBuffer/allocate (+ magic-size version-size))
         file ^FileChannel (:file handle)]
     (.position file 0)
     (bs/transfer magic file {:close? false})
-    (.putInt buf version)
+    (.putInt buf (version handle))
     (.flip buf)
     (write-file! file version-offset buf))
   handle)
@@ -483,26 +501,32 @@
                               fmagic)}))))
   handle)
 
-(defn check-version
-  "Takes a Handle and reads the version, ensuring it's a version we can
-  decode."
-  [handle]
+(defn check-version!
+  "Takes a Handle and reads the version. Ensures it's a version we can decode,
+  and updates the Handle's version if it hasn't already been set."
+  [^Handle handle]
   (let [file ^FileChannel (:file handle)
-        buf  (ByteBuffer/allocate version-size)]
-    (let [read-bytes (.read file buf version-offset)
-          fversion   (.getInt buf 0)]
-      ; TODO: what's up with this conditional?
-      (when-not (= version-size read-bytes)
-        (throw+ {:type     ::version-incomplete
-                 :expected version-size
-                 :actual   read-bytes}))
-      (when-not (contains? #{0 1} fversion)
-        (throw+ {:type      ::version-mismatch
-                 :expected  version
-                 :actual    (if (= -1 read-bytes)
-                              :eof
-                              fversion)}))))
-  handle)
+        buf  (ByteBuffer/allocate version-size)
+        read-bytes (.read file buf version-offset)
+        fversion   (.getInt buf 0)]
+    (when-not (= version-size read-bytes)
+      (throw+ {:type     ::version-incomplete
+               :expected version-size
+               :actual   read-bytes}))
+    (when-not (contains? #{0 1} fversion)
+      (throw+ {:type      ::version-mismatch
+               :expected  version
+               :actual    (if (= -1 read-bytes)
+                            :eof
+                            fversion)}))
+    (swap! (.version handle) (fn [v]
+                               (if (or (nil? v)
+                                       (= fversion v))
+                                 fversion
+                                 (throw+ {:type ::can't-load-mixed-version
+                                          :handle-version v
+                                          :file-version   fversion}))))
+    handle))
 
 (defn prep-write!
   "Called when we write anything to a handle. Ensures that we've written the
@@ -519,7 +543,7 @@
   magic, version, and loaded the block index."
   [handle]
   (when (compare-and-set! (:read? handle) false true)
-    (-> handle check-magic check-version load-block-index!))
+    (-> handle check-magic check-version! load-block-index!))
   handle)
 
 ; Fetching and updating the block index offset root pointer
@@ -1105,7 +1129,10 @@
                   (write-block-index! handle)
                   (let [writer' (fressian-stream-block-writer! handle)]
                     (append-to-fressian-stream-block! writer' element)
-                    (recur completed-count 1 chunks writer'))))))))))
+                    (recur completed-count 1 chunks writer'))))))))
+    (catch Throwable t
+      (warn t "Big vector block writer crashed!")
+      (throw t))))
 
 (defn big-vector-block-writer!
   "Takes a handle, a optional block ID, and the maximum number of elements per
@@ -1143,261 +1170,9 @@
   (.put ^BlockingQueue (.queue w) element)
   w)
 
-(declare big-vector-chunk
-         big-vector-chunk-id
-         big-vector-chunks
-         big-vector-seq
-         big-vector-parallel-load)
-
-(defn assoc-array
-  "Takes an object array a, an index i, and an object x. Returns a copy of a
-  with i = x. Like assoc on vectors, but for arrays, basically."
-  [^objects a i x]
-  (let [n  (alength a)
-        a' (object-array n)]
-    (System/arraycopy a 0 a' 0 n)
-    (aset a' i x)
-    a'))
-
-(defn fjjoin
-  "Join a ForkJoin task"
-  [^ForkJoinTask task]
-  (.join task))
-
-; This provides a lazy view of a BigVector. It includes a handle, a count of
-; elements, a long array of the initial index for each chunk (which we use to
-; look up which chunk owns a given index), an int array of the IDs for each
-; chunk, and an array of chunks--each itself a vector (or similar). Chunks are
-; loaded lazily on first access, after which they're cached in the chunk array.
-(deftype BigVector [handle
-                    ^long     count
-                    ; Each of these arrays is one per chunk
-                    ^longs    indices
-                    ^ints     block-ids
-                    ^objects  chunks
-                    ; We use this array to prevent concurrent readers from
-                    ; racing to load a single chunk.
-                    ^objects  chunk-locks]
-  ; We support parallel reduction over each chunk.
-  clojure.core.reducers.CollFold
-  (coll-fold [this n combinef reducef]
-    (if (zero? count)
-      (combinef)
-      ; Spawn forkjoin tasks for each chunk
-      (letfn [(chunk-task [chunk-id]
-                (doto (ForkJoinTask/adapt
-                        ^Callable (fn task []
-                                    (r/coll-fold (big-vector-chunk this
-                                                                   chunk-id)
-                                                 n
-                                                 combinef
-                                                 reducef)))
-                    .fork))]
-        ; Spawn forkjoin tasks for each chunk
-        (->> (range (alength chunks))
-             (mapv chunk-task)
-             ; Then combine results
-             (reduce (fn [acc task]
-                       (combinef acc (fjjoin task)))
-                     (combinef))))))
-
-  clojure.lang.Associative
-  (containsKey [this k]
-    (< -1 k count))
-
-  (entryAt [this k]
-    (nth this k))
-
-  (assoc [this k v]
-    (assoc (vec (big-vector-parallel-load this)) k v))
-
-  clojure.lang.Counted
-  (count [this]
-    count)
-
-  clojure.lang.IHashEq
-  (hasheq [this]
-    ; If this actually gets used, we should memoize.
-    (hash (vec (big-vector-parallel-load this))))
-
-  clojure.lang.IPersistentCollection
-  (cons [this x]
-    (conj (vec (big-vector-parallel-load this)) x))
-
-  ; Sure, I guess?
-  (empty [this]
-    (BigVector. handle 0
-                (long-array 0)
-                (int-array 0)
-                (object-array 0)
-                (object-array 0)))
-
-  (equiv [this other]
-    (or (identical? this other)
-        (= (vec (big-vector-parallel-load this)) other)))
-
-  clojure.lang.IPersistentStack
-  (peek [this]
-    (when (pos? count)
-      (nth this (dec count))))
-
-  (pop [this]
-    (pop (vec (big-vector-parallel-load this))))
-
-  clojure.lang.IPersistentVector
-  (length [this]
-    count)
-
-  (assocN [this i x]
-    (assoc (vec (big-vector-parallel-load this)) i x))
-
-  clojure.lang.IReduce
-  (reduce [this f]
-    (.reduce this f (f)))
-
-  clojure.lang.IReduceInit
-  (reduce [this f init]
-    (let [; We need to wrap f to determine if it terminated early due to
-          ; returning a reduced value. We *double* wrap these, then do a nested
-          ; reduce over chunks.
-          wrapped-f (fn wrapper [acc x]
-                      (let [res (f acc x)]
-                        (if (reduced? res)
-                          (reduced res)
-                          res)))]
-      (reduce (fn red [acc chunk]
-                (reduce wrapped-f acc chunk))
-              init
-              (big-vector-chunks this))))
-
-  clojure.lang.Indexed
-  (nth [this i]
-    (nth this i nil))
-
-  (nth [this i not-found]
-    (let [chunk-id       (big-vector-chunk-id this i)
-          first-index    (aget indices chunk-id)
-          chunk          (big-vector-chunk this chunk-id)]
-      (nth chunk (- i first-index) not-found)))
-
-  clojure.lang.Reversible
-  (rseq [this]
-    (when-not (= 0 count)
-      (->> (range (dec (alength chunks)) -1 -1)
-           (mapcat (comp rseq (partial big-vector-chunk this))))))
-
-  clojure.lang.Seqable
-  (seq [this]
-    (big-vector-seq this))
-
-  clojure.lang.Sequential
-
-  ; I'm not sure this will be heavily used, but it *does* seem basic enough
-  ; that we might as well. If these get used in ways that matter, there are
-  ; some obvious things we can do to make them faster.
-  Iterable
-  (forEach [this consumer]
-    (.forEach ^Iterable (seq this) consumer))
-
-  (iterator [this]
-    (.iterator ^Iterable (seq this)))
-
-  (spliterator [this]
-    (.spliterator ^Iterable (seq this)))
-
-  Object
-  (equals [this other]
-    (and (sequential? other)
-         (= (seq this) other)))
-
-  ; If you ever actually do this, uhhhhh, I have questions. I guess we could,
-  ; like, figure out a streaming hashcode equivalent to however seqs/vectors
-  ; work, and maintain it during the writing process.
-  (hashCode [this]
-    (.hashCode ^Object (vec (big-vector-parallel-load this))))
-
-  ; Again, if you call this for anything other than debugging, what the fuck
-  (toString [this]
-    (str (vec (big-vector-parallel-load this)))))
-
-(defmethod print-method BigVector [v ^java.io.Writer w]
-  (.write w (str v)))
-
-(defn big-vector-load-chunk
-  "Takes a BigVector and loads the given chunk, by chunk number."
-  [^BigVector v, ^long chunk-id]
-  (let [block-id (aget ^ints (.block-ids v) chunk-id)
-        chunk    (:data (read-block-by-id (.handle v) block-id))]
-    chunk))
-
-(defn big-vector-chunk
-  "Takes a BigVector and a chunk ID. Returns the chunk for that chunk ID,
-  loading it if it's not yet in cache. May be invoked concurrently on the same
-  chunk ID; only a single thread will actually decode the chunk."
-  [^BigVector v, ^long chunk-id]
-  (let [chunks ^objects (.chunks v)]
-    (or (aget chunks chunk-id)
-        (let [locks ^objects (.chunk-locks v)]
-          (locking (aget locks chunk-id)
-            ; Might have been loaded while we were waiting for the lock
-            (or (aget chunks chunk-id)
-                ; Nope, let's load
-                (let [chunk (big-vector-load-chunk v chunk-id)]
-                  ; Cache
-                  (locking chunks
-                    (aset chunks chunk-id chunk))
-                  chunk)))))))
-
-(defn ^long big-vector-chunk-id
-  "Takes a BigVector and an index in it, and returns the chunk ID for that
-  index. Throws ArrayIndexOutOfBoundsException if the index is too large."
-  [^BigVector v ^long target]
-  (when-not (< -1 target (.count v))
-    (throw (ArrayIndexOutOfBoundsException.
-             (str "Index " target " out of bounds for BigVector of " (.count v)
-                  " elements"))))
-  (let [indices ^longs (.indices v)
-        i       (Arrays/binarySearch indices target)]
-    (if (<= 0 i)
-      ; We found an exact hit
-      i
-      ; We found (- insertion-point) - 1, where insertion point is the index of
-      ; the first element *greater* than the key. The chunk we want is the
-      ; chunk *before* that, so we add 2 to the negative index here.
-      (-> i (unchecked-add 2) unchecked-negate))))
-
-(defn big-vector-chunks
-  "Takes a BigVector and yields a lazy seq of its chunks."
-  ([^BigVector v]
-   (when-not (= (.count v) 0)
-     (big-vector-chunks v 0)))
-  ([^BigVector v, ^long chunk-id]
-   (when (< chunk-id (alength ^objects (.chunks v)))
-     (cons (big-vector-chunk v chunk-id)
-           (lazy-seq (big-vector-chunks v (inc chunk-id)))))))
-
-(defn big-vector-seq
-  "Takes a BigVector and returns a lazy seq of its elements."
-  ([^BigVector v]
-   (when-not (= (.count v) 0)
-     (big-vector-seq v 0)))
-  ([^BigVector v, ^long chunk-id]
-   (when (< chunk-id (alength ^objects (.chunks v)))
-     (concat (big-vector-chunk v chunk-id)
-             (lazy-seq (big-vector-seq v (inc chunk-id)))))))
-
-(defn big-vector-parallel-load
-  "Takes a BigVector and loads all its chunks in parallel. Noop if already
-  realized. Returns the BigVector."
-  [^BigVector v]
-  (->> (range (alength ^objects (.chunks v)))
-       (pmap (partial big-vector-chunk v))
-       dorun)
-  v)
-
 (defn read-big-vector-block
-  "Takes a handle and a ByteBuffer for a BigVector block. Returns a lazy vector
-  representing its data."
+  "Takes a handle and a ByteBuffer for a big-vector block. Returns a lazy
+  vector (specifically, a soft chunked vector) representing its data."
   [handle ^ByteBuffer buf]
   (let [count       (.getLong buf)
         chunk-count (/ (- (.limit buf) big-vector-count-size)
@@ -1409,7 +1184,16 @@
     ; Read chunk indices and block IDs
     (loop [i 0]
       (if (= i chunk-count)
-        (BigVector. handle count indices block-ids chunks chunk-locks)
+        ; Done
+        (let [load-chunk (fn load-chunk [i]
+                           (->> (aget block-ids i)
+                                (read-block-by-id handle)
+                                :data))]
+          ; We pack the block IDs into the vector's name field so we can GC
+          ; later. Sort of a hack but ah well.
+          (soft-chunked-vector {:block-ids block-ids}
+                               count indices load-chunk))
+        ; Read first index & block ID
         (do (aset-long indices   i (.getLong buf))
             (aset-int  block-ids i (.getInt buf))
             (recur (inc i)))))))
@@ -1659,7 +1443,18 @@
         h       (:history test)
         r       (:results test)
         history (when h
-                  (delay (:data (read-block-by-id handle (:id h)))))
+                  (delay
+                    (when-let [ops (:data (read-block-by-id handle (:id h)))]
+                      (history/history
+                        ops
+                        (if (<= 1 (version handle))
+                          ; In version 1, we started writing ops as Ops and
+                          ; assigning indices on write.
+                          {:dense-indices? true
+                           :have-indices? true
+                           :already-ops? true}
+                          ; Before that, we wrote ops as maps without indices
+                          {})))))
         results (when r
                   (delay (:data (read-block-by-id handle (:id r)))))]
     (LazyTest. (dissoc test :history :results)
@@ -1702,7 +1497,9 @@
                           #{id}
                           #{})
            :fressian-stream (find-references (:data block))
-           :big-vector (set (.block-ids ^BigVector (:data block))))]
+           :big-vector (-> (.name ^SoftChunkedVector (:data block))
+                           :block-ids
+                           set))]
      (->> shallow-refs
           (map (partial block-references handle))
           (cons shallow-refs)

@@ -6,7 +6,8 @@
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.store.format :refer :all]
-            [jepsen.store :as store]
+            [jepsen [history :as h]
+                    [store :as store]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (def file "/tmp/jepsen-format-test.jepsen")
@@ -37,7 +38,7 @@
                   (check-magic h2))
 
       (is-thrown+ [:type :jepsen.store.format/version-incomplete]
-                  (check-version h2)))
+                  (check-version! h2)))
 
     ; Write header
     (write-header! h1)
@@ -45,7 +46,8 @@
 
     (testing "with header"
       (is (= h2 (check-magic h2)))
-      (is (= h2 (check-version h2))))))
+      (is (= h2 (check-version! h2)))
+      (is (= current-version (version h2))))))
 
 (deftest block-index-test
   (with-open [h1 (open file)
@@ -134,6 +136,9 @@
   (let [id (write-big-vector! v)]
     (with-open [h (open file)]
       (let [v2 (:data (read-block-by-id h id))]
+        (testing "type"
+          (is (= "jepsen.history.core.SoftChunkedVector" (.getName (type v2)))))
+
         (testing "equality"
           ;(info :read-bigvec v2)
           ; Count
@@ -179,7 +184,9 @@
 
         (testing "empty"
           (let [e (empty v2)]
-            (is (= "jepsen.store.format.BigVector" (.getName (class e))))
+            ; Right now our implementation falls back to regular vectors for
+            ; this
+            ;(is (= "jepsen.store.format.BigVector" (.getName (class e))))
             (is (= 0 (count e)))
             (is (= [] e))))
 
@@ -228,7 +235,7 @@
                       (mapcat (fn [i]
                                 [{:type :invoke, :process i}
                                  {:type :ok, :process i}]))
-                      vec)
+                      h/history)
       run-test   (assoc base-test
                         :state   :run
                         :history history)
@@ -291,8 +298,10 @@
             ; test should now have the full history.
             (reduce append-to-big-vector-block! hw (subvec history second-cut))
             (.close hw)
-            (is (= (assoc base-test :history history)
-                   (read-test)))))
+            (let [t (read-test)]
+              (is (= (assoc base-test :history history) t))
+              (is (= "jepsen.history.DenseHistory" (.getName (type (:history t)))))
+              (is (= "jepsen.history.Op" (.getName (type (first (:history t)))))))))
 
         (testing "run test"
           ; Write the run test version--it might have different fields than the
@@ -364,8 +373,8 @@
                     size2 (with-open [r (open file)]
                             (.size ^java.nio.channels.FileChannel (:file r)))]
                 (is (= final-test' (read-test)))
-                (is (= 1685 size1))
-                (is (= 722 size2))
+                (is (= 1626 size1))
+                (is (= 663 size2))
 
                 ; Now we should be able to open up this test, update its
                 ; analysis, and write it back *re-using* the existing history.

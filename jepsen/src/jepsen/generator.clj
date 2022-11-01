@@ -10,7 +10,7 @@
   - :pending if the generator doesn't know what to do yet
   - [op, gen'], where op' is the next operation this generator would like to
   execute, and `gen'` is the state of the generator that would result if `op`
-  were evaluated.
+  were evaluated. Ops must be a jepsen.history.Op.
 
   `update` allows generators to evolve as events occur--for instance, when an
   operation is invoked or completed. For instance, `update` allows a generator
@@ -327,6 +327,8 @@
   - The worker map reflects the process which that thread worker was executing
     at the time the event occurred.
 
+  See jepsen.generator.context for more.
+
   ## Default implementations
 
   Nil is a valid generator; it ignores updates and always yields nil for
@@ -382,7 +384,8 @@
             [clojure.pprint :as pprint :refer [pprint]]
             [dom-top.core :refer [loopr]]
             [fipp.ednize :as fipp.ednize]
-            [jepsen [util :as util]]
+            [jepsen [history :as history]
+                    [util :as util]]
             [jepsen.generator.context :as context]
             [potemkin :refer [import-vars]]
             [slingshot.slingshot :refer [try+ throw+]])
@@ -484,16 +487,20 @@
 
 (defn fill-in-op
   "Takes an operation and fills in missing fields for :type, :process, and
-  :time using context. Returns :pending if no process is free."
+  :time using context. Returns :pending if no process is free. Turns maps into
+  history Ops."
   [op ctx]
   (if-let [p (some-free-process ctx)]
     ; Automatically assign type, time, and process from the context, if not
     ; provided.
-    (persistent!
-      (cond-> (transient op)
-        (nil? (:time op))     (assoc! :time (:time ctx))
-        (nil? (:process op))  (assoc! :process p)
-        (nil? (:type op))     (assoc! :type :invoke)))
+    (jepsen.history.Op. -1 ; Index
+                        (:time op (:time ctx))
+                        (:type op :invoke)
+                        (:process op p)
+                        (:f op)
+                        (:value op)
+                        nil
+                        (dissoc op :index :time :type :process :f :value))
     :pending))
 
 (defrecord Fn
@@ -604,8 +611,8 @@
                   (if (= :pending op)
                     []
                     (cond-> []
-                      (not (map? op))
-                      (conj "should be either :pending or a map")
+                      (not (history/op? op))
+                      (conj "should be either :pending or a jepsen.history.Op")
 
                       (not (#{:invoke :info :sleep :log} (:type op)))
                       (conj ":type should be :invoke, :info, :sleep, or :log")
@@ -624,7 +631,7 @@
         (when (seq problems)
             (throw+ {:type      ::invalid-op
                      :context   (datafy ctx)
-                     ;:res       res
+                     :res       res
                      :problems  problems}
                     nil
                     (with-out-str
@@ -634,7 +641,7 @@
                       (println "\nSpecifically, this is a problem because:\n")
                       (doseq [p problems]
                         (println " -" p))
-                      (println "Generator:\n")
+                      (println "\nGenerator:\n")
                       (binding [*print-length* 10]
                         (pprint gen))
                       (println "\nContext:\n")

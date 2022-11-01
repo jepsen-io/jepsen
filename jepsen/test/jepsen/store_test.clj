@@ -8,6 +8,7 @@
                     [core :as core]
                     [core-test :as core-test]
                     [generator :as gen]
+                    [history :as history :refer [op]]
                     [store :refer :all]
                     [tests :refer [noop-test]]]
             [jepsen.store [format :as store.format]
@@ -40,6 +41,8 @@
                       :cons     (cons 1 (cons 2 nil))
                       :set      #{1 2 3}
                       :map      {:a 1 :b 2}
+                      :ops      [(op {:time 3, :index 4, :process :nemesis, :f
+                                      :foo, :value [:hi :there]})]
                       :sorted-map (sorted-map 1 :x 2 :y)
                       :plot {:nemeses
                              #{{:name "pause pd",
@@ -77,8 +80,10 @@
               core/run!)
         ; At this juncture we've run the test, and the history should be
         ; written.
-        _ (is (= (:history t)
-                 (:history (load t))))
+        t' (load t)
+        _ (is (= (:history t) (:history t')))
+        _ (is (instance? jepsen.history.Op (first (:history t))))
+        _ (is (instance? jepsen.history.Op (first (:history t'))))
 
         ; Now we're going to rewrite the results, adding a kitten
         [t serialized-t]

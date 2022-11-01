@@ -8,7 +8,8 @@
   breakage in future releases."
   (:require [clojure.datafy :refer [datafy]]
             [dom-top.core :refer [assert+]]
-            [jepsen.generator :as gen]
+            [jepsen [generator :as gen]
+                    [history :as history]]
             [jepsen.generator.context :as ctx])
   (:import (io.lacuna.bifurcan Set)))
 
@@ -52,7 +53,9 @@
 
 (defn simulate
   "Simulates the series of operations obtained from a generator, given a
-  function that takes a context and op and returns the completion for that op."
+  function that takes a context and op and returns the completion for that op.
+
+  Strips out op :index fields--it's generally not as useful for testing."
   ([gen complete-fn]
    (simulate default-context gen complete-fn))
   ([ctx gen complete-fn]
@@ -66,7 +69,8 @@
          ; (prn :invoke invoke :in-flight in-flight)
          (if (nil? invoke)
            ; We're done
-           (into ops in-flight)
+           (->> (into ops in-flight)
+                (history/strip-indices))
 
            ; TODO: the order of updates for worker maps here isn't correct; fix
            ; it.

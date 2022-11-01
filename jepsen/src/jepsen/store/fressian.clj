@@ -9,12 +9,14 @@
             [clj-time.format :as time.format]
             [fipp.edn :refer [pprint]]
             [multiset.core :as multiset]
-            [jepsen.util :as util]
+            [jepsen [history]
+                    [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util AbstractList
                       Collections
                       HashMap)
            (java.time Instant)
+           (jepsen.history Op)
            (jepsen.store FressianReader)
            (org.fressian.handlers ConvertList
                                   WriteHandler
@@ -72,7 +74,22 @@
       {"instant" (reify WriteHandler
                    (write [_ w instant]
                      (.writeTag w "instant" 1)
-                     (.writeObject w (.toString instant))))}}
+                     (.writeObject w (.toString instant))))}
+
+       jepsen.history.Op
+       {"jepsen.history.Op" (reify WriteHandler
+                              (write [_ w op]
+                                ; We cache type and f. Thought about process,
+                                ; but I think they might be too
+                                ; high-cardinality.
+                                (.writeTag    w "jepsen.history.Op" 7)
+                                (.writeInt    w (.index    ^Op op))
+                                (.writeInt    w (.time     ^Op op))
+                                (.writeObject w (.type     ^Op op) true)
+                                (.writeObject w (.process  ^Op op))
+                                (.writeObject w (.f        ^Op op) true)
+                                (.writeObject w (.value    ^Op op))
+                                (.writeObject w (.__extmap ^Op op))))}}
       (merge fress/clojure-write-handlers)))
 
 (def write-handlers
@@ -100,6 +117,19 @@
                                  (read [_ rdr tag component-count]
                                    (assert (= 1 component-count))
                                    (into (sorted-set) (.readObject rdr))))
+
+       "jepsen.history.Op" (reify ReadHandler
+                             (read [_ r tag component-count]
+                               (assert (= 7 component-count))
+                               (Op. (.readInt r)    ; index
+                                    (.readInt r)    ; time
+                                    (.readObject r) ; type
+                                    (.readObject r) ; process
+                                    (.readObject r) ; f
+                                    (.readObject r) ; value
+                                    nil             ; meta
+                                    (.readObject r) ; extmap
+                                    )))
 
        "map-entry" (reify ReadHandler
                      (read [_ rdr tag component-count]

@@ -22,16 +22,17 @@
     (is (= [{:time 0
              :process 0
              :type :invoke
-             :f :write}]
+             :f :write
+             :value nil}]
            (gen.test/perfect {:f :write}))))
 
   (testing "concurrent"
-    (is (= [{:type :invoke, :process 0, :f :write, :time 0}
-            {:type :invoke, :process 1, :f :write, :time 0}
-            {:type :invoke, :process :nemesis, :f :write, :time 0}
-            {:type :invoke, :process :nemesis, :f :write, :time 10}
-            {:type :invoke, :process 1, :f :write, :time 10}
-            {:type :invoke, :process 0, :f :write, :time 10}]
+    (is (= [{:type :invoke, :process 0, :f :write, :time 0, :value nil}
+            {:type :invoke, :process 1, :f :write, :time 0, :value nil}
+            {:type :invoke, :process :nemesis, :f :write, :time 0, :value nil}
+            {:type :invoke, :process :nemesis, :f :write, :time 10, :value nil}
+            {:type :invoke, :process 1, :f :write, :time 10, :value nil}
+            {:type :invoke, :process 0, :f :write, :time 10, :value nil}]
            (gen.test/perfect (repeat 6 {:f :write})))))
 
   (testing "all threads busy"
@@ -58,13 +59,13 @@
               (map :value)))))
 
 (deftest delay-test
-  (is (= [{:type :invoke, :process 0, :time 0, :f :write}
-          {:type :invoke, :process 1, :time 3, :f :write}
-          {:type :invoke, :process :nemesis, :time 6, :f :write}
+  (is (= [{:type :invoke, :process 0, :time 0, :f :write, :value nil}
+          {:type :invoke, :process 1, :time 3, :f :write, :value nil}
+          {:type :invoke, :process :nemesis, :time 6, :f :write, :value nil}
           ; This would normally execute at 9 and 12, but every thread was busy
           ; for 10 nanos: they start as soon as they can.
-          {:type :invoke, :process 0, :time 10, :f :write}
-          {:type :invoke, :process 1, :time 13, :f :write}]
+          {:type :invoke, :process 0, :time 10, :f :write, :value nil}
+          {:type :invoke, :process 1, :time 13, :f :write, :value nil}]
           (->> {:f :write}
                repeat
                (gen/delay 3e-9)
@@ -147,11 +148,11 @@
 (deftest on-update+promise-test
   ; We only fulfill p once the write has taken place.
   (let [p (promise)]
-    (is (= [{:type :invoke, :time 0, :process 0, :f :read}
+    (is (= [{:type :invoke, :time 0, :process 0, :f :read, :value nil}
             {:type :invoke, :time 0, :process 1, :f :write,   :value :x}
             {:type :invoke, :time 0, :process 1, :f :confirm, :value :x}
-            {:type :invoke, :time 0, :process 1, :f :hold}
-            {:type :invoke, :time 0, :process 1, :f :hold}]
+            {:type :invoke, :time 0, :process 1, :f :hold, :value nil}
+            {:type :invoke, :time 0, :process 1, :f :hold, :value nil}]
            (->> (gen/any p
                          [{:f :read}
                           {:f :write, :value :x}
@@ -182,22 +183,22 @@
                            d)
                gen/clients
                gen.test/perfect)]
-    (is (= [{:f :write, :time 0, :process 0, :type :invoke}
-            {:f :read, :time 10, :process 1, :type :invoke}
-            {:f :delayed, :time 20, :process 0, :type :invoke}
-            {:f :delayed, :time 20, :process 1, :type :invoke}
-            {:f :delayed, :time 30, :process 1, :type :invoke}]
+    (is (= [{:f :write, :time 0, :process 0, :type :invoke, :value nil}
+            {:f :read, :time 10, :process 1, :type :invoke, :value nil}
+            {:f :delayed, :time 20, :process 0, :type :invoke, :value nil}
+            {:f :delayed, :time 20, :process 1, :type :invoke, :value nil}
+            {:f :delayed, :time 30, :process 1, :type :invoke, :value nil}]
            h))
     (is (realized? d))
     (is (= 20 (:time @eval-ctx)))
     (is (= (Set/from [0 1]) (ctx/free-threads @eval-ctx)))))
 
 (deftest synchronize-test
-  (is (= [{:f :a, :process 0, :time 2, :type :invoke}
-          {:f :a, :process 1, :time 3, :type :invoke}
-          {:f :a, :process :nemesis, :time 5, :type :invoke}
-          {:f :b, :process 0, :time 15, :type :invoke}
-          {:f :b, :process 1, :time 15, :type :invoke}]
+  (is (= [{:f :a, :process 0, :time 2, :type :invoke, :value nil}
+          {:f :a, :process 1, :time 3, :type :invoke, :value nil}
+          {:f :a, :process :nemesis, :time 5, :type :invoke, :value nil}
+          {:f :b, :process 0, :time 15, :type :invoke, :value nil}
+          {:f :b, :process 1, :time 15, :type :invoke, :value nil}]
          (->> [(->> (fn [test ctx]
                       (let [p (ctx/some-free-process ctx)
                             ; This is technically illegal: we should return the

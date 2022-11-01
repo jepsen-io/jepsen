@@ -10,6 +10,7 @@
                  [spootnik/unilog "0.7.30"]
                  [elle "0.1.6-SNAPSHOT"]
                  [clj-time "0.15.2"]
+                 [io.jepsen/history "0.1.0-SNAPSHOT"]
                  [jepsen.txn "0.1.2"]
                  [knossos "0.3.8"]
                  [clj-ssh "0.5.14"]
