@@ -10,8 +10,9 @@
                           [shell :refer [sh]]]
             [clojure.tools.logging :refer [info warn]]
             [potemkin :refer [definterface+]]
-            [jepsen.util :as util :refer [meh fraction map-kv]]
-            [jepsen.store :as store]
+            [jepsen [history :as h]
+                    [store :as store]
+                    [util :as util :refer [meh fraction map-kv]]]
             [jepsen.checker [perf :as perf]
                             [clock :as clock]]
             [multiset.core :as multiset]
@@ -23,7 +24,8 @@
                      [wgl :as wgl]
                      [history :as history]]
             [knossos.linear.report :as linear.report]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [slingshot.slingshot :refer [try+ throw+]]
+            [tesser.core :as t])
   (:import (java.util.concurrent Semaphore)))
 
 (def valid-priorities
@@ -131,11 +133,12 @@
   []
   (reify Checker
     (check [this test history opts]
-      (let [exes (->> history
-                      (filter :exception)
-                      (filter #(= :info (:type %)))
+      (let [exes (->> (t/filter h/info?)
+                      (t/filter :exception)
                       ; TODO: do we want the first or last :via?
-                      (group-by (comp :type first :via :exception))
+                      (t/group-by (comp :type first :via :exception))
+                      (t/into [])
+                      (h/tesser history)
                       vals
                       (sort-by count)
                       reverse

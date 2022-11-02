@@ -2,17 +2,18 @@
   (:refer-clojure :exclude [set])
   (:use clojure.test)
   (:require [clojure.datafy :refer [datafy]]
-            [knossos [history :as history]
-             [model :as model]
-             [core :refer [ok-op invoke-op fail-op]]
-             [op :as op]]
-            [multiset.core :as multiset]
             [jepsen [checker :refer :all]
                     [db :as db]
+                    [history :as h]
                     [store :as store]
                     [tests :as tests]
                     [util :as util]]
-            [jepsen.checker.perf :as cp]))
+            [jepsen.checker.perf :as cp]
+            [knossos [history :as history]
+                     [model :as model]
+                     [core :refer [ok-op invoke-op fail-op]]
+                     [op :as op]]
+            [multiset.core :as multiset]))
 
 (deftest unhandled-exceptions-test
   (let [e1 (datafy (IllegalArgumentException. "bad args"))
@@ -22,23 +23,23 @@
           :exceptions
           [{:class 'java.lang.IllegalArgumentException
             :count 2
-            :example {:process 0, :type :info, :f :foo, :value 1,
-                      :exception e1
-                      :error ["Whoops!"]}}
+            :example (h/op {:index 1, :process 0, :type :info, :f :foo,
+                            :value 1, :exception e1 :error ["Whoops!"]})}
            {:class 'java.lang.IllegalStateException
-            :example {:process 0, :type :info, :f :foo, :value 1,
-                      :exception e3, :error :oh-no}
+            :example (h/op {:index 5, :process 0, :type :info, :f :foo, :value
+                            1, :exception e3, :error :oh-no})
             :count 1}]}
          (check (unhandled-exceptions) nil
-                [{:process 0, :type :invoke, :f :foo, :value 1}
-                 {:process 0, :type :info,   :f :foo, :value 1,
-                  :exception e1, :error ["Whoops!"]}
-                 {:process 0, :type :invoke, :f :foo, :value 1}
-                 {:process 0, :type :info,   :f :foo, :value 1,
-                  :exception e2, :error ["Whoops!" 2]}
-                 {:process 0, :type :invoke, :f :foo, :value 1}
-                 {:process 0, :type :info,   :f :foo, :value 1,
-                  :exception e3, :error :oh-no}]
+                (h/history
+                  [{:process 0, :type :invoke, :f :foo, :value 1}
+                   {:process 0, :type :info,   :f :foo, :value 1,
+                    :exception e1, :error ["Whoops!"]}
+                   {:process 0, :type :invoke, :f :foo, :value 1}
+                   {:process 0, :type :info,   :f :foo, :value 1,
+                    :exception e2, :error ["Whoops!" 2]}
+                   {:process 0, :type :invoke, :f :foo, :value 1}
+                   {:process 0, :type :info,   :f :foo, :value 1,
+                    :exception e3, :error :oh-no}])
                 {})))))
 
 (deftest stats-test
