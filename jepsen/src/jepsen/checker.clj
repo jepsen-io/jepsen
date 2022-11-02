@@ -2,6 +2,7 @@
   "Validates that a history is correct with respect to some model."
   (:refer-clojure :exclude [set])
   (:require [clojure [core :as c]
+                     [pprint :refer [pprint]]
                      [set :as set]
                      [stacktrace :as trace]
                      [string :as str]]
@@ -15,6 +16,7 @@
                     [util :as util :refer [meh fraction map-kv]]]
             [jepsen.checker [perf :as perf]
                             [clock :as clock]]
+            [jepsen.history.fold :as f]
             [multiset.core :as multiset]
             [gnuplot.core :as g]
             [knossos [model :as model]
@@ -153,18 +155,29 @@
            :exceptions  exes}
           {:valid? true})))))
 
-(defn stats-
-  "Helper for computing stats; takes a history (or a subset of a history), and
-  computes a map of statistics for it."
-  [history]
-  (let [ok-count    (count (filter op/ok? history))
-        fail-count  (count (filter op/fail? history))
-        info-count  (count (filter op/info? history))]
-    {:valid?      (pos? ok-count)
-     :count       (+ ok-count fail-count info-count)
-     :ok-count    ok-count
-     :fail-count  fail-count
-     :info-count  info-count}))
+(def stats-fold
+  "Helper for computing stats over a history or filtered history."
+  (f/loopf {:name :stats}
+           ; Reduce
+           ([^long oks   0
+             ^long infos 0
+             ^long fails 0]
+            [{:keys [type]}]
+            (case type
+              :ok   (recur (inc oks) infos fails)
+              :info (recur oks (inc infos) fails)
+              :fail (recur oks infos (inc fails))))
+           ; Combine
+           ([oks 0, infos 0, fails 0]
+            [[oks' infos' fails']]
+            (recur (+ oks oks')
+                   (+ infos infos')
+                   (+ fails fails'))
+            {:valid?     (pos? oks)
+             :count      (+ oks fails infos)
+             :ok-count   oks
+             :fail-count fails
+             :info-count infos})))
 
 (defn stats
   "Computes basic statistics about success and failure rates, both overall and
@@ -174,16 +187,16 @@
   (reify Checker
     (check [this test history opts]
       (let [history (->> history
-                         (remove op/invoke?)
-                         (remove (comp #{:nemesis} :process)))
-            groups (->> history
-                        (group-by :f)
-                        (map (fn [[f subhistory]]
-                               [f (stats- subhistory)]))
-                        (into (sorted-map)))]
-        (assoc (stats- history)
-               :by-f    groups
-               :valid?  (merge-valid (map :valid? (vals groups))))))))
+                         (h/remove h/invoke?)
+                         h/client-ops)
+            {:keys [all by-f]}
+            (->> (t/fuse {:all (t/fold stats-fold)
+                          :by-f (->> (t/group-by :f)
+                                     (t/fold stats-fold))})
+                 (h/tesser history))]
+        (assoc all
+               :by-f    (into (sorted-map) by-f)
+               :valid?  (merge-valid (map :valid? (vals by-f))))))))
 
 (defn linearizable
   "Validates linearizability with Knossos. Defaults to the competition checker,

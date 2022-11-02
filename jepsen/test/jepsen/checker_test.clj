@@ -59,11 +59,11 @@
                        :fail-count  2
                        :info-count  1}}}
          (check (stats) nil
-                [{:f :foo, :type :ok}
-                 {:f :foo, :type :fail}
-                 {:f :bar, :type :info}
-                 {:f :bar, :type :fail}
-                 {:f :bar, :type :fail}]
+                (h/history [{:process 1, :f :foo, :type :ok}
+                            {:process 2, :f :foo, :type :fail}
+                            {:process 3, :f :bar, :type :info}
+                            {:process 4, :f :bar, :type :fail}
+                            {:process 5, :f :bar, :type :fail}])
                 {}))))
 
 (deftest queue-test
