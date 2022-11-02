@@ -88,6 +88,40 @@
     (is (not (:valid? (check (queue (model/unordered-queue)) nil
                              [(ok-op 1 :dequeue 1)] {}))))))
 
+(deftest set-test-
+  (let [h (h/history
+            [; OK writes
+             {:process 0, :type :invoke, :f :add, :value 0}
+             {:process 0, :type :ok,     :f :add, :value 0}
+             {:process 0, :type :invoke, :f :add, :value 1}
+             {:process 0, :type :ok,     :f :add, :value 1}
+             ; Info writes
+             {:process 1, :type :invoke, :f :add, :value 10}
+             {:process 1, :type :info,   :f :add, :value 10}
+             {:process 1, :type :invoke, :f :add, :value 11}
+             {:process 1, :type :info,   :f :add, :value 11}
+             ; Failed writes
+             {:process 2, :type :invoke, :f :add, :value 20}
+             {:process 2, :type :fail,   :f :add, :value 20}
+             {:process 2, :type :invoke, :f :add, :value 21}
+             {:process 2, :type :fail,   :f :add, :value 21}
+
+             ; Final read
+             {:process 4, :type :invoke, :f :read, :value nil}
+             {:process 4, :type :ok,     :f :read, :value #{0 10 20 30}}])]
+    (is (= {:valid?             false
+            :ok-count           3
+            :ok                 "#{0 10 20}"
+            :lost-count         1
+            :lost               "#{1}"
+            :acknowledged-count 2
+            :recovered-count    2
+            :recovered          "#{10 20}"
+            :attempt-count      6
+            :unexpected-count   1
+            :unexpected         "#{30}"}
+           (check (set) nil h nil)))))
+
 (deftest total-queue-test
   (testing "empty"
     (is (:valid? (check (total-queue) nil [] {}))))

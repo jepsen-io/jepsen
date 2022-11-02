@@ -241,10 +241,10 @@
   (reify Checker
     (check [this test history opts]
       (let [final (->> history
-                       (r/filter (fn select [op]
+                       (h/filter (fn select [op]
                                    (condp = (:f op)
-                                     :enqueue (op/invoke? op)
-                                     :dequeue (op/ok? op)
+                                     :enqueue (h/invoke? op)
+                                     :dequeue (h/ok? op)
                                      false)))
                        (reduce model/step model))]
         (if (model/inconsistent? final)
@@ -260,21 +260,33 @@
   []
   (reify Checker
     (check [this test history opts]
-      (let [attempts (->> history
-                          (r/filter op/invoke?)
-                          (r/filter #(= :add (:f %)))
-                          (r/map :value)
-                          (into #{}))
-            adds (->> history
-                      (r/filter op/ok?)
-                      (r/filter #(= :add (:f %)))
-                      (r/map :value)
-                      (into #{}))
-            final-read (->> history
-                            (r/filter op/ok?)
-                            (r/filter #(= :read (:f %)))
-                            (r/map :value)
-                            (reduce (fn [_ x] x) nil))]
+      ; This would be more efficient as a single fused fold, but I'm doing it
+      ; this way to exercise/demonstrate the task system. Will replace later
+      ; once profiling shows it as a bottleneck.
+      (let [attempts (h/task! history :attempts
+                              (fn attempts [_]
+                                (->> (t/filter h/invoke?)
+                                     (t/filter (h/has-f :add))
+                                     (t/map :value)
+                                     (t/set)
+                                     (h/tesser history))))
+            adds (h/task! history :adds
+                          (fn adds [_]
+                            (->> (t/filter h/ok?)
+                                 (t/filter (h/has-f :add))
+                                 (t/map :value)
+                                 (t/set)
+                                 (h/tesser history))))
+            final-read (h/task! history :final-reads
+                                (fn final-read [_]
+                                  (->> (t/filter (h/has-f :read))
+                                       (t/filter h/ok?)
+                                       (t/map :value)
+                                       (t/last)
+                                       (h/tesser history))))
+            attempts   @attempts
+            adds       @adds
+            final-read @final-read]
         (if-not final-read
           {:valid? :unknown
            :error  "Set was never read"}
