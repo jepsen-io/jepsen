@@ -1,7 +1,8 @@
 (ns jepsen.checker-test
   (:refer-clojure :exclude [set])
   (:use clojure.test)
-  (:require [clojure.datafy :refer [datafy]]
+  (:require [clojure [datafy :refer [datafy]]
+                     [pprint :refer [pprint]]]
             [jepsen [checker :refer :all]
                     [db :as db]
                     [history :as h]
@@ -11,9 +12,21 @@
             [jepsen.checker.perf :as cp]
             [knossos [history :as history]
                      [model :as model]
-                     [core :refer [ok-op invoke-op fail-op]]
                      [op :as op]]
             [multiset.core :as multiset]))
+
+; Helpers for making ops
+(defn invoke-op
+  [process f value]
+  (h/op {:index -1, :type :invoke, :process process, :f f, :value value}))
+
+(defn ok-op
+  [process f value]
+  (h/op {:index -1, :type :ok, :process process, :f f, :value value}))
+
+(defn fail-op
+  [process f value]
+  (h/op {:index -1, :type :fail, :process process, :f f, :value value}))
 
 (deftest unhandled-exceptions-test
   (let [e1 (datafy (IllegalArgumentException. "bad args"))
@@ -536,21 +549,23 @@
          {}))
 
 (defn history
-  "Takes a sequence of operations and adds times and indexes."
+  "Takes a sequence of operations and adds times and indexes, returning a
+  History."
   [h]
-  (let [h (history/index h)]
-    (condp = (count h)
-      0 h
-      1 [(assoc (first h) :time 0)]
-      (reduce (fn [h op]
-                (conj h (assoc op :time (+ (:time (peek h))
-                                           1000000))))
-              [(assoc (first h) :time 0)]
-              (rest h)))))
+  (->> (condp = (count h)
+         0 h
+         1 [(assoc (first h) :time 0)]
+         (reduce (fn [h op]
+                   (conj h (assoc op :time (+ (:time (peek h)) 1000000))))
+                 [(assoc (first h) :time 0)]
+                 (rest h)))
+       h/strip-indices
+       h/history))
 
 (deftest set-full-test
   ; Helper fn to check a history
-  (let [c (fn [h] (check (set-full) nil (history h) {}))]
+  (let [c (fn [h]
+            (check (set-full) nil (history h) {}))]
     (testing "never read"
       (is (= {:lost             []
               :attempt-count    1

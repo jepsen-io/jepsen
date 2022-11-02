@@ -563,34 +563,29 @@
   ([checker-opts]
   (reify Checker
     (check [this test history opts]
-      ; Build up a map of elements to element states. We track the current set
-      ; of ongoing reads as well, so we can map completions back to
-      ; invocations. Finally we track a map of duplicates: elements to maximum
-      ; multiplicities for that element in any given read.
-      (let [[elements reads dups]
+      ; Build up a map of elements to element states. Finally we track a map of
+      ; duplicates: elements to maximum multiplicities for that element in any
+      ; given read.
+      (let [[elements dups]
             (->> history
-                 (r/filter (comp number? :process)) ; Ignore the nemesis
-                 (reduce (fn red [[elements reads dups] op]
+                 h/client-ops
+                 (reduce (fn red [[elements dups] op]
                            (let [v (:value op)
                                  p (:process op)]
                              (condp = (:f op)
                                :add
                                (if (= :invoke (:type op))
                                  ; Track a new element
-                                 [(assoc elements v (set-full-element op))
-                                  reads dups]
+                                 [(assoc elements v (set-full-element op)) dups]
                                  ; Oh good, it completed
-                                 [(update elements v set-full-add op)
-                                  reads dups])
+                                 [(update elements v set-full-add op) dups])
 
                                :read
-                               (condp = (:type op)
-                                 :invoke [elements (assoc reads p op) dups]
-                                 :fail   [elements (dissoc reads p op) dups]
-                                 :info   [elements reads dups]
-                                 :ok
+                               (if-not (h/ok? op)
+                                 ; Nothing doing
+                                 [elements dups]
                                  ; We read stuff! Update every element
-                                 (let [inv (get reads (:process op))
+                                 (let [inv (h/invocation history op)
                                        ; Find duplicates
                                        dups' (->> (frequencies v)
                                                   (reduce (fn [m [k v]]
@@ -609,9 +604,8 @@
                                                  (set-full-read-absent
                                                    state inv op))])
                                             elements)
-                                    reads
                                     dups'])))))
-                         [{} {} {}]))
+                         [{} {}]))
             set-results (set-full-results checker-opts
                                           (mapv val (sort elements)))]
         (assoc set-results
