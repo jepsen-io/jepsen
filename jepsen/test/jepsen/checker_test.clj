@@ -28,6 +28,10 @@
   [process f value]
   (h/op {:index -1, :type :fail, :process process, :f f, :value value}))
 
+(defn info-op
+  [process f value]
+  (h/op {:index -1, :type :info, :process process, :f f, :value value}))
+
 (defn history
   "Takes a sequence of operations and adds times and indexes, returning a
   History."
@@ -205,6 +209,36 @@
             :unexpected-count 1
             :duplicated-count 1
             :recovered-count  0}))))
+
+(deftest unique-ids-test
+  (testing "empty"
+    (is (= {:valid?             true
+            :attempted-count    0
+            :acknowledged-count 0
+            :duplicated-count   0
+            :duplicated         {}
+            :range              [nil nil]}
+           (check (unique-ids) nil (history []) nil))))
+
+  (testing "dups"
+    (is (= {:valid?             false
+            :attempted-count    5
+            :acknowledged-count 4
+            :duplicated-count   1
+            :duplicated         {0 3}
+            :range              [0 1]}
+           (check (unique-ids) nil
+                  (history [(invoke-op 0 :generate nil)
+                            (ok-op     0 :generate 0)
+                            (invoke-op 1 :generate nil)
+                            (ok-op     1 :generate 1)
+                            (invoke-op 2 :generate nil)
+                            (ok-op     2 :generate 0)
+                            (invoke-op 3 :generate nil)
+                            (ok-op     3 :generate 0)
+                            (invoke-op 4 :generate nil)
+                            (info-op   4 :generate nil)])
+                  {})))))
 
 (deftest counter-test
   (testing "empty"

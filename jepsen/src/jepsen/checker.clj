@@ -724,38 +724,29 @@
   []
   (reify Checker
     (check [this test history opts]
-      (let [attempted-count (->> history
-                                 (filter op/invoke?)
-                                 (filter #(= :generate (:f %)))
-                                 count)
-            acks     (->> history
-                          (filter op/ok?)
-                          (filter #(= :generate (:f %)))
-                          (map :value))
-            dups     (->> acks
-                          (reduce (fn [counts id]
-                               (assoc counts id
-                                      (inc (get counts id 0))))
-                             {})
-                          (filter #(< 1 (val %)))
-                          (into (sorted-map)))
-            range    (reduce (fn [[lowest highest :as pair] id]
-                               (cond (util/compare< id lowest)  [id highest]
-                                     (util/compare< highest id) [lowest id]
-                                     true           pair))
-                             [(first acks) (first acks)]
-                             acks)]
+      (let [{:keys [attempted-count acks]}
+            (->> (t/filter (h/has-f? :generate))
+                 (t/fuse {:attempted-count (->> (t/filter h/invoke?)
+                                                (t/count))
+                          :acks (->> (t/filter h/ok?)
+                                     (t/map :value)
+                                     (t/fuse {:count (t/count)
+                                              :freqs (t/frequencies)
+                                              :range (t/range)}))})
+                 (h/tesser history))
+            dups (->> acks :freqs
+                      (r/filter #(< 1 (val %)))
+                      (into (sorted-map)))]
         {:valid?              (empty? dups)
          :attempted-count     attempted-count
-         :acknowledged-count  (count acks)
+         :acknowledged-count  (:count acks)
          :duplicated-count    (count dups)
          :duplicated          (->> dups
                                    (sort-by val)
                                    (reverse)
                                    (take 48)
                                    (into (sorted-map)))
-         :range               range}))))
-
+         :range               (:range acks)}))))
 
 (defn counter
   "A counter starts at zero; add operations should increment it by that much,
