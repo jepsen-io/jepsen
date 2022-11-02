@@ -6,14 +6,18 @@
             [clojure.set :as set]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
-            [jepsen.util :as util]
-            [jepsen.store :as store]
-            [multiset.core :as multiset]
             [gnuplot.core :as g]
+            [jepsen [history :as h]
+                    [store :as store]
+                    [util :as util]]
+            [jepsen.history.fold :as f]
             [knossos.core :as knossos]
             [knossos.op :as op]
             [knossos.history :as history]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [multiset.core :as multiset]
+            [slingshot.slingshot :refer [try+ throw+]]
+            [tesser.core :as t])
+  (:import (jepsen.history Op)))
 
 (def default-nemesis-color "#cccccc")
 (def nemesis-alpha 0.6)
@@ -94,26 +98,34 @@
 
 (defn invokes-by-type
   "Splits up a sequence of invocations into ok, failed, and crashed ops by
-  looking at their corresponding completions."
-  [ops]
-  {:ok   (filter #(= :ok   (:type (:completion %))) ops)
-   :fail (filter #(= :fail (:type (:completion %))) ops)
-   :info (filter #(= :info (:type (:completion %))) ops)})
+  looking at their corresponding completions. Either a tesser fold, or runs on
+  a history."
+  ([]
+   (->> (t/filter h/invoke?)
+        (t/fuse {:ok   (t/into [] (t/filter (comp h/ok?   :completion)))
+                 :info (t/into [] (t/filter (comp h/info? :completion)))
+                 :fail (t/into [] (t/filter (comp h/fail? :completion)))})))
+  ([history]
+   (h/tesser history (invokes-by-type))))
 
 (defn invokes-by-f
-  "Takes a history and returns a map of f -> ops, for all invocations."
-  [history]
-  (->> history
-       (filter op/invoke?)
-       (group-by :f)))
+  "Takes a history and returns a map of f -> ops, for all invocations. Either a
+  tesswer fold, or runs on a history."
+  ([]
+   (->> (t/filter h/invoke?)
+        (t/group-by :f)
+        (t/into [])))
+  ([history]
+   (h/tesser history (invokes-by-f))))
 
 (defn invokes-by-f-type
-  "Takes a history and returns a map of f -> type -> ops, for all invocations."
-  [history]
-  (->> history
-       (filter op/invoke?)
-       (group-by :f)
-       (util/map-kv (fn [[f ops]] [f (invokes-by-type ops)]))))
+  "A fold which returns a map of f -> type -> ops, for all invocations."
+  ([]
+   (into (->> (t/filter h/invoke?)
+              (t/group-by :f))
+         (invokes-by-type)))
+  ([history]
+   (h/tesser history (invokes-by-f-type))))
 
 (defn completions-by-f-type
   "Takes a history and returns a map of f -> type-> ops, for all completions in
@@ -562,26 +574,42 @@
   (let [nemeses     (or nemeses (:nemeses (:plot test)))
         dt          10
         td          (double (/ dt))
-        t-max       (->> history (r/map :time) (reduce max 0) util/nanos->secs)
-        datasets    (->> history
-                         (r/remove op/invoke?)
-                         ; Don't graph nemeses
-                         (r/filter (comp integer? :process))
-                         ; Compute rates
-                         (reduce (fn [m op]
-                                   (update-in m [(:f op)
-                                                 (:type op)
-                                                 (bucket-time dt
-                                                              (util/nanos->secs
-                                                               (:time op)))]
-                                              #(+ td (or % 0))))
-                                 {}))
+        ; Times might technically be out-of-order (and our tests do this
+        ; intentionally, just for convenience)
+        t-max       (h/task! history :max-time
+                             (fn max-time [_]
+                               (let [t (->> (t/map :time)
+                                            (t/max)
+                                            (h/tesser history))]
+                                 (util/nanos->secs (or t 0)))))
+        ; Compute rates: a map of f -> type -> time-bucket -> rate
+        datasets
+        (h/fold
+          (->> history
+               (h/remove h/invoke?)
+               h/client-ops)
+          (f/loopf {:name :rate-graph}
+                   ; We work with a flat map for speed, and nest it at
+                   ; the end
+                   ([m (transient {})]
+                    [^Op op]
+                    (recur (let [bucket (bucket-time dt (util/nanos->secs
+                                                          (.time op)))
+                                 k [(.f op) (.type op) bucket]]
+                             (assoc! m k (+ (get m k 0) td))))
+                    (persistent! m))
+                   ; Combiner: merge, then furl
+                   ([m {}]
+                    [m2]
+                    (recur (merge-with + m m2))
+                    (reduce (fn unfurl [nested [ks rate]]
+                              (assoc-in nested ks rate))
+                            {}
+                            m))))
         fs          (util/polysort (keys datasets))
         fs->points- (fs->points fs)
-        output-path (.getCanonicalPath (store/path! test
-                                                    subdirectory
-                                                    "rate.png"))
-
+        output-path (.getCanonicalPath
+                      (store/path! test subdirectory "rate.png"))
         preamble (rate-preamble test output-path)
         series   (for [f fs, t types]
                    {:title     (str (util/name+ f) " " (name t))
@@ -590,7 +618,7 @@
                     :pointtype (fs->points- f)
                     :data      (let [m (get-in datasets [f t])]
                                  (map (juxt identity #(get m % 0))
-                                      (buckets dt t-max)))})]
+                                      (buckets dt @t-max)))})]
     (-> {:preamble  preamble
          :series    series}
         (with-range)

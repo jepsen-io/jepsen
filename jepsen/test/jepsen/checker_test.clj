@@ -258,16 +258,16 @@
             :errors []})))
 
   (testing "ignore failed ops"
-    (is (= (check (counter) nil
+    (is (= {:valid? true
+            :reads  [[0 0 0]]
+            :errors []}
+          (check (counter) nil
                   (history
                     [(invoke-op 0 :add 1)
                      (fail-op   0 :add 1)
                      (invoke-op 0 :read nil)
                      (ok-op     0 :read 0)])
-                  {})
-           {:valid? true
-            :reads  [[0 0 0]]
-            :errors []})))
+                  {}))))
 
   (testing "incomplete history"
     (is (= {:valid? true
@@ -403,16 +403,19 @@
          time (* 1e9 (rand-int 100))
          type (rand-nth [:ok :ok :ok :ok :ok
                          :fail :info :info])]
-     [{:process proc, :type :invoke, :f f, :time time}
-      {:process proc, :type type,    :f f, :time
-       (+ time latency)}])))
+     [(h/op {:index -1, :process proc, :type :invoke, :f f, :time time})
+      (h/op {:index -1, :process proc, :type type,    :f f,
+             :time (+ time latency)})])))
 
 (deftest perf-test
   (let [history (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
                      (mapcat perf-gen)
-                     (take 10000)
-                     vec)]
+                     (take 2000)
+                     h/strip-indices
+                     h/history)]
 
+    ; Go check store/latency graph, store/perf graph, etc to make sure these
+    ; look right
     (testing "can render latency-graph"
       (is (= (check (latency-graph)
                     {:name "latency graph"
@@ -463,7 +466,9 @@
                           :f :stop
                           :value :network-healed
                           :time (* 1e9 90)}]
-            history (apply conj history nemesis-ops)]
+            history (->> (into history nemesis-ops)
+                         h/strip-indices
+                         h/history)]
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
@@ -483,7 +488,9 @@
                           :f :nemesize
                           :value :woah!
                           :time (* 1e9 80)}]
-            history (apply conj history nemesis-ops)]
+            history (->> (into history nemesis-ops)
+                         h/strip-indices
+                         h/history)]
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
@@ -501,7 +508,9 @@
                           :process  :nemesis
                           :f        :start
                           :time     (* 1e9 25)}]
-            history (apply conj history nemesis-ops)]
+            history (->> (into history nemesis-ops)
+                         h/strip-indices
+                         h/history)]
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
@@ -535,7 +544,9 @@
                           :f :stop
                           :value :network-healed
                           :time (* 1e9 90)}]
-            history (apply conj history nemesis-ops)]
+            history (->> (into history nemesis-ops)
+                         h/strip-indices
+                         h/history)]
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
@@ -597,7 +608,9 @@
                           :f :stop2.1
                           :value :network-healed
                           :time (* 1e9 95)}]
-            history (apply conj history nemesis-ops)]
+            history (->> (into history nemesis-ops)
+                         h/strip-indices
+                         h/history)]
         (is (= (check checker test history {})
                {:latency-graph {:valid? true},
                 :rate-graph {:valid? true},
@@ -607,13 +620,14 @@
   (check (clock-plot)
          {:name       "clock plot test"
           :start-time 0}
-         [{:process :nemesis, :time 500000000,  :clock-offsets {"n1" 2.1}}
-          {:process :nemesis, :time 1000000000, :clock-offsets {"n1" 0
-                                                                "n2" -3.1}}
-          {:process :nemesis, :time 1500000000, :clock-offsets {"n1" 1
-                                                                "n2" -2}}
-          {:process :nemesis, :time 2000000000, :clock-offsets {"n1" 2
-                                                              "n2" -4.1}}]
+         (history
+           [{:process :nemesis, :time 500000000,  :clock-offsets {"n1" 2.1}}
+            {:process :nemesis, :time 1000000000, :clock-offsets {"n1" 0
+                                                                  "n2" -3.1}}
+            {:process :nemesis, :time 1500000000, :clock-offsets {"n1" 1
+                                                                  "n2" -2}}
+            {:process :nemesis, :time 2000000000, :clock-offsets {"n1" 2
+                                                                  "n2" -4.1}}])
          {}))
 
 (deftest set-full-test

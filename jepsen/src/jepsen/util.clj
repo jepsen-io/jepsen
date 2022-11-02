@@ -14,13 +14,16 @@
             [dom-top.core :as dt :refer [bounded-future]]
             [fipp [edn :as fipp]
                   [engine :as fipp.engine]]
+            [jepsen [history :as h]]
             [knossos.history :as history]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [slingshot.slingshot :refer [try+ throw+]]
+            [tesser.core :as t])
   (:import (java.lang.reflect Method)
            (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
            (java.io File
-                    RandomAccessFile)))
+                    RandomAccessFile)
+           (jepsen.history Op)))
 
 
 (defn default
@@ -752,40 +755,25 @@
         true                          (list thing-or-things)))
 
 (defn history->latencies
-  "Takes a history--a sequence of operations--and emits the same history but
-  with every invocation containing two new keys:
+  "Takes a history--a sequence of operations--and returns a new history where
+  operations have two new keys:
 
   :latency    the time in nanoseconds it took for the operation to complete.
   :completion the next event for that process"
   [history]
-  (let [idx (->> history
-                 (map-indexed (fn [i op] [op i]))
-                 (into {}))]
-    (->> history
-         (reduce (fn [[history invokes] op]
-                   (if (= :invoke (:type op))
-                     ; New invocation!
-                     [(conj! history op)
-                      (assoc! invokes (:process op)
-                              (dec (count history)))]
-
-                     (if-let [invoke-idx (get invokes (:process op))]
-                       ; We have an invocation for this process
-                       (let [invoke (get history invoke-idx)
-                             ; Compute latency
-                             l    (- (:time op) (:time invoke))
-                             op (assoc op :latency l)]
-                         [(-> history
-                              (assoc! invoke-idx
-                                      (assoc invoke :latency l, :completion op))
-                              (conj! op))
-                          (dissoc! invokes (:process op))])
-
-                       ; We have no invocation for this process
-                       [(conj! history op) invokes])))
-                 [(transient []) (transient {})])
-         first
-         persistent!)))
+  ; Force the pair index before we begin; if we start asking for completions
+  ; during a fold later it's going to tie up all our threads.
+  (when-let [op (first history)]
+    (h/completion history op))
+  (h/map (fn add-latency [^Op op]
+           (if (h/invoke? op)
+             (if-let [^Op c (h/completion history op)]
+               (assoc op
+                      :completion c
+                      :latency (- (.time c) (.time op)))
+               op)
+             op))
+         history))
 
 (defn nemesis-intervals
   "Given a history where a nemesis goes through :f :start and :f :stop type
