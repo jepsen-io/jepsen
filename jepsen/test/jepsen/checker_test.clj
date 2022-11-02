@@ -28,6 +28,20 @@
   [process f value]
   (h/op {:index -1, :type :fail, :process process, :f f, :value value}))
 
+(defn history
+  "Takes a sequence of operations and adds times and indexes, returning a
+  History."
+  [h]
+  (->> (condp = (count h)
+         0 h
+         1 [(assoc (first h) :time 0)]
+         (reduce (fn [h op]
+                   (conj h (assoc op :time (+ (:time (peek h)) 1000000))))
+                 [(assoc (first h) :time 0)]
+                 (rest h)))
+       h/strip-indices
+       h/history))
+
 (deftest unhandled-exceptions-test
   (let [e1 (datafy (IllegalArgumentException. "bad args"))
         e2 (datafy (IllegalArgumentException. "bad args 2"))
@@ -137,45 +151,47 @@
 
 (deftest total-queue-test
   (testing "empty"
-    (is (:valid? (check (total-queue) nil [] {}))))
+    (is (:valid? (check (total-queue) nil (history []) {}))))
 
   (testing "sane"
     (is (= (check (total-queue) nil
-                  [(invoke-op 1 :enqueue 1)
-                   (invoke-op 2 :enqueue 2)
-                   (ok-op     2 :enqueue 2)
-                   (invoke-op 3 :dequeue 1)
-                   (ok-op     3 :dequeue 1)
-                   (invoke-op 3 :dequeue 2)
-                   (ok-op     3 :dequeue 2)]
+                  (history
+                    [(invoke-op 1 :enqueue 1)
+                     (invoke-op 2 :enqueue 2)
+                     (ok-op     2 :enqueue 2)
+                     (invoke-op 3 :dequeue 1)
+                     (ok-op     3 :dequeue 1)
+                     (invoke-op 3 :dequeue 2)
+                     (ok-op     3 :dequeue 2)])
                   {})
-           {:valid?           true
-            :duplicated       (multiset/multiset)
-            :lost             (multiset/multiset)
-            :unexpected       (multiset/multiset)
-            :recovered        (multiset/multiset 1)
-            :attempt-count       2
-            :acknowledged-count  1
-            :ok-count            2
-            :unexpected-count    0
-            :lost-count          0
-            :duplicated-count    0
-            :recovered-count     1})))
+           {:valid?             true
+            :duplicated         (multiset/multiset)
+            :lost               (multiset/multiset)
+            :unexpected         (multiset/multiset)
+            :recovered          (multiset/multiset 1)
+            :attempt-count      2
+            :acknowledged-count 1
+            :ok-count           2
+            :unexpected-count   0
+            :lost-count         0
+            :duplicated-count   0
+            :recovered-count    1})))
 
   (testing "pathological"
     (is (= (check (total-queue) nil
-                  [(invoke-op 1 :enqueue :hung)
-                   (invoke-op 2 :enqueue :enqueued)
-                   (ok-op     2 :enqueue :enqueued)
-                   (invoke-op 3 :enqueue :dup)
-                   (ok-op     3 :enqueue :dup)
-                   (invoke-op 4 :dequeue nil) ; nope
-                   (invoke-op 5 :dequeue nil)
-                   (ok-op     5 :dequeue :wtf)
-                   (invoke-op 6 :dequeue nil)
-                   (ok-op     6 :dequeue :dup)
-                   (invoke-op 7 :dequeue nil)
-                   (ok-op     7 :dequeue :dup)]
+                  (history
+                    [(invoke-op 1 :enqueue :hung)
+                     (invoke-op 2 :enqueue :enqueued)
+                     (ok-op     2 :enqueue :enqueued)
+                     (invoke-op 3 :enqueue :dup)
+                     (ok-op     3 :enqueue :dup)
+                     (invoke-op 4 :dequeue nil) ; nope
+                     (invoke-op 5 :dequeue nil)
+                     (ok-op     5 :dequeue :wtf)
+                     (invoke-op 6 :dequeue nil)
+                     (ok-op     6 :dequeue :dup)
+                     (invoke-op 7 :dequeue nil)
+                     (ok-op     7 :dequeue :dup)])
                   {})
            {:valid?           false
             :lost             (multiset/multiset :enqueued)
@@ -547,20 +563,6 @@
           {:process :nemesis, :time 2000000000, :clock-offsets {"n1" 2
                                                               "n2" -4.1}}]
          {}))
-
-(defn history
-  "Takes a sequence of operations and adds times and indexes, returning a
-  History."
-  [h]
-  (->> (condp = (count h)
-         0 h
-         1 [(assoc (first h) :time 0)]
-         (reduce (fn [h op]
-                   (conj h (assoc op :time (+ (:time (peek h)) 1000000))))
-                 [(assoc (first h) :time 0)]
-                 (rest h)))
-       h/strip-indices
-       h/history))
 
 (deftest set-full-test
   ; Helper fn to check a history

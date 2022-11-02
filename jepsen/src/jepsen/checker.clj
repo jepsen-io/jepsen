@@ -266,20 +266,20 @@
       (let [attempts (h/task! history :attempts
                               (fn attempts [_]
                                 (->> (t/filter h/invoke?)
-                                     (t/filter (h/has-f :add))
+                                     (t/filter (h/has-f? :add))
                                      (t/map :value)
                                      (t/set)
                                      (h/tesser history))))
             adds (h/task! history :adds
                           (fn adds [_]
                             (->> (t/filter h/ok?)
-                                 (t/filter (h/has-f :add))
+                                 (t/filter (h/has-f? :add))
                                  (t/map :value)
                                  (t/set)
                                  (h/tesser history))))
             final-read (h/task! history :final-reads
                                 (fn final-read [_]
-                                  (->> (t/filter (h/has-f :read))
+                                  (->> (t/filter (h/has-f? :read))
                                        (t/filter h/ok?)
                                        (t/map :value)
                                        (t/last)
@@ -614,38 +614,38 @@
                :duplicated       dups))))))
 
 (defn expand-queue-drain-ops
-  "Takes a history. Looks for :drain operations with their value being a
+  "A Tesser fold which looks for :drain operations with their value being a
   collection of queue elements, and expands them to a sequence of :dequeue
   invoke/complete pairs."
-  [history]
-  (reduce (fn [h' op]
-            (cond ; Anything other than a drain op passes through
-                  (not= :drain (:f op)) (conj h' op)
+  []
+  (t/mapcat (fn expand [op]
+              (cond ; Pass through anything other than a :drain
+                    (not= :drain (:f op)) [op]
 
-                  ; Skip drain invocations and failures
-                  (op/invoke? op) h'
-                  (op/fail? op)   h'
+                    ; Skip drain invokes/fails
+                    (h/invoke? op) nil
+                    (h/fail? op) nil
 
-                  ; For successful drains, expand
-                  (op/ok? op)
-                  (into h' (mapcat (fn [element]
-                                     [(assoc op
-                                             :type  :invoke
-                                             :f     :dequeue
-                                             :value nil)
-                                      (assoc op
-                                             :type  :ok
-                                             :f     :dequeue
-                                             :value element)])
-                                   (:value op)))
+                    ; Expand successful drains
+                    (h/ok? op)
+                    (mapcat (fn [element]
+                              [(assoc op
+                                      :index -1
+                                      :type  :invoke
+                                      :f     :dequeue
+                                      :value nil)
+                               (assoc op
+                                      :index -1
+                                      :type  :ok
+                                      :f     :dequeue
+                                      :value element)])
+                            (:value op))
 
-                  ; Anything else (e.g. crashed drains) is illegal
-                  true
-                  (throw (IllegalStateException.
-                           (str "Not sure how to handle a crashed drain operation: "
-                                (pr-str op))))))
-          []
-          history))
+                    ; Anything else (e.g. crashed drains) is illegal
+                    true
+                    (throw (IllegalStateException.
+                             (str "Not sure how to handle a crashed drain operation: "
+                                  (pr-str op))))))))
 
 (defn total-queue
   "What goes in *must* come out. Verifies that every successful enqueue has a
@@ -654,22 +654,23 @@
   []
   (reify Checker
     (check [this test history opts]
-      (let [history  (expand-queue-drain-ops history)
-            attempts (->> history
-                          (r/filter op/invoke?)
-                          (r/filter #(= :enqueue (:f %)))
-                          (r/map :value)
-                          (into (multiset/multiset)))
-            enqueues (->> history
-                          (r/filter op/ok?)
-                          (r/filter #(= :enqueue (:f %)))
-                          (r/map :value)
-                          (into (multiset/multiset)))
-            dequeues (->> history
-                          (r/filter op/ok?)
-                          (r/filter #(= :dequeue (:f %)))
-                          (r/map :value)
-                          (into (multiset/multiset)))
+      (let [{:keys [attempts enqueues dequeues]}
+            (->> (expand-queue-drain-ops)
+                 (t/fuse
+                   {:attempts (->> (t/filter (h/has-f? :enqueue))
+                                   (t/filter h/invoke?)
+                                   (t/map :value)
+                                   (t/into (multiset/multiset)))
+                    :enqueues (->> (t/filter (h/has-f? :enqueue))
+                                   (t/filter h/ok?)
+                                   (t/map :value)
+                                   (t/into (multiset/multiset)))
+                    :dequeues (->> (t/filter (h/has-f? :dequeue))
+                                   (t/filter h/ok?)
+                                   (t/map :value)
+                                   (t/into (multiset/multiset)))})
+                 (h/tesser history))
+
             ; The OK set is every dequeue which we attempted.
             ok         (multiset/intersect dequeues attempts)
 
