@@ -10,6 +10,7 @@
             [clojure.java [io :as io]
                           [shell :refer [sh]]]
             [clojure.tools.logging :refer [info warn]]
+            [dom-top.core :as dt :refer [loopr]]
             [potemkin :refer [definterface+]]
             [jepsen [history :as h]
                     [store :as store]
@@ -759,54 +760,66 @@
 
   Returns a map:
 
-  {:valid?              Whether the counter remained within bounds
-   :reads               [[lower-bound read-value upper-bound] ...]
-   :errors              [[lower-bound read-value upper-bound] ...]
-   :max-absolute-error  The [lower read upper] where read falls furthest outside
-   :max-relative-error  Same, but with error computed as a fraction of the mean}
+    :valid?              Whether the counter remained within bounds
+    :reads               [[lower-bound read-value upper-bound] ...]
+    :errors              [[lower-bound read-value upper-bound] ...]
+
+  ; Not implemented, but might be nice:
+
+    :max-absolute-error The [lower read upper] where read falls furthest outside
+    :max-relative-error Same, but with error computed as a fraction of the mean}
   "
   []
   (reify Checker
     (check [this test history opts]
       ; pre-process our history so failed adds do not get applied
-      (loop [history         (->> history
-                                  history/complete
-                                  (remove :fails?)
-                                  (remove op/fail?)
-                                  seq)
-             lower              0             ; Current lower bound on counter
-             upper              0             ; Upper bound on counter value
-             pending-reads      {}            ; Process ID -> [lower read-val]
-             reads              []]           ; Completed [lower val upper]s
-          (if (nil? history)
-            ; We're done here
-            (let [errors (remove (partial apply <=) reads)]
-              {:valid?             (empty? errors)
-               :reads              reads
-               :errors             errors})
-            ; But wait, there's more
-            (let [op      (first history)
-                  history (next history)]
-              (case [(:type op) (:f op)]
-                [:invoke :read]
-                (recur history lower upper
-                       (assoc pending-reads (:process op) [lower (:value op)])
-                       reads)
+      (loopr [lower              0   ; Current lower bound on counter
+              upper              0   ; Upper bound on counter value
+              pending-reads      {}  ; Process ID -> [lower read-val]
+              reads              []] ; Completed [lower val upper]s
+             ; If this is slow, maybe try :via :reduce?
+             [{:keys [process type f process value] :as op} history]
+             (case [type f]
+               [:invoke :read]
+               ; What value will this read?
+               (if-let [completion (h/completion history op)]
+                 (do (if (h/ok? completion)
+                       ; We're going to read something
+                       (recur lower upper
+                              (assoc pending-reads process
+                                     [lower (:value completion)])
+                              reads)
+                       ; Won't read anything
+                       (recur lower upper pending-reads reads)))
+                 ; Doesn't finish at all
+                 (recur lower upper pending-reads reads))
 
-                [:ok :read]
-                (let [r (get pending-reads (:process op))]
-                  (recur history lower upper
-                         (dissoc pending-reads (:process op))
-                         (conj reads (conj r upper))))
+               [:ok :read]
+               (let [r (get pending-reads process)]
+                 (recur lower upper
+                        (dissoc pending-reads process)
+                        (conj reads (conj r upper))))
 
-                [:invoke :add]
-                (do (assert (not (neg? (:value op))))
-                    (recur history lower (+ upper (:value op)) pending-reads reads))
+               [:invoke :add]
+               (do (assert (not (neg? value)))
+                   ; Look forward to find out if we'll succeed
+                   (if-let [completion (h/completion history op)]
+                     (if (h/fail? completion)
+                       ; Won't complete
+                       (recur lower upper pending-reads reads)
+                       ; Will complete
+                       (recur lower (+ upper value) pending-reads reads))
+                     ; Not sure
+                     (recur lower (+ upper value) pending-reads reads)))
 
-                [:ok :add]
-                (recur history (+ lower (:value op)) upper pending-reads reads)
+               [:ok :add]
+               (recur (+ lower value) upper pending-reads reads)
 
-                (recur history lower upper pending-reads reads))))))))
+               (recur lower upper pending-reads reads))
+                 (let [errors (remove (partial apply <=) reads)]
+                   {:valid?             (empty? errors)
+                    :reads              reads
+                    :errors             errors})))))
 
 (defn latency-graph
   "Spits out graphs of latencies. Checker options take precedence over
