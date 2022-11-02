@@ -5,18 +5,19 @@
             [clojure.tools.logging :refer [info warn]]
             [clojure.pprint :refer [pprint]]
             [clojure.string :as str]
-            [jepsen [util :as util]
+            [jepsen [history :as h]
+                    [util :as util]
                     [store :as store]]
             [jepsen.checker.perf :as perf]
             [gnuplot.core :as g]))
 
 (defn history->datasets
-  "Takes a history, and produces a map of nodes to sequences of [t offset]
+  "Takes a history and produces a map of nodes to sequences of [t offset]
   pairs, representing the changing clock offsets for that node over time."
   [history]
   (let [final-time (util/nanos->secs (:time (peek history)))]
     (->> history
-         (r/filter :clock-offsets)
+         (h/filter :clock-offsets)
          (reduce (fn [series op]
                    (let [t (util/nanos->secs (:time op))]
                      (reduce (fn [series [node offset]]
