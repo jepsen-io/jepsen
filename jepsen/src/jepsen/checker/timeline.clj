@@ -3,11 +3,13 @@
   (:require [clojure.core.reducers :as r]
             [clojure.string :as str]
             [clj-time.coerce :as t-coerce]
-            [hiccup.core :as h]
+            [hiccup.core :as hiccup]
             [knossos.history :as history]
-            [jepsen.util :as util :refer [name+ pprint-str]]
-            [jepsen.store :as store]
-            [jepsen.checker :as checker]))
+            [jepsen [checker :as checker]
+                    [history :as h]
+                    [store :as store]
+                    [util :as util :refer [name+ pprint-str]]]
+            [tesser.core :as t]))
 
 (def op-limit
   "Maximum number of operations to render. Helps make timeline usable on massive histories."
@@ -163,8 +165,9 @@
 (defn process-index
   "Maps processes to columns"
   [history]
-  (->> history
-       history/processes
+  (->> (t/map :process)
+       (t/set)
+       (h/tesser history)
        history/sort-processes
        (reduce (fn [m p] (assoc m p (count m)))
                {})))
@@ -177,33 +180,37 @@
        (mapv (fn [i op] (assoc op :sub-index i)) (range))
        vec))
 
+(defn hiccup
+  "Renders the Hiccup structure for a history."
+  [test history opts]
+  (let [process-index (h/task history build-process-index []
+                              (process-index history))
+        pairs (->> history
+                   sub-index
+                   pairs)
+        pair-count (count pairs)
+        truncated? (< op-limit pair-count)
+        pairs      (take op-limit pairs)]
+    [:html
+     [:head
+      [:style stylesheet]]
+     [:body
+      (breadcrumbs test (:history-key opts))
+      [:h1 (str (:name test) " key " (:history-key opts))]
+      (when truncated?
+        [:div {:class "truncation-warning"}
+         (str "Showing only " op-limit " of " pair-count " operations in this history.")])
+      [:div {:class "ops"}
+       (->> pairs
+            (map (partial pair->div
+                          history
+                          test
+                          @process-index)))]]]))
+
 (defn html
   []
   (reify checker/Checker
     (check [this test history opts]
-      (let [pairs (->> history
-                       ; I'm not sure we actually need to complete operations
-                       ; any more.
-                       ;history/complete
-                       sub-index
-                       pairs)
-            pair-count (count pairs)
-            truncated? (< op-limit pair-count)
-            pairs      (take op-limit pairs)]
-      (->> (h/html [:html
-                    [:head
-                     [:style stylesheet]]
-                    [:body
-                     (breadcrumbs test (:history-key opts))
-                     [:h1 (str (:name test) " key " (:history-key opts))]
-                     (when truncated?
-                       [:div {:class "truncation-warning"}
-                        (str "Showing only " op-limit " of " pair-count " operations in this history.")])
-                     [:div {:class "ops"}
-                      (->> pairs
-                           (map (partial pair->div
-                                         history
-                                         test
-                                         (process-index history))))]]])
+      (->> (hiccup/html (hiccup test history opts))
            (spit (store/path! test (:subdirectory opts) "timeline.html")))
-      {:valid? true}))))
+      {:valid? true})))

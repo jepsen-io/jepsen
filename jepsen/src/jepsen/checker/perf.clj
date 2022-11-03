@@ -576,12 +576,11 @@
         td          (double (/ dt))
         ; Times might technically be out-of-order (and our tests do this
         ; intentionally, just for convenience)
-        t-max       (h/task! history :max-time
-                             (fn max-time [_]
-                               (let [t (->> (t/map :time)
-                                            (t/max)
-                                            (h/tesser history))]
-                                 (util/nanos->secs (or t 0)))))
+        t-max       (h/task history max-time []
+                            (let [t (->> (t/map :time)
+                                         (t/max)
+                                         (h/tesser history))]
+                              (util/nanos->secs (or t 0))))
         ; Compute rates: a map of f -> type -> time-bucket -> rate
         datasets
         (h/fold

@@ -264,27 +264,24 @@
       ; This would be more efficient as a single fused fold, but I'm doing it
       ; this way to exercise/demonstrate the task system. Will replace later
       ; once profiling shows it as a bottleneck.
-      (let [attempts (h/task! history :attempts
-                              (fn attempts [_]
-                                (->> (t/filter h/invoke?)
-                                     (t/filter (h/has-f? :add))
-                                     (t/map :value)
-                                     (t/set)
-                                     (h/tesser history))))
-            adds (h/task! history :adds
-                          (fn adds [_]
-                            (->> (t/filter h/ok?)
-                                 (t/filter (h/has-f? :add))
-                                 (t/map :value)
-                                 (t/set)
-                                 (h/tesser history))))
-            final-read (h/task! history :final-reads
-                                (fn final-read [_]
-                                  (->> (t/filter (h/has-f? :read))
-                                       (t/filter h/ok?)
-                                       (t/map :value)
-                                       (t/last)
-                                       (h/tesser history))))
+      (let [attempts (h/task history attempts []
+                             (->> (t/filter h/invoke?)
+                                  (t/filter (h/has-f? :add))
+                                  (t/map :value)
+                                  (t/set)
+                                  (h/tesser history)))
+            adds (h/task history adds []
+                         (->> (t/filter h/ok?)
+                              (t/filter (h/has-f? :add))
+                              (t/map :value)
+                              (t/set)
+                              (h/tesser history)))
+            final-read (h/task history final-reads []
+                               (->> (t/filter (h/has-f? :read))
+                                    (t/filter h/ok?)
+                                    (t/map :value)
+                                    (t/last)
+                                    (h/tesser history)))
             attempts   @attempts
             adds       @adds
             final-read @final-read]
