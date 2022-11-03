@@ -2,12 +2,11 @@
   "Generators and checkers for tests of Adya's proscribed behaviors for
   weakly-consistent systems. See http://pmg.csail.mit.edu/papers/adya-phd.pdf"
   (:require [jepsen [client :as client]
-             [checker :as checker]
-             [generator :as gen]
-             [independent :as independent]]
+                    [checker :as checker]
+                    [generator :as gen]
+                    [independent :as independent]]
             [clojure.core.reducers :as r]
-            [clojure.set :as set]
-            [knossos.op :as op]))
+            [clojure.set :as set]))
 
 (defn g2-gen
   "With concurrent, unique keys, emits pairs of :insert ops of the form [key

@@ -11,9 +11,6 @@
                     [store :as store]
                     [util :as util]]
             [jepsen.history.fold :as f]
-            [knossos.core :as knossos]
-            [knossos.op :as op]
-            [knossos.history :as history]
             [multiset.core :as multiset]
             [slingshot.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
@@ -132,7 +129,7 @@
   history."
   [history]
   (->> history
-       (remove op/invoke?)
+       (h/remove h/invoke?)
        (group-by :f)
        (util/map-kv (fn [[f ops]] [f (group-by :type ops)]))))
 
@@ -141,7 +138,7 @@
   each level."
   [history]
   (->> history
-       (r/remove op/invoke?)
+       (h/remove h/invoke?)
        (reduce (fn [m op]
                  (let [f (:f op)
                        t (:type op)]

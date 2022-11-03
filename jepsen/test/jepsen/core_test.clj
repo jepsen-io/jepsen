@@ -1,23 +1,22 @@
 (ns jepsen.core-test
   (:refer-clojure :exclude [run!])
-  (:use clojure.test)
-  (:require [clojure.string :as str]
-            [clojure.pprint :refer [pprint]]
-            [jepsen.core :refer :all]
-            [jepsen [common-test :refer [quiet-logging]]
-                    [nemesis-test :as nemesis-test]]
-            [jepsen.os :as os]
-            [jepsen.db :as db]
-            [jepsen.tests :as tst]
-            [jepsen.control :as control]
-            [jepsen.client :as client]
-            [jepsen.generator :as gen]
-            [jepsen.store :as store]
-            [jepsen.checker :as checker]
-            [jepsen.nemesis :as nemesis]
-            [jepsen.generator.context :as gen.ctx]
-            [knossos [model :as model]
-                     [op :as op]]))
+  (:require [clojure [pprint :refer [pprint]]
+                     [string :as str]
+                     [test :refer :all]]
+            [jepsen [checker :as checker]
+                    [client :as client]
+                    [common-test :refer [quiet-logging]]
+                    [control :as control]
+                    [core :refer :all]
+                    [db :as db]
+                    [generator :as gen]
+                    [history :as h]
+                    [nemesis :as nemesis]
+                    [nemesis-test :as nemesis-test]
+                    [os :as os]
+                    [store :as store]
+                    [tests :as tst]]
+            [jepsen.generator.context :as gen.ctx]))
 
 (use-fixtures :once quiet-logging)
 
@@ -89,8 +88,8 @@
                             (gen/nemesis {:type :info, :f :fault})))
         test     (run! test)
         h        (:history test)
-        invokes  (partial filter op/invoke?)
-        oks      (partial filter op/ok?)
+        invokes  (partial filter h/invoke?)
+        oks      (partial filter h/ok?)
         reads    (partial filter (comp #{:read} :f))
         writes   (partial filter (comp #{:write} :f))
         cases    (partial filter (comp #{:cas} :f))

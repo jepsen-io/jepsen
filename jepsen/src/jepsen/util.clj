@@ -15,7 +15,6 @@
             [fipp [edn :as fipp]
                   [engine :as fipp.engine]]
             [jepsen [history :as h]]
-            [knossos.history :as history]
             [slingshot.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (java.lang.reflect Method)

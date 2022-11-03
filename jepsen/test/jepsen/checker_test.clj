@@ -10,9 +10,7 @@
                     [tests :as tests]
                     [util :as util]]
             [jepsen.checker.perf :as cp]
-            [knossos [history :as history]
-                     [model :as model]
-                     [op :as op]]
+            [knossos [model :as model]]
             [multiset.core :as multiset]))
 
 ; Helpers for making ops

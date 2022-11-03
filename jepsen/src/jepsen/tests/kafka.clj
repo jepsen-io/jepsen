@@ -177,10 +177,10 @@
                   [txn :as txn]
                   [util :refer [index-of]]]
             [gnuplot.core :as gnuplot]
-            [hiccup.core :as h]
             [jepsen [checker :as checker]
                     [client :as client]
                     [generator :as gen]
+                    [history :as h]
                     [store :as store]
                     [util :as util :refer [map-vals
                                            meh
@@ -188,7 +188,6 @@
                                            pprint-str]]]
             [jepsen.checker.perf :as perf]
             [jepsen.tests.cycle.append :as append]
-            [knossos [history :as history]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 ;; Generator
@@ -1415,10 +1414,9 @@
                 expired
                 known-offsets)))
           {}
-          history)
-        pairs (history/pair-index+ history)]
+          history)]
     ; Now work through the history, turning each poll operation into a lag map.
-    (loop [history    history
+    (loop [history' history
            ; A map of processes to keys to the highest offset that process has
            ; seen. Keys in this map correspond to the keys this process
            ; currently has :assign'ed. If using `subscribe`, keys are filled in
@@ -1427,9 +1425,9 @@
            process-offsets {}
            ; A vector of output lag maps.
            lags []]
-      (if-not (seq history)
+      (if-not (seq history')
         lags
-        (let [[op & history'] history
+        (let [[op & history'] history'
               {:keys [type process f value]} op]
           (if-not (= :ok type)
             ; Only OK ops matter
@@ -1460,7 +1458,7 @@
               (recur history' (assoc process-offsets process {}) lags)
 
               (:poll, :txn)
-              (let [invoke-time (:time (get pairs op))
+              (let [invoke-time (:time (h/invocation history op))
                     ; For poll ops, we merge all poll mop results into this
                     ; process's offsets, then figure out how far behind each
                     ; key based on the time that key offset expired.
@@ -1890,8 +1888,7 @@
   ([history]
    (analysis history {}))
   ([history opts]
-  (let [history               (history/index history)
-        history               (remove (comp #{:nemesis} :process) history)
+  (let [history               (h/client-ops history)
         writes-by-type        (future (writes-by-type history))
         reads-by-type         (future (reads-by-type history))
         version-orders        (future (version-orders history @reads-by-type))
@@ -1901,7 +1898,8 @@
         ; because our test suite often leaves off processes and times
         realtime-lag          (future
                                 (let [op (first history)]
-                                  (when (every? op [:process :time])
+                                  (when (and (:process op)
+                                             (:time op))
                                     (realtime-lag history))))
         worst-realtime-lag    (future (worst-realtime-lag @realtime-lag))
         unseen                (future (unseen history))

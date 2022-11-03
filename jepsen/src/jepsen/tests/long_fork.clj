@@ -89,9 +89,9 @@
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen [generator :as gen]
                     [checker :as checker]
+                    [history :as h]
                     [util :refer [rand-nth-empty]]]
             [jepsen.txn.micro-op :as mop]
-            [knossos.op :as op]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn group-for
@@ -275,8 +275,8 @@
   things are OK."
   [history]
   (let [res (->> history
-                 (filter op/invoke?)
-                 (filter (comp write-txn? :value))
+                 h/invokes
+                 (h/filter (comp write-txn? :value))
                  (reduce (fn [ks op]
                            (let [k (-> op :value first second)]
                              (if (get ks k)
@@ -291,8 +291,8 @@
   "All ok read ops"
   [history]
   (->> history
-       (filter op/ok?)
-       (filter (comp read-txn? :value))))
+       h/oks
+       (h/filter (comp read-txn? :value))))
 
 (defn early-reads
   "Given a set of read txns finds those that are too early to tell us anything;

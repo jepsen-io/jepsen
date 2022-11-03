@@ -4,7 +4,6 @@
             [clojure.string :as str]
             [clj-time.coerce :as t-coerce]
             [hiccup.core :as hiccup]
-            [knossos.history :as history]
             [jepsen [checker :as checker]
                     [history :as h]
                     [store :as store]
@@ -168,7 +167,7 @@
   (->> (t/map :process)
        (t/set)
        (h/tesser history)
-       history/sort-processes
+       util/polysort
        (reduce (fn [m p] (assoc m p (count m)))
                {})))
 

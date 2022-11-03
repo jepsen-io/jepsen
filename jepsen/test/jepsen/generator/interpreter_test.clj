@@ -8,11 +8,10 @@
             [jepsen [common-test :refer [quiet-logging]]
                     [core :as jepsen]
                     [client :refer [Client]]
-                    [history :as history :refer [op]]
+                    [history :as h :refer [op]]
                     [nemesis :refer [Nemesis]]
                     [util :as util]
                     [tests :as tests]]
-            [knossos.op :as op]
             [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -215,7 +214,7 @@
                                     (repeat 3)
                                     gen/clients))
         h (:history (jepsen/run! test))
-        completions (remove op/invoke? h)]
+        completions (h/remove h/invoke? h)]
     (is (= [[0 :fail :wag]
             [1 :fail :wag]
             [2 :fail :wag]]
@@ -241,7 +240,7 @@
                            (gen/nemesis
                              (repeat 2 {:type :info, :f :break}))))
           h           (:history (jepsen/run! test))
-          completions (remove op/invoke? h)
+          completions (h/remove h/invoke? h)
           err "indeterminate: Assert failed: false"]
         (is (= [[:nemesis :info :break nil]
                 [:nemesis :info :break err]

@@ -7,14 +7,13 @@
   :total-amount Total amount to allocate.
   :max-transfer The largest transfer we'll try to execute."
   (:refer-clojure :exclude [read test])
-  (:require [knossos.op :as op]
-            [clojure.core.reducers :as r]
-            [jepsen [generator :as gen]
-                    [checker :as checker]
+  (:require [clojure.core.reducers :as r]
+            [jepsen [checker :as checker]
+             [generator :as gen]
+             [history :as h]
                     [store :as store]
                     [util :as util]]
             [jepsen.checker.perf :as perf]
-            [knossos.history :as history]
             [gnuplot.core :as g]))
 
 (defn read
@@ -91,8 +90,8 @@
       (let [accts (set (:accounts test))
             total (:total-amount test)
             reads (->> history
-                       (r/filter op/ok?)
-                       (r/filter #(= :read (:f %))))
+                       (h/filter (h/has-f? :read))
+                       h/oks)
             errors (->> reads
                         (r/map (partial check-op
                                         accts
@@ -101,7 +100,7 @@
                         (r/filter identity)
                         (group-by :type))]
         {:valid?      (every? empty? (vals errors))
-         :read-count  (count (into [] reads))
+         :read-count  (count reads)
          :error-count (reduce + (map count (vals errors)))
          :first-error (util/min-by (comp :index :op) (map first (vals errors)))
          :errors      (->> errors
@@ -123,7 +122,7 @@
 (defn ok-reads
   "Filters a history to just OK reads. Returns nil if there are none."
   [history]
-  (let [h (filter #(and (op/ok? %)
+  (let [h (filter #(and (h/ok? %)
                         (= :read (:f %)))
                   history)]
     (when (seq h)

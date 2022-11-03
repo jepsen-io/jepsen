@@ -1,12 +1,12 @@
 (ns jepsen.generator-test
-  (:require [jepsen.generator :as gen]
-            [jepsen.generator [context :as ctx]
+  (:require [jepsen.generator [context :as ctx]
                               [test :as gen.test]]
-            [jepsen.independent :as independent]
-            [jepsen [util :as util]]
+            [jepsen [generator :as gen]
+                    [history :as h]
+                    [independent :as independent]
+                    [util :as util]]
             [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
-            [knossos.op :as op]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan IMap
                                Map
@@ -160,7 +160,7 @@
                           (repeat {:f :hold})])
                 ; We don't deliver p until after the write is complete.
                 (gen/on-update (fn [this test ctx event]
-                                 (when (and (op/ok? event)
+                                 (when (and (h/ok? event)
                                             (= :write (:f event)))
                                    (deliver p {:f      :confirm
                                                :value  (:value event)}))
