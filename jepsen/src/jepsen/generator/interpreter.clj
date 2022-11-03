@@ -8,6 +8,7 @@
             [clojure.tools.logging :refer [info warn error]]
             [jepsen [client         :as client]
                     [generator      :as gen]
+                    [history        :as h]
                     [nemesis        :as nemesis]
                     [util           :as util]]
             [jepsen.generator.context :as context]
@@ -272,7 +273,10 @@
                             (-> (:handle (:store test))
                                 (store.format/read-block-by-id
                                   history-block-id)
-                                :data))))
+                                :data
+                                (h/history {:dense-indices? true
+                                            :have-indices? true
+                                            :already-ops? true})))))
 
                 ; Nothing we can do right now. Let's try to complete something.
                 :pending (recur ctx gen op-index

@@ -207,7 +207,7 @@
 
 (defn run-case!
   "Takes a test with a store handle. Spawns nemesis and clients and runs the
-  generator."
+  generator. Returns history."
   [test]
   (with-client+nemesis-setup-teardown [test test]
     (gen.interpreter/run! test)))

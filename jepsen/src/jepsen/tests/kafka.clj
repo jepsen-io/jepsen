@@ -1869,9 +1869,7 @@
                  (assoc  :directory (str directory "/elle")))
           ; For our purposes, we only want to infer cycles over txn/poll/send
           ; ops
-          history  (->> history
-                        (filter (comp #{:txn :poll :send} :f))
-                        vec)
+          history  (h/filter (h/has-f? #{:txn :poll :send}) history)
           analyzer (->> opts
                         txn/additional-graphs
                         (into [(partial graph analysis)])

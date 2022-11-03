@@ -97,25 +97,25 @@
 
 (deftest queue-test
   (testing "empty"
-    (is (:valid? (check (queue nil) nil [] {}))))
+    (is (:valid? (check (queue nil) nil (h/history []) {}))))
 
   (testing "Possible enqueue but no dequeue"
     (is (:valid? (check (queue (model/unordered-queue)) nil
-                        [(invoke-op 1 :enqueue 1)] {}))))
+                        (h/history [(invoke-op 1 :enqueue 1)]) {}))))
 
   (testing "Definite enqueue but no dequeue"
     (is (:valid? (check (queue (model/unordered-queue)) nil
-                        [(ok-op 1 :enqueue 1)] {}))))
+                        (h/history [(ok-op 1 :enqueue 1)]) {}))))
 
   (testing "concurrent enqueue/dequeue"
     (is (:valid? (check (queue (model/unordered-queue)) nil
-                        [(invoke-op 2 :dequeue nil)
-                         (invoke-op 1 :enqueue 1)
-                         (ok-op     2 :dequeue 1)] {}))))
+                        (h/history [(invoke-op 2 :dequeue nil)
+                                    (invoke-op 1 :enqueue 1)
+                                    (ok-op     2 :dequeue 1)]) {}))))
 
   (testing "dequeue but no enqueue"
     (is (not (:valid? (check (queue (model/unordered-queue)) nil
-                             [(ok-op 1 :dequeue 1)] {}))))))
+                             (h/history [(ok-op 1 :dequeue 1)]) {}))))))
 
 (deftest set-test-
   (let [h (h/history

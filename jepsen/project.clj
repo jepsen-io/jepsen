@@ -49,7 +49,9 @@
           :source-uri "https://github.com/jepsen-io/jepsen/blob/v{version}/jepsen/{filepath}#L{line}"
           :metadata {:doc/format :markdown}}
   :profiles {:uberjar {:aot :all}
-             :dev {:dependencies [[org.clojure/test.check "1.1.1"]]
+             :dev {; experimenting with faster startup
+                   ;:aot [jepsen.core]
+                   :dependencies [[org.clojure/test.check "1.1.1"]]
                    :jvm-opts ["-Xmx32g"
                               "-server"
                               "-XX:-OmitStackTraceInFastThrow"]}})
