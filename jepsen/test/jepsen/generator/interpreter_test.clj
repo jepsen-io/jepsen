@@ -84,7 +84,7 @@
                 (gen/log "Recovering")))
         h    (:history (jepsen/run! test))
         rate (float (/ (count h) 2 time-limit))]
-    ;(prn :generator-interpeter-rate rate)
+    (prn :generator-interpeter-rate rate)
     (is (< 10000 rate))))
 
 (deftest run!-test

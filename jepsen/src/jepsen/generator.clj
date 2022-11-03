@@ -389,7 +389,8 @@
             [jepsen.generator.context :as context]
             [potemkin :refer [import-vars]]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (io.lacuna.bifurcan Set)))
+  (:import (io.lacuna.bifurcan Set)
+           (java.util ArrayList)))
 
 ;; These used to be a part of jepsen.generator directly, and it makes sense for
 ;; users to interact with them here. For cleanliness, they actually live in
@@ -485,22 +486,54 @@
 
 ;; Generators!
 
+(defn tracking-get!
+  "Takes an ArrayList, a map, a key, and a not-found value. Reads key from
+  map, returning it or not-found. Adds the key to the list if it was in the
+  map. Yourkit led me down this path."
+  [^ArrayList read-keys m k not-found]
+  (let [v (get m k ::not-found)]
+    (if (identical? v ::not-found)
+      not-found
+      (do (.add read-keys k)
+          v))))
+
 (defn fill-in-op
-  "Takes an operation and fills in missing fields for :type, :process, and
-  :time using context. Returns :pending if no process is free. Turns maps into
-  history Ops."
+  "Takes an operation as a map and fills in missing fields for :type, :process,
+  and :time using context. Returns :pending if no process is free. Turns maps
+  into history Ops."
   [op ctx]
+  ; This will be both inefficient and wrong for Ops, but users shouldn't
+  ; actually be passing those to us here.
+  (assert (not (instance? jepsen.history.Op op)))
   (if-let [p (some-free-process ctx)]
     ; Automatically assign type, time, and process from the context, if not
     ; provided.
-    (jepsen.history.Op. -1 ; Index
-                        (:time op (:time ctx))
-                        (:type op :invoke)
-                        (:process op p)
-                        (:f op)
-                        (:value op)
-                        nil
-                        (dissoc op :index :time :type :process :f :value))
+    (let [; We want to avoid using dissoc if we can POSSIBLY avoid it, so we
+          ; keep track of the fields we've read from the op.
+          read-keys  (ArrayList. 5)
+          time       (tracking-get! read-keys op :time (:time ctx))
+          type       (tracking-get! read-keys op :type :invoke)
+          process    (tracking-get! read-keys op :process p)
+          f          (tracking-get! read-keys op :f nil)
+          value      (tracking-get! read-keys op :value nil)
+          read-count (.size read-keys)
+          ; Any other fields?
+          ext     (if (< read-count (count op))
+                    ; There's fields in the map we didn't read. Pull out the
+                    ; keys we DID read
+                    (loop [i 0, ext op]
+                      (if (= read-count i)
+                        op
+                        (recur (inc i) (dissoc op (.get read-keys i)))))
+                    nil)]
+      (jepsen.history.Op. -1 ; Index
+                          time
+                          type
+                          process
+                          f
+                          value
+                          nil ; meta
+                          ext))
     :pending))
 
 (defrecord Fn
@@ -871,28 +904,30 @@
   Why is this nondeterministic? Because we use this function to decide between
   several alternative generators, and always biasing towards an earlier or
   later generator could lead to starving some threads or generators."
-  [m1 m2]
-  (condp = nil
-    m1 m2
-    m2 m1
-    (let [op1 (:op m1)
-          op2 (:op m2)]
-      (condp = :pending
-        op1 m2
-        op2 m1
-        (let [t1 (:time op1)
-              t2 (:time op2)]
-          (if (= t1 t2)
-            ; We have a tie; decide based on weights.
-            (let [w1 (:weight m1 1)
-                  w2 (:weight m2 1)
-                  w  (+ w1 w2)]
-              (assoc (if (< (rand-int w) w1) m1 m2)
-                     :weight w))
-            ; Not equal times; which comes sooner?
-            (if (< t1 t2)
-              m1
-              m2)))))))
+  ([] nil)
+  ([m] m)
+  ([m1 m2]
+   (condp identical? nil
+     m1 m2
+     m2 m1
+     (let [op1 (:op m1)
+           op2 (:op m2)]
+       (condp identical? :pending
+         op1 m2
+         op2 m1
+         (let [t1 (:time op1)
+               t2 (:time op2)]
+           (if (= t1 t2)
+             ; We have a tie; decide based on weights.
+             (let [w1 (:weight m1 1)
+                   w2 (:weight m2 1)
+                   w  (+ w1 w2)]
+               (assoc (if (< (rand-int w) w1) m1 m2)
+                      :weight w))
+             ; Not equal times; which comes sooner?
+             (if (< t1 t2)
+               m1
+               m2))))))))
 
 (defrecord Any [gens]
   Generator
@@ -992,30 +1027,32 @@
   ; default generator.
   Generator
   (op [_ test ctx]
-    (let [{:keys [op gen' i] :as soonest}
-          (->> ranges
-               (map-indexed
-                 (fn [i threads]
-                   (let [gen (nth gens i)
-                         ; Restrict context to this range of threads
-                         ctx ((nth context-filters i) ctx)]
-                     ; Ask this range's generator for an op
-                     (when-let [[op gen'] (op gen test ctx)]
-                       ; Remember our index
-                       {:op     op
-                        :gen'   gen'
-                        :weight (count threads)
-                        :i      i}))))
-               ; And for the default generator...
-               (cons (let [ctx ((peek context-filters) ctx)]
-                       ; And construct a triple for the default generator
-                       (when-let [[op gen'] (op (peek gens) test ctx)]
-                         (assert ctx)
-                         {:op     op
-                          :gen'   gen'
-                          :weight (context/all-thread-count ctx)
-                          :i      (count ranges)})))
-               (reduce soonest-op-map nil))]
+    (let [; A transducer to compute op/gen'/weight/i maps for each of `ranges`
+          xf (map-indexed
+               (fn per-range [i threads]
+                 (let [gen (nth gens i)
+                       ; Restrict context to this range of threads
+                       ctx ((nth context-filters i) ctx)]
+                   ; Ask this range's generator for an op
+                   (when-let [[op gen'] (op gen test ctx)]
+                     ; Remember our index
+                     {:op     op
+                      :gen'   gen'
+                      :weight (count threads)
+                      :i      i}))))
+          ; And for the default generator...
+          default-op-map
+          (let [ctx ((peek context-filters) ctx)]
+            ; And construct a triple for the default generator
+            (when-let [[op gen'] (op (peek gens) test ctx)]
+              (assert ctx)
+              {:op     op
+               :gen'   gen'
+               :weight (context/all-thread-count ctx)
+               :i      (count ranges)}))
+          ; Find soonest generator
+          {:keys [op gen' i] :as soonest}
+          (transduce xf soonest-op-map default-op-map ranges)]
       (when soonest
         ; A range has an operation to do!
         [op (Reserve. ranges all-ranges context-filters (assoc gens i gen'))])))
@@ -1113,7 +1150,7 @@
   ; when emitting ops.
   Generator
   (op [_ test ctx]
-    (when (seq gens)
+    (when-not (= 0 (count gens))
       (if-let [[op gen'] (op (nth gens i) test ctx)]
         ; Good, we have an op
         [op (Mix. (rand-int (count gens)) (assoc gens i gen'))]
@@ -1138,7 +1175,8 @@
   won't let other generators (which could help us get unstuck!) advance. We
   should probably cycle on :pending."
   [gens]
-  (Mix. (rand-int (count gens)) (vec gens)))
+  (when (seq gens)
+    (Mix. (rand-int (count gens)) (vec gens))))
 
 (defrecord Limit [remaining gen]
   Generator
@@ -1167,11 +1205,11 @@
   [msg]
   {:type :log, :value msg})
 
-(defrecord Repeat [remaining gen]
+(defrecord Repeat [^long remaining gen]
   ; Remaining is positive for a limit, or -1 for infinite repeats.
   Generator
   (op [_ test ctx]
-    (when-not (zero? remaining)
+    (when-not (= 0 remaining)
       (when-let [[op gen'] (op gen test ctx)]
         [op (Repeat. (max -1 (dec remaining)) gen)])))
 
