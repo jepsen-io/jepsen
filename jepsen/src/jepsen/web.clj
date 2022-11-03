@@ -39,13 +39,13 @@
 ; Path/File protocols
 (extend-protocol io/Coercions
   Path
-  (as-file [p] (.toFile p))
-  (as-url [p] (.toURL (.toURI p))))
+  (as-file [^Path p] (.toFile p))
+  (as-url [^Path p] (.toURL (.toUri p))))
 
 (defn url-encode-path-components
   "URL encodes *individual components* of a path, leaving / as / instead of
   encoded."
-  [x]
+  [^String x]
   (str/replace (java.net.URLEncoder/encode x "UTF-8") #"%2F" "/"))
 
 (def test-cache
@@ -132,7 +132,7 @@
   "Takes a test and filename components; returns a URL for that file."
   [t & args]
   (url-encode-path-components
-    (str "/files/" (-> (apply store/path t args)
+    (str "/files/" (-> ^File (apply store/path t args)
                        .getPath
                        (str/replace #"\Astore/" "")
                        (str/replace #"/\Z" "")))))
@@ -268,7 +268,7 @@
   else alphanumerically."
   [files]
   (if (every? (fn [^File f] (re-find #"^\d+$" (.getName f))) files)
-    (sort-by #(Long/parseLong (.getName %)) files)
+    (sort-by #(Long/parseLong (.getName ^File %)) files)
     (sort files)))
 
 (defn js-escape
@@ -293,12 +293,12 @@
    ; Breadcrumbs
    :body (h/html (->> dir
                       (.toPath)
-                      (iterate #(.getParent %))
+                      (iterate #(.getParent ^Path %))
                       (take-while #(-> store/base-dir
                                        io/file
                                        .getCanonicalFile
                                        .toPath
-                                       (not= (.toAbsolutePath %))))
+                                       (not= (.toAbsolutePath ^Path %))))
                       (drop 1)
                       reverse
                       (map (fn [^Path component]
@@ -405,7 +405,7 @@
   [req]
   (let [pathname ((re-find #"^/files/(.+)\z" (:uri req)) 1)
         ext      (when-let [m (re-find #"\.(\w+)\z" pathname)] (m 1))
-        f    (File. store/base-dir pathname)]
+        f        (File. store/base-dir ^String pathname)]
     (assert-file-in-scope! f)
     (cond
       (.isFile f)
@@ -430,7 +430,8 @@
 
 (defn app [req]
 ;  (info :req (with-out-str (pprint req)))
-  (let [req (assoc req :uri (java.net.URLDecoder/decode (:uri req) "UTF-8"))]
+  (let [req (assoc req :uri (java.net.URLDecoder/decode
+                              ^String (:uri req) "UTF-8"))]
     (condp re-find (:uri req)
       #"^/$"     (home req)
       #"^/files/" (files req)

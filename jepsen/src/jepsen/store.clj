@@ -30,7 +30,7 @@
            (org.fressian.handlers WriteHandler ReadHandler)
            (multiset.core MultiSet)))
 
-(def base-dir "store")
+(def ^String base-dir "store")
 
 ; These were moved into their own namespace, and are here for backwards
 ; compatibility
