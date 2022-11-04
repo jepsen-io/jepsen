@@ -398,7 +398,7 @@
   ([latency nemesis?]
    (let [f (rand-nth [:write :read])
          proc (rand-int 100)
-         time (* 1e9 (rand-int 100))
+         time (long (* 1e9 (rand-int 100)))
          type (rand-nth [:ok :ok :ok :ok :ok
                          :fail :info :info])]
      [(h/op {:index -1, :process proc, :type :invoke, :f f, :time time})
@@ -406,7 +406,7 @@
              :time (+ time latency)})])))
 
 (deftest perf-test
-  (let [history (->> (repeatedly #(/ 1e9 (inc (rand-int 1000))))
+  (let [history (->> (repeatedly #(long (/ 1e9 (inc (rand-int 1000)))))
                      (mapcat perf-gen)
                      (take 2000)
                      h/strip-indices
@@ -448,22 +448,22 @@
                           :process :nemesis
                           :f :start
                           :value nil
-                          :time (* 1e9 5)}
+                          :time (long (* 1e9 5))}
                          {:type :info
                           :process :nemesis
                           :f :start
                           :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
-                          :time (* 1e9 20)}
+                          :time (long (* 1e9 20))}
                          {:type :info
                           :process :nemesis
                           :f :stop
                           :value nil
-                          :time (* 1e9 50)}
+                          :time (long (* 1e9 50))}
                          {:type :info
                           :process :nemesis
                           :f :stop
                           :value :network-healed
-                          :time (* 1e9 90)}]
+                          :time (long (* 1e9 90))}]
             history (->> (into history nemesis-ops)
                          h/strip-indices
                          h/history)]
@@ -480,12 +480,12 @@
                           :process :nemesis
                           :f :nemesize
                           :value :spooky!
-                          :time (* 1e9 20)}
+                          :time (long (* 1e9 20))}
                          {:type :info
                           :process :nemesis
                           :f :nemesize
                           :value :woah!
-                          :time (* 1e9 80)}]
+                          :time (long (* 1e9 80))}]
             history (->> (into history nemesis-ops)
                          h/strip-indices
                          h/history)]
@@ -501,11 +501,11 @@
             nemesis-ops [{:type     :info,
                           :process  :nemesis
                           :f        :start
-                          :time     (* 1e9 20)}
+                          :time     (long (* 1e9 20))}
                          {:type     :info
                           :process  :nemesis
                           :f        :start
-                          :time     (* 1e9 25)}]
+                          :time     (long (* 1e9 25))}]
             history (->> (into history nemesis-ops)
                          h/strip-indices
                          h/history)]
@@ -526,22 +526,22 @@
                           :process :nemesis
                           :f :start
                           :value nil
-                          :time (* 1e9 5)}
+                          :time (long (* 1e9 5))}
                          {:type :info
                           :process :nemesis
                           :f :start
                           :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
-                          :time (* 1e9 20)}
+                          :time (long (* 1e9 20))}
                          {:type :info
                           :process :nemesis
                           :f :stop
                           :value nil
-                          :time (* 1e9 50)}
+                          :time (long (* 1e9 50))}
                          {:type :info
                           :process :nemesis
                           :f :stop
                           :value :network-healed
-                          :time (* 1e9 90)}]
+                          :time (long (* 1e9 90))}]
             history (->> (into history nemesis-ops)
                          h/strip-indices
                          h/history)]
@@ -569,43 +569,43 @@
                           :process :nemesis
                           :f :start1
                           :value nil
-                          :time (* 1e9 5)}
+                          :time (long (* 1e9 5))}
                          {:type :info
                           :process :nemesis
                           :f :start1
                           :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
-                          :time (* 1e9 20)}
+                          :time (long (* 1e9 20))}
                          {:type :info
                           :process :nemesis
                           :f :stop1
                           :value nil
-                          :time (* 1e9 40)}
+                          :time (long (* 1e9 40))}
                          {:type :info
                           :process :nemesis
                           :f :stop1
                           :value :network-healed
-                          :time (* 1e9 60)}
+                          :time (long (* 1e9 60))}
 
                          {:type :info
                           :process :nemesis
                           :f :start2.1
                           :value nil
-                          :time (* 1e9 30)}
+                          :time (long (* 1e9 30))}
                          {:type :info
                           :process :nemesis
                           :f :start2.2
                           :value [:isolated {"n2" #{"n1" "n4" "n3"}, "n5" #{"n1" "n4" "n3"}, "n1" #{"n2" "n5"}, "n4" #{"n2" "n5"}, "n3" #{"n2" "n5"}}]
-                          :time (* 1e9 65)}
+                          :time (long (* 1e9 65))}
                          {:type :info
                           :process :nemesis
                           :f :stop2.2
                           :value nil
-                          :time (* 1e9 45)}
+                          :time (long (* 1e9 45))}
                          {:type :info
                           :process :nemesis
                           :f :stop2.1
                           :value :network-healed
-                          :time (* 1e9 95)}]
+                          :time (long (* 1e9 95))}]
             history (->> (into history nemesis-ops)
                          h/strip-indices
                          h/history)]

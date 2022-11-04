@@ -373,8 +373,8 @@
                     size2 (with-open [r (open file)]
                             (.size ^java.nio.channels.FileChannel (:file r)))]
                 (is (= final-test' (read-test)))
-                (is (= 1626 size1))
-                (is (= 663 size2))
+                (is (= 1602 size1))
+                (is (= 639 size2))
 
                 ; Now we should be able to open up this test, update its
                 ; analysis, and write it back *re-using* the existing history.

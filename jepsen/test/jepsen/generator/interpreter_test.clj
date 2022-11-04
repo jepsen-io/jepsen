@@ -8,7 +8,7 @@
             [jepsen [common-test :refer [quiet-logging]]
                     [core :as jepsen]
                     [client :refer [Client]]
-                    [history :as h :refer [op]]
+                    [history :as h]
                     [nemesis :refer [Nemesis]]
                     [util :as util]
                     [tests :as tests]]
@@ -298,10 +298,10 @@
                                  (update :free-threads disj
                                          (:process (:event e))))]
             (is (= expected-ctx (:context e)))))
-        (is (= (op {:index    0
-                    :f        :write
-                    :value    2
-                    :time     (:time (:context e))
-                    :process  (:process (:event e))
-                    :type     :invoke})
+        (is (= (h/op {:index    0
+                      :f        :write
+                      :value    2
+                      :time     (:time (:context e))
+                      :process  (:process (:event e))
+                      :type     :invoke})
                (:event e))))))
