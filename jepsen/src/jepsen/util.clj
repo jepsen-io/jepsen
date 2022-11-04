@@ -272,26 +272,27 @@
   ([f history]
     (pwrite-history! f prn-op history))
   ([f printer history]
-   (let []
-     (h/fold history
-             (loopf {:name [:pwrite-history (str printer)]}
-                    ; Reduce
-                    ([file   (File/createTempFile "jepsen-history" ".part")
-                      writer (io/writer f)]
-                     [op]
-                     (do (binding [*out* writer]
-                           (printer op))
-                         (recur file writer))
-                     (do (.close writer)
-                         file))
-                    ; Combine
-                    ([files []]
-                     [file]
-                     (recur (conj files file))
-                     (try (concat-files! f files)
-                          f
-                          (finally
-                            (doseq [^File f files] (.delete f))))))))))
+   (h/fold history
+           (loopf {:name [:pwrite-history (str printer)]}
+                  ; Reduce
+                  ([file   (File/createTempFile "jepsen-history" ".part")
+                    writer (io/writer file)]
+                   [op]
+                   (do (binding [*out*              writer
+                                 *flush-on-newline* false]
+                         (printer op))
+                       (recur file writer))
+                   (do (.flush ^java.io.Writer writer)
+                       (.close ^java.io.Writer writer)
+                       file))
+                  ; Combine
+                  ([files []]
+                   [file]
+                   (recur (conj files file))
+                   (try (concat-files! f files)
+                        f
+                        (finally
+                          (doseq [^File f files] (.delete f)))))))))
 
 (defn log-op
   "Logs an operation and returns it."
