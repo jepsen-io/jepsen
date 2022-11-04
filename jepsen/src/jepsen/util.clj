@@ -15,6 +15,7 @@
             [fipp [edn :as fipp]
                   [engine :as fipp.engine]]
             [jepsen [history :as h]]
+            [jepsen.history.fold :refer [loopf]]
             [slingshot.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (java.lang.reflect Method)
@@ -271,24 +272,26 @@
   ([f history]
     (pwrite-history! f prn-op history))
   ([f printer history]
-   (if (or (< (count history) 16384) (not (vector? history)))
-     ; Plain old write
-     (write-history! f printer history)
-     ; Parallel variant
-     (let [chunks (chunk-vec (Math/ceil (/ (count history) (processors)))
-                             history)
-           files  (repeatedly (count chunks)
-                              #(File/createTempFile "jepsen-history" ".part"))]
-       (try
-         (->> chunks
-              (map (fn [file chunk]
-                     (bounded-future (write-history! file printer chunk) file))
-                   files)
-              doall
-              (map deref)
-              (concat-files! f))
-         (finally
-           (doseq [f files] (.delete ^File f))))))))
+   (let []
+     (h/fold history
+             (loopf {:name [:pwrite-history (str printer)]}
+                    ; Reduce
+                    ([file   (File/createTempFile "jepsen-history" ".part")
+                      writer (io/writer f)]
+                     [op]
+                     (do (binding [*out* writer]
+                           (printer op))
+                         (recur file writer))
+                     (do (.close writer)
+                         file))
+                    ; Combine
+                    ([files []]
+                     [file]
+                     (recur (conj files file))
+                     (try (concat-files! f files)
+                          f
+                          (finally
+                            (doseq [^File f files] (.delete f))))))))))
 
 (defn log-op
   "Logs an operation and returns it."
