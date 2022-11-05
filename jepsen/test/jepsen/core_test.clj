@@ -124,7 +124,7 @@
 (deftest list-append-short-test
   (list-append-test 100))
 
-(deftest ^:perf ^:focus list-append-perf-test
+(deftest ^:perf list-append-perf-test
   (let [n (long 1e6)
         {:keys [run-time check-time]} (list-append-test n)]
     (println (format "list-append-perf-test: %d ops run in %.2f s (%.2f ops/sec); checked in %.2f s (%.2f ops/sec)"
