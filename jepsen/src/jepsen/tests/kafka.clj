@@ -1795,7 +1795,7 @@
   {:graph (if-not ww-deps
             ; We might ask not to infer ww dependencies, in which case this
             ; graph is empty.
-            (g/digraph)
+            (g/named-graph :ww)
             (loopr [g (g/linear (g/digraph))]
                    [[k v->writer] writer-of ; For every key
                     [v2 op2] v->writer]     ; And very value written in that key
@@ -1804,13 +1804,13 @@
                        (if-let [op1 (v->writer v1)]
                          (if (= op1 op2)
                            (recur g) ; No self-edges
-                           (recur (g/link g op1 op2 :ww)))
+                           (recur (g/link g op1 op2)))
                          (throw+ {:type   :no-writer-of-value
                                   :key    k
                                   :value  v1}))
                        ; This is the first value in the version order.
                        (recur g)))
-                   (g/forked g)))
+                   (g/named-graph :ww (g/forked g))))
    :explainer (if-not ww-deps
                 (NeverExplainer.)
                 (WWExplainer. writer-of version-orders))})
@@ -1844,9 +1844,9 @@
                   [v readers]    v->readers]
                  (if-let [writer (-> writer-of (get k) (get v))]
                    (let [readers (remove #{writer} readers)]
-                     (recur (g/link-to-all g writer readers :wr)))
+                     (recur (g/link-to-all g writer readers)))
                    (throw+ {:type :no-writer-of-value, :key k, :value v}))
-                 (g/forked g))
+                 (g/named-graph :wr (g/forked g)))
    :explainer (WRExplainer. writer-of)})
 
 (defn graph
