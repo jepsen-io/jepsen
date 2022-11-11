@@ -360,6 +360,45 @@
                            :fs    #{:strobe-clock}
                            :color "#A0E9E3"}}}))
 
+(defn file-corruption-nemesis
+  "Wraps [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]] to corrupt files.
+   
+   Responds to:
+   ```
+   {:f :bitflip  :value [:node-spec ... ; target nodes as interpreted by db-nodes
+                         {:file \"/path/to/file/or/dir\" :probability 1e-5}]} 
+   {:f :truncate :value [:node-spec ... ; target nodes as interpreted by db-nodes
+                         {:file \"/path/to/file/or/dir\" :drop {:distribution :geometric :p 1e-3}}]} 
+   ```
+  See [[jepsen.nemesis.combined/file-corruption-package]]."
+  ([db] (file-corruption-nemesis db (n/bitflip) (n/truncate-file)))
+  ([db bitflip truncate]
+  (reify
+    n/Reflection
+    (fs [_this]
+      [:bitflip :truncate])
+
+    n/Nemesis
+    (setup! [_this test]
+      (file-corruption-nemesis db (n/setup! bitflip test) (n/setup! truncate test)))
+
+    (invoke! [_this test {:keys [f value] :as op}]
+      (let [[node-spec corruption] value
+            targets (db-nodes test db node-spec)
+            plan    (->> targets
+                         (reduce (fn [plan node]
+                                   (assoc plan node corruption))
+                                 {}))
+            op      (assoc op :value plan)]
+        (case f
+          :bitflip  (n/invoke! bitflip  test op)
+          :truncate (n/invoke! truncate test op))))
+
+    (teardown! [this test]
+      (n/teardown! bitflip  test)
+      (n/teardown! truncate test)
+      this))))
+
 (defn file-corruption-package
   "A nemesis and generator package that corrupts files.
    
@@ -390,13 +429,12 @@
    See [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]].
 
    Additional options as for [[nemesis-package]]."
-  [{:keys [faults db file-corruption interval nodes] :as _opts}]
+  [{:keys [faults db file-corruption interval] :as _opts}]
   (let [needed?     (:file-corruption faults)
         targets     (:targets     file-corruption (node-specs db))
         corruptions (:corruptions file-corruption)
         gen (->> (fn gen [_test _context]
-                   (let [targets (->> (rand-nth targets)
-                                      (db-nodes {:nodes nodes} db))
+                   (let [target (rand-nth targets)
                          {:keys [type file probability drop]} (rand-nth corruptions)
                          corruption (case type
                                       :bitflip  (let [probability (cond
@@ -409,14 +447,10 @@
                                                   {:file file :drop drop}))]
                      {:type  :info
                       :f     type
-                      :value (->> targets
-                                  (reduce (fn [plan node]
-                                            (assoc plan node corruption))
-                                          {}))}))
+                      :value [target corruption]}))
                  (gen/stagger (or interval default-interval)))]
     {:generator (when needed? gen)
-     :nemesis   (n/compose {#{:bitflip}  (n/bitflip)
-                            #{:truncate} (n/truncate-file)})
+     :nemesis   (file-corruption-nemesis db)
      :perf      #{{:name  "file-corruption"
                    :fs    #{:bitflip :truncate}
                    :start #{}
