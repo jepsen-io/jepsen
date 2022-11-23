@@ -427,10 +427,10 @@
             )))
 
   (stop-master! [db]
-    (c/su (cu/stop-daemon! ce-master-bin ce-master-pidfile)))
+    (c/su (cu/grepkill! ce-master-bin)))
 
   (stop-tserver! [db]
-    (c/su (cu/stop-daemon! ce-tserver-bin ce-tserver-pidfile))
+    (c/su (cu/grepkill! ce-tserver-bin))
     (c/su (cu/grepkill! "postgres")))
 
   (wipe! [db]
