@@ -12,7 +12,7 @@
                  [clj-time "0.15.2"]
                  [io.jepsen/history "0.1.0-SNAPSHOT"]
                  [jepsen.txn "0.1.2"]
-                 [knossos "0.3.8"]
+                 [knossos "0.3.9-SNAPSHOT"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.6.0"]
