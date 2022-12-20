@@ -5,7 +5,8 @@
   namespace supports splitting a test into independent components--for example
   taking a test of a single register and lifting it to a *map* of keys to
   registers."
-  (:require [jepsen.util :as util :refer [map-kv]]
+  (:require [jepsen [history :as h]
+                    [util :as util :refer [map-kv]]]
             [jepsen.store :as store]
             [jepsen.checker :refer [merge-valid check-safe Checker]]
             [jepsen.generator :as gen]
@@ -274,7 +275,7 @@
                    (not (tuple? v)) op
                    (= k (key v))    (assoc op :value (val v))
                    true             nil))))
-       vec))
+       h/history))
 
 (defn checker
   "Takes a checker that operates on :values like `v`, and lifts it to a checker
