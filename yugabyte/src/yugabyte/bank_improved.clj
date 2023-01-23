@@ -13,12 +13,10 @@
   for YSQL (update-insert-delete) deleted key will be chosen from contention-keys"
   (:refer-clojure :exclude
                   [test])
-  (:require [clojure [pprint :refer [pprint]]]
-            [clojure.tools.logging :refer [info]]
-            [jepsen.tests.bank :as bank]
-            [knossos.op :as op]
+  (:require [jepsen.tests.bank :as bank]
             [clojure.core.reducers :as r]
             [jepsen
+             [history :as h]
              [generator :as gen]
              [checker :as checker]
              [util :as util]]))
@@ -121,40 +119,37 @@
   "Based on code from original jepsen.test.bank/checker
   Since we have internal check-op call this function needs to be modified"
   [checker-opts]
-  (reify
-    checker/Checker
+  (reify checker/Checker
     (check [this test history opts]
       (let [accts (set (:accounts test))
             total (:total-amount test)
             reads (->> history
-                       (r/filter op/ok?)
-                       (r/filter #(= :read (:f %))))
+                       (h/filter (h/has-f? :read))
+                       h/oks)
             errors (->> reads
-                        (r/map
-                          (partial check-op
-                                   accts
-                                   total))
+                        (r/map (partial check-op
+                                        accts
+                                        total))
                         (r/filter identity)
                         (group-by :type))]
         {:valid?      (every? empty? (vals errors))
-         :read-count  (count (into [] reads))
+         :read-count  (count reads)
          :error-count (reduce + (map count (vals errors)))
          :first-error (util/min-by (comp :index :op) (map first (vals errors)))
          :errors      (->> errors
                            (map
                              (fn [[type errs]]
                                [type
-                                (merge
-                                  {:count (count errs)
-                                   :first (first errs)
-                                   :worst (util/max-by
-                                            (partial bank/err-badness test)
-                                            errs)
-                                   :last  (peek errs)}
-                                  (if (= type :wrong-total)
-                                    {:lowest  (util/min-by :total errs)
-                                     :highest (util/max-by :total errs)}
-                                    {}))]))
+                                (merge {:count (count errs)
+                                        :first (first errs)
+                                        :worst (util/max-by
+                                                 (partial bank/err-badness test)
+                                                 errs)
+                                        :last  (peek errs)}
+                                       (if (= type :wrong-total)
+                                         {:lowest  (util/min-by :total errs)
+                                          :highest (util/max-by :total errs)}
+                                         {}))]))
                            (into {}))}))))
 
 (defn workload-with-inserts

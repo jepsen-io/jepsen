@@ -415,6 +415,7 @@ def main():
                          "--os debian",
                          f"--url {url}",
                          f"--nemesis {nemeses}",
+                         f"--ssh-private-key ~/.ssh/id_rsa", # tmp workaround for jepsen 0.2.7+ versions
                          f"--concurrency {args.concurrency}"])
 
     if args.iterations:

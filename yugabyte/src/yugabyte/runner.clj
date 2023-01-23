@@ -7,8 +7,7 @@
             [jepsen.core :as jepsen]
             [jepsen.cli :as cli]
             [jepsen.store :as store]
-            [yugabyte.core :as core]
-            [yugabyte.nemesis :as nemesis]))
+            [yugabyte.core :as core]))
 
 (defn parse-long [x] (Long/parseLong x))
 

@@ -1,7 +1,7 @@
 (ns yugabyte.utils
   "General helper utility functions"
-  (:import (java.text SimpleDateFormat))
-  (:import (java.util Date)))
+  (:import (java.util Date)
+           (java.text SimpleDateFormat)))
 
 (defn map-values
   "Returns a map with values transformed by function f"
