@@ -151,11 +151,11 @@
          ; options map this check is here for backwards compatibility
          opts (if (map? opts) opts {:force? opts})]
      (when (:force? opts)
-      (exec :rm :-f filename))
+       (exec :rm :-f filename))
      (when-not (empty? (:user? opts))
-      (concat wget-opts [:--user (:user? opts) :--password (:pw? opts)])) 
+       (concat wget-opts [:--user (:user? opts) :--password (:pw? opts)]))
      (when (not (exists? filename))
-      (wget-helper! wget-opts url))
+       (wget-helper! wget-opts url))
      filename)))
 
 (def wget-cache-dir
@@ -164,8 +164,8 @@
 
 (defn encode
   "base64 encode a given string and return the encoded string in utf8"
-  [s]
-  (String. (b64/encode (.getBytes s)) "UTF-8"))
+  [^String s]
+  (String. ^bytes (b64/encode (.getBytes s)) "UTF-8"))
 
 (defn cached-wget!
   "Downloads a string URL to the Jepsen wget cache directory, and returns the

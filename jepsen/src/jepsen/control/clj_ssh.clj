@@ -44,7 +44,7 @@
 (defrecord Remote [concurrency-limit
                    conn-spec
                    session
-                   semaphore]
+                   ^Semaphore semaphore]
   core/Remote
   (connect [this conn-spec]
     (assert (map? conn-spec)

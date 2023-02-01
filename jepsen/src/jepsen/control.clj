@@ -165,7 +165,7 @@
   returns the object"
   [x]
   (if (instance? java.io.File x)
-    (.getCanonicalPath x)
+    (.getCanonicalPath ^File x)
     x))
 
 (defn upload

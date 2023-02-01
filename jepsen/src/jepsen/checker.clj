@@ -885,7 +885,7 @@
                                (->> (store/path test node filename)
                                     .getCanonicalPath
                                     (sh "grep" "--text" "-P" (str pattern)))]
-                           (case exit
+                           (case (long exit)
                              0 (->> out
                                     str/split-lines
                                     (map (fn [line]
