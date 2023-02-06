@@ -36,11 +36,18 @@
   [test k]
   (str "v" (mod k keys-per-row)))
 
+(defn select-with-lock
+  [locking col table]
+  (let [clause (if (= :pessimistic locking)
+                 (rand-nth ["" " for update" " for no key update" " for share" " for key share"])
+                 "")]
+    (str "select (" col ") from " table " where k = ?" clause)))
+
 (defn read-primary
   "Reads a key based on primary key"
-  [conn table row col]
+  [locking conn table row col]
   (some-> conn
-          (c/query [(str "select (" col ") from " table " where k = ?") row])
+          (c/query [(select-with-lock locking col table) row])
           first
           (get (keyword col))
           (str/split #",")
@@ -90,18 +97,18 @@
   "Executes a transactional micro-op of the form [f k v] on a connection, where
   f is either :r for read or :append for list append. Returns the completed
   micro-op."
-  [conn test [f k v]]
+  [locking conn test [f k v]]
   (let [table (table-for test k)
         row   (row-for test k)
         col   (col-for test k)]
     [f k (case f
            :r
-           (read-primary conn table row col)
+           (read-primary locking conn table row col)
 
            :append
            (append-primary! conn table row col v))]))
 
-(defrecord InternalClient [isolation]
+(defrecord InternalClient [isolation locking]
   c/YSQLYbClient
 
   (setup-cluster! [this test c conn-wrapper]
@@ -126,8 +133,8 @@
           use-txn? (< 1 (count txn))
           txn'     (if use-txn?
                      (j/with-db-transaction [c c {:isolation isolation}]
-                                            (mapv (partial mop! c test) txn))
-                     (mapv (partial mop! c test) txn))]
+                                            (mapv (partial mop! locking c test) txn))
+                     (mapv (partial mop! locking c test) txn))]
       (assoc op :type :ok, :value txn'))))
 
 (c/defclient Client InternalClient)
