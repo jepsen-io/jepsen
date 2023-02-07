@@ -81,11 +81,9 @@ TEST_PER_VERSION = [
             "ysql/sz.multi-key-acid",
             "ysql/sz.default-value",
             "ysql/sz.ol.append",
-            "ysql/sz.pl.append",
 
             # YSQL snapshot isolation
             "ysql/si.ol.append",
-            "ysql/si.pl.append",
             "ysql/si.bank",
             "ysql/si.bank-contention",
             "ysql/si.bank-multitable",
@@ -97,6 +95,13 @@ TEST_PER_VERSION = [
             # YSQL read committed
             "ysql/rc.ol.append"
             "ysql/rc.pl.append"
+        ]
+    },
+    {
+        "start_version": "2.17.2.0-b1",
+        "tests": [
+            "ysql/sz.pl.append",
+            "ysql/si.pl.append",
         ]
     }
 ]
