@@ -51,11 +51,12 @@
 (defn net-dev
   "Returns the network interface of the current host."
   []
-  (let [choices (su (exec :ls "/sys/class/net/"))
+  (let [choices (su (exec :ip :-o :link :show))
         iface (->> choices
                    (str/split-lines)
-                   (remove (fn [iface] (re-find #"^lo" iface)))
-                   first)]
+                   (map (fn [ln] (let [[_match iface] (re-find #"\d+: ([^:@]+).+" ln)] iface)))
+                   (remove #(= "lo" %))
+                   (first))]
     (assert iface
             (str "Couldn't determine network interface!\n" choices))
     iface))
