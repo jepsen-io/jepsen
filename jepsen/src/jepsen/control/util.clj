@@ -124,7 +124,7 @@
                 (catch [:type :jepsen.control/nonzero-exit, :exit 4] e
                   (if (pos? tries)
                     ::retry
-                    (throw e))))]
+                    (throw+ e))))]
       (if (= ::retry res)
         (recur (dec tries))
         res))))
