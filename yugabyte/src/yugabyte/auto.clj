@@ -328,6 +328,30 @@
     [:--yb_enable_read_committed_isolation]
     []))
 
+(defn get-random-node-skew
+  [max_skew node_ip]
+  (rand-int max_skew))
+
+(def get-node-skew
+  (memoize get-random-node-skew))
+
+(defn master-tserver-random-clock-skew
+  "Enable random clock skew
+
+  max-skew parameter is less than (490 / (tservers + master))
+  as a result we should avoid random -500 skews in all masters e.g.
+
+  half-skew is needed to generate negative skews"
+  [test node]
+  (if (:clock-skew-flags test)
+    (let [max-skew  (int (/ 490 (count (:nodes test))))
+          host-skew  (if (:extreme-skew test)
+                       (get-random-node-skew max-skew (cn/ip node))
+                       (get-node-skew max-skew (cn/ip node)))
+          half-skew (int (/ max-skew 2))]
+      [:--time_source (format "skewed,%s" (- host-skew half-skew))])
+    []))
+
 (defn master-tserver-wait-on-conflict-flags
   "Pessimistic specific flags"
   [test]
@@ -336,15 +360,34 @@
      :--enable_deadlock_detection]
     []))
 
-(def experimental-tuning-flags
-  ; Speed up recovery from partitions and crashes. Right now it looks like
-  ; these actually make the cluster slower to, or unable to, recover.
-  [:--client_read_write_timeout_ms                2000
-   :--leader_failure_max_missed_heartbeat_periods 2
-   :--leader_failure_exp_backoff_max_delta_ms     5000
-   :--rpc_default_keepalive_time_ms               5000
-   :--rpc_connection_timeout_ms                   1500
-   ])
+
+(defn tserver-heartbeat-flags
+  "Heartbeat tracing flags"
+  [test]
+  (if (:heartbeat-flags test)
+    [:--heartbeat_interval_ms 100
+     :--heartbeat_rpc_timeout_ms 1500
+     :--retryable_rpc_single_call_timeout_ms 2000
+     :--rpc_connection_timeout_ms 1500
+     :--leader_failure_exp_backoff_max_delta_ms 1000
+     :--leader_failure_max_missed_heartbeat_period 3
+     :--consensus_rpc_timeout_ms 300
+     :--client_read_write_timeout_ms 6000]
+    []))
+
+
+(defn master-tserver-experimental-tuning-flags
+  "Speed up recovery from partitions and crashes. Right now it looks like
+  these actually make the cluster slower to, or unable to, recover."
+  [test]
+  (if (:experimental-tuning-flags test)
+    [:--client_read_write_timeout_ms 2000
+     :--leader_failure_max_missed_heartbeat_periods 2
+     :--leader_failure_exp_backoff_max_delta_ms 5000
+     :--rpc_default_keepalive_time_ms 5000
+     :--rpc_connection_timeout_ms 1500
+     ]
+    []))
 
 (def limits-conf
   "Ulimits, in the format for /etc/security/limits.conf."
@@ -397,10 +440,10 @@
              :chdir   dir}
             ce-master-bin
             (ce-shared-opts node)
-            (when (:experimental-tuning-flags test)
-              experimental-tuning-flags)
             :--master_addresses (master-addresses test)
             :--replication_factor (:replication-factor test)
+            (master-tserver-experimental-tuning-flags test)
+            (master-tserver-random-clock-skew test node)
             (master-tserver-wait-on-conflict-flags test)
             (master-api-opts (:api test) node)
             )))
@@ -414,25 +457,16 @@
              :chdir   dir}
             ce-tserver-bin
             (ce-shared-opts node)
-            (when (:experimental-tuning-flags test)
-              experimental-tuning-flags)
             :--tserver_master_addrs (master-addresses test)
             ; Tracing
             :--enable_tracing
             :--rpc_slow_query_threshold_ms 1000
+            (master-tserver-experimental-tuning-flags test)
+            (master-tserver-random-clock-skew test node)
+            (master-tserver-wait-on-conflict-flags test)
             (tserver-api-opts (:api test) node)
             (tserver-read-committed-flags test)
-            (master-tserver-wait-on-conflict-flags test)
-
-            ; Heartbeats
-            ;:--heartbeat_interval_ms 100
-            ;:--heartbeat_rpc_timeout_ms 1500
-            ;:--retryable_rpc_single_call_timeout_ms 2000
-            ;:--rpc_connection_timeout_ms 1500
-            ;:--leader_failure_exp_backoff_max_delta_ms 1000
-            ;:--leader_failure_max_missed_heartbeat_period 3
-            ;:--consensus_rpc_timeout_ms 300
-            ;:--client_read_write_timeout_ms 6000
+            (tserver-heartbeat-flags test)
             )))
 
   (stop-master! [db]
