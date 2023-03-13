@@ -10,12 +10,14 @@ x-node:
     - /run:size=100M
     - /run/lock:size=100M
   volumes:
+    - "/sys/fs/cgroup:/sys/fs/cgroup:ro"
+    - "/etc/timezone:/etc/timezone:ro"
+    - "/etc/localtime:/etc/localtime:ro"
     - "jepsen-shared:/var/jepsen/shared"
   networks:
     - jepsen
-  privileged: true
   cap_add:
-    - ALL
+    - NET_ADMIN
   ports:
     - ${JEPSEN_PORT:-22}
 
@@ -44,5 +46,7 @@ services:
     networks:
       - jepsen
     volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
       - "jepsen-shared:/var/jepsen/shared"
 %%DBS%%
