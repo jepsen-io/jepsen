@@ -98,3 +98,9 @@
             _ (is (= :nemesis (some-free-process c2)))
             c3 (-> c2 (busy-thread 0 :nemesis) (free-thread 0 :nemesis))
             _ (is (= 0 (some-free-process c3)))]))))
+
+(deftest assoc-test
+  (let [c (context {:concurrency 2})
+        c' (assoc c :special 123)]
+    (is (= 123 (:special c')))
+    (is (= (class c) (class c')))))

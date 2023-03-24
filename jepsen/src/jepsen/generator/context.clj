@@ -132,7 +132,9 @@
          ; these are gone.
          :workers (throw (UnsupportedOperationException. "Removed; use jepsen.generator.context/all-threads et al"))
          :free-threads (throw (UnsupportedOperationException. "Removed; use jepsen.generator.context/free-threads"))
-         (assoc ext-map k v)))
+         (Context. time next-thread-index translation-table all-threads
+                   free-threads thread-index->process process->thread
+                   (assoc ext-map k v))))
 
   (dissoc [_ k]
           (condp identical? k
