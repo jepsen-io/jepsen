@@ -6,5 +6,6 @@
   :test-selectors {:default     (fn [m] (not (or (:perf m))))
                    :all         (fn [m] true)
                    :perf        :perf}
+  :dependencies [[dom-top "1.0.8"]]
   :profiles {:dev {:dependencies [[org.clojure/clojure "1.10.1"]
                                   [criterium "0.4.5"]]}})

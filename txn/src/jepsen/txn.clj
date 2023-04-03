@@ -1,6 +1,7 @@
 (ns jepsen.txn
   "Manipulates transactions. Transactions are represented as a sequence of
-  micro-operations (mops for short).")
+  micro-operations (mops for short)."
+  (:require [dom-top.core :refer [loopr]]))
 
 (defn reduce-mops
   "Takes a history of operations, where each operation op has a :value which is
@@ -20,6 +21,30 @@
   "A lazy sequence of all [op mop] pairs from a history."
   [history]
   (mapcat (fn [op] (map (fn [mop] [op mop]) (:value op))) history))
+
+(defn reads
+  "Given a transaction, returns a map of keys to sets of all values that
+  transaction read."
+  [txn]
+  (loopr [reads (transient {})]
+         [[f k v] txn]
+         (if (= :r f)
+           (let [vs (get reads k #{})]
+             (recur (assoc! reads k (conj vs v))))
+           (recur reads))
+         (persistent! reads)))
+
+(defn writes
+  "Given a transaction, returns a map of keys to sets of all values that
+  transaction wrote."
+  [txn]
+  (loopr [writes (transient {})]
+         [[f k v] txn]
+         (if (= :w f)
+           (let [vs (get writes k #{})]
+             (recur (assoc! writes k (conj vs v))))
+           (recur writes))
+         (persistent! writes)))
 
 (defn ext-reads
   "Given a transaction, returns a map of keys to values for its external reads:
