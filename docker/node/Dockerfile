@@ -1,11 +1,9 @@
-# See https://github.com/jgoerzen/docker-debian-base
+# See https://salsa.debian.org/jgoerzen/docker-debian-base
 # See https://hub.docker.com/r/jgoerzen/debian-base-standard
-FROM jgoerzen/debian-base-standard:buster
+FROM jgoerzen/debian-base-standard:bullseye
 
-# I think this is a bug--debian-base-setup crashes because policy-rc.d isn't
-# present in this image, and if you create it, exim crashes... do we actually NEED this? Maybe not...
-#RUN mkdir /usr/sbin/policy-rc.d
-#RUN run-parts --exit-on-error --verbose /usr/local/debian-base-setup
+ENV container=docker
+STOPSIGNAL SIGRTMIN+3
 
 # Basic system stuff
 RUN apt-get update
