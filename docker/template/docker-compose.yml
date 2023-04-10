@@ -1,4 +1,3 @@
-version: '3.7'
 x-node:
   &default-node
   build: ./node
@@ -9,11 +8,12 @@ x-node:
   tmpfs:
     - /run:size=100M
     - /run/lock:size=100M
+  cgroup: host
   volumes:
+    - "/sys/fs/cgroup:/sys/fs/cgroup:rw"
     - "jepsen-shared:/var/jepsen/shared"
   networks:
     - jepsen
-  privileged: true
   cap_add:
     - ALL
   ports:
@@ -37,7 +37,6 @@ services:
 %%DEPS%%
     build: ./control
     env_file: ./secret/control.env
-    privileged: true
     ports:
       - "22"
       - "8080"

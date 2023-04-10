@@ -1,5 +1,7 @@
 FROM debian:bullseye
-MAINTAINER jake@apache.org
+
+ENV container=docker
+STOPSIGNAL SIGRTMIN+3
 
 ENV LEIN_ROOT true
 
