@@ -11,7 +11,7 @@ generate computers is *cloud native*.
 
 ## Quickstart
 
-Assuming you have docker-compose set up already, run:
+Assuming you have `docker compose` set up already, run:
 
 ```
 bin/up
