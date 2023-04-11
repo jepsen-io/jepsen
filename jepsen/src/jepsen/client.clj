@@ -113,6 +113,40 @@
   [client]
   (Validate. client))
 
+(defrecord Timeout [timeout-fn client]
+  Client
+  (open! [this test node]
+    (Timeout. timeout-fn (open! client test node)))
+
+  (setup! [this test]
+    (Timeout. timeout-fn (setup! client test)))
+
+  (invoke! [this test op]
+    (let [ms (timeout-fn op)]
+      (util/timeout ms (assoc op :type :info, :error ::timeout)
+                    (invoke! client test op))))
+
+  (teardown! [this test]
+    (teardown! client test))
+
+  (close! [this test]
+    (close! client test))
+
+  Reusable
+  (reusable? [this test]
+    (reusable? client test)))
+
+(defn timeout
+  "Sometimes a client library's own timeouts don't work reliably. This takes
+  either a timeout as a number of ms, or a function (f op) => timeout-in-ms,
+  and a client. Wraps that client in a new one which automatically times out
+  operations that take longer than the given timeout. Timed out operations have
+  :error :jepsen.client/timeout."
+  [timeout-or-fn client]
+  (if (number? timeout-or-fn)
+    (Timeout. (constantly timeout-or-fn) client)
+    (Timeout. timeout-or-fn client)))
+
 (defmacro with-client
   "Analogous to with-open. Takes a binding of the form [client-sym
   client-expr], and a body. Binds client-sym to client-expr (presumably,
@@ -124,3 +158,4 @@
        ~@body
        (finally
          (close! ~client-sym test)))))
+
