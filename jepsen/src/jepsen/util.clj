@@ -764,10 +764,7 @@
   :latency    the time in nanoseconds it took for the operation to complete.
   :completion the next event for that process"
   [history]
-  ; Force the pair index before we begin; if we start asking for completions
-  ; during a fold later it's going to tie up all our threads.
-  (when-let [op (first history)]
-    (h/completion history op))
+  (h/ensure-pair-index history)
   (h/map (fn add-latency [^Op op]
            (if (h/invoke? op)
              (if-let [^Op c (h/completion history op)]
