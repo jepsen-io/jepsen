@@ -16,8 +16,8 @@
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.6.0"]
-                 [ring "1.9.6"]
-                 [com.hierynomus/sshj "0.34.0"]
+                 [ring "1.10.0"]
+                 [com.hierynomus/sshj "0.35.0"]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
                  [com.jcraft/jsch.agentproxy.sshj "0.0.9"
                   :exclusions [net.schmizz/sshj]]
