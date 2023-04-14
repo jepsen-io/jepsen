@@ -1,1 +1,2 @@
-      - n%%N%%
+      n%%N%%:
+        condition: service_healthy
