@@ -166,7 +166,7 @@ that:
       (case (:f op)
         :read (let [value (-> conn
                               (v/get "foo" {:quorum? true})
-                              parse-long)]
+                              parse-long-nil)]
                 (assoc op :type :ok, :value value))
       ...
 ```
