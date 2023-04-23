@@ -327,7 +327,7 @@ We can use that to determine the `:type` of the CaS operation.
 ```clj
   (invoke! [_ test op]
     (case (:f op)
-      :read  (assoc op :type :ok, :value (parse-long (v/get conn "foo")))
+      :read  (assoc op :type :ok, :value (parse-long-nil (v/get conn "foo")))
       :write (do (v/reset! conn "foo" (:value op))
                  (assoc op :type :ok))
       :cas (let [[old new] (:value op)]
@@ -375,7 +375,7 @@ error code.
 ```clj
     (invoke! [this test op]
       (case (:f op)
-        :read (assoc op :type :ok, :value (parse-long (v/get conn "foo")))
+        :read (assoc op :type :ok, :value (parse-long-nil (v/get conn "foo")))
         :write (do (v/reset! conn "foo" (:value op))
                    (assoc op :type :ok))
         :cas (try+
