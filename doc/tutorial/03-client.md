@@ -281,6 +281,11 @@ function. It doesn't like being passed `nil`, though, so we'll write a small
 wrapper:
 
 ```clj
+(defn parse-long
+  "Parses a string to a Long."
+  [s]
+  (when s (Long/parseLong s)))
+
 (defn parse-long-nil
   "Parses a string to a Long. Passes through `nil`."
   [s]
