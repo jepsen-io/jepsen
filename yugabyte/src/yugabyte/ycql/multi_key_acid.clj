@@ -1,6 +1,5 @@
 (ns yugabyte.ycql.multi-key-acid
-  (:require [clojure.tools.logging :refer [debug info warn]]
-            [jepsen.independent :as independent]
+  (:require [jepsen.independent :as independent]
             [jepsen.txn.micro-op :as mop]
             [clojurewerkz.cassaforte.client :as cassandra]
             [clojurewerkz.cassaforte.query :as q :refer :all]

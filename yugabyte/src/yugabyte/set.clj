@@ -1,8 +1,6 @@
 (ns yugabyte.set
   "Adds elements to sets and reads them back"
-  (:require [clojure.pprint :refer [pprint]]
-            [clojure.tools.logging :refer [info]]
-            [jepsen.generator :as gen]
+  (:require [jepsen.generator :as gen]
             [jepsen.checker :as checker]
             [yugabyte.generator :as ygen]))
 

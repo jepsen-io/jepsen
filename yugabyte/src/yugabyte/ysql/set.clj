@@ -1,9 +1,5 @@
 (ns yugabyte.ysql.set
   (:require [clojure.java.jdbc :as j]
-            [clojure.string :as str]
-            [clojure.tools.logging :refer [debug info warn]]
-            [jepsen.client :as client]
-            [jepsen.reconnect :as rc]
             [yugabyte.ysql.client :as c]))
 
 (def table-name "elements")

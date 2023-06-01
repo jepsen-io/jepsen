@@ -5,12 +5,10 @@
                                      [policies :as policies]
                                      [cql :as cql]]
             [clojure.tools.logging :refer [info]]
-            [clojure.pprint :refer [pprint]]
             [jepsen [util :as util]]
             [jepsen.control.net :as cn]
             [dom-top.core :as dt]
-            [wall.hack :as wh]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [wall.hack :as wh])
   (:import (java.net InetSocketAddress)
            (com.datastax.driver.core Cluster
                                      Cluster$Builder

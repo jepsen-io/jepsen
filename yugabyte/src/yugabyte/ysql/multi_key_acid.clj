@@ -1,11 +1,7 @@
 (ns yugabyte.ysql.multi-key-acid
   "This test uses INSERT ... ON CONFLICT DO UPDATE"
   (:require [clojure.java.jdbc :as j]
-            [clojure.string :as str]
-            [clojure.tools.logging :refer [debug info warn]]
-            [jepsen.client :as client]
             [jepsen.independent :as independent]
-            [jepsen.reconnect :as rc]
             [jepsen.txn.micro-op :as mop]
             [yugabyte.ysql.client :as c]))
 

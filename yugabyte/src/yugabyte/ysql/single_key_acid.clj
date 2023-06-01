@@ -1,10 +1,6 @@
 (ns yugabyte.ysql.single-key-acid
   (:require [clojure.java.jdbc :as j]
-            [clojure.string :as str]
-            [clojure.tools.logging :refer [debug info warn]]
-            [jepsen.client :as client]
             [jepsen.independent :as independent]
-            [jepsen.reconnect :as rc]
             [yugabyte.single-key-acid :as ska]
             [yugabyte.ysql.client :as c]))
 

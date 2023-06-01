@@ -8,6 +8,7 @@
                  [jepsen "0.3.1"]
                  [com.yugabyte/cassaforte "3.0.0-alpha2-yb-1"]
                  [org.clojure/java.jdbc "0.7.12"]
+                 [org.clojure/data.json "2.4.0"]
                  [org.postgresql/postgresql "42.5.1"]
                  [version-clj "2.0.2"]
                  [clj-wallhack "1.0.1"]]

@@ -14,15 +14,8 @@
   they might not reflect commit orders, and there's no way to get (presently)
   txn commit times. We can use COUNT(*), but that reads the whole table... Not
   sure what to do here."
-  (:require [clojure.string :as str]
-            [clojure.java.jdbc :as j]
+  (:require [clojure.java.jdbc :as j]
             [clojure.tools.logging :refer [info]]
-            [jepsen [client :as client]
-                    [checker :as checker]
-                    [generator :as gen]
-                    [util :as util]]
-            [jepsen.tests.cycle :as cycle]
-            [jepsen.tests.cycle.append :as append]
             [yugabyte.ysql.client :as c]))
 
 (defn table-name

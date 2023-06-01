@@ -1,9 +1,6 @@
 (ns yugabyte.ycql.single-key-acid
   (:require [clojure [pprint :refer :all]]
-            [clojure.tools.logging :refer [debug info warn]]
             [jepsen.independent :as independent]
-            [knossos.model :as model]
-            [clojurewerkz.cassaforte.client :as cassandra]
             [clojurewerkz.cassaforte.query :refer :all]
             [clojurewerkz.cassaforte.policies :refer :all]
             [clojurewerkz.cassaforte.cql :as cql]

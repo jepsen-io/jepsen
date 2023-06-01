@@ -2,16 +2,13 @@
   "Integrates workloads, nemeses, and automation to construct test maps."
   (:require [clojure.tools.logging :refer :all]
             [clojure.string :as str]
-            [clojure.pprint :refer [pprint]]
             [jepsen.checker :as checker]
-            [jepsen.client :as client]
             [jepsen.generator :as gen]
             [jepsen.tests :as tests]
-            [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [jepsen.os.centos :as centos]
             [yugabyte [append :as append]
-                      [default-value :as default-value]]
+             [default-value :as default-value]]
             [yugabyte.auto :as auto]
             [yugabyte.bank :as bank]
             [yugabyte.bank-improved :as bank-improved]
@@ -30,8 +27,8 @@
             [yugabyte.ycql.set]
             [yugabyte.ycql.single-key-acid]
             [yugabyte.ysql [append :as ysql.append]
-                           [append-table :as ysql.append-table]
-                           [default-value :as ysql.default-value]]
+             [append-table :as ysql.append-table]
+             [default-value :as ysql.default-value]]
             [yugabyte.ysql.bank]
             [yugabyte.ysql.bank-improved]
             [yugabyte.ysql.counter]
@@ -104,16 +101,22 @@
          :sz.long-fork       (with-client long-fork/workload (yugabyte.ysql.long-fork/->YSQLLongForkClient))
          :sz.single-key-acid (with-client single-key-acid/workload (yugabyte.ysql.single-key-acid/->YSQLSingleKeyAcidClient))
          :sz.multi-key-acid  (with-client multi-key-acid/workload (yugabyte.ysql.multi-key-acid/->YSQLMultiKeyAcidClient))
-         :sz.ol.append          (with-client append/workload-serializable (ysql.append/->Client :serializable :optimistic))
-         :sz.pl.append          (with-client append/workload-serializable (ysql.append/->Client :serializable :pessimistic))
+         :sz.ol.geo.append   (with-client append/workload-serializable (ysql.append/->Client :serializable :optimistic :geo))
+         :sz.pl.geo.append   (with-client append/workload-serializable (ysql.append/->Client :serializable :pessimistic :geo))
+         :sz.ol.append       (with-client append/workload-serializable (ysql.append/->Client :serializable :optimistic :no-geo))
+         :sz.pl.append       (with-client append/workload-serializable (ysql.append/->Client :serializable :pessimistic :no-geo))
          :sz.append-table    (with-client append/workload-serializable (ysql.append-table/->Client :serializable))
          :sz.default-value   (with-client default-value/workload (ysql.default-value/->Client))
-         :rc.ol.append          (with-client append/workload-rc (ysql.append/->Client :read-committed :optimistic))
-         :rc.pl.append          (with-client append/workload-rc (ysql.append/->Client :read-committed :pessimistic))
+         :rc.ol.geo.append   (with-client append/workload-rc (ysql.append/->Client :read-committed :optimistic :geo))
+         :rc.pl.geo.append   (with-client append/workload-rc (ysql.append/->Client :read-committed :pessimistic :geo))
+         :rc.ol.append       (with-client append/workload-rc (ysql.append/->Client :read-committed :optimistic :no-geo))
+         :rc.pl.append       (with-client append/workload-rc (ysql.append/->Client :read-committed :pessimistic :no-geo))
          ; See https://docs.yugabyte.com/latest/architecture/transactions/isolation-levels/
          ; :snapshot-isolation maps to :repeatable_read SQL
-         :si.ol.append          (with-client append/workload-si (ysql.append/->Client :repeatable-read :optimistic))
-         :si.pl.append          (with-client append/workload-si (ysql.append/->Client :repeatable-read :pessimistic))
+         :si.ol.geo.append   (with-client append/workload-si (ysql.append/->Client :repeatable-read :optimistic :geo))
+         :si.pl.geo.append   (with-client append/workload-si (ysql.append/->Client :repeatable-read :pessimistic :geo))
+         :si.ol.append       (with-client append/workload-si (ysql.append/->Client :repeatable-read :optimistic :no-geo))
+         :si.pl.append       (with-client append/workload-si (ysql.append/->Client :repeatable-read :pessimistic :no-geo))
          :si.bank            (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLBankClient true :repeatable-read))
          :si.bank-multitable (with-client bank/workload-allow-neg (yugabyte.ysql.bank/->YSQLBankClient true :repeatable-read))
          :si.bank-contention (with-client bank-improved/workload-contention-keys (yugabyte.ysql.bank-improved/->YSQLBankContentionClient :repeatable-read))})
@@ -221,7 +224,7 @@
   "Initial test construction from a map of CLI options. Establishes the test
   name, OS, DB."
   [opts]
-  (let [api         (keyword (namespace (:workload opts)))
+  (let [api (keyword (namespace (:workload opts)))
         url-version (first (re-find version-regex (get opts :url "")))]
     (assoc opts
       :version (or url-version (:version opts))
@@ -248,50 +251,50 @@
   finalizes the test."
   [opts]
   (let [workload ((get workloads (:workload opts)) opts)
-        nemesis  (nemesis/nemesis opts)
-        gen      (->> (:generator workload)
-                      (gen/nemesis (:generator nemesis))
-                      (gen/time-limit (:time-limit opts)))
-        gen      (if (:final-generator workload)
-                   (gen/phases gen
-                               (gen/log "Healing cluster")
-                               (gen/nemesis (:final-generator nemesis))
-                               (gen/log "Waiting for recovery...")
-                               (gen/sleep (:final-recovery-time opts))
-                               (gen/clients (:final-generator workload)))
-                   gen)
-        perf     (checker/perf
-                   {:nemeses #{{:name       "kill master"
-                                :start      #{:kill-master :stop-master}
-                                :stop       #{:start-master}
-                                :fill-color "#E9A4A0"}
-                               {:name       "kill tserver"
-                                :start      #{:kill-tserver :stop-tserver}
-                                :stop       #{:start-tserver}
-                                :fill-color "#E9C3A0"}
-                               {:name       "pause master"
-                                :start      #{:pause-master}
-                                :stop       #{:resume-master}
-                                :fill-color "#A0B1E9"}
-                               {:name       "pause tserver"
-                                :start      #{:pause-tserver}
-                                :stop       #{:resume-tserver}
-                                :fill-color "#B8A0E9"}
-                               {:name       "clock skew"
-                                :start      #{:bump-clock :strobe-clock}
-                                :stop       #{:reset-clock}
-                                :fill-color "#D2E9A0"}
-                               {:name       "partition"
-                                :start      #{:start-partition}
-                                :stop       #{:stop-partition}
-                                :fill-color "#888888"}}})
-        checker  (if (is-stub-workload (:workload opts))
-                   (:checker workload)
-                   (checker/compose {:perf                 perf
-                                     :stats                (checker/stats)
-                                     :unhandled-exceptions (checker/unhandled-exceptions)
-                                     :clock                (checker/clock-plot)
-                                     :workload             (:checker workload)}))]
+        nemesis (nemesis/nemesis opts)
+        gen (->> (:generator workload)
+                 (gen/nemesis (:generator nemesis))
+                 (gen/time-limit (:time-limit opts)))
+        gen (if (:final-generator workload)
+              (gen/phases gen
+                          (gen/log "Healing cluster")
+                          (gen/nemesis (:final-generator nemesis))
+                          (gen/log "Waiting for recovery...")
+                          (gen/sleep (:final-recovery-time opts))
+                          (gen/clients (:final-generator workload)))
+              gen)
+        perf (checker/perf
+               {:nemeses #{{:name       "kill master"
+                            :start      #{:kill-master :stop-master}
+                            :stop       #{:start-master}
+                            :fill-color "#E9A4A0"}
+                           {:name       "kill tserver"
+                            :start      #{:kill-tserver :stop-tserver}
+                            :stop       #{:start-tserver}
+                            :fill-color "#E9C3A0"}
+                           {:name       "pause master"
+                            :start      #{:pause-master}
+                            :stop       #{:resume-master}
+                            :fill-color "#A0B1E9"}
+                           {:name       "pause tserver"
+                            :start      #{:pause-tserver}
+                            :stop       #{:resume-tserver}
+                            :fill-color "#B8A0E9"}
+                           {:name       "clock skew"
+                            :start      #{:bump-clock :strobe-clock}
+                            :stop       #{:reset-clock}
+                            :fill-color "#D2E9A0"}
+                           {:name       "partition"
+                            :start      #{:start-partition}
+                            :stop       #{:stop-partition}
+                            :fill-color "#888888"}}})
+        checker (if (is-stub-workload (:workload opts))
+                  (:checker workload)
+                  (checker/compose {:perf                 perf
+                                    :stats                (checker/stats)
+                                    :unhandled-exceptions (checker/unhandled-exceptions)
+                                    :clock                (checker/clock-plot)
+                                    :workload             (:checker workload)}))]
     (merge tests/noop-test
            opts
            (dissoc workload

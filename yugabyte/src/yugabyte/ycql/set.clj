@@ -1,7 +1,5 @@
 (ns yugabyte.ycql.set
-  (:require [clojure.pprint :refer [pprint]]
-            [clojure.tools.logging :refer [info]]
-            [clojurewerkz.cassaforte.query :as q]
+  (:require [clojurewerkz.cassaforte.query :as q]
             [clojurewerkz.cassaforte.cql :as cql]
             [yugabyte.ycql.client :as c]))
 

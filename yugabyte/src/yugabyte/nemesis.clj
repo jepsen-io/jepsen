@@ -1,12 +1,10 @@
 (ns yugabyte.nemesis
   (:require [clojure.tools.logging :refer :all]
-            [clojure.pprint :refer [pprint]]
             [jepsen.control :as c]
             [jepsen.generator :as gen]
             [jepsen.nemesis :as nemesis]
             [jepsen.util :as util :refer [meh timeout]]
             [jepsen.nemesis.time :as nt]
-            [slingshot.slingshot :refer [try+]]
             [yugabyte.auto :as auto]))
 
 (defn process-nemesis

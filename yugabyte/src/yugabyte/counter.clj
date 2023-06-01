@@ -1,6 +1,5 @@
 (ns yugabyte.counter
-  (:require [clojure.tools.logging :refer [debug info warn]]
-            [jepsen.checker :as checker]
+  (:require [jepsen.checker :as checker]
             [jepsen.generator :as gen]
             [jepsen.checker.timeline :as timeline]
             [yugabyte.generator :as ygen]))

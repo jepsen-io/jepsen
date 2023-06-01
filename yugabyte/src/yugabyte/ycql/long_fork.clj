@@ -1,8 +1,6 @@
 (ns yugabyte.ycql.long-fork
   (:refer-clojure :exclude [test])
-  (:require [clojure [pprint :refer [pprint]]]
-            [clojure.tools.logging :refer [info]]
-            [clojurewerkz.cassaforte.cql :as cql]
+  (:require [clojurewerkz.cassaforte.cql :as cql]
             [clojurewerkz.cassaforte.query :as q]
             [jepsen.tests.long-fork :as lf]
             [yugabyte.ycql.client :as c]))

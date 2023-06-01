@@ -1,8 +1,5 @@
 (ns yugabyte.ysql.long-fork
   (:require [clojure.java.jdbc :as j]
-            [clojure.tools.logging :refer [debug info warn]]
-            [jepsen.client :as client]
-            [jepsen.reconnect :as rc]
             [jepsen.tests.long-fork :as lf]
             [yugabyte.ysql.client :as c]))
 
