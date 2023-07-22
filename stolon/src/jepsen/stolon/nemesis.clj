@@ -11,7 +11,7 @@
                             [time :as nt]]))
 
 (defn nemesis-package
-  "Constructs a nemesis and generators for MongoDB."
+  "Constructs a nemesis and generators for Stolon."
   [opts]
   (let [opts (update opts :faults set)]
     (nc/nemesis-package opts)))
