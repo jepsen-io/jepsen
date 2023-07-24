@@ -176,7 +176,7 @@
                 :vim
                 :man-db
                 :faketime
-                :netcat
+                :netcat-openbsd
                 :ntpdate
                 :unzip
                 :iptables
