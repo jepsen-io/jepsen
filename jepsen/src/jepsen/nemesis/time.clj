@@ -120,7 +120,14 @@
         ; Try to stop ntpd service in case it is present and running.
         (try (c/su (c/exec :service :ntpd :stop))
              (catch RuntimeException e))
-        (reset-time!))
+        (try+ (reset-time!)
+              (catch [:type :jepsen.control/nonzero-exit, :exit 1] _
+                ; Bit awkward: on some platforms, like containers, we *can't*
+                ; step the time, but the way nemesis composition works makes it
+                ; so that we still get glued into the overall test nemesis even
+                ; if we'll never be called. We'll allow this ntpdate to fail
+                ; silently--it's just to help when we *do* mess with times.
+                )))
       nem)
 
     (invoke! [_ test op]
@@ -149,7 +156,15 @@
         (assoc op :clock-offsets res)))
 
     (teardown! [_ test]
-      (reset-time! test))))
+      (c/with-test-nodes test
+        (try+ (reset-time!)
+              (catch [:type :jepsen.control/nonzero-exit, :exit 1] _
+                ; Bit awkward: on some platforms, like containers, we *can't*
+                ; step the time, but the way nemesis composition works makes it
+                ; so that we still get glued into the overall test nemesis even
+                ; if we'll never be called. We'll allow this ntpdate to fail
+                ; silently--it's just to help when we *do* mess with times.
+                ))))))
 
 (defn reset-gen-select
   "A function which returns a generator of reset operations. Takes a function
