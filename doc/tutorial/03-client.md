@@ -276,26 +276,27 @@ INFO [2017-03-30 22:14:25,633] jepsen worker 0 - jepsen.util 0  :ok :read "0"
 Ah, we've got a bit of a snag here. etcd thinks in terms of strings, but we'd
 like to work with numbers. We could pull in a serialization library (jepsen
 includes a simple one in `jepsen.codec`), but since we're only dealing with
-integers and nil, we can get away with using Java's built-in
-`Long.parseLong(String str)` method.
+integers and nil, we can get away with using Clojure's built-in `parse-long`
+function. It doesn't like being passed `nil`, though, so we'll write a small
+wrapper:
 
 ```clj
-(defn parse-long
+(defn parse-long-nil
   "Parses a string to a Long. Passes through `nil`."
   [s]
-  (when s (Long/parseLong s)))
+  (when s (parse-long s)))
 
 ...
 
   (invoke! [_ test op]
     (case (:f op)
-      :read  (assoc op :type :ok, :value (parse-long (v/get conn "foo")))
+      :read  (assoc op :type :ok, :value (parse-long-nil (v/get conn "foo")))
       :write (do (v/reset! conn "foo" (:value op))
                  (assoc op :type :ok))))
 ```
 
-Note that we only call parseLong when our string is truthy--using `(when s
-...)`. If `when` doesn't match, it'll return `nil`, which lets us pass through
+Note that we only call `parse-long` when our string is truthy--using `(when s
+…)`. If `when` doesn't match, it'll return `nil`, which lets us pass through
 `nil` values transparently.
 
 ```bash
@@ -326,7 +327,7 @@ We can use that to determine the `:type` of the CaS operation.
 ```clj
   (invoke! [_ test op]
     (case (:f op)
-      :read  (assoc op :type :ok, :value (parse-long (v/get conn "foo")))
+      :read  (assoc op :type :ok, :value (parse-long-nil (v/get conn "foo")))
       :write (do (v/reset! conn "foo" (:value op))
                  (assoc op :type :ok))
       :cas (let [[old new] (:value op)]
@@ -374,7 +375,7 @@ error code.
 ```clj
     (invoke! [this test op]
       (case (:f op)
-        :read (assoc op :type :ok, :value (parse-long (v/get conn "foo")))
+        :read (assoc op :type :ok, :value (parse-long-nil (v/get conn "foo")))
         :write (do (v/reset! conn "foo" (:value op))
                    (assoc op :type :ok))
         :cas (try+

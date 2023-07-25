@@ -50,7 +50,7 @@ reads, in the Client `invoke` function:
         (case (:f op)
           :read (let [value (-> conn
                                 (v/get k {:quorum? (:quorum test)})
-                                parse-long)]
+                                parse-long-nil)]
                   (assoc op :type :ok, :value (independent/tuple k value)))
 ```
 

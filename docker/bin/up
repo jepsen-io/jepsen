@@ -162,10 +162,6 @@ INFO "Running \`docker compose build\`"
 # shellcheck disable=SC2086
 docker compose --compatibility -p jepsen -f docker-compose.yml ${COMPOSE} ${DEV} build
 
-# We need a fresh share volume each time we start, so we have a correct set of
-# DB hosts. Why does Docker make sharing state SO hard
-docker run --rm -v jepsen_jepsen-shared:/data/ debian:buster rm /data/nodes || true
-
 INFO "Running \`docker compose up\`"
 if [ "${RUN_AS_DAEMON}" -eq 1 ]; then
     # shellcheck disable=SC2086
