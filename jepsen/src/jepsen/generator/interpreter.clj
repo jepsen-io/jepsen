@@ -182,13 +182,14 @@
     true))
 
 (defn run!
-  "Takes a test with a :store :handle open. Opens a writer for the test's
-  history using that handle. Creates an initial context from test and evaluates
-  all ops from (:gen test). Spawns a thread for each worker, and hands those
-  workers operations from gen; each thread applies the operation using (:client
-  test) or (:nemesis test), as appropriate. Invocations and completions are
-  journaled to a history on disk. Returns a new test with no :generator and a
-  completed :history.
+  "Takes a test with a :store :handle open. Causes the test's reference to the
+  :generator to be forgotten, to avoid retaining the head of infinite seqs.
+  Opens a writer for the test's history using that handle. Creates an initial
+  context from test and evaluates all ops from (:gen test). Spawns a thread for
+  each worker, and hands those workers operations from gen; each thread applies
+  the operation using (:client test) or (:nemesis test), as appropriate.
+  Invocations and completions are journaled to a history on disk. Returns a new
+  test with no :generator and a completed :history.
 
   Generators are automatically wrapped in friendly-exception and validate.
   Clients are wrapped in a validator as well.
@@ -209,10 +210,11 @@
                             worker-ids)
           invocations (into {} (map (juxt :id :in) workers))
           gen         (->> (:generator test)
+                           deref
                            gen/friendly-exceptions
                            gen/validate)
-          ; Don't retain the head of the generator! If it's a lazy seq, this
-          ; will consume memory forever.
+          ; Forget generator
+          _           (util/forget! (:generator test))
           test        (dissoc test :generator)]
       (try+
         (loop [ctx            ctx

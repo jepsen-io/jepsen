@@ -20,18 +20,18 @@
             [clojure.datafy :refer [datafy]]
             [dom-top.core :as dt :refer [assert+]]
             [fipp.edn :refer [pprint]]
-            [jepsen.util :as util :refer [with-thread-name
+            [jepsen [checker :as checker]
+                    [client :as client]
+                    [control :as control]
+                    [db :as db]
+                    [generator :as generator]
+                    [nemesis :as nemesis]
+                    [store :as store]
+                    [os :as os]
+                    [util :as util :refer [with-thread-name
                                           fcatch
                                           real-pmap
-                                          relative-time-nanos]]
-            [jepsen.os :as os]
-            [jepsen.db :as db]
-            [jepsen.control :as control]
-            [jepsen.generator :as generator]
-            [jepsen.checker :as checker]
-            [jepsen.client :as client]
-            [jepsen.nemesis :as nemesis]
-            [jepsen.store :as store]
+                                          relative-time-nanos]]]
             [jepsen.store.format :as store.format]
             [jepsen.control.util :as cu]
             [jepsen.generator [interpreter :as gen.interpreter]]
@@ -300,11 +300,14 @@
           (store/stop-logging!))))
 
 (defn prepare-test
-  "Takes a test and ensures it has a :start-time, :concurrency, and :barrier
-  field. This operation always succeeds, and is necessary for accessing a
-  test's store directory, which depends on :start-time. You may call this
-  yourself before calling run!, if you need access to the store directory
-  outside the run! context."
+  "Takes a test and prepares it for running. Ensures it has a :start-time,
+  :concurrency, and :barrier field. Wraps its generator in a forgettable
+  reference, to prevent us from inadvertently retaining the head.
+
+  This operation always succeeds, and is necessary for accessing a test's store
+  directory, which depends on :start-time. You may call this yourself before
+  calling run!, if you need access to the store directory outside the run!
+  context."
   [test]
   (cond-> test
     (not (:start-time test)) (assoc :start-time (util/local-time))
@@ -313,7 +316,8 @@
                                  (let [c (count (:nodes test))]
                                    (if (pos? c)
                                      (CyclicBarrier. (count (:nodes test)))
-                                     ::no-barrier)))))
+                                     ::no-barrier)))
+    true (update :generator util/forgettable)))
 
 (defn run!
   "Runs a test. Tests are maps containing

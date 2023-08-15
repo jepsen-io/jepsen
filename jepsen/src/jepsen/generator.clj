@@ -601,7 +601,15 @@
                 gen')]
 
           ; This generator is exhausted; move on
-          (recur (next this) test ctx))))))
+          (recur (next this) test ctx)))))
+
+  ; Forgettables are transparently unwrapped when treated as generators.
+  jepsen.util.Forgettable
+  (update [this test ctx event]
+    (update @this test ctx event))
+
+  (op [this test ctx]
+    (op @this test ctx)))
 
 (defmacro extend-protocol-runtime
   "Extends a protocol to a runtime-defined class. Helpful because some Clojure

@@ -1,6 +1,8 @@
 (ns jepsen.util-test
   (:refer-clojure :exclude [parse-long])
-  (:require [clojure.test :refer :all]
+  (:require [clojure [pprint :refer [pprint]]
+                     [test :refer :all]]
+            [fipp.edn :as fipp]
             [jepsen [history :as h]
                     [util :refer :all]]))
 
@@ -174,3 +176,15 @@
     (is (< (* target-mean 0.7)
            mean
            (* target-mean 1.3)))))
+
+(deftest forgettable-test
+  (let [f (forgettable :foo)]
+    (is (= :foo @f))
+    (is (= "#<Forgettable :foo>" (str f)))
+    (is (= "#<Forgettable :foo>\n" (with-out-str (pprint f))))
+    (is (re-find #"^#object\[jepsen.util.Forgettable \"0x\w+\" :foo\]\n$"
+                 (with-out-str (fipp/pprint f))))
+    (forget! f)
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"\{:type :jepsen\.util/forgotten\}"
+                          @f))))

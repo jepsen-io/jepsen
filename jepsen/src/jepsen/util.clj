@@ -3,9 +3,9 @@
   (:refer-clojure :exclude [parse-long]) ; Clojure added this in 1.11.1
   (:require [clojure.tools.logging :refer [info]]
             [clojure.core.reducers :as r]
-            [clojure [string :as str]]
-            [clojure.pprint :refer [pprint]]
-            [clojure.walk :as walk]
+            [clojure [string :as str]
+                     [pprint :as pprint :refer [pprint]]
+                     [walk :as walk]]
             [clojure.java [io :as io]
                           [shell :as shell]]
             [clj-time.core :as time]
@@ -13,9 +13,11 @@
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [bounded-future]]
             [fipp [edn :as fipp]
+                  [ednize]
                   [engine :as fipp.engine]]
             [jepsen [history :as h]]
             [jepsen.history.fold :refer [loopf]]
+            [potemkin :refer [definterface+]]
             [slingshot.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (java.lang.reflect Method)
@@ -1025,3 +1027,63 @@
 
          true
          nil)))
+
+(definterface+ IForgettable
+  (forget! [this]
+           "Allows this forgettable reference to be reclaimed by the GC at some
+           later time. Future attempts to dereference it may throw. Returns
+           self."))
+
+(deftype Forgettable [^:unsynchronized-mutable x]
+  IForgettable
+  (forget! [this]
+    (set! x ::forgotten)
+    this)
+
+  clojure.lang.IDeref
+  (deref [this]
+    (let [x x]
+      (if (identical? x ::forgotten)
+        (throw+ {:type ::forgotten})
+        x)))
+
+  Object
+  (toString [this]
+    (let [x x]
+      (str "#<Forgettable " (if (identical? x ::forgotten)
+                              "?"
+                              x)
+           ">")))
+
+  (equals [this other]
+    (identical? this other)))
+
+(defn forgettable
+  "Constructs a deref-able reference to x which can be explicitly forgotten.
+  Helpful for controlling access to infinite seqs (e.g. the generator) when you
+  don't have firm control over everyone who might see them."
+  [x]
+  (Forgettable. x))
+
+(defmethod pprint/simple-dispatch jepsen.util.Forgettable
+  [^Forgettable f]
+  (let [prefix (format "#<Forgettable ")]
+    (pprint/pprint-logical-block
+      :prefix prefix :suffix ">"
+      (pprint/pprint-indent :block (-> (count prefix) (- 2) -))
+      (pprint/pprint-newline :linear)
+      (pprint/write-out (try+ @f
+                              (catch [:type ::forgotten] e
+                                "?"))))))
+
+(prefer-method pprint/simple-dispatch
+               jepsen.util.Forgettable clojure.lang.IDeref)
+
+(extend-protocol fipp.ednize/IOverride jepsen.util.Forgettable)
+(extend-protocol fipp.ednize/IEdn jepsen.util.Forgettable
+  (-edn [f]
+    (fipp.ednize/tagged-object f
+                               (try+ @f
+                                     (catch [:type ::forgotten] e
+                                       '?)))))
+
