@@ -187,7 +187,8 @@
   all ops from (:gen test). Spawns a thread for each worker, and hands those
   workers operations from gen; each thread applies the operation using (:client
   test) or (:nemesis test), as appropriate. Invocations and completions are
-  journaled to a history on disk, which is returned at the end of `run`.
+  journaled to a history on disk. Returns a new test with no :generator and a
+  completed :history.
 
   Generators are automatically wrapped in friendly-exception and validate.
   Clients are wrapped in a validator as well.
@@ -209,7 +210,10 @@
           invocations (into {} (map (juxt :id :in) workers))
           gen         (->> (:generator test)
                            gen/friendly-exceptions
-                           gen/validate)]
+                           gen/validate)
+          ; Don't retain the head of the generator! If it's a lazy seq, this
+          ; will consume memory forever.
+          test        (dissoc test :generator)]
       (try+
         (loop [ctx            ctx
                gen            gen
@@ -269,14 +273,16 @@
                           ; Await completion of writes
                           (.close history-writer)
                           ; And return history
-                          (let [history-block-id (:block-id history-writer)]
-                            (-> (:handle (:store test))
-                                (store.format/read-block-by-id
-                                  history-block-id)
-                                :data
-                                (h/history {:dense-indices? true
-                                            :have-indices? true
-                                            :already-ops? true})))))
+                          (let [history-block-id (:block-id history-writer)
+                                history
+                                (-> (:handle (:store test))
+                                    (store.format/read-block-by-id
+                                      history-block-id)
+                                    :data
+                                    (h/history {:dense-indices? true
+                                                :have-indices? true
+                                                :already-ops? true}))]
+                                (assoc test :history history))))
 
                 ; Nothing we can do right now. Let's try to complete something.
                 :pending (recur ctx gen op-index

@@ -207,7 +207,7 @@
 
 (defn run-case!
   "Takes a test with a store handle. Spawns nemesis and clients and runs the
-  generator. Returns history."
+  generator. Returns test with no :generator and a completed :history."
   [test]
   (with-client+nemesis-setup-teardown [test test]
     (gen.interpreter/run! test)))
@@ -395,9 +395,7 @@
                                     (with-db test
                                       (util/with-relative-time
                                         ; Run a single case
-                                        (let [history (run-case! test)
-                                              test (-> test
-                                                       (assoc :history history)
+                                        (let [test (-> (run-case! test)
                                                        ; Remove state
                                                        (dissoc :barrier
                                                                :sessions))
