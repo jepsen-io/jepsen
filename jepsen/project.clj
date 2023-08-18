@@ -1,4 +1,4 @@
-(defproject jepsen "0.3.3"
+(defproject jepsen "0.3.4-SNAPSHOT"
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
