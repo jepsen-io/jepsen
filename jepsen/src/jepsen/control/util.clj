@@ -26,7 +26,7 @@
      (fn check-port []
        (exec :nc :-z :localhost port)
        nil)
-     (merge {:log-message "Waiting for port " port " ..."}
+     (merge {:log-message (str "Waiting for port " port " ...")}
             opts))))
 
 (defn file?
