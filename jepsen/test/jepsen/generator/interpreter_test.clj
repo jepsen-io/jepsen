@@ -222,15 +222,21 @@
 
 (deftest run!-throw-test
   (testing "worker throws"
-    (let [test (assoc base-test
+    (let [opens (atom 0)   ; Number of calls to open a client
+          closes (atom 0)  ; Number of calls to close a client
+          test (assoc base-test
                       :name "generator interpreter run!-throw-test"
                       :concurrency 1
                       :client (reify Client
-                                (open! [this test node] this)
+                                (open! [this test node]
+                                  (swap! opens inc)
+                                  this)
                                 (setup! [this test])
-                                (invoke! [this test op] (assert false))
+                                (invoke! [this test op]
+                                  (assert false))
                                 (teardown! [this test])
-                                (close! [this test]))
+                                (close! [this test]
+                                  (swap! closes inc)))
                       :nemesis  (reify Nemesis
                                   (setup! [this test] this)
                                   (invoke! [this test op] (assert false))
@@ -253,7 +259,9 @@
                (->> h
                     ; Try to cut past parallel nondeterminism
                     (sort-by :process util/poly-compare)
-                    (map (juxt :process :type :f :error)))))))
+                    (map (juxt :process :type :f :error)))))
+        ; We should have closed everything that we opened
+        (is (= @opens @closes))))
 
     (testing "generator op throws"
       (let [call-count (atom 0)
