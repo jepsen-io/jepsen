@@ -40,7 +40,7 @@
                                          [[:dummy :int]
                                           [:v :int :default "0"]]
                                          {:conditional? true}))
-    (catch org.postgresql.util.PSQLException e
+    (catch com.yugabyte.util.PSQLException e
       (when-not (re-find #"already exists" (.getMessage e))
         (throw e)))))
 
@@ -81,7 +81,7 @@
                   `(info "Creating table" ~table-sym "and retrying")
                   `(create-table! ~conn ~table-sym)
                   body)
-          ~(apply catch-dne 'org.postgresql.util.PSQLException table-sym
+          ~(apply catch-dne 'com.yugabyte.util.PSQLException table-sym
                   `(info "Creating table" ~table-sym "and retrying")
                   `(create-table! ~conn ~table-sym)
                   body)
@@ -108,7 +108,7 @@
                         (assoc op :type :ok))
         :drop-column (do (drop-column! c table (:value op))
                          (assoc op :type :ok)))
-      (catch org.postgresql.util.PSQLException e
+      (catch com.yugabyte.util.PSQLException e
         (if (re-find #"column .+ does not exist" (.getMessage e))
           (assoc op :type :fail, :error :column-does-not-exist)
           (throw e))))))
