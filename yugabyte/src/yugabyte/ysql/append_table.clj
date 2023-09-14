@@ -78,7 +78,7 @@
                                           [:k :timestamp :default "NOW()"]
                                           [:v :int]]
                                          {:conditional? true}))
-    (catch org.postgresql.util.PSQLException e
+    (catch com.yugabyte.util.PSQLException e
       (when-not (re-find #"already exists" (.getMessage e))
         (throw e)))))
 
@@ -103,7 +103,7 @@
                   `(info "Creating table" ~table-sym "and retrying")
                   `(create-table! ~conn ~table-sym)
                   body)
-          ~(apply catch-dne 'org.postgresql.util.PSQLException table-sym
+          ~(apply catch-dne 'com.yugabyte.util.PSQLException table-sym
                   `(info "Creating table" ~table-sym "and retrying")
                   `(create-table! ~conn ~table-sym)
                   body)

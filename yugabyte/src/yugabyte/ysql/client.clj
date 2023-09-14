@@ -27,9 +27,9 @@
 (defn db-spec
   "Assemble a JDBC connection specification for a given Jepsen node."
   [node]
-  {:dbtype         "postgresql"
-   :dbname         "postgres"
-   :classname      "org.postgresql.Driver"
+  {:dbtype         "yugabytedb"
+   :dbname         "jepsen"
+   :classname      "com.yugabyte.Driver"
    :host           (name node)
    :port           ysql-port
    :user           "postgres"
@@ -178,7 +178,7 @@
           (update op :error (partial vector :batch)))
         {:type :info, :error [:batch-update m]})
 
-      org.postgresql.util.PSQLException
+      com.yugabyte.util.PSQLException
       (condp re-find m
         #"(?i)Conflicts with [- a-z]+ transaction"
         {:type :fail, :error [:conflicting-transaction m]}
@@ -300,7 +300,7 @@
   [& body]
   `(util/with-retry [attempts# max-retry-attempts]
      ~@body
-     (catch org.postgresql.util.PSQLException e#
+     (catch com.yugabyte.util.PSQLException e#
        (let [m# (.getMessage e#)]
          (if (or (re-find #"duplicate key value violates unique constraint" m#)
                  (re-find #"A relation has an associated type of the same name" m#)
