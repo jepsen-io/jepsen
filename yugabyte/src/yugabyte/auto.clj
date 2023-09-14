@@ -100,12 +100,6 @@
          :--master_addresses (master-addresses test)
          args))
 
-(defn ysqlsh
-  "Runs a ysqlsh command on a node. Args are passed to ysqlsh."
-  [args]
-  (apply c/exec (str dir "/bin/ysqlsh")
-         args))
-
 (defn list-all-masters
   "Asks a node to list all the masters it knows about."
   [test]
@@ -521,7 +515,7 @@
   db/Primary
   (setup-primary! [this test node]
     "Executed once on a first node in list (i.e. n1 by default) after per-node setup is done"
-    (ysqlsh :-c "CREATE DATABASE jepsen WITH colocated = true;")
+    ; NOOP placeholder, can be used to initialize cluster for different APIs
     )
 
   db/LogFiles
