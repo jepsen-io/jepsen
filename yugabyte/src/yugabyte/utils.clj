@@ -19,3 +19,15 @@
 (defn current-pretty-datetime
   []
   (pretty-datetime (Date.)))
+
+(defn is-test-geo-partitioned?
+  [test]
+  (clojure.string/includes? (name (:workload test)) "geo."))
+
+(defn is-test-read-committed?
+  [test]
+  (clojure.string/includes? (name (:workload test)) "rc."))
+
+(defn is-test-has-pessimistic-locs?
+  [test]
+  (clojure.string/includes? (name (:workload test)) "pl."))

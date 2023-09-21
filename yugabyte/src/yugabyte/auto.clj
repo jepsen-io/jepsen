@@ -6,12 +6,13 @@
             [dom-top.core :as dt]
             [jepsen.control :as c]
             [jepsen.db :as db]
-            [jepsen.util :as util :refer [meh timeout]]
+            [jepsen.util :as util :refer [meh]]
             [jepsen.control.net :as cn]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
             [yugabyte.ycql.client :as ycql.client]
             [yugabyte.ysql.client :as ysql.client]
+            [yugabyte.utils :as utils]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import jepsen.os.debian.Debian
            jepsen.os.centos.CentOS))
@@ -98,6 +99,12 @@
   [test & args]
   (apply c/exec (str dir "/bin/yb-admin")
          :--master_addresses (master-addresses test)
+         args))
+
+(defn ysqlsh
+  "Runs a ysqlsh command on a node. Args are passed to ysqlsh."
+  [test & args]
+  (apply c/exec (str dir "/bin/ysqlsh")
          args))
 
 (defn list-all-masters
@@ -326,7 +333,7 @@
 (defn tserver-read-committed-flags
   "Read committed specific flags"
   [test]
-  (if (clojure.string/includes? (name (:workload test)) "rc.")
+  (if (utils/is-test-read-committed? test)
     [:--yb_enable_read_committed_isolation]
     []))
 
@@ -357,7 +364,7 @@
 (defn master-tserver-wait-on-conflict-flags
   "Pessimistic specific flags"
   [test]
-  (if (clojure.string/includes? (name (:workload test)) "pl.")
+  (if (utils/is-test-has-pessimistic-locs? test)
     [:--enable_wait_queues
      :--enable_deadlock_detection]
     []))
@@ -366,7 +373,7 @@
   "Geo partitioning specific mapping flags
   Each node will be mapped to id in [1 2] and then used in each node."
   [test node nodes]
-  (if (clojure.string/includes? (name (:workload test)) "geo.")
+  (if (utils/is-test-geo-partitioned? test)
     (let [geo-ids (map #(+ 1 (mod % 2)) (range (count nodes)))
           geo-node-map (zipmap nodes geo-ids)
           node-id-int (get geo-node-map node)]
@@ -515,7 +522,12 @@
   db/Primary
   (setup-primary! [this test node]
     "Executed once on a first node in list (i.e. n1 by default) after per-node setup is done"
-    ; NOOP placeholder, can be used to initialize cluster for different APIs
+    (let [colocated (and (not (utils/is-test-geo-partitioned? test)) (> (rand) 0.5))
+          colocated-clause (if colocated
+                             " WITH colocated = true"
+                             "")]
+      (info "Creating JEPSEN" (if colocated "colocated" "") "database")
+      (ysqlsh test :-h (cn/ip node) :-c (str "CREATE DATABASE jepsen" colocated-clause ";")))
     )
 
   db/LogFiles
