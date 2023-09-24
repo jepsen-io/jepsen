@@ -1563,7 +1563,7 @@
   "Takes a seq of realtime lag measurements, and finds the point with the
   highest lag."
   [lags]
-  (or (util/max-by :lag lags) 0))
+  (or (util/max-by :lag lags) {:time 0 :lag 0}))
 
 (defn key-order-viz
   "Takes a key, a log for that key (a vector of offsets to sets of elements
@@ -1994,7 +1994,7 @@
                (assoc errs :messages
                       (map-vals (comp (partial take 32) sort)
                                 (:messages errs))))
-     {:count (count errs)
+     {:count (if (coll? errs) (count errs) 1)
       :errs
       (if (:all-errors test)
         errs

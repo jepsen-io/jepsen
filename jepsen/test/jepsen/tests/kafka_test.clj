@@ -555,6 +555,18 @@
         (is (= {:time 22, :process 0, :key :x, :lag 17}
                (:worst-realtime-lag (analysis history))))))))
 
+(deftest empty-history-test
+  (let [history (h/history [(o 0 0 :invoke :assign [:x])
+                            (o 1 0 :ok :assign [:x])])
+        c (checker)
+        check (checker/check c
+                             {:name "empty-history-test"
+                              :start-time 0
+                              :history history}
+                             history
+                             nil)]
+    (is (not (:valid? check)))))
+
 (deftest unseen-test
   (is (= [{:time 1, :unseen {}}
           {:time 3, :unseen {:x 2}}
