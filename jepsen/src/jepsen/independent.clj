@@ -219,10 +219,11 @@
   (update [this test ctx event]
     (let [process (:process event)
           thread  (gen/process->thread ctx process)
-          group   (thread->group thread)]
+          group   (thread->group thread)
+          unlifted-op (update event :value val)]
       (ConcurrentGenerator.
         n fgen group->threads thread->group group->context-filter keys
-        (update gens group gen/update test ctx event)))))
+        (update gens group gen/update test ctx unlifted-op)))))
 
 (defn concurrent-generator
   "Takes a positive integer n, a sequence of keys (k1 k2 ...) and a function
