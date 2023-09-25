@@ -11,10 +11,14 @@
             [jepsen.checker :refer [merge-valid check-safe Checker]]
             [jepsen.generator :as gen]
             [jepsen.generator.context :as ctx]
+            [jepsen.history.fold :refer [loopf]]
             [clojure.tools.logging :refer :all]
             [clojure.core.reducers :as r]
             [clojure.pprint :refer [pprint]]
-            [dom-top.core :refer [bounded-pmap]]))
+            [dom-top.core :refer [bounded-pmap loopr]])
+  (:import (io.lacuna.bifurcan IEntry IList IMap List Lists Map Maps)
+           (java.util.function BiFunction)
+           (jepsen.history Op)))
 
 (def dir
   "What directory should we write independent results to?"
@@ -264,19 +268,61 @@
                (transient #{}))
        persistent!))
 
-(defn subhistory
-  "Takes a history and a key k and yields the subhistory composed of all ops in
-  history which do not have values with a differing key, unwrapping tuples to
-  their original values."
-  [k history]
-  (->> history
-       (keep (fn [op]
-               (let [v (:value op)]
-                 (cond
-                   (not (tuple? v)) op
-                   (= k (key v))    (assoc op :value (val v))
-                   true             nil))))
-       h/history))
+(defn subhistories
+  "Takes a collection of keys and a history. Runs a concurrent fold over the
+  history, breaking it into a map of keys to Histories for those keys. Unwraps
+  tuples. Materializes everything in memory; later if we want to do ginormous
+  histories we should spill to disk."
+  ; We could do this in a single pass, but the bookkeeping when we don't know
+  ; the keyset up front is just exhausting. Tackle this later.
+  [ks history]
+  (let [unit (fn unit []
+               (Map/from ^java.util.Map
+                         (zipmap ks (repeatedly #(.linear (List.))))))]
+    (h/fold
+      history
+      (loopf
+        {:name :subhistories
+         :associative? true}
+        ; Reducer
+        ([^IMap subhistories (unit)]
+         [^Op op]
+         (recur
+           (let [v (.value op)]
+             (if (tuple? v)
+               ; Op belongs in a specific subhistory
+               (let [[k v]      v
+                     subhistory ^IList (.get subhistories k nil)
+                     subhistory' (.addLast subhistory
+                                           (assoc op :value v))]
+                 (.put subhistories k subhistory' Maps/MERGE_LAST_WRITE_WINS))
+
+               ; This belongs in every subhistory.
+               (loopr [^IMap subhistories' subhistories]
+                      [^IEntry ksh subhistories]
+                      (let [k                  (.key ksh)
+                            ^IList subhistory  (.value ksh)
+                            subhistory'        (.addLast subhistory op)]
+                        (recur (.put subhistories' k subhistory'
+                                     Maps/MERGE_LAST_WRITE_WINS))))))))
+        ; Combiner
+        ([^IMap shs1 (unit)]
+         [^IMap shs2]
+         (recur
+           ; Loop over new subhistory entries
+           (loopr [^IMap shs shs1]
+                  [k ks]
+                  (recur
+                    (let [sh1 (.get shs1 k nil)
+                          sh2 (.get shs2 k nil)
+                          sh  (Lists/concat sh1 sh2)]
+                      (.put shs k sh Maps/MERGE_LAST_WRITE_WINS)))))
+         ; Convert back to a Clojure map of histories.
+         (loopr [shs (transient {})]
+                [^IEntry ksh shs1]
+                (recur
+                  (assoc! shs (.key ksh) (h/history (.value ksh))))
+                (persistent! shs)))))))
 
 (defn checker
   "Takes a checker that operates on :values like `v`, and lifts it to a checker
@@ -296,12 +342,11 @@
   [checker]
   (reify Checker
     (check [this test history opts]
-      (let [ks       (history-keys history)
-            results  (->> ks
+      (let [ks            (history-keys history)
+            results  (->> (subhistories ks history)
                           (bounded-pmap
-                            (fn [k]
-                              (let [h (subhistory k history)
-                                    subdir (concat (:subdirectory opts)
+                            (fn per-subhistory [[k h]]
+                              (let [subdir (concat (:subdirectory opts)
                                                    [dir k])
                                     results (check-safe
                                               checker test h
