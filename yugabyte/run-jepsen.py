@@ -97,6 +97,11 @@ TEST_PER_VERSION = [
             # YSQL read committed
             "ysql/rc.ol.append",
             "ysql/rc.ol.geo.append",
+        ]
+    },
+    {
+        "start_version": "2.15.0.0-b1",
+        "tests": [
             "ysql/rc.pl.append",
             "ysql/rc.pl.geo.append",
         ]
