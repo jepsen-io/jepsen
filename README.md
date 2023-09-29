@@ -120,11 +120,11 @@ few things:
 On Debian, try:
 
 ```
-sudo apt-get install openjdk-8-jre openjdk-8-jre-headless libjna-java gnuplot graphviz
+sudo apt install openjdk-17-jdk libjna-java gnuplot graphviz
 ```
 
 ... to get the basic requirements in place. Debian's Leiningen packages are
-ancient, so download lein from the web instead.
+ancient, so [download lein from the web instead](https://leiningen.org/).
 
 ## Running a Test
 
