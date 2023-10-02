@@ -364,7 +364,7 @@
 
                                 ; Return results as a map
                                 [k results])))
-                          (into {}))
+                          (into (sorted-map)))
             failures (->> results
                           (reduce (fn [failures [k result]]
                                     (if (:valid? result)
