@@ -54,9 +54,10 @@ apply_eviction=false
 custom_size=\"" (or cache-size "0.5GB") "\"
 blocks_per_page=1
 
-[file.system]
+[filesystem]
 logfile=\"" log-file "\"
-log_all_operations=false"))
+log_all_operations=false
+"))
 
 (def real-extension
   "When we mount a lazyfs directory, it's backed by a real directory on the
@@ -164,7 +165,7 @@ log_all_operations=false"))
   "Takes a lazyfs map, creates directories and config files, and starts the
   lazyfs daemon. You likely want to call this before beginning database setup.
   Returns the lazyfs map."
-  [{:keys [dir data-dir lazyfs-dir chown user config-file] :as lazyfs}]
+  [{:keys [dir data-dir lazyfs-dir chown user config-file log-file] :as lazyfs}]
   (c/su
     (info "Mounting lazyfs" dir)
     ; Make directories
@@ -173,6 +174,8 @@ log_all_operations=false"))
     (c/exec :chown chown dir)
     (c/exec :chown :-R chown lazyfs-dir))
   (c/sudo user
+    ; Create log file
+    (c/exec :touch log-file)
     ; Write config file
     (cu/write-file! (config lazyfs) config-file)
     ; And go!
