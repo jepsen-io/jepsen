@@ -25,7 +25,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "c16518f6acad10ec14a9dae8c9cc570679d24aa4")
+  "0.2.0")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
@@ -41,16 +41,22 @@
 
 (defn config
   "The lazyfs config file text. Takes a lazyfs map"
-  [{:keys [fifo cache-size]}]
+  [{:keys [log-file fifo fifo-completed cache-size]}]
   (str "[faults]
 fifo_path=\"" fifo "\"
+# Not sure how to use this yet.
+#fifo_path_completed=\"" fifo-completed "\"
 
 [cache]
 apply_eviction=false
 
 [cache.simple]
 custom_size=\"" (or cache-size "0.5GB") "\"
-blocks_per_page=1"))
+blocks_per_page=1
+
+[file.system]
+logfile=\"" log-file "\"
+log_all_operations=false"))
 
 (def real-extension
   "When we mount a lazyfs directory, it's backed by a real directory on the
@@ -127,18 +133,18 @@ blocks_per_page=1"))
         lazyfs-dir  (:lazyfs-dir  opts (str dir ".lazyfs"))
         data-dir    (:data-dir    opts (str lazyfs-dir "/data"))
         fifo        (:fifo        opts (str lazyfs-dir "/fifo"))
+        fifo-completed (:fifo-completed opts (str lazyfs-dir "/fifo-completed"))
         config-file (:config-file opts (str lazyfs-dir "/config"))
         log-file    (:log-file    opts (str lazyfs-dir "/log"))
-        pid-file    (:pid-file    opts (str lazyfs-dir "/pid"))
         user        (:user        opts "root")
         chown       (:chown       opts (str user ":" user))]
     {:dir         dir
      :lazyfs-dir  lazyfs-dir
      :data-dir    data-dir
      :fifo        fifo
+     :fifo-completed fifo-completed
      :config-file config-file
      :log-file    log-file
-     :pid-file    pid-file
      :user        user
      :chown       chown}))
 
@@ -146,19 +152,13 @@ blocks_per_page=1"))
   "Starts the lazyfs daemon once preparation is complete. We daemonize
   ourselves so that we can get logs--also it looks like the built-in daemon
   might not work right now."
-  [{:keys [dir lazyfs-dir data-dir pid-file log-file fifo config-file]}]
-  (cu/start-daemon!
-    {:chdir   lazyfs-dir
-     :logfile log-file
-     :pidfile pid-file}
-    bin
-    dir
-    :--config-path config-file
-    :-o "allow_other"
-    :-o "modules=subdir"
-    :-o (str "subdir=" data-dir)
-    :-s ; Singlethreaded
-    :-f))
+  [opts]
+  ; This explodes if you run it anywhere other than the lazyfs dir
+  (c/cd (str dir "/lazyfs")
+        (c/exec "scripts/mount-lazyfs.sh"
+                :-c (:config-file opts)
+                :-m (:dir opts)
+                :-r (:data-dir opts))))
 
 (defn mount!
   "Takes a lazyfs map, creates directories and config files, and starts the
@@ -213,7 +213,7 @@ blocks_per_page=1"))
 
 (defn fifo!
   "Sends a string to the fifo channel for the given lazyfs map."
-  [{:keys [user fifo]} cmd]
+  [{:keys [user fifo fifo-completed]} cmd]
   (timeout 1000 (throw+ {:type ::fifo-timeout
                          :cmd  cmd
                          :node c/*host*
