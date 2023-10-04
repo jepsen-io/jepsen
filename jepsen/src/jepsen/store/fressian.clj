@@ -12,10 +12,11 @@
             [jepsen [history]
                     [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (java.util AbstractList
+  (:import (java.io ByteArrayOutputStream)
+           (java.time Instant)
+           (java.util AbstractList
                       Collections
                       HashMap)
-           (java.time Instant)
            (jepsen.history Op)
            (jepsen.store FressianReader)
            (org.fressian.handlers ConvertList
@@ -195,3 +196,62 @@
   ([output-stream opts]
    (fress/create-writer output-stream
                         :handlers (:handlers opts write-handlers))))
+
+(defn write-object+
+  "Takes options for `writer`, a Fressian writer, and an object `x`. Writes `x`
+  object to the given writer. If the write fails due to an unknown handler,
+  backs up, traverses the structure of `x`, and determines the path to the
+  specific part which could not be serialized, throwing a more specific error.
+  Uses `writer-opts` to create new writers for this debugging process, if
+  necessary."
+  ([writer-opts writer x]
+   (try (fress/write-object writer x)
+        (catch IllegalArgumentException e
+          (if (re-find #"^Cannot write .+ as tag null" (.getMessage e))
+            (do (write-object+ writer-opts writer [] x)
+                ; Uh, if we got here, something went wrong
+                (throw+ {:type ::not-fressian-serializable-not-reproducible
+                         :class (class x)
+                         :x     x}
+                        e))
+            ; Some other exception
+            (throw e)))))
+  ; Debugging path
+  ([writer-opts _ path x]
+   (if-let [e (with-open [; Make a writer
+                          bos (ByteArrayOutputStream.)
+                          w   (writer bos writer-opts)]
+                ; Try writing x
+                (try (fress/write-object w x)
+                     nil
+                     (catch IllegalArgumentException e e)))]
+     ; Can't write this!
+     (or (cond ; For sequential collections, try each index in turn
+           (sequential? x)
+           (->> x
+                (map-indexed (fn seq-traversal [i x]
+                               (write-object+ writer-opts writer
+                                              (conj path i) x)))
+                (remove nil?)
+                first)
+
+           ; For maps, try each key
+           (map? x)
+           (->> x
+                (map (fn map-traversal [[k x]]
+                       (write-object+ writer-opts nil (conj path k) x)))
+                (remove nil?)
+                first)
+
+           ; Not traversable; this is the end!
+           true
+           false)
+         ; Either this was non-traversable OR every piece of this collection
+         ; was serializable.
+         (throw+ {:type   ::not-fressian-serializable
+                  :path   path
+                  :class  (class x)
+                  :object x}
+                 e))
+     ; Can write this; move on.
+     nil)))

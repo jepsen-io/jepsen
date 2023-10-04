@@ -942,7 +942,7 @@
                      foos fressian-buffer-size)
               w    ^Closeable (jsf/writer
                                 bos {:handlers fressian-write-handlers})]
-    (fress/write-object w data)
+    (jsf/write-object+ {:handlers fressian-write-handlers} w data)
     (.flush bos)
     (.bytesWritten foos)))
 
