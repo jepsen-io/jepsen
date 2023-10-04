@@ -12,7 +12,8 @@
             [jepsen [history]
                     [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (java.io ByteArrayOutputStream)
+  (:import (java.io ByteArrayOutputStream
+                    Closeable)
            (java.time Instant)
            (java.util AbstractList
                       Collections
@@ -220,7 +221,7 @@
   ([writer-opts _ path x]
    (if-let [e (with-open [; Make a writer
                           bos (ByteArrayOutputStream.)
-                          w   (writer bos writer-opts)]
+                          w   ^Closeable (writer bos writer-opts)]
                 ; Try writing x
                 (try (fress/write-object w x)
                      nil
