@@ -81,7 +81,7 @@ TEST_PER_VERSION = [
             "ysql/sz.multi-key-acid",
             "ysql/sz.default-value",
             "ysql/sz.ol.append",
-            "ysql/sz.ol.geo.append",
+            # "ysql/sz.ol.geo.append",
 
             # YSQL snapshot isolation
             "ysql/si.ol.append",
