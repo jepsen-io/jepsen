@@ -192,6 +192,7 @@
   "Start both master and tserver. Only starts master if this node is a master
   node. Waits for masters and tservers."
   (info "Starting master and tserver for" (name (:api test)) "API")
+
   (when (master-node? test node)
     (start-master! db test node)
     (await-masters test))
@@ -315,6 +316,13 @@
    :--callhome_enabled=false
    ])
 
+(defn master-tserver-packed-columns
+  [packed-columns-enabled]
+  (if packed-columns-enabled
+    [:--ysql_enable_packed_row]
+    [])
+  )
+
 (defn master-api-opts
   "API-specific options for master"
   [api node]
@@ -378,8 +386,8 @@
           geo-node-map (zipmap nodes geo-ids)
           node-id-int (get geo-node-map node)]
       (info node [:--placement_cloud :ybc
-             :--placement_region (str "jepsen-" node-id-int)
-             :--placement_zone (str "jepsen-" node-id-int "a")])
+                  :--placement_region (str "jepsen-" node-id-int)
+                  :--placement_zone (str "jepsen-" node-id-int "a")])
       [:--placement_cloud :ybc
        :--placement_region (str "jepsen-" node-id-int)
        :--placement_zone (str "jepsen-" node-id-int "a")])
@@ -470,6 +478,7 @@
             (master-tserver-experimental-tuning-flags test)
             (master-tserver-random-clock-skew test node)
             (master-tserver-wait-on-conflict-flags test)
+            (master-tserver-packed-columns (:yb-packed-columns-enabled test))
             (master-tserver-geo-partitioning-flags test node (:nodes test))
             (master-api-opts (:api test) node)
             )))
@@ -490,6 +499,7 @@
             (master-tserver-experimental-tuning-flags test)
             (master-tserver-random-clock-skew test node)
             (master-tserver-wait-on-conflict-flags test)
+            (master-tserver-packed-columns (:yb-packed-columns-enabled test))
             (master-tserver-geo-partitioning-flags test node (:nodes test))
             (tserver-api-opts (:api test) node)
             (tserver-read-committed-flags test)
@@ -522,11 +532,9 @@
   db/Primary
   (setup-primary! [this test node]
     "Executed once on a first node in list (i.e. n1 by default) after per-node setup is done"
-    (let [colocated (and (not (utils/is-test-geo-partitioned? test)) (> (rand) 0.5))
-          colocated-clause (if colocated
+    (let [colocated-clause (if (:yb-colocated test)
                              " WITH colocated = true"
                              "")]
-      (info "Creating JEPSEN" (if colocated "colocated" "") "database")
       (ysqlsh test :-h (cn/ip node) :-c (str "CREATE DATABASE jepsen" colocated-clause ";")))
     )
 

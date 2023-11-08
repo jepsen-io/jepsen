@@ -18,6 +18,7 @@
             [yugabyte.nemesis :as nemesis]
             [yugabyte.single-key-acid :as single-key-acid]
             [yugabyte.set :as set]
+            [yugabyte.utils :as utils]
             [yugabyte.utils :refer :all]
             [yugabyte.ycql.bank]
             [yugabyte.ycql.bank-improved]
@@ -309,7 +310,14 @@
             :pure-generators true
             :checker         checker})))
 
+(defn test-3
+  "Final phase where we define global cluster configuration parameters"
+  [opts]
+  (let [packed-columns-enabled (> (rand) 0.5)
+        colocated (and (not (utils/is-test-geo-partitioned? opts)) (> (rand) 0.5))]
+    (assoc opts :yb-packed-columns-enabled packed-columns-enabled :yb-colocated colocated)))
+
 (defn yb-test
   "Constructs a yugabyte test from CLI options."
   [opts]
-  (-> opts test-1 test-2))
+  (-> opts test-1 test-2 test-3))
