@@ -84,8 +84,14 @@
 
 (defn append-primary!
   "Writes a key based on primary key."
-  [geo-partitioning conn table row col v]
-  (let [r (c/execute! conn [(str "update " table
+  [locking geo-partitioning conn table row col v]
+  (let [_ (if (= :pessimistic locking)
+            (do
+              ; Randomly evaluate SELECT FOR UPDATE with timeout in case of pessimistic locking
+              (c/query conn [(select-with-optional-lock locking col table) row])
+              (Thread/sleep (rand-int 2000)))
+            nil)
+        r (c/execute! conn [(str "update " table
                                  " set " col " = CONCAT(" col ", ',', ?)" (geo-row-update geo-partitioning v) " "
                                  "where k = ?") v row])]
     (when (= [0] r)
@@ -132,7 +138,7 @@
            (read-primary locking conn table row col)
 
            :append
-           (append-primary! geo-partitioning conn table row col v))]))
+           (append-primary! locking geo-partitioning conn table row col v))]))
 
 (defn create-geo-tablespace
   [conn tablespace-name replica-placement]
