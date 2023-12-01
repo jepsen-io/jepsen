@@ -67,7 +67,7 @@
 (defn geo-row-update
   [geo-partitioning v]
   (if (= geo-partitioning :geo)
-    (str ", geo_partition = '" (mod v 2) "a'")
+    (str "and geo_partition = '" (+' (mod v 2) 1) "a'")
     ""))
 
 (defn read-primary
@@ -92,12 +92,12 @@
               (Thread/sleep (rand-int 2000)))
             nil)
         r (c/execute! conn [(str "update " table
-                                 " set " col " = CONCAT(" col ", ',', ?)" (geo-row-update geo-partitioning v) " "
-                                 "where k = ?") v row])]
+                                 " set " col " = CONCAT(" col ", ',', ?)"
+                                 " where k = ? " (geo-row-update geo-partitioning row)) v row])]
     (when (= [0] r)
       ; No rows updated
       (if (= geo-partitioning :geo)
-        (insert-primary-geo conn table geo-partitioning col row v (str (mod v 2) "a"))
+        (insert-primary-geo conn table geo-partitioning col row v (str (+' (mod row 2) 1) "a"))
         (insert-primary conn table col row v))) v))
 
 (defn read-secondary
