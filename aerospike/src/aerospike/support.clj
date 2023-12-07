@@ -35,7 +35,8 @@
                                  Record)
            (com.aerospike.client.cluster Node)
            (com.aerospike.client.policy Policy
-                                        ConsistencyLevel
+                                        ReadModeSC
+                                        ;; ConsistencyLevel
                                         GenerationPolicy
                                         WritePolicy
                                         RecordExistsAction)))
@@ -349,7 +350,7 @@
    "Policy needed for linearizability testing."
    ;; FIXME - need supported client - prefer to install client from packages/.
    (let [p (Policy. policy)]
-     (set! (.linearizeRead p) true)
+     (set! (.readModeSC p) ReadModeSC/LINEARIZE)
      p))
 
 (def ^WritePolicy write-policy

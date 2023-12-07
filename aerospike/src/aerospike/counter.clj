@@ -36,7 +36,7 @@
                                  Record)
            (com.aerospike.client.cluster Node)
            (com.aerospike.client.policy Policy
-                                        ConsistencyLevel
+                                        ;; ConsistencyLevel
                                         GenerationPolicy
                                         WritePolicy)))
 
