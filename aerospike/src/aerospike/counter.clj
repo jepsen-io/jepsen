@@ -19,7 +19,7 @@
                     [store     :as store]
                     [tests     :as tests]]
             [jepsen.control [net :as net]
-                            [util :as net/util]]
+                            [util :as netUtil]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.nemesis.time :as nt]
             [jepsen.os.debian :as debian]
@@ -42,7 +42,7 @@
 
 (defrecord CounterClient [client namespace set key]
   client/Client
-  (setup! [this test node]
+  (open! [this test node]
     (let [client (s/connect node)]
       (Thread/sleep 3000) ; TODO: remove?
       (s/put! client namespace set key {:value 0})

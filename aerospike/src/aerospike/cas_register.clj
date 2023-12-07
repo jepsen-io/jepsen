@@ -19,7 +19,7 @@
                     [store     :as store]
                     [tests     :as tests]]
             [jepsen.control [net :as net]
-                            [util :as net/util]]
+                            [util :as netUtil]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.nemesis.time :as nt]
             [jepsen.os.debian :as debian]

@@ -57,7 +57,6 @@
                     (swap! max-key max k)
                     (->> (range 10000)
                          (map (fn [x] {:type :invoke, :f :add, :value x}))
-                         gen/seq
                          (gen/stagger 1/10))))
      :final-generator (gen/derefer
                         (delay

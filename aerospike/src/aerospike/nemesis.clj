@@ -92,7 +92,7 @@
 (defn killer-gen
   "A mix of kills, restarts, revivals, and reclusterings"
   [test]
-  (gen/seq (killer-gen-seq test)))
+   (killer-gen-seq test))
 
 (defn full-nemesis
   "Handles kills, restarts, revives, reclusters, clock skew, and partitions."
@@ -120,8 +120,8 @@
                                                (nt/clock-gen)))
         (when-not (:no-kills opts) (killer-gen opts))
         (when-not (:no-partitions opts)
-          (gen/seq (cycle [{:type :info, :f :partition-start}
-                           {:type :info, :f :partition-stop}])))]
+           (cycle [{:type :info, :f :partition-start}
+                           {:type :info, :f :partition-stop}]))]
        (remove nil?)
        gen/mix))
 

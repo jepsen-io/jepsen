@@ -1,7 +1,9 @@
 (ns aerospike.support
   "Core DB setup and support features"
-  (:require [clojure [pprint :refer [pprint]]
-                     [string :as str]]
+  (:require 
+            [clojure 
+              [pprint :refer [pprint]]
+              [string :as str]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :refer [with-retry letr]]
@@ -17,15 +19,18 @@
                     [os        :as os]
                     [store     :as store]
                     [tests     :as tests]]
-            [jepsen.control [net :as net]
-                            [util :as net/util]]
             [jepsen.checker.timeline :as timeline]
             [jepsen.nemesis.time :as nt]
             [jepsen.os.debian :as debian]
             [knossos.model :as model]
-            [wall.hack])
-  (:import (clojure.lang ExceptionInfo)
-           (com.aerospike.client AerospikeClient
+            [wall.hack]
+            [jepsen.control [net :as net]
+                            [util :as netUtil]]
+  )
+
+  (:import 
+          (clojure.lang ExceptionInfo)
+          (com.aerospike.client AerospikeClient
                                  AerospikeException
                                  AerospikeException$Connection
                                  AerospikeException$Timeout
@@ -35,11 +40,13 @@
                                  Record)
            (com.aerospike.client.cluster Node)
            (com.aerospike.client.policy Policy
+                                        RecordExistsAction
                                         ReadModeSC
-                                        ;; ConsistencyLevel
                                         GenerationPolicy
                                         WritePolicy
-                                        RecordExistsAction)))
+                                        )
+  )
+)
 
 (def local-package-dir
   "Local directory for Aerospike packages."
