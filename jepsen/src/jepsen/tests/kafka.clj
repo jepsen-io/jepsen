@@ -166,6 +166,7 @@
   since we're only generating rw edges for final reads."
   (:require [analemma [xml :as xml]
                       [svg :as svg]]
+            [bifurcan-clj [core :as b]]
             [clojure [pprint :refer [pprint]]
                      [set :as set]]
             [clojure.java.io :as io]
@@ -175,7 +176,8 @@
                   [graph :as g]
                   [list-append :refer [rand-bg-color]]
                   [txn :as txn]
-                  [util :refer [index-of]]]
+                  [util :refer [index-of]]
+                  [rels :refer [ww wr rw]]]
             [gnuplot.core :as gnuplot]
             [jepsen [checker :as checker]
                     [client :as client]
@@ -1795,8 +1797,8 @@
   {:graph (if-not ww-deps
             ; We might ask not to infer ww dependencies, in which case this
             ; graph is empty.
-            (g/named-graph :ww)
-            (loopr [g (g/linear (g/digraph))]
+            (g/op-digraph)
+            (loopr [g (b/linear (g/op-digraph))]
                    [[k v->writer] writer-of ; For every key
                     [v2 op2] v->writer]     ; And very value written in that key
                    (let [version-order (get version-orders k)]
@@ -1804,13 +1806,13 @@
                        (if-let [op1 (v->writer v1)]
                          (if (= op1 op2)
                            (recur g) ; No self-edges
-                           (recur (g/link g op1 op2)))
+                           (recur (g/link g op1 op2 ww)))
                          (throw+ {:type   :no-writer-of-value
                                   :key    k
                                   :value  v1}))
                        ; This is the first value in the version order.
                        (recur g)))
-                   (g/named-graph :ww (g/forked g))))
+                   (b/forked g)))
    :explainer (if-not ww-deps
                 (NeverExplainer.)
                 (WWExplainer. writer-of version-orders))})
@@ -1839,14 +1841,14 @@
   "Analyzes a history to extract write-read dependencies. T1 < T2 iff T1 writes
   some v to k and T2 reads k."
   [{:keys [writer-of readers-of]} history]
-  {:graph (loopr [g (g/linear (g/digraph))]
+  {:graph (loopr [g (b/linear (g/op-digraph))]
                  [[k v->readers] readers-of
                   [v readers]    v->readers]
                  (if-let [writer (-> writer-of (get k) (get v))]
                    (let [readers (remove #{writer} readers)]
-                     (recur (g/link-to-all g writer readers)))
+                     (recur (g/link-to-all g writer readers wr)))
                    (throw+ {:type :no-writer-of-value, :key k, :value v}))
-                 (g/named-graph :wr (g/forked g)))
+                 (b/forked g))
    :explainer (WRExplainer. writer-of)})
 
 (defn graph
