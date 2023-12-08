@@ -87,12 +87,19 @@
 (defn add [_ _] {:type :invoke, :f :add, :value 1})
 (defn cas [_ _] {:type :invoke, :f :cas, :value [(rand-int 5) (rand-int 5)]})
 
+(defn linear-checker-args
+  []
+  {:algorithm :linear
+   :model (model/cas-register) 
+  }
+)
+
 (defn workload
   []
   {:client  (cas-register-client)
    :checker (independent/checker
               (checker/compose
-                {:linear   (checker/linearizable)
+                {:linear   (checker/linearizable (linear-checker-args))
                  :timeline (timeline/html)}))
    :model (model/cas-register)
    :generator (independent/concurrent-generator
