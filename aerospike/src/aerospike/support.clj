@@ -40,6 +40,7 @@
                                  Record)
            (com.aerospike.client.cluster Node)
            (com.aerospike.client.policy Policy
+                                        ClientPolicy
                                         RecordExistsAction
                                         ReadModeSC
                                         GenerationPolicy
@@ -110,18 +111,28 @@
   [^java.io.Closeable x]
   (.close x))
 
+
+(defn fSingleNode-policy
+  []
+  (let [cp (ClientPolicy.)]
+    (set! (.forceSingleNode cp) true)
+    cp
+  )
+)
+
 (defn create-client
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
   (with-retry [tries 30]
-    (AerospikeClient. node 3000)
+    (AerospikeClient. (fSingleNode-policy) node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
       ; (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
+
 
 (defn connect
   "Returns a client for the given node. Blocks until the client is available."
