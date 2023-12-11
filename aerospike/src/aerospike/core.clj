@@ -6,6 +6,7 @@
                        [nemesis :as nemesis]
                        [pause :as pause]
                        [set :as set]]
+            [clojure.tools.logging :refer [debug info warn]]
             [jepsen [cli :as cli]
                     [checker :as checker]
                     [generator :as gen]
@@ -65,6 +66,7 @@
                                 (gen/log "Waiting for quiescence")
                                 (gen/sleep 10)
                                 (gen/clients final-generator)))]
+    (info "constructed jepsen test-map")
     (merge tests/noop-test
            opts
            {:name     (str "aerospike " (name (:workload opts)))

@@ -78,6 +78,7 @@
 (defn cas-register-client
   "A basic CAS register on top of a single key and bin."
   []
+  (info "In cas-register-client() call")
   (CasRegisterClient. nil s/ans "cats"))
 
 ; Generators

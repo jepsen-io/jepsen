@@ -138,6 +138,7 @@
 (defn connect
   "Returns a client for the given node. Blocks until the client is available."
   [node]
+  (info ">> connect() call <<")
   ;; FIXME - client no longer blocks till cluster is ready.
   (let [client (create-client node)]
     ; Wait for connection
@@ -203,25 +204,25 @@
 
 (defn wait-for-all-nodes-observed
   [conn test namespace]
-  ; (info "Waiting for all nodes observed")
+  (info "Waiting for all nodes observed")
   (poll [result (:observed_nodes (roster conn namespace))]
         (= (count result) (count (:nodes test)))))
 
 (defn wait-for-all-nodes-pending
   [conn test namespace]
-  ; (info "Waiting for all nodes pending")
+  (info "Waiting for all nodes pending")
   (poll [result (:pending_roster (roster conn namespace))]
         (= (count result) (count (:nodes test)))))
 
 (defn wait-for-all-nodes-active
   [conn test namespace]
-  ; (info "Waiting for all nodes active")
+  (info "Waiting for all nodes active")
   (poll [result (:roster (roster conn namespace))]
         (= (count result) (count (:nodes test)))))
 
 (defn wait-for-migrations
   [conn]
-  ; (info "Waiting for migrations")
+  (info "Waiting for migrations")
   (poll [stats (:statistics (server-info (first (nodes conn))))]
         (and (= (:migrate_allowed stats) "true")
              (= (:migrate_partitions_remaining stats) 0))))
