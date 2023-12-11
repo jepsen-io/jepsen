@@ -124,6 +124,7 @@
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
+  (info "CREATING CLIENT")
   (with-retry [tries 30]
     (AerospikeClient. (fSingleNode-policy) node 3000)
     (catch com.aerospike.client.AerospikeException e
@@ -342,9 +343,12 @@
 (defn db
   [opts]
   "Aerospike for a particular version."
+  (info "CREATING DB")
   (reify db/DB
     (setup! [_ test node]
+      (info "Resetting clocktimes!")
       (nt/reset-time!)
+      (info "Running Install & Configuration!")
       (doto node
         (install!)
         (configure! test opts)
@@ -355,7 +359,8 @@
 
     db/LogFiles
     (log-files [_ test node]
-      ["/var/log/aerospike/aerospike.log"])))
+      ["/var/log/aerospike/aerospike.log"]))
+  (info "DONE!!"))
 
 (def ^Policy policy
   "General operation policy"
