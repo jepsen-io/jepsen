@@ -5,6 +5,7 @@
               [pprint :refer [pprint]]
               [string :as str]]
             [clojure.java.io :as io]
+            [clojure.walk :as walk]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :refer [with-retry letr]]
             [jepsen [core      :as jepsen]
@@ -524,3 +525,92 @@
 
            (do (info :error-code (.getResultCode e#))
                (throw e#)))))))
+
+(defprotocol Generator
+  (op [gen test process] "Yields an operation to apply."))
+
+(defmacro defgenerator
+  "Like deftype, but the fields spec is followed by a vector of expressions
+  which are used to print the datatype, and the Generator protocol is implicit.
+  For instance:
+
+      (defgenerator Delay [dt]
+        [(str dt \" seconds\")] ; For pretty-printing
+        (op [this test process] ; Function body
+          ...))
+
+  Inside the print-forms vector, every occurrence of a field name is replaced
+  by (.some-field a-generator), so don't get fancy with let bindings or
+  anything."
+  [name fields print-forms & protocols-and-functions]
+  (let [field-set (set fields)
+        this-sym  (gensym "this")
+        w-sym     (gensym "w")]
+    `(do ; Standard deftype, just insert the generator and drop the print forms
+         (deftype ~name ~fields Generator ~@protocols-and-functions)
+
+         ; For prn/str, we'll generate a defmethod
+         (defmethod print-method ~name
+           [~this-sym ^java.io.writer ~w-sym]
+           (.write ~w-sym
+                   ~(str "(gen/" (.toLowerCase (clojure.core/name name))))
+           ~@(mapcat (fn [field]
+                       ; Rewrite field expression, changing field names to
+                       ; instance variable getters
+                       (let [field (walk/prewalk
+                                     (fn [form]
+                                       (if (field-set form)
+                                         ; This was a field
+                                         (list (symbol (str "." form))
+                                               this-sym)
+                                         ; Something else
+                                         form))
+                                     field)]
+                         ; Spaces between fields
+                         [`(.write ~w-sym " ")
+                          `(print-method ~field ~w-sym)]))
+                 print-forms)
+           (.write ~w-sym ")")))))
+
+(defgenerator Derefer [dgen]
+  [dgen]
+  (op [this test process]
+      (let [gen @dgen]
+        (op gen test process))))
+
+(defn derefer
+  "Sometimes you need to build a generator not *now*, but *later*; e.g. because
+  it depends on state that won't be available until the generator is actually
+  invoked. Wrap a derefable returning a generator in this, and it'll be
+  deref'ed every time an op is requested. For instance:
+
+      (derefer (delay (gen/once {:type :drain-key, :value @key})))
+
+  Looks up the key to drain only once an operation is requested."
+  [dgen]
+  (Derefer. dgen))
+
+
+(defn each-
+  "Takes a function that yields a generator. Invokes that function to
+  create a new generator for each distinct process."
+  [gen-fn]
+  (let [processes (atom {})]
+    (reify Generator
+      (op [this test process]
+        (if-let [gen (get @processes process)]
+          (op gen test process)
+          (do
+            (swap! processes (fn [processes]
+                               (if (contains? processes process)
+                                 processes
+                                 (assoc processes process (gen-fn)))))
+            (recur test process)))))))
+
+(defmacro each
+  "Takes an expression evaluating to a generator. Captures that expression as a
+  function, and constructs a generator that invokes that expression once for
+  each process, as new processes arrive, such that each process sees an
+  independent copy of the underlying generator."
+  [gen-expr]
+  `(each- (fn [] ~gen-expr)))

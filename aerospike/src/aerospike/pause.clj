@@ -213,7 +213,7 @@
                 :checker (independent/checker (checker/set))
                 :generator gen
                 :final-generator
-                (gen/derefer
+                (s/derefer
                   (delay
                     (locking state
                       (independent/concurrent-generator

@@ -58,7 +58,7 @@
                     (->> (range 10000)
                          (map (fn [x] {:type :invoke, :f :add, :value x}))
                          (gen/stagger 1/10))))
-     :final-generator (gen/derefer
+     :final-generator (s/derefer
                         (delay
                           (locking keys
                             (independent/concurrent-generator
@@ -66,6 +66,6 @@
                               (range (inc @max-key))
                               (fn [k]
                                 (gen/stagger 10
-                                   (gen/each
+                                   (s/each
                                      (gen/once {:type :invoke
                                                 :f    :read}))))))))}))
