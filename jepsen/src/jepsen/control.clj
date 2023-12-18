@@ -174,6 +174,8 @@
   (let [s *session*
         local-paths (map file->path (util/coll local-paths))]
     (upload! s (cmd-context) local-paths remote-path {})
+    (info "Uploaded" local-paths " to " remote-path)
+    (info "with context:" (cmd-context))
     remote-path))
 
 (defn upload-resource!

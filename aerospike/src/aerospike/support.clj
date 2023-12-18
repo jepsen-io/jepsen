@@ -252,7 +252,8 @@
   (info "Installing Aerospike packages")
   (c/su
    (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
-   (debian/install ["python"])
+   (debian/install ["python-is-python3"])
+  ;;  (debian/install ["python"])
    (c/exec :mkdir :-p remote-package-dir)
    (c/exec :chmod :a+rwx remote-package-dir)
    (doseq [[name file] (local-packages)]
@@ -362,7 +363,8 @@
     db/LogFiles
     (log-files [_ test node]
       ["/var/log/aerospike/aerospike.log"]))
-  (info "DONE!!"))
+  ;; (info "DONE!!  (DB->)" (db opts))
+)
 
 (def ^Policy policy
   "General operation policy"
