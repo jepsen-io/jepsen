@@ -3,6 +3,7 @@
   SCP for copying even medium-sized files of a few GB. This provides a faster
   implementation of a Remote which shells out to SCP."
   (:require [clojure.string :as str]
+            [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util]
             [jepsen.control.core :as core]
@@ -107,8 +108,9 @@
             ; Upload to tmpfile
             (core/upload! this {} src tmp nil)
             ; Chown and move to dest, as root
+            (info "Moving <"src"> as <"tmp"> to <"dest">")
             (exec! cmd-remote {:sudo "root"} [:chown sudo tmp])
-            (exec! cmd-remote {:sudo "root"} [:mv tmp dest]))))))
+            (exec! cmd-remote {:sudo "root"} [:mv tmp (str dest (.getName (io/file src)))]))))))
 
   (download! [this ctx srcs dest _]
     (let [sudo (:sudo ctx)]

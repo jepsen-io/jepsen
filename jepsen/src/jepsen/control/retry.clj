@@ -57,6 +57,7 @@
   (upload! [this context local-paths remote-path more]
     (with-retry
       (rc/with-conn [c conn]
+        (info "UPLOADING "  local-paths " as " ^String remote-path)
         (core/upload! c context local-paths remote-path more))))
 
   (download! [this context remote-paths local-path more]
