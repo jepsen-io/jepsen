@@ -116,7 +116,7 @@
 (defn fSingleNode-policy
   []
   (let [cp (ClientPolicy.)]
-    (set! (.forceSingleNode cp) false)
+    (set! (.forceSingleNode cp) true)
     cp
   )
 )
@@ -257,11 +257,11 @@
    (c/exec :mkdir :-p remote-package-dir)
    (c/exec :chmod :a+rwx remote-package-dir)
    (doseq [[name file] (local-packages)]
-     (c/trace
-       (c/upload (.getCanonicalPath file) remote-package-dir))
-      ;;  (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/"))
-       (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
-       (info "--AND" (.getPath (io/resource "features.conf")) " to /etc/aerospike/features.conf")       
+    ;;  (c/trace
+    ;;   ;;  (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/"))
+    ;;    (c/upload (.getCanonicalPath file) remote-package-dir))
+    ;;    (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
+    ;;    (info "--AND" (.getPath (io/resource "features.conf")) " to /etc/aerospike/features.conf")       
        (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
 
    (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/")
