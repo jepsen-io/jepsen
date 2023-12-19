@@ -131,7 +131,7 @@
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
-      ; (info "Retrying client creation -" (.getMessage e))
+      ;; (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
 
@@ -139,13 +139,13 @@
 (defn connect
   "Returns a client for the given node. Blocks until the client is available."
   [node]
-  (info ">> connect() call <<")
   ;; FIXME - client no longer blocks till cluster is ready.
   (let [client (create-client node)]
     ; Wait for connection
     (while (not (.isConnected client))
       (Thread/sleep 100))
 
+    (info "CLIENT CONNECTED!")
     ; Wait for workable ops
     (while (try (server-info (first (nodes client)))
                 false
@@ -257,10 +257,14 @@
    (c/exec :mkdir :-p remote-package-dir)
    (c/exec :chmod :a+rwx remote-package-dir)
    (doseq [[name file] (local-packages)]
-     (c/trace
-       (c/upload (.getCanonicalPath file) remote-package-dir))
+    ;;  (c/trace
+    ;;   ;;  (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/"))
+    ;;    (c/upload (.getCanonicalPath file) remote-package-dir))
+    ;;    (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
+    ;;    (info "--AND" (.getPath (io/resource "features.conf")) " to /etc/aerospike/features.conf")       
        (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
 
+   (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/")
    ; sigh
    (c/exec :systemctl :daemon-reload)
 
@@ -269,7 +273,7 @@
    (c/exec :chown "aerospike:aerospike" "/var/log/aerospike")
    (c/exec :mkdir :-p "/var/run/aerospike")
    (c/exec :chown "aerospike:aerospike" "/var/run/aerospike")
-
+   (info "DONE with install & config!")
    ;; Replace /usr/bin/asd with a wrapper that skews time a bit
    ;(c/exec :mv "/usr/bin/asd" "/usr/local/bin/asd")
    ;(c/exec :echo
@@ -302,7 +306,9 @@
 (defn start!
   "Starts aerospike."
   [node test]
-  (jepsen/synchronize test)
+  (info "Syncronizing...")
+  (jepsen/synchronize test 5)
+  (info "Syncronized!")
   (info "Starting...")
   (c/su (c/exec :service :aerospike :start))
   (info "Started")
@@ -355,7 +361,8 @@
       (doto node
         (install!)
         (configure! test opts)
-        (start! test)))
+        (start! test))
+      (info "Done w/ db.setup! call."))
 
     (teardown! [_ test node]
       (wipe! node))
