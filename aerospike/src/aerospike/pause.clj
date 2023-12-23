@@ -78,7 +78,8 @@
                  (net/heal! (:net test) test)
                  (c/on-nodes test (remove #{node} (:nodes test))
                              (fn restart [test node]
-                               (c/su (c/exec :service :aerospike :restart))))))
+			       ;; Jepsen spawned process issue workaround
+			       (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl restart asd || echo 'started with ulimit'")))))
   :resumed)
 
 (defn nemesis

@@ -61,7 +61,8 @@
   "Runs an SCP command by shelling out. Takes a conn-spec (used for port, key,
   etc), a seq of sources, and a single destination, all as strings."
   [conn-spec sources dest]
-  (apply util/sh "scp" "-rpC"
+  ;; bob scp seems to need -O as workaround in current implementation
+  (apply util/sh "scp" "-rpCO"
          "-P" (str (:port conn-spec))
          (concat (when-let [k (:private-key-path conn-spec)]
                    ["-i" k])
@@ -110,7 +111,7 @@
             ; Chown and move to dest, as root
             (info "Moving <"src"> as <"tmp"> to <"dest">")
             (exec! cmd-remote {:sudo "root"} [:chown sudo tmp])
-            (exec! cmd-remote {:sudo "root"} [:mv tmp (str dest (.getName (io/file src)))]))))))
+	    (exec! cmd-remote {:sudo "root"} [:mv tmp dest]))))))
 
   (download! [this ctx srcs dest _]
     (let [sudo (:sudo ctx)]

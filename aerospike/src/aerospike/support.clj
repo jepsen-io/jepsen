@@ -58,7 +58,7 @@
   "/tmp/packages/")
 
 (def ans "Aerospike namespace"
-  "jepsen")
+  "test")
 
 ;;; asinfo helpers:
 (defn kv-split
@@ -159,7 +159,7 @@
   "Reclusters all connected nodes."
   []
   ;; Sends to all clustered nodes.
-  (c/trace (c/su (c/exec :asadm :-e "asinfo -v recluster:"))))
+  (c/trace (c/su (c/exec :asadm "--enable" :-e "asinfo -v recluster:"))))
 
 (defn revive!
   "Revives a namespace on the local node."
@@ -241,8 +241,9 @@
                              (when (re-find #"\.deb$" (.getName f))
                                [name f]))))
                    (into (sorted-map)))]
-    (assert (some (partial re-find #"aerospike-server") (keys files))
-            (str "Expected an aerospike-server .deb in " local-package-dir))
+    ;; Bob tests already have server installed
+    ;;(assert (some (partial re-find #"aerospike-server") (keys files))
+    ;;        (str "Expected an aerospike-server .deb in " local-package-dir))
     (assert (some (partial re-find #"aerospike-tools") (keys files))
             (str "Expected an aerospike-tools .deb in " local-package-dir))
     files))
@@ -251,22 +252,24 @@
   [node]
   (info "Installing Aerospike packages")
   (c/su
-   (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
+   ;; Bob tests should not need to clean up before test run
+   ;;(debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
    (debian/install ["python-is-python3"])
   ;;  (debian/install ["python"])
    (c/exec :mkdir :-p remote-package-dir)
    (c/exec :chmod :a+rwx remote-package-dir)
    (doseq [[name file] (local-packages)]
-    ;;  (c/trace
+       (c/trace
     ;;   ;;  (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/"))
-    ;;    (c/upload (.getCanonicalPath file) remote-package-dir))
-    ;;    (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
+       (c/upload (.getCanonicalPath file) (str remote-package-dir name)))
+       (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
     ;;    (info "--AND" (.getPath (io/resource "features.conf")) " to /etc/aerospike/features.conf")       
        (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
-
-   (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/")
+   ;; Bob should already handle updating features.conf
+   ;;(c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/")
    ; sigh
-   (c/exec :systemctl :daemon-reload)
+   ;; systemctl not applicable for docker
+   ;;(c/exec :systemctl :daemon-reload)
 
    ; debian packages don't do this?
    (c/exec :mkdir :-p "/var/log/aerospike")
@@ -285,6 +288,7 @@
   "Uploads configuration files to the given node."
   [node test opts]
   (info "Configuring...")
+;; Bob owns the initial static config file - but diff may result in expected failures
   (c/su
     ; Config file
     (c/exec :echo (-> "aerospike.conf"
@@ -310,7 +314,8 @@
   (jepsen/synchronize test 5)
   (info "Syncronized!")
   (info "Starting...")
-  (c/su (c/exec :service :aerospike :start))
+  ;; Use bob image wrapper with workaround for jepsen spawned process issue
+  (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl start asd || echo 'started with ulimit'")
   (info "Started")
   (jepsen/synchronize test) ;; Wait for all servers to start
 
@@ -334,7 +339,8 @@
   [node]
   (info node "stopping aerospike")
   (c/su
-    (meh (c/exec :service :aerospike :stop))
+    ;; use bob asd process wrapper
+    (meh (c/exec :aerospikectl :stop :asd))
     (meh (c/exec :killall :-9 :asd))))
 
 (defn wipe!
@@ -343,8 +349,9 @@
   (stop! node)
   (info node "deleting data files")
   (c/su
-   (meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
-   (meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
+   ;; bob runs shouldn't need to wipe logs
+   ;;(meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
+   ;;(meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
    (doseq [dir ["data" "smd" "udf"]]
      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
 
@@ -360,18 +367,22 @@
       (info "Running Install & Configuration!")
       (doto node
         (install!)
-        (configure! test opts)
+        ;; Bob owns the initial static config file - but diff may result in expected failures
+        ;;(configure! test opts)
         (start! test))
       (info "Done w/ db.setup! call."))
 
+    ;; Bob will teardown
     (teardown! [_ test node]
-      (wipe! node))
+      )
+      ;;(wipe! node))
 
-    db/LogFiles
-    (log-files [_ test node]
-      ["/var/log/aerospike/aerospike.log"]))
+    )
+    ;;db/LogFiles
+    ;;(log-files [_ test node]
+    ;;  ["/var/log/aerospike/aerospike.log"]))
   ;; (info "DONE!!  (DB->)" (db opts))
-)
+  )
 
 (def ^Policy policy
   "General operation policy"
