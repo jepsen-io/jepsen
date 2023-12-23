@@ -1,16 +1,20 @@
-FROM jgoerzen/debian-base-standard:bullseye
+FROM jgoerzen/debian-base-standard:bookworm
 
 ENV container=docker
 STOPSIGNAL SIGRTMIN+3
 
 ENV LEIN_ROOT true
 
+# JDK21 only in Debian testing
+RUN echo "deb http://deb.debian.org/debian testing main" >> /etc/apt/sources.list
+ADD ./apt-preferences /etc/apt/preferences
+
 #
 # Jepsen dependencies
 #
 RUN apt-get -qy update && \
     apt-get -qy install \
-        curl dos2unix emacs git gnuplot graphviz htop iputils-ping libjna-java openjdk-17-jdk-headless pssh screen vim wget
+        curl dos2unix emacs git gnuplot graphviz htop iputils-ping libjna-java openjdk-21-jdk-headless pssh screen vim wget
 
 RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && \
     mv lein /usr/bin && \
