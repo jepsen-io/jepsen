@@ -1,6 +1,6 @@
 # See https://salsa.debian.org/jgoerzen/docker-debian-base
 # See https://hub.docker.com/r/jgoerzen/debian-base-standard
-FROM jgoerzen/debian-base-standard:bullseye
+FROM jgoerzen/debian-base-standard:bookworm
 
 ENV container=docker
 STOPSIGNAL SIGRTMIN+3
@@ -29,7 +29,7 @@ ENV DEBBASE_SSH enabled
 # Install Jepsen deps
 RUN apt-get -qy update && \
     apt-get -qy install \
-        build-essential bzip2 ca-certificates curl dirmngr dnsutils faketime iproute2 iptables iputils-ping libzip4 logrotate man man-db netcat net-tools ntpdate psmisc python rsyslog sudo tar tcpdump unzip vim wget
+        build-essential bzip2 ca-certificates curl dirmngr dnsutils faketime iproute2 iptables iputils-ping libzip4 logrotate lsb-release man man-db netcat-openbsd net-tools ntpdate psmisc python3 rsyslog sudo tar tcpdump unzip vim wget
 
 EXPOSE 22
 CMD ["/usr/local/bin/boot-debian-base"]

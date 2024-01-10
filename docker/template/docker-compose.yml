@@ -41,7 +41,7 @@ networks:
 
 services:
   setup:
-    image: jgoerzen/debian-base-standard:bullseye
+    image: jgoerzen/debian-base-standard:bookworm
     container_name: jepsen-setup
     hostname: setup
     volumes:
