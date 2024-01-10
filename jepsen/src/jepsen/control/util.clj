@@ -205,6 +205,9 @@
   current contents of dest. Supports both zip files and tarballs, compressed or
   raw. Returns dest.
 
+  URLs can be HTTP, HTTPS, or file://, in which case they are interpreted as a
+  file path on the remote node.
+
   Standard practice for release tarballs is to include a single directory,
   often named something like foolib-1.2.3-amd64, with files inside it. If only
   a single directory is present, its *contents* will be moved to dest, so
