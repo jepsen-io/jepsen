@@ -374,6 +374,7 @@
 
     ;; Bob will teardown
     (teardown! [_ test node]
+      (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
       )
       ;;(wipe! node))
 
