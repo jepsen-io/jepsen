@@ -48,6 +48,8 @@
       (s/put! client namespace set key {:value 0})
       (assoc this :client client)))
 
+  (setup! [this test] this)
+  
   (invoke! [this test op]
     (s/with-errors op #{:read}
       (case (:f op)
