@@ -59,7 +59,9 @@
         :add  (do (s/add! client namespace set key {:value (:value op)})
                   (assoc op :type :ok)))))
 
-  (teardown! [this test]
+  (teardown! [this test])
+
+  (close! [this test]
     (s/close client)))
 
 (defn counter-client
