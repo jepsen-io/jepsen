@@ -304,7 +304,7 @@
                ;| :grep pattern
                ;| :grep :-v "grep"
                ;| :awk "{print $2}"
-               :pgrep pattern
+               :pgrep :-f :--ignore-ancestors pattern
                | :xargs :--no-run-if-empty :kill (str "-" (name+ signal)))
          (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
            nil)
