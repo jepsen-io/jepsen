@@ -455,7 +455,7 @@
    (await-fn f {}))
   ([f opts]
    (let [log-message    (:log-message opts (str "Waiting for " f "..."))
-         retry-interval (:retry-interval opts 1000)
+         retry-interval (long (:retry-interval opts 1000))
          log-interval   (:log-interval opts retry-interval)
          timeout        (:timeout opts 60000)
          t0             (linear-time-nanos)
