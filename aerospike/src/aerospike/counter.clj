@@ -44,8 +44,6 @@
   client/Client
   (open! [this test node]
     (let [client (s/connect node)]
-      (Thread/sleep 3000) ; TODO: remove?
-      (s/put! client namespace set key {:value 0})
       (assoc this :client client)))
 
   (setup! [this test] this)
