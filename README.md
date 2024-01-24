@@ -298,3 +298,5 @@ Additional projects that may be of interest:
 
 - [Jecci](https://github.com/michaelzenz/jecci): A wrapper framework around Jepsen
 - [Porcupine](https://github.com/anishathalye/porcupine): a linearizability checker written in Go.
+- [elle-cli](https://github.com/ligurio/elle-cli): command-line frontend to
+  transactional consistency checkers for black-box databases.
