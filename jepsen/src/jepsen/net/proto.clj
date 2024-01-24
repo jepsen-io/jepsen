@@ -4,7 +4,7 @@
 
 (defprotocol Net
   (drop! [net test src dest]
-         "Drop traffic between nodes src and dest.")
+         "Drop traffic from src to dest.")
   (heal! [net test]
          "End all traffic drops and restores network to fast operation.")
   (slow! [net test]
