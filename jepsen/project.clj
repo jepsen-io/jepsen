@@ -7,8 +7,9 @@
                  [org.clojure/data.fressian "1.0.0"]
                  [org.clojure/tools.logging "1.2.4"]
                  [org.clojure/tools.cli "1.0.219"]
-                 [spootnik/unilog "0.7.31"]
-                 [elle "0.2.0"]
+                 [spootnik/unilog "0.7.31"
+                  :exclusions [org.slf4j/slf4j-api]]
+                 [elle "0.2.1"]
                  [clj-time "0.15.2"]
                  [io.jepsen/history "0.1.3"]
                  [jepsen.txn "0.1.2"]
@@ -16,8 +17,8 @@
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.7.0"]
-                 [ring "1.10.0"]
-                 [com.hierynomus/sshj "0.37.0"]
+                 [ring "1.11.0"]
+                 [com.hierynomus/sshj "0.38.0"]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
                  [com.jcraft/jsch.agentproxy.sshj "0.0.9"
                   :exclusions [net.schmizz/sshj]]
