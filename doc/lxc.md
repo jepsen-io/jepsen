@@ -1,5 +1,13 @@
 # How to set up nodes via LXC
 
+#### [Mint 21.2 Victoria](#mint-212-victoria-1)
+#### [Debian Bookworm - LXD](#debian-bookworm---lxd-1)
+#### [Debian Bookworm - LXC](#debian-bookworm---lxc-1)
+
+For further information, [LXD - Debian Wiki](https://wiki.debian.org/LXD).
+
+----
+
 ## Mint 21.2 Victoria
 
 Install LXC
@@ -170,7 +178,167 @@ for n in {1..10}; do
 done >> ~/.ssh/known_hosts
 ```
 
-## Debian Bookworm
+----
+
+## Debian Bookworm - LXD
+
+
+#### Install host packages:
+```bash
+sudo apt install lxd lxd-tools dnsmasq-base btrfs-progs
+```
+
+#### Initialize LXD:
+```bash
+# defaults are good
+sudo lxd init
+
+# add yourself to the LXD group
+sudo usermod -aG lxd <username>
+
+# will need to logout/login for new group to be active
+
+# try creating a sample container if you want
+lxc launch images:debian/12 scratch
+lxc list
+lxc shell scratch
+lxc stop scratch
+lxc delete scratch
+```
+
+#### Create and start Jepsen's node containers:
+
+```bash
+for i in {1..10}; do lxc launch images:debian/12 n${i}; done
+```
+
+#### Configure LXD bridge network:
+
+`lxd` automatically creates the bridge network, and `lxc launch` automatically configures the containers for it: 
+```bash
+lxc network list
++--------+----------+---------+----------------+---+-------------+---------+---------+
+|  NAME  |   TYPE   | MANAGED |      IPV4      |...| DESCRIPTION | USED BY |  STATE  |
++--------+----------+---------+----------------+---+-------------+---------+---------+
+| lxdbr0 | bridge   | YES     | 10.82.244.1/24 |...|             | 11      | CREATED |
++--------+----------+---------+----------------+---+-------------+---------+---------+
+```
+
+Assuming you are using `systemd-resolved`:
+
+```bash
+# confirm your settings
+lxc network get lxdbr0 ipv4.address
+lxc network get lxdbr0 ipv6.address
+lxc network get lxdbr0 dns.domain    # will be blank if default lxd is used 
+
+# create a systemd unit file
+sudo nano /etc/systemd/system/lxd-dns-lxdbr0.service
+# with the contents:
+[Unit]
+Description=LXD per-link DNS configuration for lxdbr0
+BindsTo=sys-subsystem-net-devices-lxdbr0.device
+After=sys-subsystem-net-devices-lxdbr0.device
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/resolvectl dns lxdbr0 10.82.244.1
+ExecStart=/usr/bin/resolvectl domain lxdbr0 ~lxd
+ExecStopPost=/usr/bin/resolvectl revert lxdbr0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sys-subsystem-net-devices-lxdbr0.device
+
+# bring up and confirm status
+sudo systemctl daemon-reload
+sudo systemctl enable --now lxd-dns-lxdbr0
+sudo systemctl status lxd-dns-lxdbr0.service
+sudo resolvectl status lxdbr0
+
+ping n1
+PING n1 (10.82.244.166) 56(84) bytes of data.
+64 bytes from n1.lxd (10.82.244.166): icmp_seq=1 ttl=64 time=0.598 ms
+```
+
+#### Add required packages to node containers:
+
+```bash
+for i in {1..10}; do
+  lxc exec n${i} -- sh -c "apt-get -qy update && apt-get -qy install openssh-server sudo";
+done
+```
+
+#### Configure SSH:
+
+Slip your preferred SSH key into each node's `.ssh/.authorized-keys`:
+```bash
+for i in {1..10}; do
+  lxc exec n${i} -- sh -c "mkdir -p /root/.ssh && chmod 700 /root/.ssh/";
+  lxc file push ~/.ssh/id_rsa.pub n${i}/root/.ssh/authorized_keys --uid 0 --gid 0 --mode 644;
+done
+```
+
+Reset the root password to root, and allow root logins with passwords on each container.
+If you've got an SSH agent set up, Jepsen can use that instead.
+```bash
+for i in {1..10}; do
+  lxc exec n${i} -- bash -c 'echo -e "root\nroot\n" | passwd root';
+  lxc exec n${i} -- sed -i 's,^#\?PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config;
+  lxc exec n${i} -- systemctl restart sshd;
+done
+```
+
+Store the node keys unencrypted so that jsch can use them.
+If you already have the node keys, they may be unreadable to Jepsen -- remove them from `~/.ssh/known_hosts` and rescan:
+```bash
+for n in {1..10}; do
+  ssh-keyscan -t rsa n${n} >> ~/.ssh/known_hosts;
+done
+```
+
+#### Confirm that your host can ssh in:
+
+```bash
+ssh root@n1
+```
+
+#### Stopping and deleting containers:
+
+```bash
+for i in {1..10}; do
+  lxc stop n${i};
+  lxc delete n${i};
+done
+```
+
+----
+
+#### Real VMs w/Real Clocks
+
+```bash
+sudo apt install qemu-system
+
+lxc launch images:debian/12 n1 --vm
+```
+
+Allows the clock nemesis to bump, skew, and scramble time in the Jepsen node as it's a real vm with a real clock.
+
+----
+
+#### Misc
+
+The `lxc` command's \<Tab\> completion works well, even autocompletes container names.
+
+#### LXD/LXC and Docker
+
+There are issues with running LXD and Docker simultaneously, Docker grabs port forwarding.
+Running Docker in an LXC container resolves the issue:
+ [Prevent connectivity issues with LXD and Docker](https://documentation.ubuntu.com/lxd/en/latest/howto/network_bridge_firewalld/#prevent-connectivity-issues-with-lxd-and-docker).
+
+----
+
+## Debian Bookworm - LXC
 
 ```sh
 # Deps
@@ -257,153 +425,3 @@ for i in {1..10}; do
   echo "c$i" >> ~/lxc-nodes
 done &&
 ```
-
-## Debian Buster
-
-(Refer to https://wiki.debian.org/LXC)
-
-```
-apt install lxc debootstrap bridge-utils libvirt-clients libvirt-daemon-system iptables ebtables dnsmasq-base libxml2-utils iproute2
-```
-
-Apply google and kernel parameters until checkconfig passes:
-
-```
-lxc-checkconfig
-```
-
-Create VMs:
-
-```
-for i in {1..10}; do sudo lxc-create -n n$i -t debian -- --release buster; done
-```
-
-Add network configuration to each node. We assign each a sequential MAC
-address.
-
-```
-for i in {1..10}; do
-sudo cat >>/var/lib/lxc/n${i}/config <<EOF
-
-# Network config
-lxc.net.0.type = veth
-lxc.net.0.flags = up
-lxc.net.0.link = virbr0
-lxc.net.0.hwaddr = 00:1E:62:AA:AA:$(printf "%02x" $i)
-EOF
-done
-```
-
-Set up the virsh network bindings mapping those MAC addresses to hostnames and
-IP addresses:
-
-```
-for i in {1..10}; do
-  virsh net-update --current default add-last ip-dhcp-host "<host mac=\"00:1E:62:AA:AA:$(printf "%02x" $i)\" name=\"n${i}\" ip=\"192.168.122.1$(printf "%02d" $i)\"/>"
-done
-```
-
-Start the network, and set it to start at boot so the dnsmasq will be
-available.
-
-```
-virsh net-autostart default;
-virsh net-start default
-```
-
-If you configure resolv.conf by hand, add the libvirt local dnsmasq to
-resolv.conf:
-
-```
-echo -e "nameserver 192.168.122.1\n$(cat /etc/resolv.conf)" > /etc/resolv.conf
-```
-
-If you're letting dhclient manage it, then:
-
-```
-echo "prepend domain-name-servers 192.168.122.1;" >>/etc/dhcp/dhclient.conf
-sudo service networking restart
-```
-
-Slip your preferred SSH key into each node's `.authorized-keys`:
-
-```
-for i in {1..10}; do
-  mkdir -p /var/lib/lxc/n${i}/rootfs/root/.ssh
-  chmod 700 /var/lib/lxc/n${i}/rootfs/root/.ssh/
-  cp ~/.ssh/id_rsa.pub /var/lib/lxc/n${i}/rootfs/root/.ssh/authorized_keys
-  chmod 644 /var/lib/lxc/n${i}/rootfs/root/.ssh/authorized_keys
-done
-```
-
-And start the nodes:
-
-```
-for i in {1..10}; do
-  lxc-start -d -n n$i
-done
-```
-
-To stop them:
-
-```
-for i in {1..10}; do
-  lxc-stop -n n$i
-done
-```
-
-Reset the root passwords to whatever you like. Jepsen uses `root` by default,
-and allow root logins with passwords on each container. If you've got an SSH
-agent set up, Jepsen can use that instead.
-
-```
-for i in {1..10}; do
-  lxc-attach -n n${i} -- bash -c 'echo -e "root\nroot\n" | passwd root';
-  lxc-attach -n n${i} -- sed -i 's,^#\?PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config;
-  lxc-attach -n n${i} -- systemctl restart sshd;
-done
-```
-
-Store the host keys unencrypted so that jsch can use them. If you already have
-the host keys, they may be unreadable to Jepsen--remove them from .known_hosts
-and rescan.
-
-```
-for n in {1..10}; do ssh-keyscan -t rsa n$n; done >> ~/.ssh/known_hosts
-```
-
-Install `sudo`:
-
-```sh
-for i in {1..10}; do
-  lxc-attach -n n${i} -- apt install -y sudo
-done
-```
-
-And check that you can SSH to the nodes
-
-```sh
-cssh n1 n2 n3 n4 n5
-```
-
-## Ubuntu 14.04 / trusty
-
-Follow generally the same steps as for Debian, but the process is easier. Reference: https://help.ubuntu.com/lts/serverguide/lxc.html
-
-* Right after you have installed LXC, create or open /etc/lxc/dnsmasq.conf and add the following contents:
-
-```
-dhcp-host=n1,10.0.3.101
-dhcp-host=n2,10.0.3.102
-dhcp-host=n3,10.0.3.103
-dhcp-host=n4,10.0.3.104
-dhcp-host=n5,10.0.3.105
-```
-
-10.0.3.* is LXC's default network. If you want others, go for it but you'll have to change it in the main configuration for lxc as well.
-
-* you may not need to add cgroup to fstab and/or mount it. /sys/fs/cgroups may already be there.
-* Then, go and run the lxc-create command, but...
-* no need to edit /var/lib/lxc/*/config or set up a bridge, LXC does that for you.
-* Fire up the boxes (lxc-start -n n{1,2,3,4,5} -d) and you should be able to ssh right into them.
-* Follow the rest of the Debian tutorial, but make sure to use the correct ip addresses.
