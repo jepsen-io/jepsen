@@ -214,15 +214,14 @@
                 :checker (independent/checker (checker/set))
                 :generator gen
                 :final-generator
-                (s/derefer
-                  (delay
-                    (locking state
-                      (independent/concurrent-generator
-                        (count (:nodes test))
-                        (range (peek (:keys @state)))
-                        (fn [k]
-                          (gen/once {:type :invoke
-                                     :f    :read}))))))}
+                (delay
+                  (locking state
+                    (independent/concurrent-generator
+                      (count (:nodes test))
+                      (range (peek (:keys @state)))
+                      (fn [k]
+                        (gen/once {:type :invoke
+                                    :f    :read})))))}
      :nemesis {:nemesis           (nemesis state)
                :generator         gen
                :final-generator   (gen/concat

@@ -47,7 +47,7 @@
       (assoc this :client client)))
 
   (setup! [this test] this)
-  
+
   (invoke! [this test op]
     (s/with-errors op #{:read}
       (case (:f op)
@@ -58,7 +58,7 @@
                   (assoc op :type :ok)))))
 
   (teardown! [this test])
-
+    
   (close! [this test]
     (s/close client)))
 

@@ -396,7 +396,9 @@
    "Policy needed for linearizability testing."
    ;; FIXME - need supported client - prefer to install client from packages/.
    (let [p (Policy. policy)]
-     (set! (.readModeSC p) ReadModeSC/LINEARIZE)
+      (set! (.maxRetries p) 2)
+      (set! (.sleepBetweenRetries p) 300)
+      (set! (.readModeSC p) ReadModeSC/LINEARIZE)
      p))
 
 (def ^WritePolicy write-policy
@@ -490,6 +492,7 @@
   [^AerospikeClient client namespace set key bins]
   (.add client write-policy (Key. namespace set key) (map->bins bins)))
 
+
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operations :f's which can
   safely be assumed to fail without altering the model state, and a body to
@@ -504,17 +507,17 @@
 
        ; Timeouts could be either successful or failing
        (catch AerospikeException$Timeout e#
-         (assoc ~op :type error-type#, :error :timeout))
+          (assoc ~op :type error-type#, :error :timeout))
 
        ;; Connection errors could be either successful or failing
        (catch AerospikeException$Connection e#
-         (assoc ~op :type error-type#, :error :connection))
+          (assoc ~op :type error-type#, :error :connection))
 
        (catch ExceptionInfo e#
          (case (.getMessage e#)
            ; Skipping a CAS can't affect the DB state
-           "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
-           "cas not found" (assoc ~op :type :fail, :error :not-found)
+           "skipping cas"   (assoc ~op :type :fail, :error :value-mismatch)
+           "cas not found"  (assoc ~op :type :fail, :error :not-found)
            (throw e#)))
 
        (catch com.aerospike.client.AerospikeException e#
@@ -522,24 +525,24 @@
            ; This is error code "OK", which I guess also means "dunno"?
            0 (condp instance? (.getCause e#)
                java.io.EOFException
-               (assoc ~op :type error-type#, :error :eof)
+                (assoc ~op :type error-type#, :error :eof)
 
                java.net.SocketException
-               (assoc ~op :type error-type#, :error :socket-error)
+                (assoc ~op :type error-type#, :error :socket-error)
 
                (throw e#))
 
            ; Generation error; CAS can't have taken place.
-           3 (assoc ~op :type :fail, :error :generation-mismatch)
+           3  (assoc ~op :type :fail, :error :generation-mismatch)
 
-           -8 (assoc ~op :type error-type#, :error :server-unavailable)
+           -8  (assoc ~op :type error-type#, :error :server-unavailable)
 
            ; With our custom client, these are guaranteed failures. Not so in
            ; the stock client!
-           11 (assoc ~op :type :fail, :error :partition-unavailable)
+           11  (assoc ~op :type :fail, :error :partition-unavailable)
 
            ; Hot key
-           14 (assoc ~op :type :fail, :error :hot-key)
+           14  (assoc ~op :type :fail, :error :hot-key)
 
            ;; Forbidden
            22 (assoc ~op :type :fail, :error [:forbidden (.getMessage e#)])
@@ -547,91 +550,3 @@
            (do (info :error-code (.getResultCode e#))
                (throw e#)))))))
 
-(defprotocol Generator
-  (op [gen test process] "Yields an operation to apply."))
-
-(defmacro defgenerator
-  "Like deftype, but the fields spec is followed by a vector of expressions
-  which are used to print the datatype, and the Generator protocol is implicit.
-  For instance:
-
-      (defgenerator Delay [dt]
-        [(str dt \" seconds\")] ; For pretty-printing
-        (op [this test process] ; Function body
-          ...))
-
-  Inside the print-forms vector, every occurrence of a field name is replaced
-  by (.some-field a-generator), so don't get fancy with let bindings or
-  anything."
-  [name fields print-forms & protocols-and-functions]
-  (let [field-set (set fields)
-        this-sym  (gensym "this")
-        w-sym     (gensym "w")]
-    `(do ; Standard deftype, just insert the generator and drop the print forms
-         (deftype ~name ~fields Generator ~@protocols-and-functions)
-
-         ; For prn/str, we'll generate a defmethod
-         (defmethod print-method ~name
-           [~this-sym ^java.io.writer ~w-sym]
-           (.write ~w-sym
-                   ~(str "(gen/" (.toLowerCase (clojure.core/name name))))
-           ~@(mapcat (fn [field]
-                       ; Rewrite field expression, changing field names to
-                       ; instance variable getters
-                       (let [field (walk/prewalk
-                                     (fn [form]
-                                       (if (field-set form)
-                                         ; This was a field
-                                         (list (symbol (str "." form))
-                                               this-sym)
-                                         ; Something else
-                                         form))
-                                     field)]
-                         ; Spaces between fields
-                         [`(.write ~w-sym " ")
-                          `(print-method ~field ~w-sym)]))
-                 print-forms)
-           (.write ~w-sym ")")))))
-
-(defgenerator Derefer [dgen]
-  [dgen]
-  (op [this test process]
-      (let [gen @dgen]
-        (op gen test process))))
-
-(defn derefer
-  "Sometimes you need to build a generator not *now*, but *later*; e.g. because
-  it depends on state that won't be available until the generator is actually
-  invoked. Wrap a derefable returning a generator in this, and it'll be
-  deref'ed every time an op is requested. For instance:
-
-      (derefer (delay (gen/once {:type :drain-key, :value @key})))
-
-  Looks up the key to drain only once an operation is requested."
-  [dgen]
-  (Derefer. dgen))
-
-
-(defn each-
-  "Takes a function that yields a generator. Invokes that function to
-  create a new generator for each distinct process."
-  [gen-fn]
-  (let [processes (atom {})]
-    (reify Generator
-      (op [this test process]
-        (if-let [gen (get @processes process)]
-          (op gen test process)
-          (do
-            (swap! processes (fn [processes]
-                               (if (contains? processes process)
-                                 processes
-                                 (assoc processes process (gen-fn)))))
-            (recur test process)))))))
-
-(defmacro each
-  "Takes an expression evaluating to a generator. Captures that expression as a
-  function, and constructs a generator that invokes that expression once for
-  each process, as new processes arrive, such that each process sees an
-  independent copy of the underlying generator."
-  [gen-expr]
-  `(each- (fn [] ~gen-expr)))
