@@ -264,6 +264,11 @@
        (c/upload (.getCanonicalPath file) (str remote-package-dir name)))
        (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
     ;;    (info "--AND" (.getPath (io/resource "features.conf")) " to /etc/aerospike/features.conf")       
+
+      ; handle "dpkg was interrupted, you must manually run 
+      ; 'sudo dpkg --configure -a' to correct the problem."
+       (c/exec :dpkg :--configure :-a)    
+      ; do package install
        (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
    ;; Bob should already handle updating features.conf
    ;;(c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/")
