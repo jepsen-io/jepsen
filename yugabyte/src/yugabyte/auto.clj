@@ -532,10 +532,12 @@
   db/Primary
   (setup-primary! [this test node]
     "Executed once on a first node in list (i.e. n1 by default) after per-node setup is done"
-    (let [colocated-clause (if (:yb-colocated test)
-                             " WITH colocated = true"
-                             "")]
-      (ysqlsh test :-h (cn/ip node) :-c (str "CREATE DATABASE jepsen" colocated-clause ";")))
+    (if (= (:api test) :ysql)
+      (let [colocated-clause (if (:yb-colocated test)
+                               " WITH colocated = true"
+                               "")]
+        (ysqlsh test :-h (cn/ip node) :-c (str "DROP DATABASE IF EXISTS jepsen;"))
+        (ysqlsh test :-h (cn/ip node) :-c (str "CREATE DATABASE jepsen" colocated-clause ";"))))
     )
 
   db/LogFiles
