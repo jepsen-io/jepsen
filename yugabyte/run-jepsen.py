@@ -81,11 +81,11 @@ TEST_PER_VERSION = [
             "ysql/sz.multi-key-acid",
             "ysql/sz.default-value",
             "ysql/sz.ol.append",
-            # "ysql/sz.ol.geo.append",
+            "ysql/sz.ol.geo.append",
 
             # YSQL snapshot isolation
             "ysql/si.ol.append",
-            # "ysql/si.ol.geo.append",
+            "ysql/si.ol.geo.append",
             "ysql/si.bank",
             "ysql/si.bank-contention",
             "ysql/si.bank-multitable",
@@ -96,23 +96,23 @@ TEST_PER_VERSION = [
         "tests": [
             # YSQL read committed
             "ysql/rc.ol.append",
-            # "ysql/rc.ol.geo.append",
+            "ysql/rc.ol.geo.append",
         ]
     },
     {
         "start_version": "2.15.0.0-b1",
         "tests": [
             "ysql/rc.pl.append",
-            # "ysql/rc.pl.geo.append",
+            "ysql/rc.pl.geo.append",
         ]
     },
     {
         "start_version": "2.17.2.0-b1",
         "tests": [
             "ysql/sz.pl.append",
-            # "ysql/sz.pl.geo.append",
+            "ysql/sz.pl.geo.append",
             "ysql/si.pl.append",
-            # "ysql/si.pl.geo.append",
+            "ysql/si.pl.geo.append",
         ]
     }
 ]
@@ -251,12 +251,13 @@ def send_report_to_reportportal(
                             headers={"accept": "*/*", "Content-Type": "application/json",
                                      "Authorization": f"bearer {reportportal_api_token}"})
 
-    if response.status_code == 200:
-        logging.info(f"Successfully updated attributes for launch {launch_id}")
-    else:
+    if response.status_code != 200:
         logging.error(f"Could not update attributes for launch {launch_id}")
         logging.error(f"Code: {response.status_code} Text: {response.text}")
         return False
+
+    logging.info(f"Successfully updated attributes for launch {launch_id}")
+    return True
 
 
 def run_cmd(cmd,
@@ -434,7 +435,7 @@ def main():
                          "--os debian",
                          f"--url {url}",
                          f"--nemesis {nemeses}",
-                         f"--ssh-private-key ~/.ssh/id_rsa", # tmp workaround for jepsen 0.2.7+ versions
+                         f"--ssh-private-key ~/.ssh/id_rsa",  # tmp workaround for jepsen 0.2.7+ versions
                          f"--concurrency {args.concurrency}"])
 
     if args.iterations:
