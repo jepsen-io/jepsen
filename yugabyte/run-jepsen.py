@@ -81,7 +81,6 @@ TEST_PER_VERSION = [
             "ysql/sz.multi-key-acid",
             "ysql/sz.default-value",
             "ysql/sz.ol.append",
-            "ysql/sz.ol.geo.append",
 
             # YSQL snapshot isolation
             "ysql/si.ol.append",
@@ -96,23 +95,35 @@ TEST_PER_VERSION = [
         "tests": [
             # YSQL read committed
             "ysql/rc.ol.append",
-            "ysql/rc.ol.geo.append",
         ]
     },
     {
         "start_version": "2.15.0.0-b1",
         "tests": [
             "ysql/rc.pl.append",
-            "ysql/rc.pl.geo.append",
         ]
     },
     {
         "start_version": "2.17.2.0-b1",
         "tests": [
-            "ysql/sz.pl.append",
-            "ysql/sz.pl.geo.append",
             "ysql/si.pl.append",
+        ]
+    },
+    {
+        "start_version": "2.18.0.0-b1",
+        "tests": [
+            "ysql/rc.pl.geo.append",
             "ysql/si.pl.geo.append",
+            "ysql/sz.pl.geo.append",
+            "ysql/rc.ol.geo.append",
+            "ysql/si.ol.geo.append",
+            "ysql/sz.ol.geo.append",
+        ]
+    },
+    {
+        "start_version": "2.20.0.0-b1",
+        "tests": [
+            "ysql/sz.pl.append",
         ]
     }
 ]
