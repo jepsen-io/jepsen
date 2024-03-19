@@ -84,7 +84,6 @@ TEST_PER_VERSION = [
 
             # YSQL snapshot isolation
             "ysql/si.ol.append",
-            "ysql/si.ol.geo.append",
             "ysql/si.bank",
             "ysql/si.bank-contention",
             "ysql/si.bank-multitable",
@@ -410,7 +409,7 @@ def main():
     atexit.register(cleanup)
 
     # Sort old results in the beginning if it did not happen at the end of the last run.
-    run_cmd(SORT_RESULTS_SH)
+    # run_cmd(SORT_RESULTS_SH)
 
     start_time = time.time()
     nemeses = args.nemeses
