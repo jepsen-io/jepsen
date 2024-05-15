@@ -29,26 +29,28 @@
                             [util :as netUtil]]
   )
 
-  (:import 
-          (clojure.lang ExceptionInfo)
-          (com.aerospike.client AerospikeClient
-                                 AerospikeException
-                                 AerospikeException$Connection
-                                 AerospikeException$Timeout
-                                 Bin
-                                 Info
-                                 Key
-                                 Record)
-           (com.aerospike.client.cluster Node)
-           (com.aerospike.client.policy Policy
-                                        ClientPolicy
-                                        RecordExistsAction
-                                        ReadModeSC
-                                        GenerationPolicy
-                                        WritePolicy
-                                        )
-  )
-)
+  (:import
+   (clojure.lang ExceptionInfo)
+   (com.aerospike.client AerospikeClient
+                         AerospikeException
+                         AerospikeException$Connection
+                         AerospikeException$Timeout
+                         Bin
+                         Info
+                         Operation
+                         Key
+                         Record
+                         Value)
+   (com.aerospike.client.cdt ListOperation
+                             ListPolicy)
+   (com.aerospike.client.cluster Node)
+   (com.aerospike.client.policy Policy
+                                ClientPolicy
+                                RecordExistsAction
+                                ReadModeSC
+                                GenerationPolicy
+                                WritePolicy)
+   (java.util ArrayList)))
 
 (def local-package-dir
   "Local directory for Aerospike packages."
@@ -58,7 +60,7 @@
   "/tmp/packages/")
 
 (def ans "Aerospike namespace"
-  "test")
+  "jepsen")
 
 ;;; asinfo helpers:
 (defn kv-split
@@ -117,21 +119,19 @@
   []
   (let [cp (ClientPolicy.)]
     (set! (.forceSingleNode cp) true)
-    cp
-  )
-)
+    cp))
 
 (defn create-client
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
-  (info "CREATING CLIENT")
+  ;; (info "CREATING CLIENT")
   (with-retry [tries 30]
     (AerospikeClient. (fSingleNode-policy) node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
-      ;; (info "Retrying client creation -" (.getMessage e))
+      (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
 
@@ -142,10 +142,10 @@
   ;; FIXME - client no longer blocks till cluster is ready.
   (let [client (create-client node)]
     ; Wait for connection
-    (while (not (.isConnected client))
+    (while (not (.isConnected ^AerospikeClient client))
       (Thread/sleep 100))
 
-    (info "CLIENT CONNECTED!")
+    ;; (info "CLIENT CONNECTED!")
     ; Wait for workable ops
     (while (try (server-info (first (nodes client)))
                 false
@@ -159,7 +159,7 @@
   "Reclusters all connected nodes."
   []
   ;; Sends to all clustered nodes.
-  (c/trace (c/su (c/exec :asadm "--enable" :-e "asinfo -v recluster:"))))
+  (c/trace (c/su (c/exec :asadm :-e "enable; asinfo -v recluster:"))))
 
 (defn revive!
   "Revives a namespace on the local node."
@@ -186,8 +186,8 @@
   [namespace node-list]
   (c/trace
    (c/exec
-     :asinfo :-v (str "roster-set:namespace=" namespace ";nodes="
-                      (str/join "," node-list)))))
+    :asinfo :-v (str "roster-set:namespace=" namespace ";nodes="
+                     (str/join "," node-list)))))
 
 ;;; asinfo utilities:
 (defmacro poll
@@ -296,21 +296,21 @@
 ;; Bob owns the initial static config file - but diff may result in expected failures
   (c/su
     ; Config file
-    (c/exec :echo (-> "aerospike.conf"
-                      io/resource
-                      slurp
-                      (str/replace "$NODE_ADDRESS" (net/local-ip))
-                      (str/replace "$MESH_ADDRESS"
-                                   (net/ip (jepsen/primary test)))
-                      (str/replace "$REPLICATION_FACTOR"
-                                   (str (:replication-factor opts)))
-                      (str/replace "$HEARTBEAT_INTERVAL"
-                                   (str (:heartbeat-interval opts)))
-                      (str/replace "$COMMIT_TO_DEVICE"
-                                   (if (:commit-to-device opts)
-                                     "commit-to-device true"
-                                     "")))
-            :> "/etc/aerospike/aerospike.conf")))
+   (c/exec :echo (-> "aerospike.conf"
+                     io/resource
+                     slurp
+                     (str/replace "$NODE_ADDRESS" (net/local-ip))
+                     (str/replace "$MESH_ADDRESS"
+                                  (net/ip (jepsen/primary test)))
+                     (str/replace "$REPLICATION_FACTOR"
+                                  (str (:replication-factor opts)))
+                     (str/replace "$HEARTBEAT_INTERVAL"
+                                  (str (:heartbeat-interval opts)))
+                     (str/replace "$COMMIT_TO_DEVICE"
+                                  (if (:commit-to-device opts)
+                                    "commit-to-device true"
+                                    "")))
+           :> "/etc/aerospike/aerospike.conf")))
 
 (defn start!
   "Starts aerospike."
@@ -393,18 +393,19 @@
 (def ^Policy policy
   "General operation policy"
   (let [p (Policy.)]
-    (set! (.socketTimeout p) 10000)
+    (set! (.socketTimeout p) 30000)
+    (set! (.totalTimeout p) 5000)
     (set! (.maxRetries p) 0)
     p))
 
 (def ^Policy linearize-read-policy
-   "Policy needed for linearizability testing."
-   ;; FIXME - need supported client - prefer to install client from packages/.
-   (let [p (Policy. policy)]
-      (set! (.maxRetries p) 2)
-      (set! (.sleepBetweenRetries p) 300)
-      (set! (.readModeSC p) ReadModeSC/LINEARIZE)
-     p))
+  "Policy needed for linearizability testing."
+  (let [p (Policy. policy)]
+      ;; needed reads to retry for set workload
+    (set! (.maxRetries p) 2)
+    (set! (.sleepBetweenRetries p) 300)
+    (set! (.readModeSC p) ReadModeSC/LINEARIZE)
+    p))
 
 (def ^WritePolicy write-policy
   (let [p (WritePolicy. policy)]
@@ -467,14 +468,43 @@
   ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (.append client policy (Key. namespace set key) (map->bins bins))))
 
+;; (defn list-append ""
+;;   [client namespace set key bins]
+;;   (.Operate client  )
+;;   )
+
+(def sendKey-WritePolicy
+  (let [p write-policy]
+    (set! (.sendKey p) true)
+    p))
+
+(defn list-append  [^AerospikeClient client, namespace set key bins]
+  (let [pk (Key. namespace set key)
+        write-policy sendKey-WritePolicy
+        ;; record (doto (.get ^AerospikeClient client write-policy pk))
+        binName (name :value)
+        binVal (:value bins)
+        op (ListOperation/append ^ListPolicy (ListPolicy.) ^String binName ^Value (Value/get binVal) nil)]
+    (doto (.operate ^AerospikeClient client
+                    ^WritePolicy write-policy
+                    ^Key pk
+                    (into-array [^Operation op])))))
 
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
   set, and key. Returns nil if no record found."
-  [^AerospikeClient client namespace set key]
-  (-> client
-      (.get linearize-read-policy (Key. namespace set key))
-      record->map))
+  ([^AerospikeClient client namespace set key]
+   (-> client
+       (.get linearize-read-policy (Key. namespace set key))
+       record->map))
+  ([^AerospikeClient client namespace set key trid]
+   (let [p linearize-read-policy]
+     (set! (.tran p) trid)
+     (info "CALLING GET() w/ key:" key)
+     (-> client
+         (.get p (Key. namespace set key))
+         record->map))))
+
 
 (defn cas!
   "Atomically applies a function f to the current bins of a record."
@@ -497,7 +527,6 @@
   [^AerospikeClient client namespace set key bins]
   (.add client write-policy (Key. namespace set key) (map->bins bins)))
 
-
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operations :f's which can
   safely be assumed to fail without altering the model state, and a body to
@@ -516,13 +545,13 @@
 
        ;; Connection errors could be either successful or failing
        (catch AerospikeException$Connection e#
-          (assoc ~op :type error-type#, :error :connection))
+         (assoc ~op :type error-type#, :error :connection))
 
        (catch ExceptionInfo e#
          (case (.getMessage e#)
            ; Skipping a CAS can't affect the DB state
-           "skipping cas"   (assoc ~op :type :fail, :error :value-mismatch)
-           "cas not found"  (assoc ~op :type :fail, :error :not-found)
+           "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
+           "cas not found" (assoc ~op :type :fail, :error :not-found)
            (throw e#)))
 
        (catch com.aerospike.client.AerospikeException e#
@@ -530,28 +559,27 @@
            ; This is error code "OK", which I guess also means "dunno"?
            0 (condp instance? (.getCause e#)
                java.io.EOFException
-                (assoc ~op :type error-type#, :error :eof)
+               (assoc ~op :type error-type#, :error :eof)
 
                java.net.SocketException
-                (assoc ~op :type error-type#, :error :socket-error)
+               (assoc ~op :type error-type#, :error :socket-error)
 
                (throw e#))
 
            ; Generation error; CAS can't have taken place.
-           3  (assoc ~op :type :fail, :error :generation-mismatch)
+           3 (assoc ~op :type :fail, :error :generation-mismatch)
 
-           -8  (assoc ~op :type error-type#, :error :server-unavailable)
+           -8 (assoc ~op :type error-type#, :error :server-unavailable)
 
            ; With our custom client, these are guaranteed failures. Not so in
            ; the stock client!
-           11  (assoc ~op :type :fail, :error :partition-unavailable)
+           11 (assoc ~op :type :fail, :error :partition-unavailable)
 
            ; Hot key
-           14  (assoc ~op :type :fail, :error :hot-key)
+           14 (assoc ~op :type :fail, :error :hot-key)
 
            ;; Forbidden
            22 (assoc ~op :type :fail, :error [:forbidden (.getMessage e#)])
 
            (do (info :error-code (.getResultCode e#))
                (throw e#)))))))
-
