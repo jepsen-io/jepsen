@@ -34,3 +34,7 @@ bench/**
 jepsen/doc
 .eastwood
 docker/docker-compose.yml
+.clj-kondo/.cache/v1/lock
+.clj-kondo/.cache/v1/clj/*
+.lsp/.cache/db.transit.json
+aerospike/.calva/output-window/output.calva-repl
