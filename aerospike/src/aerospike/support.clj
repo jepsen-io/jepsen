@@ -60,7 +60,7 @@
   "/tmp/packages/")
 
 (def ans "Aerospike namespace"
-  "jepsen")
+  "test")
 
 ;;; asinfo helpers:
 (defn kv-split
