@@ -177,7 +177,8 @@
   [conn namespace]
   (->> (server-info (first (nodes conn))
                     (str "roster:namespace=" namespace))
-       split-colons
+       (do (info "Result before split-colons:"))
+        split-colons
        (map kv-split)
        (into {})
        (util/map-vals split-commas)))
