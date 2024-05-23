@@ -141,6 +141,6 @@
                         (gen/once
                           (fn [test _]
                             {:type :info, :f :restart, :value (:nodes test)}))
-                        (gen/sleep 10)
+                        (gen/sleep 15)
                         (gen/once revive-gen)
                         (gen/once recluster-gen))}))
