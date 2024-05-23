@@ -160,8 +160,8 @@
   []
   ;; Sends to all clustered nodes.
   (c/trace (c/su (c/exec :asadm :-e "enable; asinfo -v recluster:"))))
-revive!
-(defn 
+
+(defn revive!
   "Revives a namespace on the local node."
   ([]
    (revive! ans))
