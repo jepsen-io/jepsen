@@ -195,6 +195,12 @@
    (c/exec
     :asinfo :-v (str "roster-set:namespace=" namespace ";nodes="
                      (str/join "," node-list)))))
+(defn allow-expunge!
+  [namespace]
+  ;; (info "Setting ns-config item `strong-consistency-allow-expunge` to TRUE")
+  (c/trace 
+   (c/exec :asinfo :-v 
+           (str "set-config:context=namespace;id=" namespace ";strong-consistency-allow-expunge=true"))))
 
 ;;; asinfo utilities:
 (defmacro poll
@@ -335,6 +341,7 @@
     (try
       (when (= node (jepsen/primary test))
         (asinfo-roster-set! ans (wait-for-all-nodes-observed conn test ans))
+        (allow-expunge! ans)
         (wait-for-all-nodes-pending conn test ans)
         (asadm-recluster!))
 
