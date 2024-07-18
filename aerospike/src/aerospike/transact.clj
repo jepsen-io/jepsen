@@ -4,7 +4,8 @@
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen [client :as client]
              [independent :as independent]]
-            [jepsen.tests.cycle.wr :as rw]))
+            [jepsen.tests.cycle.wr :as rw])
+  (:import com.aerospike.client.Tran))
 
 
 (def txn-set "Set Name for Txn Test" "entries")
@@ -45,7 +46,7 @@
     (info "Invoking" op)
     (if (= (:f op) :txn)   
       (s/with-errors op #{}
-        (let [tid (.tranBegin client)]
+        (let [tid (Tran.)]
         (try 
           (let [
               ;; wp (txn-wp tid)
@@ -55,14 +56,14 @@
           ;; (info "TRANSACTION!" tid "begin")
           ;; (mapv (partial mop! client wp) txn)
           ;; (info "TRANSACTION!" tid "ending")
-            (.tranCommit client tid)
+            (.commit client tid)
             
             (assoc op :type :ok :value txn')
             )
           ;; (info  op)
           (catch com.aerospike.client.AerospikeException e#
             (info "Exception caught, aborting..")
-            (.tranAbort client tid)
+            (.abort client tid)
             (case (.getResultCode e#)
                 29 (do
                      (info "CAUGHT CODE 29 in TranClient.invoke --> ABORTING " (:value op))
