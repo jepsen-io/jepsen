@@ -5,7 +5,11 @@
             [jepsen [client :as client]
              [independent :as independent]]
             [jepsen.tests.cycle.wr :as rw])
-  (:import com.aerospike.client.Tran))
+  (:import com.aerospike.client Tran
+           AerospikeException$Commit
+           CommitError
+
+           ))
 
 
 (def txn-set "Set Name for Txn Test" "entries")
@@ -61,6 +65,13 @@
             (assoc op :type :ok :value txn')
             )
           ;; (info  op)
+          (catch com.aerospike.client.AerospikeException$Commit e#
+            (info "Encountered Commit Error! " e#)
+            (if (or (= (.error e#) CommitError/ROLL_FORWARD_ABANDONED) 
+                    (= (.error e#) CommitError/CLOSE_ABANDONED)) 
+                (do (info "COMMITS EVENTUALLY") (assoc op :type :ok) ) ; TODO: save :value too
+                (info "FAILURE COMMITTING"))
+          )
           (catch com.aerospike.client.AerospikeException e#
             (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
             (info "Aborting..")
