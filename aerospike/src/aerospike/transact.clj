@@ -55,7 +55,7 @@
                 ]
           ;; (info "TRANSACTION!" tid "begin")
           ;; (mapv (partial mop! client wp) txn)
-          ;; (info "TRANSACTION!" tid "ending")
+            (info "Txn: " tid " ..OKAY!")
             (.commit client tid)
             
             (assoc op :type :ok :value txn')
