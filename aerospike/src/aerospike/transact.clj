@@ -55,14 +55,15 @@
                 ]
           ;; (info "TRANSACTION!" tid "begin")
           ;; (mapv (partial mop! client wp) txn)
-            (info "Txn: " tid " ..OKAY!")
+            (info "Txn: " (.getId tid) " ..OKAY!")
             (.commit client tid)
             
             (assoc op :type :ok :value txn')
             )
           ;; (info  op)
           (catch com.aerospike.client.AerospikeException e#
-            (info "Exception caught, aborting..")
+            (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
+            (info "Aborting..")
             (.abort client tid)
             (case (.getResultCode e#)
                 29 (do
