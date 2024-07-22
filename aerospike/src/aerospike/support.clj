@@ -461,6 +461,7 @@
   ([client namespace set key bins]
    (put! client write-policy namespace set key bins))
   ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+   (info "CALLING PUT() w/ key:" key   " -- bins: " bins)
    (.put client policy (Key. namespace set key) (map->bins bins))))
 
 (defn put-if-absent!
