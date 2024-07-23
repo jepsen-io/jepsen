@@ -50,13 +50,15 @@
     (info "Invoking" op)
     (if (= (:f op) :txn)   
       (s/with-errors op #{}
-        (let [tid (Tran.)]
+        (let [tid (Tran.)
+              txn' atom]
         (try 
           (let [
               ;; wp (txn-wp tid)
                 txn (:value op)
-                txn' (mapv (partial mop! client tid) txn)
+                txn-res (mapv (partial mop! client tid) txn)
                 ]
+            (reset! txn' txn-res)
           ;; (info "TRANSACTION!" tid "begin")
           ;; (mapv (partial mop! client wp) txn)
             (info "Txn: " (.getId tid) " ..OKAY!")
@@ -69,7 +71,7 @@
             (info "Encountered Commit Error! " (.getResultCode e#) (.getMessage e#))
             (if (or (= (.error e#) CommitError/ROLL_FORWARD_ABANDONED) 
                     (= (.error e#) CommitError/CLOSE_ABANDONED)) 
-              (do (info "COMMITS EVENTUALLY") (assoc op :type :ok) ) ; TODO: save :value too
+              (do (info "COMMITS EVENTUALLY") (assoc op :type :ok, :value txn') ) ; TODO: save :value too
               (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit-error)))
             )
           (catch AerospikeException e#
