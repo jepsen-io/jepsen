@@ -51,7 +51,7 @@
     (if (= (:f op) :txn)   
       (s/with-errors op #{}
         (let [tid (Tran.)
-              txn' atom]
+              txn' (atom nil)]
         (try 
           (let [
               ;; wp (txn-wp tid)
