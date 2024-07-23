@@ -66,26 +66,26 @@
             )
           ;; (info  op)
           (catch AerospikeException$Commit e#
-            (info "Encountered Commit Error! " e#)
+            (info "Encountered Commit Error! " (.getResultCode e#) (.getMessage e#))
             (if (or (= (.error e#) CommitError/ROLL_FORWARD_ABANDONED) 
                     (= (.error e#) CommitError/CLOSE_ABANDONED)) 
-                (do (info "COMMITS EVENTUALLY") (assoc op :type :ok) ) ; TODO: save :value too
-                (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit-error)))
-          )
+              (do (info "COMMITS EVENTUALLY") (assoc op :type :ok) ) ; TODO: save :value too
+              (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit-error)))
+            )
           (catch AerospikeException e#
             (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
             (info "Aborting..")
             (.abort client tid)
             (case (.getResultCode e#)
-                29 (do
-                     (info "CAUGHT CODE 29 in TranClient.invoke --> ABORTING " (:value op))
-                     (assoc op :type :fail, :error :MRT-blocked)
+              29 (do
+                   (info "CAUGHT CODE 29 in TranClient.invoke --> ABORTING " (:value op))
+                   (assoc op :type :fail, :error :MRT-blocked)
                    )
             ;; 30
-                (throw e#)
+              (throw e#)
+              )
             )
           )
-        )
       ))
       (info "REGULAR OP!"))
   )
