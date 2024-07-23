@@ -71,7 +71,7 @@
             (info "Encountered Commit Error! " (.getResultCode e#) (.getMessage e#))
             (if (or (= (.error e#) CommitError/ROLL_FORWARD_ABANDONED) 
                     (= (.error e#) CommitError/CLOSE_ABANDONED)) 
-              (do (info "COMMITS EVENTUALLY") (assoc op :type :ok, :value txn') ) ; TODO: save :value too
+              (do (info "COMMITS EVENTUALLY") (assoc op :type :ok, :value @txn') ) ; TODO: save :value too
               (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit-error)))
             )
           (catch AerospikeException e#
