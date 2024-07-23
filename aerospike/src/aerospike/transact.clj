@@ -64,7 +64,7 @@
             (info "Txn: " (.getId tid) " ..OKAY!")
             (.commit client tid)
             (info "COMMITED!")
-            (assoc op :type :ok :value txn')
+            (assoc op :type :ok :value @txn')
             )
           ;; (info  op)
           (catch AerospikeException$Commit e#
