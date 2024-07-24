@@ -15,7 +15,7 @@
 (def txn-set "Set Name for Txn Test" "entries")
 
 (defn txn-wp [tid]
-  (let [p s/write-policy]
+  (let [p (s/write-policy)]
     (set! (.tran p) tid)
     p
     )

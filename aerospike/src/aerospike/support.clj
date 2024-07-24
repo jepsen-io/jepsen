@@ -421,14 +421,15 @@
     (set! (.readModeSC p) ReadModeSC/LINEARIZE)
     p))
 
-(def ^WritePolicy write-policy
+(defn ^WritePolicy write-policy
+  []
   (let [p (WritePolicy. policy)]
     p))
 
 (defn ^WritePolicy generation-write-policy
   "Write policy for a particular generation."
   [^long g]
-  (let [p (WritePolicy. write-policy)]
+  (let [p (WritePolicy. (write-policy))]
     (set! (.generationPolicy p) GenerationPolicy/EXPECT_GEN_EQUAL)
     (set! (.generation p) (int g))
     p))
@@ -459,7 +460,7 @@
   "Writes a map of bin names to values to the record at the given namespace,
   set, and key."
   ([client namespace set key bins]
-   (put! client write-policy namespace set key bins))
+   (put! client (write-policy) namespace set key bins))
   ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (info "CALLING PUT() w/ key:" key   " -- bins: " bins)
    (.put client policy (Key. namespace set key) (map->bins bins))))
