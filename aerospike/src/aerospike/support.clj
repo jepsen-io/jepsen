@@ -490,7 +490,7 @@
 ;;   )
 
 (def sendKey-WritePolicy
-  (let [p write-policy]
+  (let [p (write-policy)]
     (set! (.sendKey p) true)
     p))
 
@@ -541,7 +541,7 @@
   "Takes a client, a key, and a map of bin names to numbers, and adds those
   numbers to the corresponding bins on that record."
   [^AerospikeClient client namespace set key bins]
-  (.add client write-policy (Key. namespace set key) (map->bins bins)))
+  (.add client (write-policy) (Key. namespace set key) (map->bins bins)))
 
 (defmacro with-errors
   "Takes an invocation operation, a set of idempotent operations :f's which can
