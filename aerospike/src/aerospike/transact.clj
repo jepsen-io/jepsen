@@ -2,14 +2,16 @@
   "Tests MRTs"
   (:require [aerospike.support :as s]
             [clojure.tools.logging :refer [debug info warn]]
-            [jepsen [client :as client]
+            [jepsen
+             [client :as client]
              [independent :as independent]]
-            [jepsen.tests.cycle.wr :as rw])
+            [jepsen.tests.cycle
+             [wr :as rw]
+             [append :as la]])
   (:import (com.aerospike.client Tran
                                  AerospikeException
                                  AerospikeException$Commit
-                                 CommitError)
-           ))
+                                 CommitError)))
 
 
 (def txn-set "Set Name for Txn Test" "entries")
@@ -17,9 +19,7 @@
 (defn txn-wp [tid]
   (let [p (s/write-policy)]
     (set! (.tran p) tid)
-    p
-    )
-  )
+    p))
 
 (defn mop!
   "Given a client, transaction-id, and micro-operation,
@@ -31,15 +31,10 @@
                 :bins
                 :value
                 (or []))
-         :w (do 
+         :w (do
               (let [wp (txn-wp tid)]
-                (s/put! conn wp s/ans txn-set k {:value v})                
-              )
-              v)
-        
-  )]
-  
-  )
+                (s/put! conn wp s/ans txn-set k {:value v}))
+              v))])
 
 (defrecord TranClient [client namespace set]
   client/Client
@@ -48,49 +43,39 @@
   (setup! [this _] this)
   (invoke! [this test op]
     (info "Invoking" op)
-    (if (= (:f op) :txn)   
+    (if (= (:f op) :txn)
       (s/with-errors op #{}
         (let [tid (Tran.)
               txn' (atom nil)]
-        (try 
-          (let [
-              ;; wp (txn-wp tid)
-                txn (:value op)
-                txn-res (mapv (partial mop! client tid) txn)
-                ]
-            (reset! txn' txn-res)
-          ;; (info "TRANSACTION!" tid "begin")
-          ;; (mapv (partial mop! client wp) txn)
-            (info "Txn: " (.getId tid) " ..OKAY!")
-            (.commit client tid)
-            (info "COMMITED!")
-            (assoc op :type :ok :value @txn')
-            )
-          ;; (info  op)
-          (catch AerospikeException$Commit e#
-            (info "Encountered Commit Error! " (.getResultCode e#) (.getMessage e#))
-            (if (or (= (.error e#) CommitError/ROLL_FORWARD_ABANDONED) 
-                    (= (.error e#) CommitError/CLOSE_ABANDONED)) 
-              (do (info "COMMITS EVENTUALLY") (assoc op :type :ok, :value @txn') ) ; TODO: save :value too
-              (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit-error)))
-            )
-          (catch AerospikeException e#
-            (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
-            (info "Aborting..")
-            (.abort client tid)
-            (case (.getResultCode e#)
-              29 (do
-                   (info "CAUGHT CODE 29 in TranClient.invoke --> ABORTING " (:value op))
-                   (assoc op :type :fail, :error :MRT-blocked)
-                   )
-            ;; 30
-              (throw e#)
-              )
-            )
-          )
-      ))
-      (info "REGULAR OP!"))
-  )
+          (try
+            (let [;; wp (txn-wp tid)
+                  txn (:value op)
+                  txn-res (mapv (partial mop! client tid) txn)]
+              (reset! txn' txn-res)
+           ;; (info "TRANSACTION!" tid "begin")
+           ;; (mapv (partial mop! client wp) txn)
+              (info "Txn: " (.getId tid) " ..OKAY!")
+              (.commit client tid)
+              (info "COMMITED!")
+              (assoc op :type :ok :value @txn'))
+           ;; (info  op)
+            (catch AerospikeException$Commit e#
+              (info "Encountered Commit Error! " (.getResultCode e#) (.getMessage e#))
+              (if (or (= (.error e#) CommitError/ROLL_FORWARD_ABANDONED)
+                      (= (.error e#) CommitError/CLOSE_ABANDONED))
+                (do (info "COMMITS EVENTUALLY") (assoc op :type :ok, :value @txn')) ; TODO: save :value too
+                (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit-error))))
+            (catch AerospikeException e#
+              (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
+              (info "Aborting..")
+              (.abort client tid)
+              (case (.getResultCode e#)
+                29 (do
+                     (info "CAUGHT CODE 29 in TranClient.invoke --> ABORTING " (:value op))
+                     (assoc op :type :fail, :error :MRT-blocked))
+             ;; 30
+                (throw e#))))))
+      (info "REGULAR OP!")))
   (teardown! [_ test])
   (close! [this test]
     (s/close client)))
@@ -99,5 +84,10 @@
 (defn workload []
   {:client (TranClient. nil s/ans "vals")
    :checker (rw/checker)
-   :generator (rw/gen {:key-dist :uniform, :key-count 3})}
-)
+   :generator (rw/gen {:key-dist :uniform, :key-count 3})})
+
+
+(defn workload-ListAppend []
+  {:client (TranClient. nil s/ans "vals")
+   :checker (la/checker)
+   :generator (la/gen {:key-dist :uniform, :key-count 3})})

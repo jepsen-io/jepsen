@@ -32,6 +32,7 @@
    :counter      (counter/workload)
    :set          (set/workload)
    :transact     (transact/workload)
+   :list-append  (transact/workload-ListAppend)
    :pause        :pause}) ; special case
 
 (defn workload+nemesis
