@@ -23,7 +23,7 @@
   ; 74.125.239.39   STREAM host.com
   ; 74.125.239.39   DGRAM
   ; ...
-  (let [res (c/exec :getent :ahosts host)
+  (let [res (c/exec :getent :ahostsv4 host)
         ip (first (str/split (->> res
                                   (str/split-lines)
                                   (first))

@@ -1,6 +1,13 @@
 # See https://salsa.debian.org/jgoerzen/docker-debian-base
 # See https://hub.docker.com/r/jgoerzen/debian-base-standard
-FROM jgoerzen/debian-base-standard:bookworm
+FROM jgoerzen/debian-base-minimal:bookworm as debian-addons
+FROM debian:bookworm-slim
+
+COPY --from=debian-addons /usr/local/preinit/ /usr/local/preinit/
+COPY --from=debian-addons /usr/local/bin/ /usr/local/bin/
+COPY --from=debian-addons /usr/local/debian-base-setup/ /usr/local/debian-base-setup/
+
+RUN run-parts --exit-on-error --verbose /usr/local/debian-base-setup
 
 ENV container=docker
 STOPSIGNAL SIGRTMIN+3
