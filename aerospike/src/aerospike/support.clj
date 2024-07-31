@@ -412,8 +412,9 @@
     (set! (.maxRetries p) 0)
     p))
 
-(def ^Policy linearize-read-policy
+(defn ^Policy linearize-read-policy 
   "Policy needed for linearizability testing."
+  []
   (let [p (Policy. policy)]
       ;; needed reads to retry for set workload
     (set! (.maxRetries p) 2)
@@ -511,10 +512,10 @@
   set, and key. Returns nil if no record found."
   ([^AerospikeClient client namespace set key]
    (-> client
-       (.get linearize-read-policy (Key. namespace set key))
+       (.get (linearize-read-policy) (Key. namespace set key))
        record->map))
   ([^AerospikeClient client namespace set key trid]
-   (let [p linearize-read-policy]
+   (let [p (linearize-read-policy)]
      (set! (.tran p) trid)
      (info "CALLING GET() w/ key: (" namespace ", " set ", " key   ")" )
      (-> client
