@@ -38,8 +38,10 @@
                     :still-alive)
 
             :restart (do (c/su
-			     ;; Jepsen spawned process workarounds
-                          (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl restart asd || echo 'started with ulimit'"))
+                          ;; Jepsen spawned process workarounds
+                          (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl restart asd || echo 'started with ulimit'")
+                          ;; Try old way too..
+                          (c/exec :service :aerospike :restart))
                          (swap! dead disj node)
                          :started)
 
