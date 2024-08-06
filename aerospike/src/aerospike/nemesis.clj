@@ -5,7 +5,8 @@
              [generator :as gen]
              [nemesis :as nemesis]
              [util :refer [meh random-nonempty-subset]]]
-            [jepsen.nemesis.time :as nt]))
+            [jepsen.nemesis.time :as nt]
+            [jepsen.control :as c]))
 
 ; Nemeses
 
@@ -39,9 +40,9 @@
 
             :restart (do (c/su
                           ;; Jepsen spawned process workarounds
-                          (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl restart asd || echo 'started with ulimit'")
-                          ;; Try old way too..
-                          (c/exec :service :aerospike :restart))
+                          (c/trace (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl restart asd || echo 'started with ulimit'"))
+                          
+                          )
                          (swap! dead disj node)
                          :started)
 
