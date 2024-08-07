@@ -470,7 +470,7 @@
   "Writes a map of bin names to bin values to the record at the given
   namespace, set, and key, if and only if the record does not presently exist."
   ([client namespace set key bins]
-   (put-if-absent! client write-policy namespace set key bins))
+   (put-if-absent! client (write-policy) namespace set key bins))
   ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (let [p (WritePolicy. policy)]
      (set! (.recordExistsAction p) RecordExistsAction/CREATE_ONLY)
@@ -481,7 +481,7 @@
   identified by key, appends each value in `bins` to the current value of the
   corresponding bin key."
   ([client namespace set key bins]
-   (append! client write-policy namespace set key bins))
+   (append! client (write-policy) namespace set key bins))
   ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (.append client policy (Key. namespace set key) (map->bins bins))))
 
