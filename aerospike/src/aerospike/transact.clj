@@ -8,7 +8,7 @@
             [jepsen.tests.cycle
              [wr :as rw]
              [append :as la]])
-  (:import (com.aerospike.client Tran
+  (:import (com.aerospike.client Txn
                                  AerospikeException
                                  AerospikeException$Commit
                                  CommitError)))
@@ -45,7 +45,7 @@
     (info "Invoking" op)
     (if (= (:f op) :txn)
       (s/with-errors op #{}
-        (let [tid (Tran.)
+        (let [tid (Txn.)
               txn' (atom nil)]
           (try
             (let [;; wp (txn-wp tid)
