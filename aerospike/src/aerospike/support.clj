@@ -516,7 +516,7 @@
        record->map))
   ([^AerospikeClient client namespace set key trid]
    (let [p (linearize-read-policy)]
-     (set! (.tran p) trid)
+     (set! (.txn p) trid)
      (info "CALLING GET() w/ key: (" namespace ", " set ", " key   ")" )
      (-> client
          (.get p (Key. namespace set key))
