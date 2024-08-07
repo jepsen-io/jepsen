@@ -18,7 +18,7 @@
 
 (defn txn-wp [tid]
   (let [p (s/write-policy)]
-    (set! (.tran p) tid)
+    (set! (.txn p) tid)
     p))
 
 (defn mop!
