@@ -495,15 +495,15 @@
     (set! (.sendKey p) true)
     p))
 
-(defn list-append  [^AerospikeClient client, namespace set key bins]
+(defn list-append!  [^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
   (let [pk (Key. namespace set key)
-        write-policy sendKey-WritePolicy
+        ;; write-policy sendKey-WritePolicy
         ;; record (doto (.get ^AerospikeClient client write-policy pk))
         binName (name :value)
         binVal (:value bins)
         op (ListOperation/append ^ListPolicy (ListPolicy.) ^String binName ^Value (Value/get binVal) nil)]
     (doto (.operate ^AerospikeClient client
-                    ^WritePolicy write-policy
+                    ^WritePolicy policy
                     ^Key pk
                     (into-array [^Operation op])))))
 

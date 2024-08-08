@@ -34,7 +34,10 @@
          :w (do
               (let [wp (txn-wp tid)]
                 (s/put! conn wp s/ans txn-set k {:value v}))
-              v))])
+              v)
+         :append (let [wp (txn-wp tid)]
+                   (s/list-append! conn wp s/ans txn-set k {:value v})
+                   v))])
 
 (defrecord TranClient [client namespace set]
   client/Client
