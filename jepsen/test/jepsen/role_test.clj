@@ -2,6 +2,7 @@
   (:refer-clojure :exclude [test])
   (:require [clojure [test :refer :all]]
             [jepsen [db :as db]
+                    [db-test :refer [log-db]]
                     [role :as r]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -33,29 +34,6 @@
   (is (= {:nodes ["b" "c"]
           :roles (:roles test)}
          (r/restrict-test test :txn))))
-
-(defn log-db
-  "A DB which logs operations of the form [:prefix op test node] to the given atom, containing a vector."
-  [log prefix]
-  (reify db/DB
-    (setup!     [_ test node] (swap! log conj [prefix :setup! test node]))
-    (teardown!  [_ test node] (swap! log conj [prefix :teardown! test node]))
-
-    db/Kill
-    (start!     [_ test node] (swap! log conj [prefix :start! test node]))
-    (kill!      [_ test node] (swap! log conj [prefix :kill! test node]))
-
-    db/Pause
-    (pause!     [_ test node] (swap! log conj [prefix :pause! test node]))
-    (resume!    [_ test node] (swap! log conj [prefix :resume! test node]))
-
-    db/Primary
-    (primaries   [_ test]         [(first (:nodes test))])
-    (setup-primary! [_ test node] (swap! log conj [prefix :setup-primary! test node]))
-
-    db/LogFiles
-    (log-files [db test node]
-      [prefix])))
 
 (deftest db-test
   ; DBs are basically all stateful, so we simulate a bunch of stateful calls
