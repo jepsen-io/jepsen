@@ -10,11 +10,9 @@
 (def test
   "A basic test map."
   {:nodes ["a" "b" "c" "d" "e"]
-   :roles {"a" :coord
-           "b" :txn
-           "c" :txn
-           "d" :storage
-           "e" :storage}
+   :roles {:coord   ["a"]
+           :txn     ["b" "c"]
+           :storage ["d" "e"]}
    :concurrency 5
    :barrier (CyclicBarrier. 5)})
 
@@ -31,7 +29,7 @@
   (is (= ["a"] (r/nodes test :coord)))
   (is (= ["b" "c"] (r/nodes test :txn)))
   (is (= ["d" "e"] (r/nodes test :storage)))
-  (is (= [] (r/nodes test :cat))))
+  (is (= nil (r/nodes test :cat))))
 
 (deftest restrict-test-test
   (let [t (r/restrict-test test :txn)]

@@ -3,9 +3,13 @@
   one node might run ZooKeeper, and the remaining nodes might run Kafka.
 
   Using this namespace requires the test to have a :roles map, whose keys are
-  exactly the nodes in (:nodes test), and where each value is the single role
-  assigned to that node."
-  (:require [jepsen.db :as db]
+  arbitrary roles, and whose corresponding values are vectors of nodes in the
+  test, like so:
+
+     {:mongod [\"n1\" \"n2\"]
+      :mongos [\"n3\"]}"
+  (:require [dom-top.core :refer [loopr]]
+            [jepsen.db :as db]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
@@ -13,24 +17,22 @@
   "Takes a test and node. Returns the role for that particular node. Throws if
   the test does not define a role for that node."
   [test node]
-  (or (get (:roles test) node)
-      (throw+ {:type ::no-role-for-node
-               :node node
-               :roles (:roles test)})))
+  (loopr []
+         [[role nodes] (:roles test)
+          n nodes]
+         (if (= n node)
+           role
+           (recur))
+         (throw+ {:type ::no-role-for-node
+                  :node node
+                  :roles (:roles test)})))
 
 (defn nodes
   "Returns a vector of nodes associated with a given role, in test order. Right
-  now this returns [] when no node has a role; I'm not sure if that's more or
-  less useful than throwing. This may change."
+  now this returns nil when given a role not in the roles map. I'm not sure if
+  that's more or less useful than throwing. This may change."
   [test role]
-  (let [roles (:roles test)]
-    (persistent!
-      (reduce (fn [nodes node]
-                (if (= (get roles node) role)
-                  (conj! nodes node)
-                  nodes))
-              (transient [])
-              (:nodes test)))))
+  (get (:roles test) role))
 
 (defn restrict-test
   "Takes a test map and a role. Returns a version of the test map where the
@@ -77,8 +79,7 @@
   (primaries [db test]
     ; Call for each role, then combine
     (->> (:roles test)
-         vals
-         set
+         keys
          (mapcat (fn [role]
                    (let [db   (get dbs role)
                          test (restrict-test test role)]
@@ -90,8 +91,7 @@
   ; independently iff they support Primary.
   (setup-primary! [db test node]
     (->> (:roles test)
-         vals
-         set
+         keys
          (mapv (fn [role]
                  (let [db   (get dbs role)
                        test (restrict-test test role)]
