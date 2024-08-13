@@ -27,13 +27,16 @@
 
   Or, for some special cases where nemeses and workloads are coupled, we return
   a keyword here instead."
-  []
+  ([]
+  (workloads {})) 
+  ([opts]
   {:cas-register (cas-register/workload)
    :counter      (counter/workload)
    :set          (set/workload)
    :transact     (transact/workload)
-   :list-append  (transact/workload-ListAppend)
-   :pause        :pause}) ; special case
+   :list-append  (transact/workload-ListAppend opts)
+   :pause        :pause}); special case
+)
 
 (defn workload+nemesis
   "Finds the workload and nemesis for a given set of parsed CLI options."
@@ -41,7 +44,7 @@
   (case (:workload opts)
     :pause (pause/workload+nemesis opts)
 
-    {:workload (get (workloads) (:workload opts))
+    {:workload (get (workloads opts) (:workload opts))
      :nemesis  (nemesis/full opts)}))
 
 (defn aerospike-test
@@ -124,7 +127,29 @@
    [nil "--heartbeat-interval MS" "Aerospike heartbeat interval in milliseconds"
     :default 150
     :parse-fn #(Long/parseLong %)
-    :validate [pos? "must be positive"]]])
+    :validate [pos? "must be positive"]]
+   [nil "--max-txn-length MAX" "Maximum number of micro-ops per transaction"
+    :default 2
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]
+              ; TODO: must be >= min-txn-length
+    ]
+   [nil "--min-txn-length MIN" "Maximum number of micro-ops per transaction"
+    :default 2
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]
+              ; TODO: must be <= min-txn-length
+    ]
+   [nil "--key-count N_KEYS" "Number of active keys at any given time"
+    :default  3 ; TODO: make this  default differently based on key-dist 
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]
+   ]
+   [nil "--key-dist DIST" "Uniform or Exponential"
+    :default  :exponential 
+    :parse-fn keyword
+    :validate [#{:uniform :exponential} (cli/one-of #{:uniform :exponential}) ]]
+   ])
 
 (defn -main
   "Handles command-line arguments, running a Jepsen command."

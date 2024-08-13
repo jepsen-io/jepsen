@@ -5,8 +5,7 @@
              [generator :as gen]
              [nemesis :as nemesis]
              [util :refer [meh random-nonempty-subset]]]
-            [jepsen.nemesis.time :as nt]
-            [jepsen.control :as c]))
+            [jepsen.nemesis.time :as nt]))
 
 ; Nemeses
 
@@ -101,11 +100,7 @@
   [test]
   (let [disrupts (killer-gen-seq test)]
     (info "(killer-gen-seq) returned: [" (take 5 disrupts) "..]")
-    ;; (info "(once disrupts): [" (gen/once disrupts) "..]")
-    ;; (info "as sequence..:"(seq disrupts))
-    (gen/mix (seq disrupts))
-    ;; [(take 120 disrupts)]
-    ))
+    (gen/mix (seq disrupts))))
 
 (defn full-nemesis
   "Handles kills, restarts, revives, reclusters, clock skew, and partitions."
@@ -113,20 +108,18 @@
   (nemesis/compose
    {{:partition-start :start
      :partition-stop  :stop} (nemesis/partition-random-halves)
-
     #{:kill :restart :revive :recluster} (kill-nemesis (if (:clean-kill opts)
                                                          15 ; SIGTERM
                                                          9) ; SIGKILL
                                                        (:max-dead-nodes opts)
                                                        (:dead opts))
-
     {:clock-reset  :reset
      :clock-bump   :bump
      :clock-strobe :strobe} (nt/clock-nemesis)}))
 
 (defn full-gen
-  [opts]
   "Generates kills, restarts, revives, reclusters, clock skews, and partitions."
+  [opts]
   (->> [(when-not (:no-clocks opts) (gen/f-map {:strobe :clock-strobe
                                                 :reset  :clock-reset
                                                 :bump   :clock-bump}
