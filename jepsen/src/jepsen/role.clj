@@ -6,7 +6,8 @@
   exactly the nodes in (:nodes test), and where each value is the single role
   assigned to that node."
   (:require [jepsen.db :as db]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import (java.util.concurrent CyclicBarrier)))
 
 (defn role
   "Takes a test and node. Returns the role for that particular node. Throws if
@@ -33,11 +34,16 @@
 
 (defn restrict-test
   "Takes a test map and a role. Returns a version of the test map where the
-  :nodes are only those for this specific role."
+  :nodes are only those for this specific role, and the :barrier is replaced by
+  a fresh CyclicBarrier for the appropriate number of nodes."
   [test role]
-  ; TODO: should we restrict :concurrency too? Not sure what the generator
-  ; semantics should be here.
-  (assoc test :nodes (nodes test role)))
+  (let [nodes (nodes test role)
+        n     (count nodes)]
+    (assoc test
+           :nodes       nodes
+           :barrier     (if (pos? n)
+                          (CyclicBarrier. n)
+                          :jepsen.core/no-barrier))))
 
 (defmacro db-helper*
   "We have to figure out the role, db, and restricted test for every single fn.
