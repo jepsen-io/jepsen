@@ -9,7 +9,8 @@
      {:mongod [\"n1\" \"n2\"]
       :mongos [\"n3\"]}"
   (:require [dom-top.core :refer [loopr]]
-            [jepsen.db :as db]
+            [jepsen [client :as client]
+                    [db :as db]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
@@ -110,3 +111,29 @@
   on."
   [dbs]
   (DB. dbs))
+
+(defrecord RestrictedClient [role client]
+  client/Client
+  (open! [this test node]
+    (let [node-index  (.indexOf (:nodes test) node)
+          role-nodes  (nodes test role)
+          _           (assert (pos? (count role-nodes))
+                              (str "No nodes for role " (pr-str role)
+                                   " (roles are " (pr-str (:roles test))))
+          node        (nth role-nodes (mod node-index (count role-nodes)))]
+      (client/open! client test node))))
+
+(defn restrict-client
+  "Your test has nodes with different roles, but only one role is client-facing.
+
+  Wraps a jepsen Client `c` in a new Client specific to the given role. This
+  client responds *only* to (client/open! wrapper test node). Instead of
+  connecting to the given node, calls `(client/open! c test node'), where node'
+  is a node with the given role.
+
+  Note that this wrapper evaporates after open!; the inner client takes over
+  thereafter. Calls to `invoke!` etc go directly to the inner client and will
+  receive the full test map, rather than a restricted one. This may come back
+  to bite us later, in which case we'll change."
+  [client role]
+  (RestrictedClient. role client))

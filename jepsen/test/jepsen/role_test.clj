@@ -1,7 +1,8 @@
 (ns jepsen.role-test
   (:refer-clojure :exclude [test])
   (:require [clojure [test :refer :all]]
-            [jepsen [db :as db]
+            [jepsen [client :as client]
+                    [db :as db]
                     [db-test :refer [log-db]]
                     [role :as r]]
             [slingshot.slingshot :refer [try+ throw+]])
@@ -115,4 +116,17 @@
     (testing "log-files"
       (is (= [:coord]   (db/log-files db test "a")))
       (is (= [:storage] (db/log-files db test "e"))))
+    ))
+
+(deftest restrict-client-test
+  ; Clients need to remap nodes when calling open!
+  (let [c (reify client/Client
+            (open! [this test node]
+              [:client node]))
+        wrapper (r/restrict-client c :txn)]
+    (is (= [:client "b"] (client/open! wrapper test "a")))
+    (is (= [:client "c"] (client/open! wrapper test "b")))
+    (is (= [:client "b"] (client/open! wrapper test "c")))
+    (is (= [:client "c"] (client/open! wrapper test "d")))
+    (is (= [:client "b"] (client/open! wrapper test "e")))
     ))
