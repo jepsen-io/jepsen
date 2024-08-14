@@ -72,12 +72,9 @@
               (info "Aborting..")
               (.abort client tid)
               (case (.getResultCode e#)
-                29 (do
-                     (info "CAUGHT CODE 29 in TranClient.invoke --> ABORTING " (:value op))
-                     (assoc op :type :fail, :error :MRT-blocked))
-                30 (do
-                     (info "CAUGHT CODE 30 in TranClient.invoke --> ABORTING " (:value op))
-                     (assoc op :type :fail, :error :read-verify))
+                29 (assoc op :type :fail, :error :MRT-blocked)
+                30 (assoc op :type :fail, :error :read-verify)
+                31 (assoc op :type :fail, :error :expired)
                 (throw e#))))))
       (info "REGULAR OP!")  ; Should never happen with txn test workloads 
     ))
