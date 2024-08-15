@@ -386,7 +386,9 @@
   (let [data    (mapcat :data (:series plot))
         _       (when-not (seq data)
                   (throw+ {:type ::no-points
-                           :plot plot}))
+                           :plot plot}
+                          nil
+                          "No points in plot"))
         [x0 y0] (first data)
         [xmin xmax ymin ymax] (reduce (fn [[xmin xmax ymin ymax] [x y :as pair]]
                                              [(min xmin x)
