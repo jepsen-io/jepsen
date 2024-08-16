@@ -10,7 +10,8 @@
       :mongos [\"n3\"]}"
   (:require [dom-top.core :refer [loopr]]
             [jepsen [client :as client]
-                    [db :as db]]
+                    [db :as db]
+                    [nemesis :as n]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
@@ -137,3 +138,31 @@
   to bite us later, in which case we'll change."
   [client role]
   (RestrictedClient. role client))
+
+(defrecord RestrictedNemesis [role nemesis]
+  n/Reflection
+  (fs [_] (n/fs nemesis))
+
+  n/Nemesis
+  (setup! [this test]
+    (RestrictedNemesis. role (n/setup! nemesis (restrict-test test role))))
+
+  (invoke! [this test op]
+    (n/invoke! nemesis (restrict-test test role) op))
+
+  (teardown! [this test]
+    (n/teardown! nemesis (restrict-test test role))))
+
+(defn restrict-nemesis
+  "Wraps a Nemesis in a new one restricted to a specific role. Calls to the
+  underlying nemesis receive a restricted test map."
+  [nemesis role]
+  (RestrictedNemesis. role nemesis))
+
+(defn restrict-nemesis-package
+  "Restricts a jepsen.nemesis.combined package to act purely on a single role.
+  Right now we just restrict the nemesis, not the generators; maybe later we'll
+  need to do the generators too."
+  [package role]
+  (assoc package
+         :nemesis (restrict-nemesis (:nemesis package) role)))

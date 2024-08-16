@@ -4,7 +4,8 @@
             [jepsen [client :as client]
                     [db :as db]
                     [db-test :refer [log-db]]
-                    [role :as r]]
+                    [role :as r]
+                    [nemesis :as n]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
@@ -16,6 +17,12 @@
            :storage ["d" "e"]}
    :concurrency 5
    :barrier (CyclicBarrier. 5)})
+
+(defn test=
+  "Special comparator for tests, equal in all but barrier"
+  [a b]
+  (and (= (dissoc a :barrier) (dissoc b :barrier))
+       (= (.getParties (:barrier a)) (.getParties (:barrier b)))))
 
 (deftest role-test
   (is (= :coord (r/role test "a")))
@@ -59,16 +66,12 @@
                      (let [l @log]
                        (reset! log [])
                        l))
-        ; Special comparator for tests, equal in all but barrier
-        t= (fn t= [a b]
-             (and (= (dissoc a :barrier) (dissoc b :barrier))
-                  (= (.getParties (:barrier a)) (.getParties (:barrier b)))))
         ; Special comparator for single log lines, equal in all but barrier
         ll= (fn ll= [a b]
               (and (= 4 (count a) (count b))
                    (= (nth a 0) (nth b 0))
                    (= (nth a 1) (nth b 1))
-                   (t= (nth a 2) (nth b 2))
+                   (test= (nth a 2) (nth b 2))
                    (= (nth a 3) (nth b 3))))
         ; Special comparator for groups of log lines, equal in all but barrier
         l= (fn l= [as bs]
@@ -130,3 +133,24 @@
     (is (= [:client "c"] (client/open! wrapper test "d")))
     (is (= [:client "b"] (client/open! wrapper test "e")))
     ))
+
+; A trivial nemesis, just to verify we restrict tests properly.
+(defrecord Nemesis []
+  n/Nemesis
+  (setup! [this test]
+    (assoc this :setup-test test))
+
+  (invoke! [this test op]
+    [test op])
+
+  (teardown! [this test]
+    test))
+
+(deftest restrict-nemesis-test
+  (let [n (r/restrict-nemesis (Nemesis.) :storage)
+        rt (r/restrict-test test :storage)]
+    (is (test= rt (:setup-test (:nemesis (n/setup! n test)))))
+    (let [[test' op'] (n/invoke! n test :foo)]
+      (is (test= rt test'))
+      (is (= :foo op')))
+    (is (test= rt (n/teardown! n test)))))
