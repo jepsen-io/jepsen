@@ -40,7 +40,7 @@
   (is (= nil (r/nodes test :cat))))
 
 (deftest restrict-test-test
-  (let [t (r/restrict-test test :txn)]
+  (let [t (r/restrict-test :txn test)]
     (testing "nodes"
       (is (= ["b" "c"] (:nodes t))))
     (testing "roles"
@@ -59,9 +59,9 @@
         db  (r/db {:coord   (log-db log :coord)
                    :txn     (log-db log :txn)
                    :storage (log-db log :storage)})
-        coord-test   (r/restrict-test test :coord)
-        txn-test     (r/restrict-test test :txn)
-        storage-test (r/restrict-test test :storage)
+        coord-test   (r/restrict-test :coord test)
+        txn-test     (r/restrict-test :txn test)
+        storage-test (r/restrict-test :storage test)
         drain-log! (fn drain-log! []
                      (let [l @log]
                        (reset! log [])
@@ -126,7 +126,7 @@
   (let [c (reify client/Client
             (open! [this test node]
               [:client node]))
-        wrapper (r/restrict-client c :txn)]
+        wrapper (r/restrict-client :txn c)]
     (is (= [:client "b"] (client/open! wrapper test "a")))
     (is (= [:client "c"] (client/open! wrapper test "b")))
     (is (= [:client "b"] (client/open! wrapper test "c")))
@@ -147,8 +147,8 @@
     test))
 
 (deftest restrict-nemesis-test
-  (let [n (r/restrict-nemesis (Nemesis.) :storage)
-        rt (r/restrict-test test :storage)]
+  (let [n (r/restrict-nemesis :storage (Nemesis.))
+        rt (r/restrict-test :storage test)]
     (is (test= rt (:setup-test (:nemesis (n/setup! n test)))))
     (let [[test' op'] (n/invoke! n test :foo)]
       (is (test= rt test'))

@@ -40,7 +40,7 @@
   "Takes a test map and a role. Returns a version of the test map where the
   :nodes are only those for this specific role, and the :barrier is replaced by
   a fresh CyclicBarrier for the appropriate number of nodes."
-  [test role]
+  [role test]
   (let [nodes (nodes test role)
         n     (count nodes)]
     (assoc test
@@ -60,7 +60,7 @@
                     (throw+ {:type ::no-db-for-role
                              :role ~'role
                              :dbs  ~'dbs}))
-         ~'test (restrict-test ~'test ~'role)]
+         ~'test (restrict-test ~'role ~'test)]
      ~@body))
 
 (defrecord DB
@@ -84,7 +84,7 @@
          keys
          (mapcat (fn [role]
                    (let [db   (get dbs role)
-                         test (restrict-test test role)]
+                         test (restrict-test role test)]
                      (when (satisfies? db/Primary db)
                        (db/primaries db test)))))
          (into [])))
@@ -96,7 +96,7 @@
          keys
          (mapv (fn [role]
                  (let [db   (get dbs role)
-                       test (restrict-test test role)]
+                       test (restrict-test role test)]
                    (when (satisfies? db/Primary db)
                      (db/setup-primary! db test (first (:nodes test)))))))))
 
@@ -136,7 +136,7 @@
   thereafter. Calls to `invoke!` etc go directly to the inner client and will
   receive the full test map, rather than a restricted one. This may come back
   to bite us later, in which case we'll change."
-  [client role]
+  [role client]
   (RestrictedClient. role client))
 
 (defrecord RestrictedNemesis [role nemesis]
@@ -145,24 +145,24 @@
 
   n/Nemesis
   (setup! [this test]
-    (RestrictedNemesis. role (n/setup! nemesis (restrict-test test role))))
+    (RestrictedNemesis. role (n/setup! nemesis (restrict-test role test))))
 
   (invoke! [this test op]
-    (n/invoke! nemesis (restrict-test test role) op))
+    (n/invoke! nemesis (restrict-test role test) op))
 
   (teardown! [this test]
-    (n/teardown! nemesis (restrict-test test role))))
+    (n/teardown! nemesis (restrict-test role test))))
 
 (defn restrict-nemesis
   "Wraps a Nemesis in a new one restricted to a specific role. Calls to the
   underlying nemesis receive a restricted test map."
-  [nemesis role]
+  [role nemesis]
   (RestrictedNemesis. role nemesis))
 
 (defn restrict-nemesis-package
   "Restricts a jepsen.nemesis.combined package to act purely on a single role.
   Right now we just restrict the nemesis, not the generators; maybe later we'll
   need to do the generators too."
-  [package role]
+  [role package]
   (assoc package
          :nemesis (restrict-nemesis (:nemesis package) role)))
