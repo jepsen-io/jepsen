@@ -163,7 +163,12 @@
   look like a transaction T1 which writes [v1 v2 v3] to k, and another T2 which
   polls k and observes any of v1, v2, or v3, but not *all* of them. This
   miiight be captured as a wr-rw cycle in some cases, but perhaps not all,
-  since we're only generating rw edges for final reads."
+  since we're only generating rw edges for final reads.
+
+  8. Precommitted reads. These occur when a transaction observes a value that
+  it wrote. This is fine in most transaction systems, but illegal in Kafka,
+  which assumes that consumers (running at read committed) *never* observe
+  uncommitted records."
   (:require [analemma [xml :as xml]
                       [svg :as svg]]
             [bifurcan-clj [core :as b]]
@@ -190,7 +195,8 @@
                                            pprint-str]]]
             [jepsen.checker.perf :as perf]
             [jepsen.tests.cycle.append :as append]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]]
+            [tesser.core :as t]))
 
 ;; Generator
 
@@ -894,6 +900,31 @@
             :writer (get-in writer-of [k v])
             :reader op})
          seq)))
+
+(defn precommitted-read-cases
+  "Takes a partial analysis with a history and looks for a transaction which
+  observed its own writes. Returns a vector of error maps, or nil if none are
+  found.
+
+  This is legal in most DBs, but in Kafka's model, sent values are supposed to
+  be invisible to *all* pollers until their producing txn commits."
+  [{:keys [history]}]
+  (->> (t/keep (fn check-op [op]
+                 (let [reads  (op-reads op)
+                       writes (op-writes op)]
+                   (loopr []
+                          [[k vs] writes]
+                          (let [k-writes (set vs)
+                                k-reads  (set (get reads k))
+                                bad      (set/intersection k-writes k-reads)]
+                            (if (empty? bad)
+                              (recur)
+                              {:op     op
+                               :key    k
+                               :value (first bad)}))))))
+       (t/into [])
+       (h/tesser history)
+       util/nil-if-empty))
 
 (defn lost-write-cases
   "Takes a partial analysis and looks for cases of lost write: where a write
@@ -1912,6 +1943,7 @@
                                      :writes-by-type @writes-by-type
                                      :reads-by-type  @reads-by-type
                                      :version-orders version-orders)
+        precommitted-read-cases (future (precommitted-read-cases analysis))
         g1a-cases               (future (g1a-cases analysis))
         lost-write-cases        (future (lost-write-cases analysis))
         poll-skip+nm-cases      (future (poll-skip+nonmonotonic-cases analysis))
@@ -1956,6 +1988,9 @@
 
                version-order-errors
                (assoc :inconsistent-offsets version-order-errors)
+
+               @precommitted-read-cases
+               (assoc :precommitted-read @precommitted-read-cases)
 
                @g1a-cases
                (assoc :G1a @g1a-cases)

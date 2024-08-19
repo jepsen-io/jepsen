@@ -630,3 +630,20 @@
                       :a-mop-index 1, :b-mop-index 1}]}]
            (-> [t1 t2 t1' t2'] h/history
                (analysis {:ww-deps true}) :errors :G1c)))))
+
+(deftest precommitted-read-test
+  ; Transaction T1 observes its own write, which commits after the poll. This
+  ; would be legal in most databases, but in Kafka's model, consumers at read
+  ; committed are supposed to *never* observe values which haven't yet been
+  ; committed, because consumers may sometimes not be participants in
+  ; transaction control.
+  (let [t1  (o 0 0 :invoke :txn [[:send :x :a] [:poll]])
+        t1' (o 1 0 :ok     :txn [[:send :x [0 :a]] [:poll {:x [[0 :a]]}]])
+        r   (-> [t1 t1']
+                h/history
+                analysis)]
+    (pprint r)
+    (is (= [{:op   t1'
+             :key  :x
+             :value :a}]
+           (:precommitted-read (:errors r))))))

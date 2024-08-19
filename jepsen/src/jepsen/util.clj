@@ -759,6 +759,14 @@
         (sequential? thing-or-things) thing-or-things
         true                          (list thing-or-things)))
 
+(defn nil-if-empty
+  "Takes a seqable and returns it, or nil if (seq seqable) is nil. Helpful when
+  you want to return a vector if non-empty, or nil otherwise."
+  [seqable]
+  (if (nil? (seq seqable))
+    nil
+    seqable))
+
 (defn history->latencies
   "Takes a history--a sequence of operations--and returns a new history where
   operations have two new keys:
