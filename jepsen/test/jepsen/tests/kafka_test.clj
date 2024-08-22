@@ -4,7 +4,10 @@
                      [set :as set]]
             [clojure.tools.logging :refer [info]]
             [jepsen [checker :as checker]
+                    [generator :as gen]
                     [history :as h]]
+            [jepsen.generator [context :as gen.ctx]
+                              [test :as gen.test]]
             [jepsen.tests.kafka :refer :all]))
 
 (defn deindex
@@ -642,8 +645,68 @@
         r   (-> [t1 t1']
                 h/history
                 analysis)]
-    (pprint r)
     (is (= [{:op   t1'
              :key  :x
              :value :a}]
            (:precommitted-read (:errors r))))))
+
+(defn gen-poll-unseen-test-sim
+  "Simulator for gen.test. Takes an atom to the next offset we assign, and a
+  context and invocation. Returns a completed op."
+  [next-offset ctx op]
+  (let [op (update op :time + gen.test/perfect-latency)]
+    (case (:f op)
+      (:poll :send :txn)
+      (let [v' (mapv (fn [mop]
+                       (case (first mop)
+                         :send (let [[f k v] mop]
+                                 [f k [(swap! next-offset inc) v]])
+                         :poll [:poll {}]))
+                     (:value op))]
+        (assoc op :type :ok
+               :value v'))
+
+      ; Otherwise
+      (assoc op :type :ok))))
+
+(deftest gen-poll-unseen-test
+  ; We verify that a laggy DB which accepts sends but never returns them in
+  ; polls causes repeated polling attempts even after the end of the key.
+  (let [gen [(concat
+               ; We do a single write and several (unsuccessful) polls of :x
+               [{:f :send, :value [[:send :x 0]]}]
+               (repeat 5 {:f :assign, :value [:x]})
+               (repeat 5 {:f :poll, :value [[:poll]]})
+               ; Then we move everyone on to :y and do a bunch of assigns.
+               ; We've got a 1/3 chance to rewrite these to :x.
+               (repeat 100 {:f :assign :value [:y]}))]
+        ctx gen.test/default-context
+        ; Returns a map of assigned keys to the number of times we assigned
+        ; that specific combination of keys, e.g. {[:x] 5, [:x :y] 10}
+        assigns-freq (fn [h]
+                       (->> h
+                            (filter (comp #{:assign} :f))
+                            (map :value)
+                            frequencies))
+        sim (fn [gen]
+              (gen.test/invocations
+                (gen.test/simulate ctx gen
+                                   (partial gen-poll-unseen-test-sim
+                                            (atom 0)))))]
+    (testing "without unseen-poll"
+      (let [h (sim gen)]
+        (is (= {[:x] 5
+                [:y] 100}
+               (assigns-freq h)))))
+    (testing "with unseen-poll"
+      (let [h (sim (poll-unseen gen))
+            freqs (assigns-freq h)]
+        ;(pprint freqs)
+        (is (= #{[:x] [:y] [:x :y]} (set (keys freqs))))
+        (is (= 5 (freqs [:x])))
+        (is (< (freqs [:y] 100)))
+        (is (< 0 (freqs [:x :y])))
+        ; Check that our debugging key is present
+        (is (= {:x {:polled -1, :sent 1}}
+               (first (keep :unseen h))))
+        ))))

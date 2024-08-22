@@ -317,15 +317,24 @@
       (if (= :pending op)
         [:pending this]
         (let [this' (PollUnseen. gen' sent polled)]
-          ; About 1/3 of the time, insert our sent-but-unpolled keys in place of
+          ; About 1/3 of the time, merge our sent-but-unpolled keys into an
           ; assign/subscribe
           (if (and (< (rand) 1/3)
+                   (< 0 (count sent))
                    (or (= :assign    (:f op))
                        (= :subscribe (:f op))))
-            [(assoc op :value (->> (:value op)
-                                   (concat (keys sent))
-                                   distinct
-                                   vec))
+            [(assoc op
+                    :value (->> (:value op)
+                                (concat (keys sent))
+                                distinct
+                                vec)
+                    ; Just for debugging, so you can look at the log and tell
+                    ; what's going on
+                    :unseen (->> sent
+                                      (map (fn [[k sent-offset]]
+                                             [k {:polled (polled k -1)
+                                                 :sent sent-offset}]))
+                                      (into (sorted-map))))
              this']
 
             ; Pass through
