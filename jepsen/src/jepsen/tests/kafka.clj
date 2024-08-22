@@ -331,10 +331,10 @@
                     ; Just for debugging, so you can look at the log and tell
                     ; what's going on
                     :unseen (->> sent
-                                      (map (fn [[k sent-offset]]
-                                             [k {:polled (polled k -1)
-                                                 :sent sent-offset}]))
-                                      (into (sorted-map))))
+                                 (map (fn [[k sent-offset]]
+                                        [k {:polled (polled k -1)
+                                            :sent sent-offset}]))
+                                 (into (sorted-map))))
              this']
 
             ; Pass through
