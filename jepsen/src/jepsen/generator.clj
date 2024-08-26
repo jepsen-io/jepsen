@@ -484,6 +484,14 @@
    (let [gen (java.util.Random. seed)]
      (repeatedly #(.nextLong gen)))))
 
+(defn rand-seq
+  "Generates a reproducible sequence of random doubles, given a random seed. If
+  seed is not provided, taken from (rand-int)"
+  ([] (rand-seq (rand-int Integer/MAX_VALUE)))
+  ([seed]
+   (let [gen (java.util.Random. seed)]
+     (repeatedly #(.nextDouble gen)))))
+
 ;; Generators!
 
 (defn tracking-get!

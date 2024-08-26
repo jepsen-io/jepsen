@@ -15,7 +15,7 @@
 
 (def default-test
   "A default test map."
-  {})
+  {:nodes ["n1" "n2"]})
 
 (defn n+nemesis-context
   "A context with n numeric worker threads and one nemesis."
@@ -32,17 +32,27 @@
   [history]
   (filter #(= :invoke (:type %)) history))
 
-(defmacro with-fixed-rand-int
-  "Rebinds rand-int to yield a deterministic series of random values.
-  Definitely not threadsafe, but fine for tests I think."
+(defmacro with-fixed-rands
+  "Rebinds rand, rand-int, and rand-nth to yield a deterministic series of
+  random values. Definitely not threadsafe, but fine for tests I think."
   [seed & body]
-  `(let [values#    (atom (gen/rand-int-seq ~seed))
-         rand-int#  (fn [limit#]
+  `(let [rand-values#     (atom (gen/rand-seq ~seed))
+         rand-int-values# (atom (gen/rand-int-seq ~seed))
+         rand#      (fn ~'rand
+                      ([]
+                       (first (swap! rand-values# next)))
+                      ([limit#]
+                       (* limit# (first (swap! rand-values# next)))))
+         rand-int#  (fn ~'rand-int [limit#]
                       (if (zero? limit#)
                         0
-                        (mod (first (swap! values# next))
-                             limit#)))]
-     (with-redefs [rand-int rand-int#]
+                        (mod (first (swap! rand-int-values# next))
+                             limit#)))
+         rand-nth#   (fn ~'rand-nth [coll#]
+                       (nth coll# (rand-int# (count coll#))))]
+     (with-redefs [rand     rand#
+                   rand-int rand-int#
+                   rand-nth rand-nth]
        ~@body)))
 
 (def rand-seed
@@ -59,7 +69,7 @@
   ([gen complete-fn]
    (simulate default-context gen complete-fn))
   ([ctx gen complete-fn]
-   (with-fixed-rand-int rand-seed
+   (with-fixed-rands rand-seed
      (loop [ops        []
             in-flight  [] ; Kept sorted by time
             gen        (gen/validate gen)
