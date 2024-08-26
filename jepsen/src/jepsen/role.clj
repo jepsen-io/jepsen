@@ -163,8 +163,11 @@
 (defn restrict-nemesis-package
   "Restricts a jepsen.nemesis.combined package to act purely on a single role.
   Right now we just restrict the nemesis, not the generators; maybe later we'll
-  need to do the generators too. Operations in this package have their operation `:f`s lifted to `:f [role f]`."
+  need to do the generators too. Operations in this package have their
+  operation `:f`s lifted to `:f [role f]`. Also adds a :role key to the
+  package, for your use later."
   [role package]
   (-> package
-      (assoc :nemesis (restrict-nemesis role (:nemesis package)))
+      (assoc :role    role
+             :nemesis (restrict-nemesis role (:nemesis package)))
       (->> (nc/f-map (partial vector role)))))
