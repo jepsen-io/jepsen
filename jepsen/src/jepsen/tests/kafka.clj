@@ -1304,7 +1304,16 @@
                       (map (fn [[value number]]
                              {:key    k
                               :value  value
-                              :count  number})))))
+                              :count  number
+                              ; Run through the log to find offsets
+                              :offsets (loopr [i       0
+                                               offsets []]
+                                              [vs (:log version-order)]
+                                              (recur (inc i)
+                                                     (if (contains? vs value)
+                                                       (conj offsets i)
+                                                       offsets))
+                                              offsets)})))))
        seq))
 
 (defn unseen

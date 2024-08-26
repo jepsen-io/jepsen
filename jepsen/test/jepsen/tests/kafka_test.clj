@@ -485,7 +485,8 @@
         poll-a3' (o 5 2 :ok     :poll [[:poll {:x [[2 :b] [3 :a]]}]])]
     (is (= [{:key   :x
              :value :a
-             :count 2}]
+             :count 2
+             :offsets [1 3]}]
            (-> [send-a1 send-a1' send-b2 send-b2' poll-a3 poll-a3'] h/history analysis :errors :duplicate)))))
 
 (deftest realtime-lag-test
