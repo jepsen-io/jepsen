@@ -12,6 +12,7 @@
             [jepsen [client :as client]
                     [db :as db]
                     [nemesis :as n]]
+            [jepsen.nemesis.combined :as nc]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
@@ -162,7 +163,8 @@
 (defn restrict-nemesis-package
   "Restricts a jepsen.nemesis.combined package to act purely on a single role.
   Right now we just restrict the nemesis, not the generators; maybe later we'll
-  need to do the generators too."
+  need to do the generators too. Operations in this package have their operation `:f`s lifted to `:f [role f]`."
   [role package]
-  (assoc package
-         :nemesis (restrict-nemesis (:nemesis package) role)))
+  (-> package
+      (assoc :nemesis (restrict-nemesis role (:nemesis package)))
+      (->> (nc/f-map (partial vector role)))))

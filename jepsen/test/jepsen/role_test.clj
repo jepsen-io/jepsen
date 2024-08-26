@@ -1,11 +1,15 @@
 (ns jepsen.role-test
   (:refer-clojure :exclude [test])
-  (:require [clojure [test :refer :all]]
+  (:require [clojure [pprint :refer [pprint]]
+                     [test :refer :all]]
             [jepsen [client :as client]
                     [db :as db]
                     [db-test :refer [log-db]]
+                    [generator :as gen]
                     [role :as r]
                     [nemesis :as n]]
+            [jepsen.generator.test :as gt]
+            [jepsen.nemesis.combined :as nc]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
@@ -154,3 +158,27 @@
       (is (test= rt test'))
       (is (= :foo op')))
     (is (test= rt (n/teardown! n test)))))
+
+(deftest restrict-nemesis-package-test
+  (let [pkg (nc/partition-package {:faults #{:partition}})
+        pkg' (r/restrict-nemesis-package :storage pkg)]
+    ; We have tests for the nemesis already; just check the generator lifts
+    ; properly
+    (testing "generator"
+      (let [ops (->> (:generator pkg')
+                     gen/nemesis
+                     (gen/limit 2)
+                     gt/perfect*
+                     (filter (comp #{:info} :type))
+                     ; values use rand-nth baked into fns in a way we can't
+                     ; make deterministic; just drop em
+                     (map #(dissoc % :value)))]
+        (is (= [{:time 0,
+                 :type :info,
+                 :process :nemesis,
+                 :f [:storage :start-partition]}
+                {:time 15702284397,
+                 :type :info,
+                 :process :nemesis,
+                 :f [:storage :stop-partition]}]
+               ops))))))
