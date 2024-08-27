@@ -291,7 +291,9 @@
   (is (= [{:type :invoke, :process 0, :time 0, :f :b, :value 2}]
          (->> {:f :a, :value 2}
               (gen/f-map {:a :b})
-              gen.test/perfect))))
+              gen.test/perfect)))
+  (testing "nil passthrough"
+    (is (= nil (gen/f-map {:a :b} nil)))))
 
 (deftest filter-test
   (is (= [0 2 4 6 8]

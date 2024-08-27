@@ -816,7 +816,8 @@
   this generator does too, without calling `f`. Passes updates to underlying
   generator."
   [f gen]
-  (Map. f gen))
+  (when gen
+    (Map. f gen)))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,
