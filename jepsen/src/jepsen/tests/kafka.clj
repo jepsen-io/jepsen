@@ -216,11 +216,7 @@
                                            :r      [:poll]))))))
            la-gen))
 
-(def subscribe-ratio
-  "How many subscribe ops should we issue per txn op?"
-  1/8)
-
-(defrecord InterleaveSubscribes [gen]
+(defrecord InterleaveSubscribes [sub-p gen]
   gen/Generator
   (op [this test context]
     ; When we're asked for an operation, ask the underlying generator for
@@ -228,25 +224,27 @@
     (when-let [[op gen'] (gen/op gen test context)]
       (if (= :pending op)
         [:pending this]
-        (let [this' (InterleaveSubscribes. gen')]
-          (if (< (rand) subscribe-ratio)
+        (let [this' (InterleaveSubscribes. sub-p gen')]
+          (if (< (rand) sub-p)
             ; At random, emit a subscribe/assign op instead.
             (let [f  (rand-nth (vec (:sub-via test)))
                   op {:f f, :value (vec (:keys op))}]
               [(gen/fill-in-op op context) this])
             ; Or pass through the op directly
-            [(dissoc op :keys) (InterleaveSubscribes. gen')])))))
+            [(dissoc op :keys) this'])))))
 
   ; Pass through updates
   (update [this test context event]
-    (InterleaveSubscribes. (gen/update gen test context event))))
+    (InterleaveSubscribes.
+      sub-p
+      (gen/update gen test context event))))
 
 (defn interleave-subscribes
-  "Takes a txn generator and keeps track of the keys flowing through it,
-  interspersing occasional :subscribe or :assign operations for recently seen
-  keys."
-  [txn-gen]
-  (InterleaveSubscribes. txn-gen))
+  "Takes CLI options (:sub-p) and a txn generator. Keeps track of the keys
+  flowing through it, interspersing occasional :subscribe or :assign operations
+  for recently seen keys."
+  [opts txn-gen]
+  (InterleaveSubscribes. (:sub-p opts 1/64) txn-gen))
 
 (defn tag-rw
   "Takes a generator and tags operations as :f :poll or :send if they're
@@ -2172,6 +2170,9 @@
     :txn?           If set, generates transactions with multiple send/poll
                     micro-operations.
 
+    :sub-p          The probability that the generator emits an
+                    assign/subscribe op.
+
   These options must also be present in the test map, because they are used by
   the checker, client, etc at various points. For your convenience, they are
   included in the workload map returned from this function; merging that map
@@ -2198,5 +2199,5 @@
                                        txn-generator
                                        tag-rw
                                        (track-key-offsets max-offsets)
-                                       interleave-subscribes
+                                       (interleave-subscribes opts)
                                        poll-unseen))))))
