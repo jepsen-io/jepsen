@@ -62,8 +62,8 @@
 
               (if (or (= @cs CommitStatus/OK) 
                       (= @cs CommitStatus/ROLL_FORWARD_ABANDONED))
-                (assoc op :type :ok :value @txn') 
-                (assoc op :type :fail, :error :commit)))
+                (assoc op :type :ok :value @txn')
+                (do (info "CommitStatus-> " @cs) (assoc op :type :fail, :error :commit))))
             (catch AerospikeException$Commit e#
               (info "Encountered Commit Error! " (.getResultCode e#) (.getMessage e#))
                 (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit)))
