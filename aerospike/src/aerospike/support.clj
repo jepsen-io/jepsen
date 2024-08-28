@@ -309,21 +309,10 @@
 ;; Bob owns the initial static config file - but diff may result in expected failures
   (c/su
     ; Config file
-   (c/exec :echo (-> "aerospike.conf"
-                     io/resource
-                     slurp
-                     (str/replace "$NODE_ADDRESS" (net/local-ip))
-                     (str/replace "$MESH_ADDRESS"
-                                  (net/ip (jepsen/primary test)))
-                     (str/replace "$REPLICATION_FACTOR"
-                                  (str (:replication-factor opts)))
-                     (str/replace "$HEARTBEAT_INTERVAL"
-                                  (str (:heartbeat-interval opts)))
-                     (str/replace "$COMMIT_TO_DEVICE"
-                                  (if (:commit-to-device opts)
-                                    "commit-to-device true"
-                                    "")))
-           :> "/etc/aerospike/aerospike.conf")))
+      (c/exec :cp "/data/aerospike_a/etc/aerospike/aerospike.conf" "/etc/aerospike/aerospike.conf")
+      (c/exec :cp "/data/aerospike_a/etc/aerospike/features.conf" "/etc/aerospike/features.conf")
+   )
+  )
 
 (defn start!
   "Starts aerospike."
@@ -387,7 +376,7 @@
       (doto node
         (install!)
         ;; Bob owns the initial static config file - but diff may result in expected failures
-        ;;(configure! test opts)
+        (configure! test opts)
         (start! test))
       (info "Done w/ db.setup! call."))
 
@@ -570,14 +559,16 @@
        (catch com.aerospike.client.AerospikeException e#
          (case (.getResultCode e#)
            ; This is error code "OK", which I guess also means "dunno"?
-           0 (condp instance? (.getCause e#)
+           ;; well in 2024, we should absoultely never have an exception & 0 result code
+           0 (do (info "if your client is from 2018 or later, WTF are you doing here??")
+                 (condp instance? (.getCause e#)
                java.io.EOFException
                (assoc ~op :type error-type#, :error :eof)
 
                java.net.SocketException
                (assoc ~op :type error-type#, :error :socket-error)
 
-               (throw e#))
+               (throw e#)))
 
            ; Generation error; CAS can't have taken place.
            3 (assoc ~op :type :fail, :error :generation-mismatch)
