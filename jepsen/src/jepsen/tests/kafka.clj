@@ -1648,9 +1648,9 @@
                [op history]
                (if-let [pairs (-> op op-pairs (get k))]
                  (let [row (row i op pairs)]
-                   (info :row row)
+                   ;(info :row row)
                    (if-let [cells (-> row next next)]
-                     (do (info :cells cells)
+                     (do ; (info :cells cells)
                          (let [max-y (->> cells first second :y long
                                           (max max-y))
                                max-x (->> cells
