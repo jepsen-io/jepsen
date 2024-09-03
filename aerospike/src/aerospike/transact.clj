@@ -60,13 +60,16 @@
               (info "Txn: " (.getId tid) " ..DONE!")
               (reset! cs (.commit client tid))
 
-              (if (or (= @cs CommitStatus/OK) 
-                      (= @cs CommitStatus/ROLL_FORWARD_ABANDONED))
+              (if (not (= @cs CommitStatus/ALREADY_ATTEMPTED))
                 (assoc op :type :ok :value @txn')
-                (do (info "CommitStatus-> " @cs) (assoc op :type :fail, :error :commit))))
+                (do (info "}> !! DOUBLE-COMMIT !! <{  (" @cs ")") (assoc op :type :fail, :error :commit))))
             (catch AerospikeException$Commit e#
-              (info "Encountered Commit Error! " (.getResultCode e#) (.getMessage e#))
-                (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit)))
+              (info "Encountered Commit Error! >> InDoubt:" (.getInDoubt e#) (.getResultCode e#) (.getMessage e#))
+              (if (.getInDoubt e#)
+                (assoc op :type :info, :error :commit)
+                (assoc op :type :fail, :error :commit)
+              ))
+                ;; (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit)))
             (catch AerospikeException e#
               (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
               (info "Aborting..")

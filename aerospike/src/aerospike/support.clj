@@ -318,7 +318,7 @@
   "Starts aerospike."
   [node test]
   (info "Syncronizing...")
-  (jepsen/synchronize test 5)
+  (jepsen/synchronize test)
   (info "Syncronized!")
   (info "Starting...")
   ;; Use bob image wrapper with workaround for jepsen spawned process issue
