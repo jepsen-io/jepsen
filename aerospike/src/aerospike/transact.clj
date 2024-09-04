@@ -103,5 +103,6 @@
                  :key-count       (:key-count opts 3)
                  :min-txn-length  (:min-txn-length opts 1)
                  :max-txn-length  (:max-txn-length opts 3)
+                 :max-writes-per-key (:max-writes-per-key opts 32)
                  })})
 )
