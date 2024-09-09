@@ -145,6 +145,10 @@
     :parse-fn #(Long/parseLong %)
     :validate [pos? "must be positive"]
    ]
+   [nil "--max-writes-per-key N_WRITES" "Limit of writes to a particular key"
+    :default  32 ; TODO: make this  default differently based on key-dist 
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]]
    [nil "--key-dist DIST" "Uniform or Exponential"
     :default  :exponential 
     :parse-fn keyword

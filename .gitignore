@@ -1,0 +1,4 @@
+**/.clj-kondo/**
+**/.lsp/**
+**/target/
+jepsen/pom.xml
