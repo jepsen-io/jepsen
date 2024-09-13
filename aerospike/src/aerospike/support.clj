@@ -595,11 +595,6 @@
   [op & body]
   `(try ~@body
        (catch AerospikeException e#
-         (case (.getResultCode e#)
-           29 (throw e#)
-           30 (throw e#)
-           31 (throw e#)
-           nil)
          (if (.getInDoubt e#)
            (assoc ~op :type :info, :error (.getMessage e#))
            (assoc ~op :type :fail, :error (.getMessage e#))))
