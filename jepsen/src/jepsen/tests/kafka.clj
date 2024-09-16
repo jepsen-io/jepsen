@@ -874,7 +874,8 @@
                                                  (conj errs {:key    k
                                                              :offset offset
                                                              :index  index
-                                                             :values values})]
+                                                             :values
+                                                             (into (sorted-set) values)})]
                                               ; No divergence
                                               1 [(inc offset) (inc index) errs]
                                               ; Hole in log
