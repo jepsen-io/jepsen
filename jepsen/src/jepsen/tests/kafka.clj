@@ -1296,10 +1296,12 @@
   [{:keys [version-orders]}]
   (->> version-orders
        (mapcat (fn per-key [[k version-order]]
-                 (->> (:by-index version-order)
-                      frequencies
+                 (->> (:log version-order) ; Take every single read value
+                      (mapcat identity)
+                      frequencies          ; Get a frequency count
                       (filter (fn dup? [[value number]]
                                 (< 1 number)))
+                      ; And with those dups, construct a more detailed error
                       (map (fn [[value number]]
                              {:key    k
                               :value  value

@@ -3,6 +3,7 @@
                      [test :refer :all]
                      [set :as set]]
             [clojure.tools.logging :refer [info]]
+            [dom-top.core :refer [loopr]]
             [jepsen [checker :as checker]
                     [generator :as gen]
                     [history :as h]]
@@ -472,22 +473,57 @@
                analysis :errors :int-nonmonotonic-send)))))
 
 (deftest duplicate-test
-  ; A duplicate here means that a single value winds up at multiple positions
-  ; in the log--reading the same log offset multiple times is a nonmonotonic
-  ; poll.
-  (let [; Here we have a send operation which puts a to 1, and a poll which
-        ; reads a at 3; it must have been at both.
-        send-a1  (o 0 0 :invoke :send [[:send :x :a]])
-        send-a1' (o 1 0 :ok     :send [[:send :x [1 :a]]])
-        send-b2  (o 2 1 :invoke :send [[:send :x :b]])
-        send-b2' (o 3 1 :info   :send [[:send :x :b]])
-        poll-a3  (o 4 2 :invoke :poll [[:poll]])
-        poll-a3' (o 5 2 :ok     :poll [[:poll {:x [[2 :b] [3 :a]]}]])]
-    (is (= [{:key   :x
-             :value :a
-             :count 2
-             :offsets [1 3]}]
-           (-> [send-a1 send-a1' send-b2 send-b2' poll-a3 poll-a3'] h/history analysis :errors :duplicate)))))
+  (testing "basic"
+    ; A duplicate here means that a single value winds up at multiple positions
+    ; in the log--reading the same log offset multiple times is a nonmonotonic
+    ; poll.
+    (let [; Here we have a send operation which puts a to 1, and a poll which
+          ; reads a at 3; it must have been at both.
+          send-a1  (o 0 0 :invoke :send [[:send :x :a]])
+          send-a1' (o 1 0 :ok     :send [[:send :x [1 :a]]])
+          send-b2  (o 2 1 :invoke :send [[:send :x :b]])
+          send-b2' (o 3 1 :info   :send [[:send :x :b]])
+          poll-a3  (o 4 2 :invoke :poll [[:poll]])
+          poll-a3' (o 5 2 :ok     :poll [[:poll {:x [[2 :b] [3 :a]]}]])]
+      (is (= [{:key   :x
+               :value :a
+               :count 2
+               :offsets [1 3]}]
+             (-> [send-a1 send-a1' send-b2 send-b2' poll-a3 poll-a3'] h/history analysis :errors :duplicate)))))
+
+  (testing "hash-insensitive"
+    ; Version orders are lossy: they destroy information when presented with
+    ; inconsistent offsets. This can be a little confusing: sometimes you'll
+    ; detect an inconsistent offset as a duplicate, other times not, depending
+    ; on the hash. To test this, we spam a whole bunch of values at the same
+    ; two offsets and verify they're all flagged as dups.
+    (let [n      10
+          values (into (sorted-set) (range n))
+          h (loopr
+              [index 0
+               ops   []]
+              [value values]
+              (recur
+                (+ index 4)
+                (conj ops
+                      ; Send value at offset 0, poll it at 1
+                      (o (+ index 0) 0 :invoke :send [[:send :x value]])
+                      (o (+ index 1) 0 :ok     :send [[:send :x [0 value]]])
+                      (o (+ index 2) 1 :invoke :poll [[:poll]])
+                      (o (+ index 3) 1 :ok     :poll
+                         [[:poll {:x [[1 value]]}]])))
+              (h/history ops))
+          a (analysis h)]
+      (testing "duplicates"
+        (is (= values
+               (->> (:duplicate (:errors a))
+                    (map :value)
+                    (into (sorted-set))))))
+      ; While we're here...
+      (testing "inconsistent offsets"
+        (is (= [{:key :x, :offset 0, :index 0, :values values}
+                {:key :x, :offset 1, :index 1, :values values}]
+               (:inconsistent-offsets (:errors a))))))))
 
 (deftest realtime-lag-test
   (testing "up to date"
