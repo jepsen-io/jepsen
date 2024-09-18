@@ -1144,78 +1144,75 @@
          (fn per-process [ops]
            ; Iterate over this process's operations, building up a vector of
            ; errors.
-           (loop [ops        ops
-                  errors     []
-                  last-reads {}]
-             (if-not (seq ops)
-               ; Done
-               errors
-               ; Process this op
-               (let [op    (first ops)]
-                 (case (:f op)
-                   ; When we assign or subscribe a new topic, preserve *only*
-                   ; those last-reads which we're still subscribing to.
-                   (:assign, :subscribe)
-                   (recur (next ops)
-                          errors
-                          (if (#{:invoke :fail} (:type op))
-                            last-reads
-                            (select-keys last-reads (:value op))))
+           (loopr
+             [errors     []  ; A vector of error maps
+              last-reads {}] ; A map of key -> op last last read that key
+             [op ops]
+             (case (:f op)
+               ; When we assign or subscribe a new topic, preserve *only*
+               ; those last-reads which we're still subscribing to.
+               (:assign, :subscribe)
+               (recur errors
+                      (if (#{:invoke :fail} (:type op))
+                        last-reads
+                        (select-keys last-reads (:value op))))
 
-                   (:txn, :poll)
-                   (let [reads (op-reads op)
-                         ; Look at each key and values read by this op.
-                         errs (for [[k reads] reads]
-                                ; What was the last op that read this key?
-                                (if-let [last-op (get last-reads k)]
-                                  ; Compare the index of the last thing read by
-                                  ; the last op read to the index of our first
-                                  ; read
-                                  (let [vo  (get-in version-orders
-                                                    [k :by-value])
-                                        v   (-> last-op op-reads (get k) last)
-                                        v'  (first reads)
-                                        i   (get vo v)
-                                        i'  (get vo v')
-                                        delta (if (and i i')
-                                                (- i' i)
-                                                1)]
-                                    [(when (< 1 delta)
-                                       ; We can show that this op skipped an
-                                       ; index!
-                                       (let [voi (-> version-orders (get k)
-                                                     :by-index)
-                                             skipped (map voi
-                                                          (range (inc i) i'))]
-                                         {:type    :skip
-                                          :key     k
-                                          :delta   delta
-                                          :skipped skipped
-                                          :ops     [last-op op]}))
-                                     (when (< delta 1)
-                                       ; Aha, this wasn't monotonic!
-                                       {:type   :nonmonotonic
-                                        :key    k
-                                        :values [v v']
-                                        :delta  delta
-                                        :ops    [last-op op]})])
-                                  ; First read of this key
-                                  nil))
-                         errs (->> errs
-                                   (mapcat identity)
-                                   (remove nil?))
-                         ; Update our last-reads index for this op's read keys
-                         last-reads' (->> (keys reads)
-                                          (reduce (fn update-last-read [lr k]
-                                                    (assoc lr k op))
-                                                  last-reads))]
-                     (recur (next ops) (into errors errs) last-reads'))
+               (:txn, :poll)
+               (let [reads (op-reads op)
+                     ; Look at each key and values read by this op.
+                     errs (for [[k reads] reads]
+                            ; What was the last op that read this key?
+                            (if-let [last-op (get last-reads k)]
+                              ; Compare the index of the last thing read by
+                              ; the last op read to the index of our first
+                              ; read
+                              (let [vo  (get-in version-orders
+                                                [k :by-value])
+                                    v   (-> last-op op-reads (get k) last)
+                                    v'  (first reads)
+                                    i   (get vo v)
+                                    i'  (get vo v')
+                                    delta (if (and i i')
+                                            (- i' i)
+                                            1)]
+                                [(when (< 1 delta)
+                                   ; We can show that this op skipped an
+                                   ; index!
+                                   (let [voi (-> version-orders (get k)
+                                                 :by-index)
+                                         skipped (map voi
+                                                      (range (inc i) i'))]
+                                     {:type    :skip
+                                      :key     k
+                                      :delta   delta
+                                      :skipped skipped
+                                      :ops     [last-op op]}))
+                                 (when (< delta 1)
+                                   ; Aha, this wasn't monotonic!
+                                   {:type   :nonmonotonic
+                                    :key    k
+                                    :values [v v']
+                                    :delta  delta
+                                    :ops    [last-op op]})])
+                              ; First read of this key
+                              nil))
+                     errs (->> errs
+                               (mapcat identity)
+                               (remove nil?))
+                     ; Update our last-reads index for this op's read keys
+                     last-reads' (->> (keys reads)
+                                      (reduce (fn update-last-read [lr k]
+                                                (assoc lr k op))
+                                              last-reads))]
+                 (recur (into errors errs) last-reads'))
 
-                   ; Some other :f
-                   (recur (next ops) errors last-reads)))))))
-           ; Join together errors from all processes
-           (mapcat val)
-           (group-by :type)
+               ; Some other :f
+               (recur errors last-reads))
+             ; Done with history
+             errors)))
+       ; Join together errors from all processes
+       (mapcat val)
+       (group-by :type)
        (map-vals strip-types)))
 
 (defn nonmonotonic-send-cases
@@ -2075,7 +2072,7 @@
   Kafka transactional model, and g1c is normal with wr-only edges at
   read-uncommitted but *not* with read-committed. This is a *very* ad-hoc
   attempt to encode that so that Jepsen's valid/invalid results are somewhat
-  meaningful.]
+  meaningful.
 
   Takes a test, and returns a set of keyword error types (e.g. :poll-skip)
   which this test considers allowable."
