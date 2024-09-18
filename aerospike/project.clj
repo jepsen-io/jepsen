@@ -7,7 +7,7 @@
   :dependencies [[org.clojure/clojure "1.12.0-alpha5"]
                  [jepsen "0.3.5a-aerospike"]
                 ;;  [com.aerospike/aerospike-client "7.2.0"]
-                 [com.aerospike/aerospike-client-jdk21-jepsen "8.1.3"]
+                 [com.aerospike/aerospike-client-jdk21-jepsen "8.1.4"]
                  [com.sun.xml.bind/jaxb-core "4.0.4"]
                  [javax.xml.bind/jaxb-api "2.4.0-b180830.0359"]
                  [com.sun.xml.bind/jaxb-impl "4.0.4"]
