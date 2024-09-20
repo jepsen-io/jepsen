@@ -1035,6 +1035,76 @@
   [gen]
   (EachThread. gen (promise) {}))
 
+(defrecord EachProcess
+  [; A fresh copy of the generator we start with for each process
+   fresh-gen
+   ; A promise of a map of threads to the context filters for those particular
+   ; threads, lazily initialized.
+   context-filters
+   ; A map of thread -> process for processes that are currently initialized
+   ; and running
+   extant
+   ; A map of threads to generators
+   gens]
+
+  Generator
+  (op [this test ctx]
+    (each-thread-ensure-context-filters! context-filters ctx)
+    (let [{:keys [op gen' extant' thread] :as soonest}
+          (->> (context/free-threads ctx)
+               (keep (fn [thread]
+                       (let [extant-process (get extant thread ::not-found)
+                             new-process    (context/thread->process ctx thread)
+                             ; Is this a process we haven't initialized yet?
+                             new?           (not= extant-process new-process)
+                             ; Maybe inefficient--we might discard most of these
+                             extant'        (if new?
+                                              (assoc extant thread new-process)
+                                              extant)
+                             gen            (if new?
+                                              fresh-gen
+                                              (get gens thread))
+                             ; Give this generator a context *just* for one
+                             ; thread
+                             ctx     ((@context-filters thread) ctx)]
+                         ; Generate an op
+                         (when-let [[op gen'] (op gen test ctx)]
+                           {:op      op
+                            :gen'    gen'
+                            :thread  thread
+                            :extant' extant'}))))
+               (reduce soonest-op-map nil))]
+      (cond ; A free thread has an operation
+            soonest [op (EachProcess. fresh-gen context-filters extant'
+                                     (assoc gens thread gen'))]
+
+            ; Some thread is busy; we can't tell what to do just yet
+            (not= (context/free-thread-count ctx)
+                  (context/all-thread-count ctx))
+            [:pending this]
+
+            ; Every thread is exhausted
+            true
+            nil)))
+
+    (update [this test ctx event]
+    (each-thread-ensure-context-filters! context-filters ctx)
+    (let [process (:process event)
+          thread (context/process->thread ctx process)
+          gen    (get gens thread fresh-gen)
+          ctx    ((@context-filters thread) ctx)
+          gen'   (update gen test ctx event)]
+      (EachProcess. fresh-gen context-filters extant
+                    (assoc gens thread gen')))))
+
+(defn each-process
+  "Takes a generator. Constructs a generator which maintains independent copies
+  of that generator for every process. Each generator sees exactly one thread &
+  process in its free process list. Updates are propagated to the generator for
+  the thread which emitted the operation."
+  [gen]
+  (EachProcess. gen (promise) {} {}))
+
 (defrecord Reserve [ranges all-ranges context-filters gens]
   ; ranges is a collection of sets of threads engaged in each generator.
   ; all-ranges is the union of all ranges.
