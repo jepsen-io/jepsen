@@ -1196,15 +1196,24 @@
                                     :ops    [last-op op]})])
                               ; First read of this key
                               nil))
-                     errs (->> errs
-                               (mapcat identity)
-                               (remove nil?))
-                     ; Update our last-reads index for this op's read keys
-                     last-reads' (->> (keys reads)
-                                      (reduce (fn update-last-read [lr k]
-                                                (assoc lr k op))
-                                              last-reads))]
-                 (recur (into errors errs) last-reads'))
+                     errors' (->> errs
+                                  (mapcat identity)
+                                  (remove nil?)
+                                  (into errors))
+                     ; Update our last-reads index for this op's read keys.
+                     last-reads'
+                     (case (:type op)
+                       :ok
+                       (reduce (fn update-last-read [lr k]
+                                 (assoc lr k op))
+                               last-reads
+                               (keys reads))
+
+                       ; If this was an invoke, nothing changes. If it failed
+                       ; or crashed, we want the offsets to remain unchanged as
+                       ; well.
+                       (:invoke, :fail, :info) last-reads)]
+                 (recur errors' last-reads'))
 
                ; Some other :f
                (recur errors last-reads))
@@ -1621,24 +1630,48 @@
   offsets."
   [k log history]
   (let [; Turn an index into a y-coordinate
-        i->y      (fn [i] (* i 14))
+        i->y      (fn [i] (* (inc i) 14))
         ; Turn an offset into an x-coordinate
-        offset->x (fn [offset] (* offset 24))
-        ; Turn a log, index, and op, and pairs in that op into an SVG element
-        row (fn [i {:keys [type time f process value] :as op} pairs]
-              (let [y (i->y i)]
-                (into [:g [:title (str (name type) " " (name f)
-                                       " by process " process "\n"
-                                       (pr-str value))]]
-                      (for [[offset value] pairs :when offset]
-                        (let [compat? (-> log (nth offset) count (< 2))
-                              style   (str (when-not compat?
-                                             (str "background: "
-                                                  (rand-bg-color value) ";")))]
-                          [:text (cond-> {:x (offset->x offset)
-                                          :y y
-                                          :style style})
-                           (str value)])))))
+        offset->x (fn [offset] (* (inc offset) 24))
+        ; Constructs an SVG cell for a single value. Takes a log, a y
+        ; coordinate, wr (either "w" or "r", so we can tell what was written vs
+        ; read, an offset, and a value.
+        cell (fn cell [log y wr offset value]
+               (let [compat? (try (-> log (nth offset) count (< 2))
+                                  (catch IndexOutOfBoundsException _
+                                    ; Not in version order, e.g.
+                                    ; a failed send
+                                    true))
+                     style   (str (when-not compat?
+                                    (str "background: "
+                                         (rand-bg-color value) "; ")))]
+                 [:text (cond-> {:x (offset->x offset)
+                                 :y y
+                                 :style style})
+                  (str wr value)]))
+        ; Turn a log, index, and op, read pairs, and write pairs in that op
+        ; into an SVG element
+        row (fn row [i {:keys [type time f process value] :as op}
+                     write-pairs read-pairs]
+                (let [y (i->y i)
+                      rows (concat
+                             (for [[offset value] read-pairs :when offset]
+                               (cell log y "r" offset value))
+                             (for [[offset value] write-pairs :when offset]
+                               (cell log y "w" offset value)))]
+                  (when (seq rows)
+                    (into [:g {:style (str ; Colored borders based on op type
+                                           "outline-offset: 1px; "
+                                           "outline: 1px solid "
+                                           (case type
+                                             :ok    "#ffffff"
+                                             :info  "#FFAA26"
+                                             :fail  "#FEB5DA")
+                                           "; ")}
+                              [:title (str (name type) " " (name f)
+                                           " by process " process "\n"
+                                           (pr-str value))]]
+                          rows))))
         ; Compute rows and bounds
         [_ max-x max-y rows]
         (loopr [i     0
@@ -1646,25 +1679,27 @@
                 max-y 0
                 rows  []]
                [op history]
-               (if-let [pairs (-> op op-pairs (get k))]
-                 (let [row (row i op pairs)]
-                   ;(info :row row)
-                   (if-let [cells (-> row next next)]
-                     (do ; (info :cells cells)
-                         (let [max-y (->> cells first second :y long
-                                          (max max-y))
-                               max-x (->> cells
-                                          (map (comp :x second))
-                                          (reduce max max-x)
-                                          long)]
-                           (recur (inc i)
-                                  max-x
-                                  max-y
-                                  (conj rows row))))
-                     ; No cells here
-                     (recur (inc i) max-x max-y (conj rows row))))
+               (if-let [row (row i op
+                                 (get (op-write-pairs op) k)
+                                 (get (op-read-pairs op) k))]
+                 (if-let [cells (drop 3 row)]
+                   (do ;(info :cells (pr-str cells))
+                       ;(info :row (pr-str row))
+                       (let [max-y (->> cells first second :y long
+                                        (max max-y))
+                             max-x (->> cells
+                                        (map (comp :x second))
+                                        (reduce max max-x)
+                                        long)]
+                         (recur (inc i)
+                                max-x
+                                max-y
+                                (conj rows row))))
+                   ; No cells here
+                   (recur (inc i) max-x max-y (conj rows row)))
                  ; Nothing relevant here, skip it
                  (recur i max-x max-y rows)))
+        ;_ (info :rows (with-out-str (pprint rows)))
         svg (svg/svg {"version" "2.0"
                       "width"   (+ max-x 20)
                       "height"  (+ max-y 20)}
@@ -1679,7 +1714,7 @@
   "Takes a test, an analysis, and for each key with certain errors
   renders an HTML timeline of how each operation perceived that key's log."
   [test {:keys [version-orders errors history] :as analysis}]
-  (let [history (filter (comp #{:ok} :type) history)]
+  (let [history (h/remove h/invoke? history)]
     (->> (select-keys errors [:inconsistent-offsets :duplicate :lost-write])
          (mapcat val)
          (map :key)

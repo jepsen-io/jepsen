@@ -201,7 +201,7 @@
              (-> [send-ab send-ab' send-c send-c' poll-a poll-a' poll-c poll-c']
                  h/history analysis :errors :lost-write))))))
 
-(deftest poll-skip-test
+(deftest ^:focus poll-skip-test
   ; Process 0 observes offsets 1, 2, then 4, then 7, but we know 3 and 6
   ; existed due to other reads/writes. 5 might actually be a gap in the log.
   (let [poll-1-2  (o 0 0 :invoke :poll [[:poll]])
@@ -258,7 +258,131 @@
         ; But subscribes that still cover x, we preserve state
         (is (= errs (nm [poll-1-2 poll-1-2' poll-3 poll-3' sub-xy sub-xy'
                          poll-4 poll-4' assign-xy assign-xy' write-6 write-6'
-                         poll-7 poll-7' write-* write-*'])))))))
+                         poll-7 poll-7' write-* write-*']))))))
+
+  (testing "txn abort"
+    ; Aborted transactions, both info and fail, should a.) pick up where the
+    ; previous txn left off, and b.) reset the offset to the beginning
+    (testing "good"
+      (let [h (h/history
+                [; Send a simple series of ints
+                 (o 0 0 :invoke :send [[:send :x 0]
+                                       [:send :x 1]
+                                       [:send :x 2]])
+                 (o 1 0 :ok     :send [[:send :x [0 0]]
+                                       [:send :x [1 1]]
+                                       [:send :x [2 2]]])
+
+                 ; Poll 0
+                 (o 1 1 :invoke :txn  [[:poll]])
+                 (o 2 1 :ok     :txn  [[:poll {:x [[0 0]]}]])
+
+                 ; Poll 1, 2, abort. This is correct.
+                 (o 3 1 :invoke :txn [[:poll]])
+                 (o 4 1 :fail   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 1, 2, info. This is correct; we should have rewound.
+                 (o 5 1 :invoke :txn [[:poll]])
+                 (o 6 1 :info   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 1, 2, ok. This is correct; we should have rewound.
+                 (o 7 1 :invoke :txn [[:poll]])
+                 (o 8 1 :ok     :txn [[:poll {:x [[1 1] [2 2]]}]])])
+            a (analysis h)]
+        (is (empty? (:errors a)))))
+
+    (testing "abort doesn't roll back"
+      (let [h (h/history
+                [; Send a simple series of ints
+                 (o 0 0 :invoke :send [[:send :x 0]
+                                       [:send :x 1]
+                                       [:send :x 2]
+                                       [:send :x 3]
+                                       [:send :x 4]
+                                       [:send :x 5]])
+                 (o 1 0 :ok     :send [[:send :x [0 0]]
+                                       [:send :x [1 1]]
+                                       [:send :x [2 2]]
+                                       [:send :x [3 3]]
+                                       [:send :x [4 4]]
+                                       [:send :x [5 5]]])
+
+                 ; Poll 0
+                 (o 1 1 :invoke :txn  [[:poll]])
+                 (o 2 1 :ok     :txn  [[:poll {:x [[0 0]]}]])
+
+                 ; Poll 1, 2, abort. This is fine
+                 (o 3 1 :invoke :txn [[:poll]])
+                 (o 4 1 :fail   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 3 4 and fail. Even though it failed, this is bad; we
+                 ; should have rewound.
+                 (o 5 1 :invoke :txn [[:poll]])
+                 (o 6 1 :fail   :txn [[:poll {:x [[3 3] [4 4]]}]])
+
+                 ; Poll 5 OK. This is also bad, we should still be back at 1 2
+                 (o 7 1 :invoke :txn [[:poll]])
+                 (o 8 1 :ok     :txn [[:poll {:x [[5 5]]}]])])
+            a (analysis h)]
+        ; This is a poll skip!
+        (is (= [; When we polled 3, 4, we should have seen 1.
+                {:key :x
+                 :delta 3
+                 :skipped [1 2]
+                 :ops [(h 3) (h 7)]}
+                ; Ditto, when we polled 5, we should have seen 1.
+                {:key :x
+                 :delta 5
+                 :skipped [1 2 3 4]
+                 :ops [(h 3) (h 9)]}]
+               (:poll-skip (:errors a))))))
+
+    (testing "info doesn't roll back"
+      (let [h (h/history
+                [; Send a simple series of ints
+                 (o 0 0 :invoke :send [[:send :x 0]
+                                       [:send :x 1]
+                                       [:send :x 2]
+                                       [:send :x 3]
+                                       [:send :x 4]
+                                       [:send :x 5]])
+                 (o 1 0 :ok     :send [[:send :x [0 0]]
+                                       [:send :x [1 1]]
+                                       [:send :x [2 2]]
+                                       [:send :x [3 3]]
+                                       [:send :x [4 4]]
+                                       [:send :x [5 5]]])
+
+                 ; Poll 0
+                 (o 1 1 :invoke :txn  [[:poll]])
+                 (o 2 1 :ok     :txn  [[:poll {:x [[0 0]]}]])
+
+                 ; Poll 1, 2, abort. This is fine
+                 (o 3 1 :invoke :txn [[:poll]])
+                 (o 4 1 :info   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 3 4 and fail. Even though it failed, this is bad; we
+                 ; should have rewound.
+                 (o 5 1 :invoke :txn [[:poll]])
+                 (o 6 1 :info   :txn [[:poll {:x [[3 3] [4 4]]}]])
+
+                 ; Poll 5 OK. This is also bad, we should still be back at 1 2
+                 (o 7 1 :invoke :txn [[:poll]])
+                 (o 8 1 :ok     :txn [[:poll {:x [[5 5]]}]])])
+            a (analysis h)]
+        ; This is a poll skip!
+        (is (= [; When we polled 3, 4, we should have seen 1.
+                {:key :x
+                 :delta 3
+                 :skipped [1 2]
+                 :ops [(h 3) (h 7)]}
+                ; Ditto, when we polled 5, we should have seen 1.
+                {:key :x
+                 :delta 5
+                 :skipped [1 2 3 4]
+                 :ops [(h 3) (h 9)]}]
+               (:poll-skip (:errors a))))))
+  ))
 
 (deftest nonmonotonic-poll-test
   ; A nonmonotonic poll occurs when a single process performs two transactions,
