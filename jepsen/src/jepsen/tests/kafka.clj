@@ -2070,7 +2070,7 @@
      :version-orders     version-orders})))
 
 (defn condense-error
-  "Takes a test and a  pair of an error type (e.g. :lost-write) and a seq of
+  "Takes a test and a pair of an error type (e.g. :lost-write) and a seq of
   errors. Returns a pair of [type, {:count n, :errors [...]}], which tries to
   show the most interesting or severe errors without making the pretty-printer
   dump out two gigabytes of EDN."
@@ -2118,6 +2118,8 @@
             :int-send-skip
             ; Likewise, G0 is always allowed, since writes are never isolated
             :G0 :G0-process :G0-realtime
+            ; These are less-precise versions of G0/G0-realtime
+            :PL-1-cycle-exists :strong-PL-1-cycle-exists
             }
 
             ; With subscribe, we expect external poll skips and nonmonotonic
@@ -2128,7 +2130,8 @@
 
             ; When we include ww edges, G1c is normal--the lack of write
             ; isolation means we should expect cycles like t0 <ww t1 <wr t0.
-            (:ww-deps test) (conj :G1c :G1c-process :G1c-realtime)
+            (:ww-deps test) (conj :G1c :G1c-process :G1c-realtime
+                                  :PL-2-cycle-exists :strong-PL-2-cycle-exists)
             ))
 
 (defn checker
