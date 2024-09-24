@@ -531,8 +531,8 @@
                     ; keys we DID read
                     (loop [i 0, ext op]
                       (if (= read-count i)
-                        op
-                        (recur (inc i) (dissoc op (.get read-keys i)))))
+                        ext
+                        (recur (inc i) (dissoc ext (.get read-keys i)))))
                     nil)]
       (jepsen.history.Op. -1 ; Index
                           time

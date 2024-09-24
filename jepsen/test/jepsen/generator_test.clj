@@ -41,7 +41,12 @@
                     c
                     (ctx/all-threads c))]
     (is (= [:pending {:f :write}]
-           (gen/op {:f :write} {} c))))))
+           (gen/op {:f :write} {} c)))))
+
+  (testing "don't duplicate extmap keys"
+    (let [[op _] (gen/op {:f :write, :foo :bar} {} gen.test/default-context)]
+      (is (instance? jepsen.history.Op op))
+      (is (= {:foo :bar} (.__extmap op))))))
 
 (deftest limit-test
   (is (= [{:type :invoke, :process 0, :time 0, :f :write, :value 1}
