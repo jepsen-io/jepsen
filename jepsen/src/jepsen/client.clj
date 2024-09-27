@@ -8,6 +8,10 @@
 
 (defprotocol Client
   ; TODO: this should be open, not open!
+  ;
+  ; TODO: it would also be really nice to have this be (open client test node
+  ; process)--we keep wanting to make decisions based on the process at client
+  ; open time.
   (open! [client test node]
           "Set up the client to work with a particular node. Returns a client
           which is ready to accept operations via invoke! Open *should not*
