@@ -201,7 +201,7 @@
              (-> [send-ab send-ab' send-c send-c' poll-a poll-a' poll-c poll-c']
                  h/history analysis :errors :lost-write))))))
 
-(deftest ^:focus poll-skip-test
+(deftest poll-skip-test
   ; Process 0 observes offsets 1, 2, then 4, then 7, but we know 3 and 6
   ; existed due to other reads/writes. 5 might actually be a gap in the log.
   (let [poll-1-2  (o 0 0 :invoke :poll [[:poll]])
@@ -587,7 +587,7 @@
                h/history
                analysis :errors :int-nonmonotonic-send)))))
 
-(deftest duplicate-test
+(deftest ^:focus duplicate-test
   (testing "basic"
     ; A duplicate here means that a single value winds up at multiple positions
     ; in the log--reading the same log offset multiple times is a nonmonotonic
@@ -638,7 +638,30 @@
       (testing "inconsistent offsets"
         (is (= [{:key :x, :offset 0, :index 0, :values values}
                 {:key :x, :offset 1, :index 1, :values values}]
-               (:inconsistent-offsets (:errors a))))))))
+               (:inconsistent-offsets (:errors a)))))))
+
+  (testing "aborted txns"
+    ; Transactions which abort can contain polls with duplicate information.
+    ; Because the poller is supposed to never return bad information
+    ; *regardless* of what's happening in the transaction, we want to detect
+    ; these.
+    (let [h (h/history
+              ; We send 0 to offset 1
+              [(o 0 0 :invoke :send [[:send :x 0]])
+               (o 1 0 :ok :send [[:send :x [1 0]]])
+               ; And fail to send 1 to offset 2 (but we get an offset for it!)
+               (o 2 0 :invoke :send [[:send :x 1]])
+               (o 3 0 :fail   :send [[:send :x [2 1]]])
+               ; Now we have an aborted poll that sees both of these at higher
+               ; offsets. We want a duplicate for value 0, but not 1, because
+               ; 1's *writes* never happened. GOD the Kafka transaction model
+               ; is complicated.
+               (o 4 1 :invoke :poll [[:poll]])
+               (o 5 1 :fail :poll [[:poll {:x [[11 0] [12 1]]}]])])
+          a (analysis h)]
+      (is (= [{:key :x, :value 0, :count 2, :offsets [1 11]}]
+             (:duplicate (:errors a))))))
+  )
 
 (deftest realtime-lag-test
   (testing "up to date"

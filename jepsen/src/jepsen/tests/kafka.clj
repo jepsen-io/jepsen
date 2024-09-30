@@ -740,7 +740,7 @@
 (defn must-have-committed?
   "Takes a reads-by-type map and a (presumably :info) transaction which sent
   something. Returns true iff the transaction was :ok, or if it was :info and
-  we can prove that some send from this transaction was successfully read."
+  we can prove that some send from this transaction was read."
   [reads-by-type op]
   (or (= :ok (:type op))
       (and (= :info (:type op))
@@ -845,50 +845,58 @@
              a single offset for a key maps to multiple values.}
 
   Offsets are directly from Kafka. Indices are *dense* offsets, removing gaps
-  in the log."
-  ([history reads-by-type]
-   (version-orders history reads-by-type {}))
-  ([history reads-by-type logs]
-   ; Logs is a map of keys to vectors, where index i in one of those vectors is
-   ; the vector of all observed values for that index.
-   (if (seq history)
-     (let [op       (first history)
-           history' (next history)]
-       (if (must-have-committed? reads-by-type op)
+  in the log.
+
+  Note that we infer version orders from sends only when we can prove their
+  effects were visible, but from *all* polls, including :info and :fail ones.
+  Why? Because unlike a traditional transaction, where you shouldn't trust
+  reads in aborted txns, pollers in Kafka's transaction design are *always*
+  supposed to emit safe data regardless of whether the transaction commits or
+  not."
+  [history reads-by-type]
+  (loopr [logs {}]
+         [op history]
          (case (:f op)
            (:poll, :send, :txn)
-           (recur history' reads-by-type
-                  (reduce version-orders-reduce-mop logs (:value op)))
-           ; Some non-transactional op, like an assign/subscribe
-           (recur history' reads-by-type logs))
-         ; We can't assume this committed; don't consider it.
-         (recur history' reads-by-type logs)))
-     ; All done; transform our logs to orders.
-     {:errors (->> logs
-                   (mapcat (fn errors [[k log]]
-                             (->> log
-                                  (reduce (fn [[offset index errs] values]
-                                            (condp <= (count values)
-                                              ; Divergence
-                                              2 [(inc offset) (inc index)
-                                                 (conj errs {:key    k
-                                                             :offset offset
-                                                             :index  index
-                                                             :values
-                                                             (into (sorted-set) values)})]
-                                              ; No divergence
-                                              1 [(inc offset) (inc index) errs]
-                                              ; Hole in log
-                                              0 [(inc offset) index errs]))
-                                          [0 0 []])
-                                  last)))
-                   seq)
-      :orders
-      (map-vals
-        (fn key-order [log]
-          (assoc (->> log (remove nil?) (map first) index-seq)
-                 :log log))
-        logs)})))
+           (recur
+             (if (must-have-committed? reads-by-type op)
+               ; OK or info and we can prove its effects were visible
+               (reduce version-orders-reduce-mop logs (:value op))
+               ; We're not sure it was visible; *just* use the polls.
+               (reduce version-orders-reduce-mop logs
+                       (filter (comp #{:poll} first) (:value op)))))
+
+           ; Some non-transactional op
+           (recur logs))
+         ; All done; transform our logs to orders.
+         {:errors
+          (->> logs
+               (mapcat (fn errors [[k log]]
+                         (->> log
+                              (reduce (fn [[offset index errs] values]
+                                        (condp <= (count values)
+                                          ; Divergence
+                                          2 [(inc offset) (inc index)
+                                             (conj errs {:key    k
+                                                         :offset offset
+                                                         :index  index
+                                                         :values
+                                                         (into (sorted-set)
+                                                               values)})]
+                                          ; No divergence
+                                          1 [(inc offset) (inc index) errs]
+                                          ; Hole in log
+                                          0 [(inc offset) index errs]))
+                                      [0 0 []])
+                              last)))
+               seq)
+
+          :orders
+          (map-vals
+            (fn key-order [log]
+              (assoc (->> log (remove nil?) (map first) index-seq)
+                     :log log))
+            logs)}))
 
 (defn g1a-cases
   "Takes a partial analysis and looks for aborted reads, where a known-failed
