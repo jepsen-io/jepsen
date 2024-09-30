@@ -1,16 +1,17 @@
 (ns aerospike.core
   "Entry point for aerospike tests"
   (:require [aerospike [support :as support]
-                       [counter :as counter]
-                       [cas-register :as cas-register]
-                       [nemesis :as nemesis]
-                       [pause :as pause]
-                       [set :as set]]
+             [counter :as counter]
+             [cas-register :as cas-register]
+             [nemesis :as nemesis]
+             [pause :as pause]
+             [set :as set]]
             [clojure.tools.logging :refer [debug info warn]]
+            [clojure.string :as string]
             [jepsen [cli :as cli]
-                    [checker :as checker]
-                    [generator :as gen]
-                    [tests :as tests]]
+             [checker :as checker]
+             [generator :as gen]
+             [tests :as tests]]
             [jepsen.os.debian :as debian])
   (:gen-class))
 
@@ -32,7 +33,7 @@
               :counter      (counter/workload)
               :set          (set/workload)
               :pause        :pause}]
-     (if (= (System/getenv "JAVA_CLIENT_REF") "CLIENT-2848")
+     (if (string/starts-with? (System/getenv "JAVA_CLIENT_REF") "CLIENT-2848")
        (do (require '[aerospike.transact :as transact]) ; for alias only(?)
           ;; add MRT workloads iff client branch supports it
            (assoc res
