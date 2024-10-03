@@ -1367,6 +1367,51 @@
       (update out (dec (count out))
               assoc :messages unseen))))
 
+(defn plot-bounds
+  "Quickly determine {:min-x, :max-x, :min-y, :max-y} from a series of [x y]
+  points. Nil if there are no points."
+  [points]
+  (when (seq points)
+    (loopr [min-x ##Inf
+            max-x ##-Inf
+            min-y ##Inf
+            max-y ##-Inf]
+           [[x y] points]
+           (recur (min min-x x)
+                  (max max-x x)
+                  (min min-y y)
+                  (max max-y y))
+           {:min-x min-x
+            :max-x max-x
+            :min-y min-y
+            :max-y max-y})))
+
+(defn downsample-plot
+  "Sometimes we wind up feeding absolutely huge plots to gnuplot, which chews
+  up a lot of CPU time. We downsample these points, skipping points which are
+  close in both x and y."
+  [points]
+  (when (seq points)
+    (let [{:keys [min-x max-x min-y max-y]} (plot-bounds points)
+          ; Estimate steps for a meaningful change on the plot
+          dx (/ (- max-x min-x) 200)
+          dy (/ (- max-y min-y) 100)]
+      (loopr [points' (transient [])
+              last-x ##-Inf
+              last-y ##-Inf]
+             [[x y :as point] points]
+             (if (or ; Don't downsample when we jump around in time
+                     (< x last-x)
+                     (< dx (Math/abs (- x last-x)))
+                     (< dy (Math/abs (- y last-y))))
+               (recur (conj! points' point) x y)
+               (recur points' last-x last-y))
+             ; Done
+             (let [points' (persistent! points')]
+               ;(info "Downsampled" (count points) "to" (count points') "points")
+               points')))))
+
+
 (defn plot-unseen!
   "Takes a test, a collection of unseen measurements, and options (e.g. those
   to checker/check). Plots a graph file (unseen.png) in the store directory."
@@ -1391,6 +1436,8 @@
                           first))
                    {}
                    unseen)
+        ; Downsample datasets; plotting lots of points is slow
+        datasets (update-vals datasets downsample-plot)
         ; Grab just the final poll section of history
         final-polls (->> test :history rseq
                          (take-while (comp #{:poll :crash :assign
@@ -1565,48 +1612,6 @@
   "Returns the thread which executed a given operation."
   [test op]
   (-> op :process (mod (:concurrency test))))
-
-(defn plot-bounds
-  "Quickly determine {:min-x, :max-x, :min-y, :max-y} from a series of [x y]
-  points. Nil if there are no points."
-  [points]
-  (when (seq points)
-    (loopr [min-x ##Inf
-            max-x ##-Inf
-            min-y ##Inf
-            max-y ##-Inf]
-           [[x y] points]
-           (recur (min min-x x)
-                  (max max-x x)
-                  (min min-y y)
-                  (max max-y y))
-           {:min-x min-x
-            :max-x max-x
-            :min-y min-y
-            :max-y max-y})))
-
-(defn downsample-plot
-  "Sometimes we wind up feeding absolutely huge plots to gnuplot, which chews
-  up a lot of CPU time. We downsample these points, skipping points which are
-  close in both x and y."
-  [points]
-  (when (seq points)
-    (let [{:keys [min-x max-x min-y max-y]} (plot-bounds points)
-          ; Estimate steps for a meaningful change on the plot
-          dx (/ (- max-x min-x) 200)
-          dy (/ (- max-y min-y) 100)]
-      (loopr [points' (transient [])
-              last-x ##-Inf
-              last-y ##-Inf]
-             [[x y :as point] points]
-             (if (or (< dx (- x last-x))
-                     (< dy (- y last-y)))
-               (recur (conj! points' point) x y)
-               (recur points' last-x last-y))
-             ; Done
-             (let [points' (persistent! points')]
-               ;(info "Downsampled" (count points) "to" (count points') "points")
-               points')))))
 
 (defn plot-realtime-lag!
   "Takes a test, a collection of realtime lag measurements, and options (e.g.
