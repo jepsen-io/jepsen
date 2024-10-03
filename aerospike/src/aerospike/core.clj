@@ -161,6 +161,7 @@
 (defn -main
   "Handles command-line arguments, running a Jepsen command."
   [& args]
+  ;; (Thread/sleep 1000000)
   (cli/run! (merge (cli/single-test-cmd {:test-fn   aerospike-test
                                          :opt-spec  opt-spec})
                    (cli/serve-cmd))
