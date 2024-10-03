@@ -117,7 +117,7 @@
 (defrecord RestrictedClient [role client]
   client/Client
   (open! [this test node]
-    (let [node-index  (.indexOf (:nodes test) node)
+    (let [node-index  (.indexOf ^java.util.List (:nodes test) node)
           role-nodes  (nodes test role)
           _           (assert (pos? (count role-nodes))
                               (str "No nodes for role " (pr-str role)

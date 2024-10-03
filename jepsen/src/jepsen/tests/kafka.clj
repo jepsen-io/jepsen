@@ -1377,10 +1377,12 @@
             min-y ##Inf
             max-y ##-Inf]
            [[x y] points]
-           (recur (min min-x x)
-                  (max max-x x)
-                  (min min-y y)
-                  (max max-y y))
+           (let [x (double x)
+                 y (double y)]
+             (recur (min min-x x)
+                    (max max-x x)
+                    (min min-y y)
+                    (max max-y y)))
            {:min-x min-x
             :max-x max-x
             :min-y min-y
@@ -1394,18 +1396,20 @@
   (when (seq points)
     (let [{:keys [min-x max-x min-y max-y]} (plot-bounds points)
           ; Estimate steps for a meaningful change on the plot
-          dx (/ (- max-x min-x) 200)
-          dy (/ (- max-y min-y) 100)]
+          dx (double (/ (- max-x min-x) 200))
+          dy (double (/ (- max-y min-y) 100))]
       (loopr [points' (transient [])
               last-x ##-Inf
               last-y ##-Inf]
              [[x y :as point] points]
-             (if (or ; Don't downsample when we jump around in time
-                     (< x last-x)
-                     (< dx (Math/abs (- x last-x)))
-                     (< dy (Math/abs (- y last-y))))
-               (recur (conj! points' point) x y)
-               (recur points' last-x last-y))
+             (let [x (double x)
+                   y (double y)]
+               (if (or ; Don't downsample when we jump around in time
+                       (< x last-x)
+                       (< dx (Math/abs (- x last-x)))
+                       (< dy (Math/abs (- y last-y))))
+                 (recur (conj! points' point) x y)
+                 (recur points' last-x last-y)))
              ; Done
              (let [points' (persistent! points')]
                ;(info "Downsampled" (count points) "to" (count points') "points")
