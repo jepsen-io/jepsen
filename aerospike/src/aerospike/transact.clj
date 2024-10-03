@@ -48,7 +48,7 @@
   (invoke! [this test op]
     (info "Invoking" op)
     (if (= (:f op) :txn)
-      (s/with-errors op #{}
+      (s/with-modern-errors op
         (let [tid (Txn.)
               txn' (atom nil)
               cs (atom nil)]
@@ -63,13 +63,6 @@
               (if (not (= @cs CommitStatus/ALREADY_ATTEMPTED))
                 (assoc op :type :ok :value @txn')
                 (do (info "}> !! DOUBLE-COMMIT !! <{  (" @cs ")") (assoc op :type :fail, :error :commit))))
-            (catch AerospikeException$Commit e#
-              (info "Encountered Commit Error! >> InDoubt:" (.getInDoubt e#) (.getResultCode e#) (.getMessage e#))
-              (if (.getInDoubt e#)
-                (assoc op :type :info, :error :commit)
-                (assoc op :type :fail, :error :commit)
-              ))
-                ;; (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit)))
             (catch AerospikeException e#
               (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
               (info "Aborting..")

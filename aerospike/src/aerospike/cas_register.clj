@@ -48,7 +48,7 @@
   (setup! [this test])
 
   (invoke! [this test op]
-    (s/with-errors op #{:read}
+    (s/with-modern-errors op
       (let [[k v] (:value op)]
         (case (:f op)
           :read (assoc op

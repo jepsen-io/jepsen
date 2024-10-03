@@ -49,7 +49,7 @@
   (setup! [this test] this)
 
   (invoke! [this test op]
-    (s/with-errors op #{:read}
+    (s/with-modern-errors op
       (case (:f op)
         :read (assoc op :type :ok
                      :value (-> client (s/fetch namespace set key) :bins :value))
@@ -58,7 +58,7 @@
                   (assoc op :type :ok)))))
 
   (teardown! [this test])
-    
+
   (close! [this test]
     (s/close client)))
 

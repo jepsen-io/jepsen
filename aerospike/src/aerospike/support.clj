@@ -587,3 +587,19 @@
 
            (do (info :error-code (.getResultCode e#))
                (throw e#)))))))
+
+(defmacro with-modern-errors
+  "Takes an invocation operation as `with-errors`, but uses Exception's Indoubt
+   instead of relying on idempotent ops to determine more strictly whether an
+   attempt definitely failed"
+  [op & body]
+  `(try ~@body
+       (catch AerospikeException e#
+         (if (.getInDoubt e#)
+           (assoc ~op :type :info, :error (.getMessage e#))
+           (assoc ~op :type :fail, :error (.getMessage e#))))
+       (catch ExceptionInfo e#
+         (case (.getMessage e#)
+                  ; Skipping a CAS can't affect the DB state
+           "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
+           "cas not found" (assoc ~op :type :fail, :error :not-found)))))

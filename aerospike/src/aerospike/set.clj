@@ -16,7 +16,7 @@
 
   (invoke! [this test op]
     (let [[k v] (:value op)]
-      (s/with-errors op #{}
+      (s/with-modern-errors op
         (case (:f op)
           :read (assoc op
                        :type :ok,
