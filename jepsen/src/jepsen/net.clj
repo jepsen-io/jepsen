@@ -212,7 +212,7 @@
         (try
           (su (exec tc :qdisc :del :dev :eth0 :root))
           (catch RuntimeException e
-            (if (re-find #"RTNETLINK answers: No such file or directory"
+            (if (re-find #"Error: Cannot delete qdisc with handle of zero."
                          (.getMessage e))
               nil
               (throw e))))))
