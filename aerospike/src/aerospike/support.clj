@@ -30,8 +30,10 @@
   )
 
   (:import
+   (asx AsxClient
+        Asx)
    (clojure.lang ExceptionInfo)
-   (com.aerospike.client AerospikeClient
+   (com.aerospike.client 
                          AerospikeException
                          AerospikeException$Connection
                          AerospikeException$Timeout
@@ -90,7 +92,7 @@
 ;;; Client functions:
 (defn nodes
   "Nodes known to a client."
-  [^AerospikeClient client]
+  [^AsxClient client]
   (vec (.getNodes client)))
 
 (defn server-info
@@ -112,7 +114,8 @@
 
 (defn close
   [^java.io.Closeable x]
-  (.close x))
+  (.close x)
+  (.terminateServer x))
 
 
 (defn fSingleNode-policy
@@ -125,15 +128,17 @@
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
-  ;; (info "CREATING CLIENT")
+  (info (format "CREATING CLIENT %s" node))
   (with-retry [tries 30]
-    (AerospikeClient. (fSingleNode-policy) node 3000)
+    ;; (Asx/setStaticPort (+ 8000 (* tries 10) (read-string (get (str/split node #"\.") 3))))
+    (AsxClient. (fSingleNode-policy) node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
       (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
-      (retry (dec tries)))))
+      (retry (dec tries)))
+    ))
 
 
 (defn connect
@@ -142,7 +147,7 @@
   ;; FIXME - client no longer blocks till cluster is ready.
   (let [client (create-client node)]
     ; Wait for connection
-    (while (not (.isConnected ^AerospikeClient client))
+    (while (not (.isConnected ^AsxClient client))
       (Thread/sleep 100))
 
     ;; (info "CLIENT CONNECTED!")
@@ -368,6 +373,8 @@
   [opts]
   "Aerospike for a particular version."
   (info "CREATING DB")
+  (Asx/disableDebugMode)
+  (Asx/enableStaticPortMode)
   (reify db/DB
     (setup! [_ test node]
       (info "Resetting clocktimes!")
@@ -451,7 +458,7 @@
   set, and key."
   ([client namespace set key bins]
    (put! client (write-policy) namespace set key bins))
-  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+  ([^AsxClient client, ^WritePolicy policy, namespace set key bins]
    (info "CALLING PUT() w/ key: (" namespace ", " set ", " key   ") -- bins: " bins)
    (.put client policy (Key. namespace set key) (map->bins bins))))
 
@@ -460,7 +467,7 @@
   namespace, set, and key, if and only if the record does not presently exist."
   ([client namespace set key bins]
    (put-if-absent! client (write-policy) namespace set key bins))
-  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+  ([^AsxClient client, ^WritePolicy policy, namespace set key bins]
    (let [p (WritePolicy. policy)]
      (set! (.recordExistsAction p) RecordExistsAction/CREATE_ONLY)
      (put! client p namespace set key bins))))
@@ -471,7 +478,7 @@
   corresponding bin key."
   ([client namespace set key bins]
    (append! client (write-policy) namespace set key bins))
-  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+  ([^AsxClient client, ^WritePolicy policy, namespace set key bins]
    (.append client policy (Key. namespace set key) (map->bins bins))))
 
 (def sendKey-WritePolicy
@@ -479,7 +486,7 @@
     (set! (.sendKey p) true)
     p))
 
-(defn list-append!  [^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+(defn list-append!  [^AsxClient client, ^WritePolicy policy, namespace set key bins]
   (let [pk (Key. namespace set key)
         binName (name :value)
         binVal (:value bins)
@@ -487,7 +494,7 @@
             ^ListPolicy (ListPolicy.) 
             ^String binName 
             ^Value (Value/get binVal) nil)]
-    (doto (.operate ^AerospikeClient client
+    (doto (.operate ^AsxClient client
                     ^WritePolicy policy
                     ^Key pk
                     (into-array [^Operation op])))))
@@ -495,11 +502,11 @@
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
   set, and key. Returns nil if no record found."
-  ([^AerospikeClient client namespace set key]
+  ([^AsxClient client namespace set key]
    (-> client
        (.get (linearize-read-policy) (Key. namespace set key))
        record->map))
-  ([^AerospikeClient client namespace set key trid]
+  ([^AsxClient client namespace set key trid]
    (let [p (linearize-read-policy)]
      (set! (.txn p) trid)
      (info "CALLING GET() w/ key: (" namespace ", " set ", " key   ")" )
@@ -510,7 +517,7 @@
 
 (defn cas!
   "Atomically applies a function f to the current bins of a record."
-  [^AerospikeClient client namespace set key f]
+  [^AsxClient client namespace set key f]
   (let [r (fetch client namespace set key)]
     (when (nil? r)
       (throw (ex-info "cas not found" {:namespace namespace
@@ -526,7 +533,7 @@
 (defn add!
   "Takes a client, a key, and a map of bin names to numbers, and adds those
   numbers to the corresponding bins on that record."
-  [^AerospikeClient client namespace set key bins]
+  [^AsxClient client namespace set key bins]
   (.add client (write-policy) (Key. namespace set key) (map->bins bins)))
 
 (defmacro with-errors
