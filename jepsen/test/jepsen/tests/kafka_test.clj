@@ -5,6 +5,7 @@
             [clojure.tools.logging :refer [info]]
             [dom-top.core :refer [loopr]]
             [jepsen [checker :as checker]
+                    [common-test :refer [quiet-logging]]
                     [generator :as gen]
                     [history :as h]
                     [store :as store]
@@ -12,6 +13,8 @@
             [jepsen.generator [context :as gen.ctx]
                               [test :as gen.test]]
             [jepsen.tests.kafka :refer :all]))
+
+(use-fixtures :once quiet-logging)
 
 (defn deindex
   "Strips :index field off a map, or a collection of maps."

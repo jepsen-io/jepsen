@@ -3,11 +3,13 @@
             [clojure [string :as str]
                      [test :refer :all]]
             [clojure.java.io :as io]
-            [jepsen.control :as c]
+            [jepsen [common-test :refer [quiet-logging]]
+                    [control :as c]]
             [jepsen.control [util :as util]
                             [sshj :as sshj]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
+(use-fixtures :once quiet-logging)
 (use-fixtures :once (fn with-ssh [t]
                       (c/with-ssh {}
                         (c/on "n1"

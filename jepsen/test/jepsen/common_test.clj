@@ -21,8 +21,9 @@
                         "jepsen.lazyfs"       :error
                         "jepsen.os.debian"    :error
                         "jepsen.store"        :error
+                        "jepsen.tests.kafka"  :error
                         "jepsen.util"         :error
-                        "net.schmizz.sshj.transport" :error
+                        "net.schmizz.sshj"    :error
                         })})
   (f)
   (store/stop-logging!))
