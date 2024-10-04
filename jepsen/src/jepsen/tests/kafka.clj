@@ -173,11 +173,13 @@
                       [svg :as svg]]
             [bifurcan-clj [core :as b]
                           [int-map :as bim]
+                          [list :as bl]
                           [map :as bm]
                           [set :as bs]]
             [clojure [datafy :refer [datafy]]
                      [pprint :refer [pprint]]
                      [set :as set]]
+            [clojure.core.reducers :as r]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [assert+ real-pmap loopr]]
@@ -798,36 +800,40 @@
 (defn version-orders-update-log
   "Updates a version orders log with the given offset and value."
   [log offset value]
-  (if-let [values (nth+ log offset)]
-    (assoc  log offset (conj values value)) ; Already have values
-    (assocv log offset #{value}))) ; First time we've seen this offset
+  (bm/update (or log (bim/int-map))
+             offset
+             (fn update [values]
+               (bs/add (if (nil? values)
+                         (b/linear bs/empty)
+                         values)
+                       value))))
 
 (defn version-orders-reduce-mop
   "Takes a logs object from version-orders and a micro-op, and integrates that
   micro-op's information about offsets into the logs."
   [logs mop]
-  (case (first mop)
+  (case (firstv mop)
     :send (let [[_ k v] mop]
             (if (vector? v)
               (let [[offset value] v]
                 (if offset
                   ; We completed the send and know an offset
-                  (update logs k version-orders-update-log offset value)
+                  (bm/update logs k version-orders-update-log offset value)
                   ; Not sure what the offset was
                   logs))
               ; Not even offset structure: maybe an :info txn
               logs))
 
-    :poll (reduce (fn poll-key [logs [k pairs]]
-                    (reduce (fn pair [logs [offset value]]
-                              (if offset
-                                (update logs k version-orders-update-log
-                                        offset value)
-                                logs))
-                            logs
-                            pairs))
-                  logs
-                  (second mop))))
+    :poll (loopr [logs logs]
+                 [; For each key and series of pairs polled for that key
+                  [k pairs] (second mop)
+                  ; And for each offset and value in those pairs
+                  [offset value] pairs]
+                 (recur (if offset
+                          (bm/update logs k
+                                     version-orders-update-log offset value)
+                          ; Don't know offset
+                          logs)))))
 
 (defn index-seq
   "Takes a seq of distinct values, and returns a map of:
@@ -876,6 +882,27 @@
                    (assocv log index (conj values value))))
                [])))
 
+(defn datafy-version-order-log
+  "Turns a bifurcan integer map of Bifurcan sets, and converts it to a vector
+  of Clojure sets."
+  [m]
+  (let [size (b/size m)]
+    (if (= 0 size)
+      []
+      (let [; Since keys are sorted...
+            max-i (bm/key (b/nth m (dec size)))]
+        (loop [v (transient [])
+               i 0]
+          (if (< max-i i)
+            ; Done
+            (persistent! v)
+            ; Copy this offset into the vector
+            (let [values (bim/get m i nil)
+                  values (when values
+                           (set values))]
+              (recur (assoc! v i values)
+                     (inc i)))))))))
+
 (defn version-orders
   "Takes a history and a reads-by-type structure. Constructs a map of:
 
@@ -899,49 +926,75 @@
   supposed to emit safe data regardless of whether the transaction commits or
   not."
   [history reads-by-type]
-  (loopr [logs {}]
-         [op history]
-         (case (:f op)
-           (:poll, :send, :txn)
-           (recur
-             (if (must-have-committed? reads-by-type op)
-               ; OK or info and we can prove its effects were visible
-               (reduce version-orders-reduce-mop logs (:value op))
-               ; We're not sure it was visible; *just* use the polls.
-               (reduce version-orders-reduce-mop logs
-                       (filter (comp #{:poll} first) (:value op)))))
-
-           ; Some non-transactional op
-           (recur logs))
-         ; All done; transform our logs to orders.
-         {:errors
-          (->> logs
-               (mapcat (fn errors [[k log]]
-                         (->> log
-                              (reduce (fn [[offset index errs] values]
-                                        (condp <= (count values)
-                                          ; Divergence
-                                          2 [(inc offset) (inc index)
-                                             (conj errs {:key    k
-                                                         :offset offset
-                                                         :index  index
-                                                         :values
-                                                         (into (sorted-set)
-                                                               values)})]
-                                          ; No divergence
-                                          1 [(inc offset) (inc index) errs]
-                                          ; Hole in log
-                                          0 [(inc offset) index errs]))
-                                      [0 0 []])
-                              last)))
-               seq)
-
-          :orders
-          (map-vals
-            (fn key-order [log]
-              (assoc (->> log (remove nil?) (map first) index-seq)
-                     :log log))
-            logs)}))
+  ; First, build up our logs concurrently. We start with a Bifurcan map of keys
+  ; to logs. Each log is a Bifurcan integer map of offsets to sets of values.
+  ; This gives us efficient mergeability.
+  (let [fold
+        {:name :version-orders
+         :reducer
+         (fn reducer
+           ([] (b/linear bm/empty))
+           ([logs] logs)
+           ([logs op]
+            (case (:f op)
+              (:poll, :send, :txn)
+              (if (must-have-committed? reads-by-type op)
+                ; OK or info, and we can prove effects were visible
+                (reduce version-orders-reduce-mop logs (:value op))
+                ; We're not sure it was bisible, just use the polls.
+                (reduce version-orders-reduce-mop logs
+                        (r/filter (comp #{:poll} firstv) (:value op))))
+              ; Some non-transactional op
+              logs)))
+         ; Merge logs together
+         :combiner
+         (fn combiner
+           ([] (b/linear bm/empty))
+           ([logs]
+            ; Convert back to Clojure
+            (loopr [logs' (transient {})]
+                   [k-log logs]
+                   (let [k (bm/key k-log)
+                         log (bm/value k-log)]
+                     (recur
+                       (assoc! logs' k (datafy-version-order-log log))))
+                   (persistent! logs')))
+           ; Merge two logs
+           ([logs1 logs2]
+            (bm/merge logs1 logs2
+                      (fn merge-log [log1 log2]
+                        (bm/merge log1 log2
+                                  (fn merge-offset [vs1 vs2]
+                                    (bs/union vs1 vs2)))))))}
+        logs (h/fold history fold)]
+    ; Transform our logs to orders.
+    {:errors
+     (->> logs
+          (mapcat (fn errors [[k log]]
+                    (->> log
+                         (reduce (fn [[offset index errs] values]
+                                   (condp <= (count values)
+                                     ; Divergence
+                                     2 [(inc offset) (inc index)
+                                        (conj errs {:key    k
+                                                    :offset offset
+                                                    :index  index
+                                                    :values
+                                                    (into (sorted-set)
+                                                          values)})]
+                                     ; No divergence
+                                     1 [(inc offset) (inc index) errs]
+                                     ; Hole in log
+                                     0 [(inc offset) index errs]))
+                                 [0 0 []])
+                         last)))
+          seq)
+     :orders
+     (map-vals
+       (fn key-order [log]
+         (assoc (->> log (remove nil?) (map first) index-seq)
+                :log log))
+       logs)}))
 
 (defn g1a-cases
   "Takes a partial analysis and looks for aborted reads, where a known-failed
@@ -2107,7 +2160,16 @@
                  [[k v->readers] readers-of
                   [v readers]    v->readers]
                  (if-let [writer (-> writer-of (get k) (get v))]
-                   (let [readers (remove #{writer} readers)]
+                   (let [; The simple way, which is also, per profiler, slow
+                         ;readers (remove #{writer} readers)
+                         readers
+                         (loopr [readers' (b/linear (bl/list))]
+                                [reader readers]
+                                (recur
+                                  ; For ops in a history, we have fast equality
+                                  (if (h/index= reader writer)
+                                    readers'
+                                    (bl/add-last readers' reader))))]
                      (recur (g/link-to-all g writer readers wr)))
                    (throw+ {:type :no-writer-of-value, :key k, :value v}))
                  (b/forked g))
@@ -2165,11 +2227,15 @@
                            (unseen {:history history
                                     :op-reads op-reads})))
          writes-by-type (h/task history writes-by-type []
-                                (writes-by-type history))
+                                (t :writes-by-type
+                                  (writes-by-type history)))
          reads-by-type (h/task history reads-by-type [op-reads op-reads]
-                               (reads-by-type history op-reads))
+                               (t :reads-by-type
+                                 (reads-by-type history op-reads)))
          version-orders (h/task history version-orders [rs reads-by-type]
-                                (version-orders history rs))
+                                (info :version-orders-start)
+                                (t :version-orders
+                                   (version-orders history rs)))
          ; Break up version orders into errors vs the orders themselves
          version-order-errors (h/task history version-order-errors
                                       [vos version-orders]
@@ -2185,6 +2251,7 @@
                                         ro readers-of
                                         vos version-orders
                                         ors op-reads]
+                        (info :cycles-start)
                         (t :cycles
                            (cycles!
                              (assoc opts

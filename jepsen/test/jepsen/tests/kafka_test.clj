@@ -60,22 +60,24 @@
           ; The write of c at 1 conflicts with the read of b at 1
           :errors [{:key :x, :index 1, :offset 1, :values #{:b :c}}]}
          (version-orders
-           ; Read [a b] at offset 0 and 1
-           [{:type :ok, :f :txn, :value [[:poll {:x [[0 :a] [1 :b]]}]]}
-            ; But write c at offset 1, b at offset 3, and d at offset 4. Even
-            ; though this crashes, we can prove it committed because we read
-            ; :b.
-            {:type :info, :f :txn, :value [[:send :x [1 :c]]
-                                           [:send :x [3 :b]]
-                                           [:send :x [4 :d]]]}]
+           (h/history
+             ; Read [a b] at offset 0 and 1
+             [{:type :ok, :f :txn, :value [[:poll {:x [[0 :a] [1 :b]]}]]}
+              ; But write c at offset 1, b at offset 3, and d at offset 4. Even
+              ; though this crashes, we can prove it committed because we read
+              ; :b.
+              {:type :info, :f :txn, :value [[:send :x [1 :c]]
+                                             [:send :x [3 :b]]
+                                             [:send :x [4 :d]]]}])
            {:ok {:x #{:a :b}}})))
 
   (testing "a real-world example"
-    (let [h [{:type :invoke, :f :send, :value [[:send 11 641]], :time 280153467070, :process 379}
-{:type :ok, :f :send, :value [[:send 11 [537 641]]], :time 280169754615, :process 379}
-{:type :invoke, :f :send, :value [[:send 11 645]], :time 283654729962, :process 363}
-{:type :ok, :f :send, :value [[:send 11 [537 645]]], :time 287474569112, :process 363}
-             ]]
+    (let [h (h/history
+              [{:type :invoke, :f :send, :value [[:send 11 641]], :time 280153467070, :process 379}
+               {:type :ok, :f :send, :value [[:send 11 [537 641]]], :time 280169754615, :process 379}
+               {:type :invoke, :f :send, :value [[:send 11 645]], :time 283654729962, :process 363}
+               {:type :ok, :f :send, :value [[:send 11 [537 645]]], :time 287474569112, :process 363}
+               ])]
       (is (= [{:key 11
                :index  0
                :offset 537
@@ -888,14 +890,15 @@
                (first (keep :unseen h))))
         ))))
 
-(deftest ^:focus perf-test
+#_(deftest ^:focus perf-test
   ; This is a little helper for performance benchmarking. Grab a
   ; slow-to-analyze test directory and it'll load the test.jepsen from it.
   (let [f "slow-kafka"
         test (store/test f)
         history (:history test)
-        checker (checker)
-        t0 (System/nanoTime)
-        r  (checker/check checker test history {})
-        t1 (System/nanoTime)]
-    (println "Checked in " (util/nanos->secs (- t1 t0)) " seconds")))
+        checker (checker)]
+    (dotimes [i 3]
+      (let [t0 (System/nanoTime)
+            r  (checker/check checker test history {})
+            t1 (System/nanoTime)]
+        (println "Checked in " (util/nanos->secs (- t1 t0)) " seconds")))))
