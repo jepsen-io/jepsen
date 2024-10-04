@@ -891,6 +891,7 @@
       []
       (let [; Since keys are sorted...
             max-i (bm/key (b/nth m (dec size)))]
+        ; Create a vector for each index up to and including max-i
         (loop [v (transient [])
                i 0]
           (if (< max-i i)
@@ -2212,8 +2213,8 @@
   ([history]
    (analysis history {}))
   ([history opts]
-   (let [t (fn [msg val]
-             (info msg)
+   (let [t (fn trace-logging [msg val]
+             ;(info msg)
              val)
          history (h/client-ops history)
          ; Basically this whole thing is a giant asynchronous graph of
@@ -2233,7 +2234,6 @@
                                (t :reads-by-type
                                  (reads-by-type history op-reads)))
          version-orders (h/task history version-orders [rs reads-by-type]
-                                (info :version-orders-start)
                                 (t :version-orders
                                    (version-orders history rs)))
          ; Break up version orders into errors vs the orders themselves
@@ -2251,7 +2251,6 @@
                                         ro readers-of
                                         vos version-orders
                                         ors op-reads]
-                        (info :cycles-start)
                         (t :cycles
                            (cycles!
                              (assoc opts
@@ -2469,14 +2468,12 @@
     (check [this test history opts]
       (let [dir (store/path! test)
             ; Analyze history
-            _ (info "start")
             {:keys [errors
                     realtime-lag
                     worst-realtime-lag
                     unseen] :as analysis}
             (analysis history {:directory dir
                                :ww-deps   (:ww-deps test)})
-            _ (info "analysis done")
 
             ; Write out a file with consume counts
             consume-counts-task (h/task history consume-counts []
@@ -2507,7 +2504,6 @@
         @order-viz-task
         @plot-unseen-task
         @plot-realtime-lags-task
-        (info "written")
 
         ; Construct results
         (->> errors

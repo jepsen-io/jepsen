@@ -890,7 +890,7 @@
                (first (keep :unseen h))))
         ))))
 
-#_(deftest ^:focus perf-test
+#_(deftest perf-test
   ; This is a little helper for performance benchmarking. Grab a
   ; slow-to-analyze test directory and it'll load the test.jepsen from it.
   (let [f "slow-kafka"
@@ -901,4 +901,4 @@
       (let [t0 (System/nanoTime)
             r  (checker/check checker test history {})
             t1 (System/nanoTime)]
-        (println "Checked in " (util/nanos->secs (- t1 t0)) " seconds")))))
+        (println "Checked in" (util/nanos->secs (- t1 t0)) "seconds")))))
