@@ -1621,14 +1621,15 @@
   (let [nemeses  (or nemeses (:nemeses (:plot test)))
         datasets (->> lags
                       (group-by group-fn)
-                      (map-vals (fn [lags]
+                      (map-vals (fn per-group [lags]
                                   ; At any point in time, we want the maximum
                                   ; lag for this thread across any key.
                                   (->> lags
-                                       (partition-by :time)
-                                       (map (partial util/max-by :lag))
-                                       (map (juxt (comp nanos->secs :time)
-                                                  (comp nanos->secs :lag)))
+                                       (util/partition-by-vec :time)
+                                       (mapv (fn ->point [lags]
+                                               (let [p (util/max-by :lag lags)]
+                                                 [(nanos->secs (:time p))
+                                                  (nanos->secs (:lag p))])))
                                        downsample-plot))))
         output  (.getCanonicalPath
                   (store/path! test subdirectory
@@ -2222,9 +2223,9 @@
                                :ww-deps   (:ww-deps test)})
             ; What caused our transactions to return indefinite results?
             info-txn-causes (->> history
-                                 (filter (comp #{:info} :type))
-                                 (filter (comp #{:txn :send :poll} :f))
-                                 (map :error)
+                                 h/infos
+                                 (h/filter (h/has-f? #{:txn :send :poll}))
+                                 (h/map :error)
                                  distinct)
             ; Which errors are bad enough to invalidate the test?
             bad-error-types (->> (keys errors)
