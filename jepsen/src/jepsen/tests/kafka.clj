@@ -1656,26 +1656,35 @@
 (defn plot-realtime-lags!
   "Constructs realtime lag plots for all processes together, and then another
   broken out by process, and also by key."
-  [test lags opts]
+  [{:keys [history] :as test} lags opts]
   (->> [{:group-name "thread",     :group-fn (partial op->thread test)}
         {:group-name "key",        :group-fn :key}
         {:group-name "thread-key", :group-fn (juxt (partial op->thread test)
                                                    :key)}]
-       (mapv (fn [{:keys [group-name group-fn] :as opts2}]
-               (let [opts (merge opts opts2)]
-                 (plot-realtime-lag!
-                   test lags (assoc opts :filename (str "realtime-lag-"
-                                                        group-name ".png")))
-                 (->> lags
-                      (group-by group-fn)
-                      (pmap (fn [[thread lags]]
-                              (plot-realtime-lag!
-                                test lags
-                                (assoc opts
-                                       :subdirectory (str "realtime-lag-"
-                                                          group-name)
-                                       :filename (str thread ".png")))))
-                      dorun))))))
+       (mapcat (fn per-group [{:keys [group-name group-fn] :as opts2}]
+                 (let [opts (merge opts opts2)]
+                   ; All together
+                   (cons (h/task history plot-realtime-lag []
+                                 (let [file (str "realtime-lag-" group-name
+                                                 ".png")
+                                       opts (assoc opts :filename file)]
+                                   (plot-realtime-lag! test lags opts)))
+                         ; And broken down
+                         (->> lags
+                              (group-by group-fn)
+                              (map (fn breakdown [[thread lags]]
+                                     (h/task history plot-realtime-lag-sub []
+                                             (plot-realtime-lag!
+                                               test
+                                               lags
+                                               (assoc opts
+                                                      :subdirectory
+                                                      (str "realtime-lag-"
+                                                           group-name)
+                                                      :filename
+                                                      (str thread ".png")))))))))))
+       doall
+       (mapv deref)))
 
 (defn worst-realtime-lag
   "Takes a seq of realtime lag measurements, and finds the point with the
@@ -1775,21 +1784,26 @@
   renders an HTML timeline of how each operation perceived that key's log."
   [test {:keys [version-orders errors history] :as analysis}]
   (let [history (h/remove h/invoke? history)]
-    (->> (select-keys errors [:inconsistent-offsets :duplicate :lost-write])
+    (->> (select-keys errors [:inconsistent-offsets
+                              :duplicate
+                              :lost-write
+                              :G1a])
          (mapcat val)
          (map :key)
          (concat (->> errors :unseen :unseen keys))
          distinct
-         (pmap (fn [k]
-                 (let [svg (key-order-viz k
-                                          (get-in version-orders [k :log])
-                                          history)
-                       path (store/path! test "orders"
-                                         (if (integer? k)
-                                           (format "%03d.svg" k)
-                                           (str k ".svg")))]
-                   (spit path (xml/emit svg)))))
-         dorun)))
+         (mapv (fn [k]
+                 (h/task history render-order-viz []
+                         (let [svg (key-order-viz
+                                     k
+                                     (get-in version-orders [k :log])
+                                     history)
+                               path (store/path! test "orders"
+                                                 (if (integer? k)
+                                                   (format "%03d.svg" k)
+                                                   (str k ".svg")))]
+                           (spit path (xml/emit svg))))))
+         (mapv deref))))
 
 (defn consume-counts
   "Kafka transactions are supposed to offer 'exactly once' processing: a
@@ -2199,6 +2213,12 @@
   (reify checker/Checker
     (check [this test history opts]
       (let [dir (store/path! test)
+            ; Write out a file with consume counts
+            consume-counts-task (h/task history consume-counts []
+                                        (store/with-out-file
+                                          test "consume-counts.edn"
+                                          (pprint (consume-counts history))))
+            ; Analyze history
             {:keys [errors
                     realtime-lag
                     worst-realtime-lag
@@ -2214,14 +2234,21 @@
             ; Which errors are bad enough to invalidate the test?
             bad-error-types (->> (keys errors)
                                  (remove (allowed-error-types test))
-                                 sort)]
-        ; Render plots
-        (render-order-viz!   test analysis)
-        (plot-unseen!        test unseen opts)
-        (plot-realtime-lags! test realtime-lag opts)
-        ; Write out a file with consume counts
-        (store/with-out-file test "consume-counts.edn"
-          (pprint (consume-counts history)))
+                                 sort)
+            ; Render plots
+            order-viz-task (h/task history order-viz []
+                                   (render-order-viz! test analysis))
+            plot-unseen-task (h/task history plot-unseen []
+                                     (plot-unseen! test unseen opts))
+            plot-realtime-lags-task (h/task history plot-realtime-lags []
+                                            (plot-realtime-lags!
+                                              test realtime-lag opts))]
+        ; Block on tasks
+        @consume-counts-task
+        @order-viz-task
+        @plot-unseen-task
+        @plot-realtime-lags-task
+
         ; Construct results
         (->> errors
              (map (partial condense-error test))
