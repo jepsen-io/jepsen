@@ -950,8 +950,8 @@
   [{:keys [history writes-by-type writer-of op-reads]}]
   (let [failed (:fail writes-by-type)
         ops (->> history
-                 (filter (comp #{:ok} :type))
-                 (filter (comp #{:txn :poll} :f)))]
+                 h/oks
+                 (h/filter (h/has-f? #{:txn :poll})))]
     (->> (for [op     ops
                [k vs] (op-reads op)
                v      vs
@@ -1015,6 +1015,11 @@
   run through each poll of k and cross off the values read. If there are any
   values left, they must be lost updates."
   [{:keys [history version-orders reads-by-type writer-of readers-of]}]
+  (assert history)
+  (assert version-orders)
+  (assert reads-by-type)
+  (assert writer-of)
+  (assert readers-of)
   ; Start with all the values we know were read
   (->> (:ok reads-by-type)
        (mapcat
@@ -1149,7 +1154,6 @@
   assume that rebalances invalidate any assumption of monotonically advancing
   offsets."
   [{:keys [history version-orders op-reads]}]
-  (info :int-poll-skip-start)
   (->> (t/mapcat
          (fn per-op [op]
            (let [rebalanced-keys (->> op :rebalance-log
@@ -2146,59 +2150,120 @@
   ([history]
    (analysis history {}))
   ([history opts]
-  (let [t                     (fn [msg val]
-                                (info msg)
-                                val)
-        history               (h/client-ops history)
-        op-reads              (h/task history op-reads []
-                                      (t :op-reads (op-reads-index history)))
-        unseen                (h/task history unseen [op-reads op-reads]
-                                      (info :unseen-start)
-                                      (t :unseen
-                                         (unseen {:history history
-                                                  :op-reads op-reads})))
-        writes-by-type        (future (writes-by-type history))
-        reads-by-type         (h/task history reads-by-type [op-reads op-reads]
-                                      (reads-by-type history op-reads))
-        version-orders        (future (version-orders history @reads-by-type))
-        writer-of             (future (writer-of history))
-        readers-of            (h/task history readers-of [op-reads op-reads]
-                                      (readers-of history op-reads))
-        by-process            (h/task history by-process []
-                                      (group-by :process history))
-        ; Sort of a hack; we only bother computing this for "real" histories
-        ; because our test suite often leaves off processes and times
-        realtime-lag          (h/task history realtime-lag []
-                                      (let [op (first history)]
-                                        (when (and (:process op)
-                                                   (:time op))
-                                          (realtime-lag history))))
-        worst-realtime-lag    (future (worst-realtime-lag @realtime-lag))
-        _ (info "waiting for version orders")
-        version-order-errors  (:errors @version-orders)
-        version-orders        (:orders @version-orders)
-        _ (info "version orders done")
-        analysis              (assoc opts
-                                     :history        history
-                                     :op-reads       @op-reads
-                                     :by-process     @by-process
-                                     :writer-of      @writer-of
-                                     :readers-of     @readers-of
-                                     :writes-by-type @writes-by-type
-                                     :reads-by-type  @reads-by-type
-                                     :version-orders version-orders)
-        _ (info "analysis phase 2 started")
-        precommitted-read-cases (future (t :precommitted-read
-                                           (precommitted-read-cases analysis)))
-        g1a-cases               (future (t :g1a (g1a-cases analysis)))
-        lost-write-cases        (future (t :lost-write (lost-write-cases analysis)))
-        poll-skip+nm-cases      (future (t :poll-skip
-                                           @(poll-skip+nonmonotonic-cases analysis)))
-        nonmonotonic-send-cases (future (t :nm-send (nonmonotonic-send-cases analysis)))
-        int-poll-skip+nm-cases  (future (t :int-poll-skip (int-poll-skip+nonmonotonic-cases analysis)))
-        int-send-skip+nm-cases  (future (t :int-send-skip (int-send-skip+nonmonotonic-cases analysis)))
-        duplicate-cases         (future (t :dup (duplicate-cases analysis)))
-        cycles                  (future (t :cycles (cycles! analysis)))
+   (let [t (fn [msg val]
+             (info msg)
+             val)
+         history (h/client-ops history)
+         ; Basically this whole thing is a giant asynchronous graph of
+         ; computation--we want to re-use expensive computational passes
+         ; wherever possible. We fire off a bunch of history tasks and let it
+         ; handle the dependency graph to maximize concurrency.
+         op-reads (h/task history op-reads []
+                          (t :op-reads (op-reads-index history)))
+         unseen (h/task history unseen [op-reads op-reads]
+                        (t :unseen
+                           (unseen {:history history
+                                    :op-reads op-reads})))
+         writes-by-type (h/task history writes-by-type []
+                                (writes-by-type history))
+         reads-by-type (h/task history reads-by-type [op-reads op-reads]
+                               (reads-by-type history op-reads))
+         version-orders (h/task history version-orders [rs reads-by-type]
+                                (version-orders history rs))
+         ; Break up version orders into errors vs the orders themselves
+         version-order-errors (h/task history version-order-errors
+                                      [vos version-orders]
+                                      (:errors vos))
+         version-orders (h/task history version-orders-orders
+                                [vos version-orders]
+                                (:orders vos))
+         writer-of (h/task history writer-of []
+                           (writer-of history))
+         readers-of (h/task history readers-of [op-reads op-reads]
+                            (readers-of history op-reads))
+         cycles (h/task history cycles [wo writer-of
+                                        ro readers-of
+                                        vos version-orders
+                                        ors op-reads]
+                        (t :cycles
+                           (cycles!
+                             (assoc opts
+                                    :history        history
+                                    :writer-of      wo
+                                    :readers-of     ro
+                                    :version-orders vos
+                                    :op-reads       ors))))
+         by-process (h/task history by-process []
+                            (group-by :process history))
+         ; Sort of a hack; we only bother computing this for "real" histories
+         ; because our test suite often leaves off processes and times
+         realtime-lag (h/task history realtime-lag []
+                              (let [op (first history)]
+                                (when (and (:process op)
+                                           (:time op))
+                                  (realtime-lag history))))
+         worst-realtime-lag (h/task history worst-realtime-lag
+                                    [rt realtime-lag]
+                                    (worst-realtime-lag rt))
+         precommitted-read-cases (h/task history precommitted-read-cases
+                                         [op-reads op-reads]
+                                         (t :precommitted-read
+                                            (precommitted-read-cases
+                                              {:history  history
+                                               :op-reads op-reads})))
+         g1a-cases (h/task history g1a-cases [wbt writes-by-type
+                                              wo  writer-of
+                                              ors op-reads]
+                           (t :g1a (g1a-cases
+                                     {:history        history
+                                      :writer-of      wo
+                                      :writes-by-type wbt
+                                      :op-reads       ors})))
+         lost-write-cases (h/task history lost-write-cases [vos version-orders
+                                                            rbt reads-by-type
+                                                            wo  writer-of
+                                                            ro  readers-of]
+                                  (t :lost-write
+                                     (lost-write-cases
+                                       {:history        history
+                                        :version-orders vos
+                                        :reads-by-type  rbt
+                                        :writer-of      wo
+                                        :readers-of     ro})))
+        poll-skip+nm-cases (h/task history poll-skip+nm-cases
+                                   [bp  by-process
+                                    vos version-orders
+                                    ors op-reads]
+                                   (t :poll-skip
+                                      @(poll-skip+nonmonotonic-cases
+                                         {:history        history
+                                          :by-process     bp
+                                          :version-orders vos
+                                          :op-reads       ors})))
+        nonmonotonic-send-cases (h/task history nonmonotonic-send-cases
+                                        [bp by-process
+                                         vos version-orders]
+                                        (t :nm-send
+                                           (nonmonotonic-send-cases
+                                             {:history        history
+                                              :by-process     bp
+                                              :version-orders vos})))
+        int-poll-skip+nm-cases (h/task history int-poll-skip+nonmonotonic-cases
+                                       [vos version-orders
+                                        ors op-reads]
+                                       (t :int-poll-skip
+                                          (int-poll-skip+nonmonotonic-cases
+                                            {:history        history
+                                             :version-orders vos
+                                             :op-reads       ors})))
+        int-send-skip+nm-cases (h/task history int-send-skip+nm-cases
+                                       [vos version-orders]
+                                       (t :int-send-skip
+                                          (int-send-skip+nonmonotonic-cases
+                                            {:history        history
+                                             :version-orders vos})))
+        duplicate-cases (h/task history duplicate-cases [vos version-orders]
+                                (t :dup (duplicate-cases {:version-orders vos})))
         poll-skip-cases         (:skip @poll-skip+nm-cases)
         nonmonotonic-poll-cases (:nonmonotonic @poll-skip+nm-cases)
         int-poll-skip-cases     (:skip @int-poll-skip+nm-cases)
@@ -2217,7 +2282,6 @@
                                                    (filter (comp seq val))
                                                    (into (sorted-map))))))
         ]
-    (info "analysis accrete")
     {:errors (cond-> {}
                @duplicate-cases
                (assoc :duplicate @duplicate-cases)
@@ -2234,8 +2298,8 @@
                int-send-skip-cases
                (assoc :int-send-skip int-send-skip-cases)
 
-               version-order-errors
-               (assoc :inconsistent-offsets version-order-errors)
+               @version-order-errors
+               (assoc :inconsistent-offsets @version-order-errors)
 
                @precommitted-read-cases
                (assoc :precommitted-read @precommitted-read-cases)
@@ -2265,7 +2329,7 @@
      :realtime-lag       @realtime-lag
      :worst-realtime-lag @worst-realtime-lag
      :unseen             @unseen
-     :version-orders     version-orders})))
+     :version-orders     @version-orders})))
 
 (defn condense-error
   "Takes a test and a pair of an error type (e.g. :lost-write) and a seq of
