@@ -9,7 +9,7 @@
                  [org.clojure/tools.cli "1.0.219"]
                  [spootnik/unilog "0.7.31"
                   :exclusions [org.slf4j/slf4j-api]]
-                 [elle "0.2.1"]
+                 [elle "0.2.2-SNAPSHOT"]
                  [clj-time "0.15.2"]
                  [io.jepsen/history "0.1.3"]
                  [jepsen.txn "0.1.2"]

@@ -171,8 +171,12 @@
   uncommitted records."
   (:require [analemma [xml :as xml]
                       [svg :as svg]]
-            [bifurcan-clj [core :as b]]
-            [clojure [pprint :refer [pprint]]
+            [bifurcan-clj [core :as b]
+                          [int-map :as bim]
+                          [map :as bm]
+                          [set :as bs]]
+            [clojure [datafy :refer [datafy]]
+                     [pprint :refer [pprint]]
                      [set :as set]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
@@ -256,6 +260,16 @@
                #{:send}  (assoc op :f :send)
                op))
            gen))
+
+(defn firstv
+  "First for vectors."
+  [v]
+  (nth v 0))
+
+(defn secondv
+  "Second for vectors."
+  [v]
+  (nth v 1))
 
 (defn op->max-poll-offsets
   "Takes an operation and returns a map of keys to the highest offsets polled."
@@ -517,19 +531,28 @@
   "Takes an operation and a function which takes an offset-value pair. Returns
   a map of keys read by this operation to the sequence of (f [offset value])
   read for that key."
-  [op f]
-  (when (#{:txn :poll} (:f op))
-    (reduce (fn mop [res mop]
-              (if (= :poll (first mop))
-                (reduce (fn per-key [res [k pairs]]
-                          (let [vs  (get res k [])
-                                vs' (into vs (map f pairs))]
-                            (assoc res k vs')))
-                        res
-                        (second mop))
-                res))
-            {}
-            (:value op))))
+  [^jepsen.history.Op op f]
+  ; This shows up in lots of our tight loops, so it's full of
+  ; micro-optimizations
+  ; shape
+  (when (or (identical? :txn (.f op))
+            (identical? :poll (.f op)))
+    (let [r (reduce (fn mop [res mop]
+                      (if (and (identical? :poll (nth mop 0))
+                               (<= 2 (count mop)))
+                        (reduce (fn per-key [res [k pairs]]
+                                  (let [vs' (reduce (fn per-pair [vs pair]
+                                                      (conj! vs (f pair)))
+                                                    (get res k (transient []))
+                                                    pairs)]
+                                    (assoc! res k vs')))
+                                res
+                                (nth mop 1))
+                        res))
+                    (transient {})
+                    (.value op))]
+      ; Persist
+      (update-vals (persistent! r) persistent!))))
 
 (defn op-read-pairs
   "Returns a map of keys to the sequence of all [offset value] pairs read for
@@ -540,12 +563,34 @@
 (defn op-read-offsets
   "Returns a map of keys to the sequence of all offsets read for that key."
   [op]
-  (op-reads-helper op first))
+  (op-reads-helper op firstv))
 
 (defn op-reads
   "Returns a map of keys to the sequence of all values read for that key."
   [op]
-  (op-reads-helper op second))
+  (op-reads-helper op secondv))
+
+(defn op-reads-index
+  "We call op-reads a LOT. This takes a history and builds an efficient index,
+  then returns a function (op-reads op) which works just like (op-reads op),
+  but is memoized."
+  [history]
+  (let [reducer (fn reducer
+                  ([] (b/linear (bim/int-map)))
+                  ([index] index)
+                  ([index ^jepsen.history.Op op]
+                   (bim/put index (.index op) (op-reads op))))
+        combiner (fn combiner
+                   ([] (b/linear (bim/int-map)))
+                   ([index] (b/forked index))
+                   ([index1 index2]
+                    (bm/merge index1 index2)))
+        fold {:name :op-reads-index
+              :reducer reducer
+              :combiner combiner}
+        index (h/fold history fold)]
+    (fn memoized [^jepsen.history.Op op]
+      (bim/get index (.index op) nil))))
 
 (defn op-pairs
   "Returns a map of keys to the sequence of all [offset value] pairs either
@@ -721,11 +766,11 @@
                         (reduce (partial merge-with set/union) {}))))))
 
 (defn reads-by-type
-  "Takes a history and constructs a map of types (:ok, :info, :fail) to maps of
-  keys to the set of all values which were read for that key. We use this to
-  identify, for instance, the known-successful reads for some key as a part of
-  finding lost updates."
-  [history]
+  "Takes a history and an op-reads fn, and constructs a map of types (:ok,
+  :info, :fail) to maps of keys to the set of all values which were read for
+  that key. We use this to identify, for instance, the known-successful reads
+  for some key as a part of finding lost updates."
+  [history op-reads]
   (->> history
        (remove (comp #{:invoke} :type))
        (filter (comp #{:txn :poll} :f))
@@ -902,7 +947,7 @@
   "Takes a partial analysis and looks for aborted reads, where a known-failed
   write is nonetheless visible to a committed read. Returns a seq of error
   maps, or nil if none are found."
-  [{:keys [history writes-by-type writer-of]}]
+  [{:keys [history writes-by-type writer-of op-reads]}]
   (let [failed (:fail writes-by-type)
         ops (->> history
                  (filter (comp #{:ok} :type))
@@ -924,7 +969,7 @@
 
   This is legal in most DBs, but in Kafka's model, sent values are supposed to
   be invisible to *all* pollers until their producing txn commits."
-  [{:keys [history]}]
+  [{:keys [history op-reads]}]
   (->> (t/keep (fn check-op [op]
                  (let [reads  (op-reads op)
                        writes (op-writes op)]
@@ -1043,6 +1088,53 @@
   [ms]
   (seq (map (fn [m] (dissoc m :type)) ms)))
 
+(defn int-poll-skip+nonmonotonic-cases-per-key
+  "A reducer for int-poll-skip+nonmonotonic-cases. Takes version orders, an op,
+  a rebalanced-keys set, a transient vector of error maps and a [key, values]
+  pair from (op-reads). Adds an error if we can find one in some key."
+  [version-orders op rebalanced-keys errs [k vs]]
+  (if (rebalanced-keys k)
+    ; We rebalanced this key; we shouldn't expect any kind of internal
+    ; consistency.
+    errs
+    ; Proceed
+    (let [{:keys [by-index by-value]} (get version-orders k)]
+      ; Zip along each pair of observed values, looking at the delta of their
+      ; indices
+      (loopr [errs errs
+              i1   nil  ; Previous index
+              v1   ::init] ; Previous value
+             [v2 vs]
+             (let [; What are their indices in the log?
+                   i2 (get by-value v2)
+                   delta (if (and i1 i2)
+                           (- i2 i1)
+                           ; We don't know; assume we just incremented by 1
+                           1)]
+               (recur
+                 (cond (< 1 delta)
+                       (conj! errs
+                              {:type     :skip
+                               :key      k
+                               :values   [v1 v2]
+                               :delta    delta
+                               :skipped  (map by-index (range (inc i1) i2))
+                               :op       op})
+
+                       (< delta 1)
+                       (conj! errs {:type    :nonmonotonic
+                                    :key     k
+                                    :values  [v1 v2]
+                                    :delta   delta
+                                    :op      op})
+
+                       true
+                       errs)
+                 i2
+                 v2))
+             ; Done looping through values
+             errs))))
+
 (defn int-poll-skip+nonmonotonic-cases
   "Takes a partial analysis and looks for cases where a single transaction
   contains:
@@ -1056,45 +1148,24 @@
   involved in one of these violations, we don't report it as an error: we
   assume that rebalances invalidate any assumption of monotonically advancing
   offsets."
-  [{:keys [history version-orders]}]
-  (->> history
-       (pmap
+  [{:keys [history version-orders op-reads]}]
+  (info :int-poll-skip-start)
+  (->> (t/mapcat
          (fn per-op [op]
            (let [rebalanced-keys (->> op :rebalance-log
                                       (mapcat :keys)
                                       set)]
-             ; Consider each pair of reads of some key in this op...
-             (->> (for [[k vs]  (op-reads op)
-                        [v1 v2] (partition 2 1 vs)]
-                    (let [{:keys [by-index by-value]} (get version-orders k)
-                          ; What are their indices in the log?
-                          i1 (get by-value v1)
-                          i2 (get by-value v2)
-                          delta (if (and i1 i2)
-                                  (- i2 i1)
-                                  1)]
-                      (cond ; If a key was rebalanced during the transaction,
-                            ; all bets are off.
-                            (rebalanced-keys k)
-                            nil
-
-                            (< 1 delta)
-                            {:type     :skip
-                             :key      k
-                             :values   [v1 v2]
-                             :delta    delta
-                             :skipped  (map by-index (range (inc i1) i2))
-                             :op       op}
-
-                            (< delta 1)
-                            {:type    :nonmonotonic
-                             :key     k
-                             :values  [v1 v2]
-                             :delta   delta
-                             :op      op})))
-                  (remove nil?)))))
-       (mapcat identity)
-       (group-by :type)
+             ; Consider each key
+             (persistent!
+               (reduce (partial int-poll-skip+nonmonotonic-cases-per-key
+                                version-orders
+                                op
+                                rebalanced-keys)
+                       (transient [])
+                       (op-reads op))))))
+       (t/group-by :type)
+       (t/into [])
+       (h/tesser history)
        (map-vals strip-types)))
 
 (defn int-send-skip+nonmonotonic-cases
@@ -1134,112 +1205,121 @@
        (group-by :type)
        (map-vals strip-types)))
 
+(defn poll-skip+nonmonotonic-cases-per-process
+  "Per-process helper for poll-skip+nonmonotonic cases."
+  [version-orders op-reads ops]
+  ; Iterate over this process's operations, building up a vector of
+  ; errors.
+  (loopr
+    [errors     []  ; A vector of error maps
+     last-reads {}] ; A map of key -> op last last read that key
+    [op ops]
+    (case (:f op)
+      ; When we assign or subscribe a new topic, preserve *only*
+      ; those last-reads which we're still subscribing to.
+      (:assign, :subscribe)
+      (recur errors
+             (if (#{:invoke :fail} (:type op))
+               last-reads
+               (select-keys last-reads (:value op))))
+
+      (:txn, :poll)
+      (let [reads (op-reads op)
+            ; Look at each key and values read by this op.
+            errs (for [[k reads] reads]
+                   ; What was the last op that read this key?
+                   (if-let [last-op (get last-reads k)]
+                     ; Compare the index of the last thing read by
+                     ; the last op read to the index of our first
+                     ; read
+                     (let [vo  (get-in version-orders [k :by-value])
+                           v   (-> last-op op-reads (get k) last)
+                           v'  (first reads)
+                           i   (get vo v)
+                           i'  (get vo v')
+                           delta (if (and i i')
+                                   (- i' i)
+                                   1)]
+                       [(when (< 1 delta)
+                          ; We can show that this op skipped an
+                          ; index!
+                          (let [voi (-> version-orders (get k) :by-index)
+                                skipped (map voi (range (inc i) i'))]
+                            {:type    :skip
+                             :key     k
+                             :delta   delta
+                             :skipped skipped
+                             :ops     [last-op op]}))
+                        (when (< delta 1)
+                          ; Aha, this wasn't monotonic!
+                          {:type   :nonmonotonic
+                           :key    k
+                           :values [v v']
+                           :delta  delta
+                           :ops    [last-op op]})])
+                     ; First read of this key
+                     nil))
+            errors' (->> errs
+                         (mapcat identity)
+                         (remove nil?)
+                         (into errors))
+            ; Update our last-reads index for this op's read keys.
+            last-reads'
+            (case (:type op)
+              :ok
+              (reduce (fn update-last-read [lr k]
+                        (assoc lr k op))
+                      last-reads
+                      (keys reads))
+
+              ; If this was an invoke, nothing changes. If it failed
+              ; or crashed, we want the offsets to remain unchanged as
+              ; well.
+              (:invoke, :fail, :info) last-reads)]
+        (recur errors' last-reads'))
+
+      ; Some other :f
+      (recur errors last-reads))
+    ; Done with history
+    errors))
+
 (defn poll-skip+nonmonotonic-cases
   "Takes a partial analysis and checks each process's operations sequentially,
   looking for cases where a single process either jumped backwards or skipped
-  over some region of a topic-partition. Returns a map:
+  over some region of a topic-partition. Returns a task of a map:
 
     {:nonmonotonic  Cases where a process started polling at or before a
                     previous operation last left off
      :skip          Cases where two successive operations by a single process
                     skipped over one or more values for some key.}"
-  [{:keys [history version-orders]}]
-  ; First, group ops by process
-  (->> (group-by :process history)
-       ; Then reduce each process, keeping track of the most recent read
-       ; index for each key.
-       (map-vals
-         (fn per-process [ops]
-           ; Iterate over this process's operations, building up a vector of
-           ; errors.
-           (loopr
-             [errors     []  ; A vector of error maps
-              last-reads {}] ; A map of key -> op last last read that key
-             [op ops]
-             (case (:f op)
-               ; When we assign or subscribe a new topic, preserve *only*
-               ; those last-reads which we're still subscribing to.
-               (:assign, :subscribe)
-               (recur errors
-                      (if (#{:invoke :fail} (:type op))
-                        last-reads
-                        (select-keys last-reads (:value op))))
-
-               (:txn, :poll)
-               (let [reads (op-reads op)
-                     ; Look at each key and values read by this op.
-                     errs (for [[k reads] reads]
-                            ; What was the last op that read this key?
-                            (if-let [last-op (get last-reads k)]
-                              ; Compare the index of the last thing read by
-                              ; the last op read to the index of our first
-                              ; read
-                              (let [vo  (get-in version-orders
-                                                [k :by-value])
-                                    v   (-> last-op op-reads (get k) last)
-                                    v'  (first reads)
-                                    i   (get vo v)
-                                    i'  (get vo v')
-                                    delta (if (and i i')
-                                            (- i' i)
-                                            1)]
-                                [(when (< 1 delta)
-                                   ; We can show that this op skipped an
-                                   ; index!
-                                   (let [voi (-> version-orders (get k)
-                                                 :by-index)
-                                         skipped (map voi
-                                                      (range (inc i) i'))]
-                                     {:type    :skip
-                                      :key     k
-                                      :delta   delta
-                                      :skipped skipped
-                                      :ops     [last-op op]}))
-                                 (when (< delta 1)
-                                   ; Aha, this wasn't monotonic!
-                                   {:type   :nonmonotonic
-                                    :key    k
-                                    :values [v v']
-                                    :delta  delta
-                                    :ops    [last-op op]})])
-                              ; First read of this key
-                              nil))
-                     errors' (->> errs
-                                  (mapcat identity)
-                                  (remove nil?)
-                                  (into errors))
-                     ; Update our last-reads index for this op's read keys.
-                     last-reads'
-                     (case (:type op)
-                       :ok
-                       (reduce (fn update-last-read [lr k]
-                                 (assoc lr k op))
-                               last-reads
-                               (keys reads))
-
-                       ; If this was an invoke, nothing changes. If it failed
-                       ; or crashed, we want the offsets to remain unchanged as
-                       ; well.
-                       (:invoke, :fail, :info) last-reads)]
-                 (recur errors' last-reads'))
-
-               ; Some other :f
-               (recur errors last-reads))
-             ; Done with history
-             errors)))
-       ; Join together errors from all processes
-       (mapcat val)
-       (group-by :type)
-       (map-vals strip-types)))
+  [{:keys [history by-process version-orders op-reads]}]
+  (let [tasks (mapv (fn [[process ops]]
+                      ; Reduce each process, keeping track of the most recent
+                      ; read index for each key. Each one is a specific task.
+                      (h/task history
+                              poll-skip+nonmonotonic-cases-per-process
+                              []
+                        (poll-skip+nonmonotonic-cases-per-process
+                          version-orders
+                          op-reads
+                          ops)))
+              by-process)]
+    ; Join tasks
+    (h/task-call history
+                 :poll-skip+nonmonotonic-cases
+                 tasks
+                 (fn accrete [tasks]
+                   (->> (mapcat identity tasks)
+                        (group-by :type)
+                        (map-vals strip-types))))))
 
 (defn nonmonotonic-send-cases
   "Takes a partial analysis and checks each process's operations sequentially,
   looking for cases where a single process's sends to a given key go backwards
   relative to the version order."
-  [{:keys [history version-orders]}]
+  [{:keys [history by-process version-orders]}]
   ; First, consider each process' completions...
-  (->> (filter (comp #{:ok :info} :type) history)
-       (group-by :process)
+  (->> by-process
        ; Then reduce each process, keeping track of the most recent sent
        ; index for each key.
        (map-vals
@@ -1254,52 +1334,61 @@
                errors
                ; Process this op
                (let [op (first ops)]
-                 (case (:f op)
-                   ; When we assign or subscribe a new topic, preserve *only*
-                   ; those last-reads which we're still subscribing to.
-                   (:assign, :subscribe)
+                 (if-not (or (identical? :ok (:type op))
+                             (identical? :info (:type op)))
+                   ; Irrelevant
                    (recur (next ops)
-                          errors
-                          (if (#{:invoke :fail} (:type op))
-                            last-sends
-                            (select-keys last-sends (:value op))))
+                         errors
+                         last-sends)
 
-                   (:send, :txn)
-                   (let [; Look at each key and values sent by this op.
-                         sends (op-writes op)
-                         errs (for [[k sends] sends]
-                                ; What was the last op that sent to this key?
-                                (if-let [last-op (get last-sends k)]
-                                  ; Compare the index of the last thing sent by
-                                  ; the last op to the index of our first send
-                                  (let [vo  (get-in version-orders
-                                                    [k :by-value])
-                                        v   (-> last-op op-writes (get k) last)
-                                        v'  (first sends)
-                                        i   (get vo v)
-                                        i'  (get vo v')
-                                        delta (if (and i i')
-                                                (- i' i)
-                                                1)]
-                                    (when (< delta 1)
-                                      ; Aha, this wasn't monotonic!
-                                      {:key    k
-                                       :values [v v']
-                                       :delta  (- i' i)
-                                       :ops    [last-op op]}))
-                                  ; First send to this key
-                                  nil))
-                         errs (->> errs
-                                   (remove nil?))
-                         ; Update our last-reads index for this op's sent keys
-                         last-sends' (->> (keys sends)
-                                          (reduce (fn update-last-send [lr k]
-                                                    (assoc lr k op))
-                                                  last-sends))]
-                     (recur (next ops) (into errors errs) last-sends'))
+                   (case (:f op)
+                     ; When we assign or subscribe a new topic, preserve *only*
+                     ; those last-reads which we're still subscribing to.
+                     (:assign, :subscribe)
+                     (recur (next ops)
+                            errors
+                            (if (#{:invoke :fail} (:type op))
+                              last-sends
+                              (select-keys last-sends (:value op))))
 
-                   ; Some other :f
-                   (recur (next ops) errors last-sends)))))))
+                     (:send, :txn)
+                     (let [; Look at each key and values sent by this op.
+                           sends (op-writes op)
+                           errs (for [[k sends] sends]
+                                  ; What was the last op that sent to this key?
+                                  (if-let [last-op (get last-sends k)]
+                                    ; Compare the index of the last thing sent
+                                    ; by the last op to the index of our first
+                                    ; send
+                                    (let [vo  (get-in version-orders
+                                                      [k :by-value])
+                                          v   (-> last-op op-writes (get k)
+                                                  last)
+                                          v'  (first sends)
+                                          i   (get vo v)
+                                          i'  (get vo v')
+                                          delta (if (and i i')
+                                                  (- i' i)
+                                                  1)]
+                                      (when (< delta 1)
+                                        ; Aha, this wasn't monotonic!
+                                        {:key    k
+                                         :values [v v']
+                                         :delta  (- i' i)
+                                         :ops    [last-op op]}))
+                                    ; First send to this key
+                                    nil))
+                           errs (->> errs
+                                     (remove nil?))
+                           ; Update our last-reads index for this op's sent keys
+                           last-sends' (->> (keys sends)
+                                            (reduce (fn update-last-send [lr k]
+                                                      (assoc lr k op))
+                                                    last-sends))]
+                       (recur (next ops) (into errors errs) last-sends'))
+
+                     ; Some other :f
+                     (recur (next ops) errors last-sends))))))))
        ; Join together errors from all processes
        (mapcat val)
        seq))
@@ -1332,7 +1421,7 @@
        seq))
 
 (defn unseen
-  "Takes a history and yields a series of maps like
+  "Takes a partial analysis and yields a series of maps like
 
     {:time    The time in nanoseconds
      :unseen  A map of keys to the number of messages in that key which have
@@ -1340,32 +1429,49 @@
 
   The final map in the series includes a :messages key: a map of keys to sets
   of messages that were unseen."
-  [history]
-  (let [[out unseen]
-        (reduce
-          ; Out is a vector of output observations. sent is a map of keys to
-          ; successfully sent values; polled is a map of keys to successfully
-          ; read values.
-          (fn red [[out sent polled :as acc] {:keys [type time f] :as op}]
-            (if-not (and (= type :ok)
-                         (#{:poll :send :txn} f))
-              acc
-              (let [sent'   (->> op op-writes (map-vals set)
-                                 (merge-with set/union sent))
-                    polled' (->> op op-reads (map-vals set)
-                                 (merge-with set/union polled))
-                    unseen  (merge-with set/difference sent' polled')]
-                ; We don't have to keep looking for things we've seen, so we can
-                ; recur with unseen rather than sent'.
-                [(conj! out {:time time, :unseen (map-vals count unseen)})
-                 unseen
-                 polled'])))
-          [(transient []) {} {}]
-          history)
-        out (persistent! out)]
-    (when (seq out)
-      (update out (dec (count out))
-              assoc :messages unseen))))
+  [{:keys [history op-reads]}]
+  (let [; We'll ignore everything but OK txns
+        history (->> history
+                     (h/filter h/ok?)
+                     (h/filter (h/has-f? #{:poll :send :txn})))
+        ; For converting clojure sets to bifurcan
+        ->set (fn [k v] (bs/from v))]
+    (loopr [; A vector of output observations
+            out    (transient [])
+            ; A map of keys to bifurcan sets of successfully sent values
+            sent   (b/linear (bm/map))
+            ; A bifurcan map of keys to bifurcan sets of successfully read
+            ; values
+            polled (b/linear (bm/map))]
+           ; For each op...
+           [{:keys [type f time] :as op} history]
+           (let [; Merge in what this op sent
+                 sent' (bm/merge sent
+                                 (-> op op-writes bm/from
+                                     (bm/map-values ->set))
+                                 bs/union)
+                 ; Merge in what this op polled
+                 polled' (bm/merge polled
+                                   (-> op op-reads bm/from
+                                       (bm/map-values ->set))
+                                   bs/union)
+                 ; What haven't we seen?
+                 unseen (bm/merge sent' polled' bs/difference)]
+             ; We don't have to keep looking for things we've seen, sow e can
+             ; recur with unseen rather than sent'
+             (recur (conj! out {:time   time
+                                :unseen (-> unseen
+                                            (bm/map-values #(b/size %2))
+                                            datafy)})
+                    unseen
+                    polled'))
+           ; Done iterating over history
+           (let [out (persistent! out)]
+             (when (seq out)
+               (update out (dec (count out)) assoc :messages
+                       (-> sent
+                           (bm/map-values #(datafy %2))
+                           datafy)))))))
 
 (defn plot-bounds
   "Quickly determine {:min-x, :max-x, :min-y, :max-y} from a series of [x y]
@@ -1815,7 +1921,7 @@
   performed a poll while subscribed (not assigned!) and keeping track of the
   number of times each key and value is polled. Yields a map of keys to values
   to consumed counts, wherever that count is more than one."
-  [history]
+  [{:keys [history op-reads]}]
   (loopr [counts      {}  ; process->k->v->count
           subscribed #{}] ; set of processes which are subscribed
          [{:keys [type f process value] :as op} history]
@@ -1868,11 +1974,11 @@
          (map-vals persistent! (persistent! writer-of))))
 
 (defn readers-of
-  "Takes a history and builds a map of keys to values to vectors of completion
-  operations which observed those that value."
-  [history]
+  "Takes a history and an op-reads fn, and builds a map of keys to values to
+  vectors of completion operations which observed those that value."
+  [history op-reads]
   (loopr [readers (transient {})]
-         [op     (remove (comp #{:invoke} :type) history)
+         [op     (h/remove h/invoke? history)
           [k vs] (op-reads op)
           v      vs]
          (let [k-readers   (get readers   k (transient {}))
@@ -1969,7 +2075,7 @@
                 (NeverExplainer.)
                 (WWExplainer. writer-of version-orders))})
 
-(defrecord WRExplainer [writer-of]
+(defrecord WRExplainer [writer-of op-reads]
   elle/DataExplainer
   (explain-pair-data [_ a b]
     (->> (for [[k vs] (op-reads b)
@@ -1992,7 +2098,7 @@
 (defn wr-graph
   "Analyzes a history to extract write-read dependencies. T1 < T2 iff T1 writes
   some v to k and T2 reads k."
-  [{:keys [writer-of readers-of]} history]
+  [{:keys [writer-of readers-of op-reads]} history]
   {:graph (loopr [g (b/linear (g/op-digraph))]
                  [[k v->readers] readers-of
                   [v readers]    v->readers]
@@ -2001,7 +2107,7 @@
                      (recur (g/link-to-all g writer readers wr)))
                    (throw+ {:type :no-writer-of-value, :key k, :value v}))
                  (b/forked g))
-   :explainer (WRExplainer. writer-of)})
+   :explainer (WRExplainer. writer-of op-reads)})
 
 (defn graph
   "A combined Elle dependency graph between completion operations."
@@ -2040,12 +2146,26 @@
   ([history]
    (analysis history {}))
   ([history opts]
-  (let [history               (h/client-ops history)
+  (let [t                     (fn [msg val]
+                                (info msg)
+                                val)
+        history               (h/client-ops history)
+        op-reads              (h/task history op-reads []
+                                      (t :op-reads (op-reads-index history)))
+        unseen                (h/task history unseen [op-reads op-reads]
+                                      (info :unseen-start)
+                                      (t :unseen
+                                         (unseen {:history history
+                                                  :op-reads op-reads})))
         writes-by-type        (future (writes-by-type history))
-        reads-by-type         (future (reads-by-type history))
+        reads-by-type         (h/task history reads-by-type [op-reads op-reads]
+                                      (reads-by-type history op-reads))
         version-orders        (future (version-orders history @reads-by-type))
         writer-of             (future (writer-of history))
-        readers-of            (future (readers-of history))
+        readers-of            (h/task history readers-of [op-reads op-reads]
+                                      (readers-of history op-reads))
+        by-process            (h/task history by-process []
+                                      (group-by :process history))
         ; Sort of a hack; we only bother computing this for "real" histories
         ; because our test suite often leaves off processes and times
         realtime-lag          (h/task history realtime-lag []
@@ -2054,25 +2174,31 @@
                                                    (:time op))
                                           (realtime-lag history))))
         worst-realtime-lag    (future (worst-realtime-lag @realtime-lag))
-        unseen                (future (unseen history))
+        _ (info "waiting for version orders")
         version-order-errors  (:errors @version-orders)
         version-orders        (:orders @version-orders)
+        _ (info "version orders done")
         analysis              (assoc opts
                                      :history        history
+                                     :op-reads       @op-reads
+                                     :by-process     @by-process
                                      :writer-of      @writer-of
                                      :readers-of     @readers-of
                                      :writes-by-type @writes-by-type
                                      :reads-by-type  @reads-by-type
                                      :version-orders version-orders)
-        precommitted-read-cases (future (precommitted-read-cases analysis))
-        g1a-cases               (future (g1a-cases analysis))
-        lost-write-cases        (future (lost-write-cases analysis))
-        poll-skip+nm-cases      (future (poll-skip+nonmonotonic-cases analysis))
-        nonmonotonic-send-cases (future (nonmonotonic-send-cases analysis))
-        int-poll-skip+nm-cases  (future (int-poll-skip+nonmonotonic-cases analysis))
-        int-send-skip+nm-cases  (future (int-send-skip+nonmonotonic-cases analysis))
-        duplicate-cases         (future (duplicate-cases analysis))
-        cycles                  (future (cycles! analysis))
+        _ (info "analysis phase 2 started")
+        precommitted-read-cases (future (t :precommitted-read
+                                           (precommitted-read-cases analysis)))
+        g1a-cases               (future (t :g1a (g1a-cases analysis)))
+        lost-write-cases        (future (t :lost-write (lost-write-cases analysis)))
+        poll-skip+nm-cases      (future (t :poll-skip
+                                           @(poll-skip+nonmonotonic-cases analysis)))
+        nonmonotonic-send-cases (future (t :nm-send (nonmonotonic-send-cases analysis)))
+        int-poll-skip+nm-cases  (future (t :int-poll-skip (int-poll-skip+nonmonotonic-cases analysis)))
+        int-send-skip+nm-cases  (future (t :int-send-skip (int-send-skip+nonmonotonic-cases analysis)))
+        duplicate-cases         (future (t :dup (duplicate-cases analysis)))
+        cycles                  (future (t :cycles (cycles! analysis)))
         poll-skip-cases         (:skip @poll-skip+nm-cases)
         nonmonotonic-poll-cases (:nonmonotonic @poll-skip+nm-cases)
         int-poll-skip-cases     (:skip @int-poll-skip+nm-cases)
@@ -2091,6 +2217,7 @@
                                                    (filter (comp seq val))
                                                    (into (sorted-map))))))
         ]
+    (info "analysis accrete")
     {:errors (cond-> {}
                @duplicate-cases
                (assoc :duplicate @duplicate-cases)
@@ -2134,6 +2261,7 @@
                true
                (merge @cycles))
      :history            history
+     :op-reads           @op-reads
      :realtime-lag       @realtime-lag
      :worst-realtime-lag @worst-realtime-lag
      :unseen             @unseen
@@ -2209,18 +2337,22 @@
   (reify checker/Checker
     (check [this test history opts]
       (let [dir (store/path! test)
-            ; Write out a file with consume counts
-            consume-counts-task (h/task history consume-counts []
-                                        (store/with-out-file
-                                          test "consume-counts.edn"
-                                          (pprint (consume-counts history))))
             ; Analyze history
+            _ (info "start")
             {:keys [errors
                     realtime-lag
                     worst-realtime-lag
                     unseen] :as analysis}
             (analysis history {:directory dir
                                :ww-deps   (:ww-deps test)})
+            _ (info "analysis done")
+
+            ; Write out a file with consume counts
+            consume-counts-task (h/task history consume-counts []
+                                        (store/with-out-file
+                                          test "consume-counts.edn"
+                                          (pprint (consume-counts analysis))))
+
             ; What caused our transactions to return indefinite results?
             info-txn-causes (->> history
                                  h/infos
@@ -2244,6 +2376,7 @@
         @order-viz-task
         @plot-unseen-task
         @plot-realtime-lags-task
+        (info "written")
 
         ; Construct results
         (->> errors

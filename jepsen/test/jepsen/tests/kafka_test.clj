@@ -6,7 +6,9 @@
             [dom-top.core :refer [loopr]]
             [jepsen [checker :as checker]
                     [generator :as gen]
-                    [history :as h]]
+                    [history :as h]
+                    [store :as store]
+                    [util :as util]]
             [jepsen.generator [context :as gen.ctx]
                               [test :as gen.test]]
             [jepsen.tests.kafka :refer :all]))
@@ -587,7 +589,7 @@
                h/history
                analysis :errors :int-nonmonotonic-send)))))
 
-(deftest ^:focus duplicate-test
+(deftest duplicate-test
   (testing "basic"
     ; A duplicate here means that a single value winds up at multiple positions
     ; in the log--reading the same log offset multiple times is a nonmonotonic
@@ -885,3 +887,15 @@
         (is (= {:x {:polled -1, :sent 1}}
                (first (keep :unseen h))))
         ))))
+
+(deftest ^:focus perf-test
+  ; This is a little helper for performance benchmarking. Grab a
+  ; slow-to-analyze test directory and it'll load the test.jepsen from it.
+  (let [f "slow-kafka"
+        test (store/test f)
+        history (:history test)
+        checker (checker)
+        t0 (System/nanoTime)
+        r  (checker/check checker test history {})
+        t1 (System/nanoTime)]
+    (println "Checked in " (util/nanos->secs (- t1 t0)) " seconds")))
