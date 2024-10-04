@@ -1533,84 +1533,79 @@
           {}
           history)]
     ; Now work through the history, turning each poll operation into a lag map.
-    (loop [history' history
-           ; A map of processes to keys to the highest offset that process has
-           ; seen. Keys in this map correspond to the keys this process
-           ; currently has :assign'ed. If using `subscribe`, keys are filled in
-           ; only when they appear in poll operations. The default offset is
-           ; -1.
-           process-offsets {}
-           ; A vector of output lag maps.
-           lags []]
-      (if-not (seq history')
-        lags
-        (let [[op & history'] history'
-              {:keys [type process f value]} op]
-          (if-not (= :ok type)
-            ; Only OK ops matter
-            (recur history' process-offsets lags)
+    (loopr [; A map of processes to keys to the highest offset that process has
+            ; seen. Keys in this map correspond to the keys this process
+            ; currently has :assign'ed. If using `subscribe`, keys are filled in
+            ; only when they appear in poll operations. The default offset is
+            ; -1.
+            process-offsets {}
+            ; A vector of output lag maps.
+            lags []]
+           [{:keys [type process f value] :as op} history]
+           (if-not (= :ok type)
+             ; Only OK ops matter
+             (recur process-offsets lags)
 
-            (case f
-              ; When we assign something, we replace the process's offsets map.
-              :assign
-              (recur history'
-                     (let [offsets (get process-offsets process {})]
-                       ; Preserve keys that we're still subscribing to;
-                       ; anything else gets reset to offset -1. This is gonna
-                       ; break if we use something other than auto_offset_reset
-                       ; = earliest, but... deal with that later. I've got
-                       ; limited time here and just need to get SOMETHING
-                       ; working.
-                       (assoc process-offsets process
-                              (merge (zipmap value (repeat -1))
-                                     (select-keys offsets value))))
-                     lags)
+             (case f
+               ; When we assign something, we replace the process's offsets map.
+               :assign
+               (recur (let [offsets (get process-offsets process {})]
+                        ; Preserve keys that we're still subscribing to;
+                        ; anything else gets reset to offset -1. This is gonna
+                        ; break if we use something other than auto_offset_reset
+                        ; = earliest, but... deal with that later. I've got
+                        ; limited time here and just need to get SOMETHING
+                        ; working.
+                        (assoc process-offsets process
+                               (merge (zipmap value (repeat -1))
+                                      (select-keys offsets value))))
+                      lags)
 
-              ; When we subscribe, we're not necessarily supposed to get
-              ; updates for the key we subscribed to--we subscribe to *topics*,
-              ; not individual partitions. We might get *no* updates, if other
-              ; subscribers have already claimed all the partitions for that
-              ; topic. We reset the offsets map to empty, to be conservative.
-              :subscribe
-              (recur history' (assoc process-offsets process {}) lags)
+               ; When we subscribe, we're not necessarily supposed to get
+               ; updates for the key we subscribed to--we subscribe to *topics*,
+               ; not individual partitions. We might get *no* updates, if other
+               ; subscribers have already claimed all the partitions for that
+               ; topic. We reset the offsets map to empty, to be conservative.
+               :subscribe
+               (recur (assoc process-offsets process {}) lags)
 
-              (:poll, :txn)
-              (let [invoke-time (:time (h/invocation history op))
-                    ; For poll ops, we merge all poll mop results into this
-                    ; process's offsets, then figure out how far behind each
-                    ; key based on the time that key offset expired.
-                    offsets' (merge-with max
-                                         (get process-offsets process {})
-                                         (op->max-offsets op))
-                    lags' (->> offsets'
-                               (map (fn [[k offset]]
-                                      ; If we've read *nothing*, then we're at
-                                      ; offset -1. Element 0 in the expired
-                                      ; vector for k tells us the time when the
-                                      ; first element was definitely present.
-                                      ; If we read offset 0, we want to consult
-                                      ; element 1 of the vector, which tells us
-                                      ; when offset 0 was no longer the tail,
-                                      ; and so on.
-                                      (let [expired-k (get expired k [])
-                                            i (inc offset)
-                                            expired-at (get-in expired
-                                                               [k (inc offset)]
-                                                               ##Inf)
-                                            lag (-> invoke-time
-                                                    (- expired-at)
-                                                    (max 0))]
-                                        {:time    invoke-time
-                                         :process process
-                                         :key     k
-                                         :lag     lag})))
-                               (into lags))]
-                (recur history'
-                       (assoc process-offsets process offsets')
-                       lags'))
+               (:poll, :txn)
+               (let [invoke-time (:time (h/invocation history op))
+                     ; For poll ops, we merge all poll mop results into this
+                     ; process's offsets, then figure out how far behind each
+                     ; key based on the time that key offset expired.
+                     offsets' (merge-with max
+                                          (get process-offsets process {})
+                                          (op->max-offsets op))
+                     lags' (->> offsets'
+                                (map (fn [[k offset]]
+                                       ; If we've read *nothing*, then we're at
+                                       ; offset -1. Element 0 in the expired
+                                       ; vector for k tells us the time when the
+                                       ; first element was definitely present.
+                                       ; If we read offset 0, we want to consult
+                                       ; element 1 of the vector, which tells us
+                                       ; when offset 0 was no longer the tail,
+                                       ; and so on.
+                                       (let [expired-k (get expired k [])
+                                             i (inc offset)
+                                             expired-at (get-in expired
+                                                                [k (inc offset)]
+                                                                ##Inf)
+                                             lag (-> invoke-time
+                                                     (- expired-at)
+                                                     (max 0))]
+                                         {:time    invoke-time
+                                          :process process
+                                          :key     k
+                                          :lag     lag})))
+                                (into lags))]
+                 (recur (assoc process-offsets process offsets')
+                        lags'))
 
-              ; Anything else, pass through
-              (recur history' process-offsets lags))))))))
+               ; Anything else, pass through
+               (recur process-offsets lags)))
+           lags)))
 
 (defn op->thread
   "Returns the thread which executed a given operation."
@@ -2052,11 +2047,11 @@
         readers-of            (future (readers-of history))
         ; Sort of a hack; we only bother computing this for "real" histories
         ; because our test suite often leaves off processes and times
-        realtime-lag          (future
-                                (let [op (first history)]
-                                  (when (and (:process op)
-                                             (:time op))
-                                    (realtime-lag history))))
+        realtime-lag          (h/task history realtime-lag []
+                                      (let [op (first history)]
+                                        (when (and (:process op)
+                                                   (:time op))
+                                          (realtime-lag history))))
         worst-realtime-lag    (future (worst-realtime-lag @realtime-lag))
         unseen                (future (unseen history))
         version-order-errors  (:errors @version-orders)
