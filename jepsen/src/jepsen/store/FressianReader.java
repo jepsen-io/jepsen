@@ -4,8 +4,8 @@
 //   (http://opensource.org/licenses/eclipse-1.0.php) which can be found in the
 //   file epl-v10.html at the root of this distribution.
 //   By using this software in any fashion, you are agreeing to be bound by
-//   the terms of this license. You must not remove this notice, or any other,
-//   from this software.
+//   the terms of this license.
+//   You must not remove this notice, or any other, from this software.
 
 // This is a very straightforward patch to the original
 // (https://github.com/Datomic/fressian/blob/43e34cade9b7b498fa88db1dd88546ff07f2282a/src/org/fressian/FressianReader.java)
@@ -717,11 +717,11 @@ public class FressianReader implements org.fressian.Reader, Closeable {
         return intCast(readInt());
     }
 
-    private StringBuffer internalReadString(int length) throws IOException {
-        return internalReadStringBuffer(new StringBuffer(length), length);
+    private StringBuilder internalReadString(int length) throws IOException {
+        return internalReadStringBuilder(new StringBuilder(length), length);
     }
 
-    private StringBuffer internalReadStringBuffer(StringBuffer buf, int length) throws IOException {
+    private StringBuilder internalReadStringBuilder(StringBuilder buf, int length) throws IOException {
         if ((byteBuffer == null) || (byteBuffer.length < length))
             byteBuffer = new byte[length];
         is.readFully(byteBuffer, 0, length);
@@ -730,7 +730,7 @@ public class FressianReader implements org.fressian.Reader, Closeable {
     }
 
     private String internalReadChunkedString(int length) throws IOException {
-        StringBuffer buf = internalReadString(length);
+        StringBuilder buf = internalReadString(length);
         boolean done = false;
         while (!done) {
             int code = readNextCode();
@@ -743,17 +743,17 @@ public class FressianReader implements org.fressian.Reader, Closeable {
                 case Codes.STRING_PACKED_LENGTH_START + 5:
                 case Codes.STRING_PACKED_LENGTH_START + 6:
                 case Codes.STRING_PACKED_LENGTH_START + 7:
-                    internalReadStringBuffer(buf, code - Codes.STRING_PACKED_LENGTH_START).toString();
+                    internalReadStringBuilder(buf, code - Codes.STRING_PACKED_LENGTH_START).toString();
                     done = true;
                     break;
 
                 case Codes.STRING:
-                    internalReadStringBuffer(buf, readCount());
+                    internalReadStringBuilder(buf, readCount());
                     done = true;
                     break;
 
                 case Codes.STRING_CHUNK:
-                    internalReadStringBuffer(buf, readCount());
+                    internalReadStringBuilder(buf, readCount());
                     break;
                 default:
                     throw expected("chunked string", code);
