@@ -4,6 +4,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :main aerospike.core
+  :aot [aerospike.core]
   :dependencies [[org.clojure/clojure "1.12.0"]
                  [jepsen "0.3.5a-aerospike"]
                 ;;  [com.aerospike/aerospike-client "7.2.0"]

@@ -1,33 +1,17 @@
 (ns aerospike.support
   "Core DB setup and support features"
-  (:require 
-            [clojure 
-              [pprint :refer [pprint]]
-              [string :as str]]
-            [clojure.java.io :as io]
-            [clojure.walk :as walk]
-            [clojure.tools.logging :refer [debug info warn]]
-            [dom-top.core :refer [with-retry letr]]
-            [jepsen [core      :as jepsen]
-                    [db        :as db]
-                    [util      :as util :refer [meh timeout]]
-                    [control   :as c :refer [|]]
-                    [client    :as client]
-                    [checker   :as checker]
-                    [generator :as gen]
-                    [independent :as independent]
-                    [nemesis   :as nemesis]
-                    [os        :as os]
-                    [store     :as store]
-                    [tests     :as tests]]
-            [jepsen.checker.timeline :as timeline]
-            [jepsen.nemesis.time :as nt]
-            [jepsen.os.debian :as debian]
-            [knossos.model :as model]
-            [wall.hack]
-            [jepsen.control [net :as net]
-                            [util :as netUtil]]
-  )
+  (:require
+   [clojure [string :as str]]
+   [clojure.java.io :as io]
+   [clojure.tools.logging :refer [debug info warn]]
+   [dom-top.core :refer [with-retry]]
+   [jepsen 
+    [core      :as jepsen]
+    [db        :as db]
+    [util      :as util :refer [meh timeout]]
+    [control   :as c :refer [|]]]
+   [jepsen.nemesis.time :as nt]
+   [jepsen.os.debian :as debian])
 
   (:import
    (clojure.lang ExceptionInfo)
@@ -133,7 +117,7 @@
         (throw e))
       (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
-      (retry (dec tries)))))
+      ('retry (dec tries)))))
 
 
 (defn connect
@@ -201,6 +185,12 @@
   (c/trace 
    (c/exec :asinfo :-v 
            (str "set-config:context=namespace;id=" namespace ";strong-consistency-allow-expunge=true"))))
+
+(defn clear-data!
+  [namespace]
+  (c/trace (c/su (c/exec 
+        :asinfo :-v (str "truncate-namespace:namespace=" namespace)))))
+
 
 ;;; asinfo utilities:
 (defmacro poll
@@ -308,7 +298,7 @@
   (info "Configuring...")
 ;; Bob owns the initial static config file - but diff may result in expected failures
   (c/su
-    ; Config file
+    ; Copy test data's Config & Feature-Key files
       (c/exec :cp "/data/aerospike_a/etc/aerospike/aerospike.conf" "/etc/aerospike/aerospike.conf")
       (c/exec :cp "/data/aerospike_a/etc/aerospike/features.conf" "/etc/aerospike/features.conf")
    )
@@ -332,7 +322,8 @@
         (asinfo-roster-set! ans (wait-for-all-nodes-observed conn test ans))
         (allow-expunge! ans)
         (wait-for-all-nodes-pending conn test ans)
-        (asadm-recluster!))
+        (asadm-recluster!)
+        (clear-data! "test"))
 
       (jepsen/synchronize test)
       (wait-for-all-nodes-active conn test ans)
@@ -365,8 +356,8 @@
 
 ;;; Test:
 (defn db
-  [opts]
   "Aerospike for a particular version."
+  [opts]
   (info "CREATING DB")
   (reify db/DB
     (setup! [_ test node]
@@ -382,8 +373,10 @@
 
     ;; Bob will teardown
     (teardown! [_ test node]
-      ;; (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
-      )
+               (info "IN db/teardown! CALL!") 
+              ;; (clear-data! "test")
+              ;; (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
+               )
       ;;(wipe! node))
 
     )

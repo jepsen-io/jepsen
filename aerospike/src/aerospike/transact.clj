@@ -79,11 +79,21 @@
     (s/close client)))
 
 
-(defn workload []
-  {:client (TranClient. nil s/ans "vals")
-   :checker (rw/checker)
-   :generator (rw/gen {:key-dist :uniform, :key-count 3})})
-
+(defn workload 
+  ([]
+   {:client (TranClient. nil s/ans "vals")
+    :checker (rw/checker)
+    :generator (rw/gen {:key-dist :uniform, :key-count 3})})
+  ([opts]
+   {:client (TranClient. nil s/ans "vals")
+    :checker (rw/checker)
+    :generator (rw/gen
+                {:key-dist        (:key-dist opts :uniform),
+                 :key-count       (:key-count opts 3)
+                 :min-txn-length  (:min-txn-length opts 1)
+                 :max-txn-length  (:max-txn-length opts 3)
+                 :max-writes-per-key (:max-writes-per-key opts 32)})})
+  )
 
 (defn workload-ListAppend 
   ([]

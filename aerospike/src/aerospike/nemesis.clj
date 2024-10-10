@@ -140,7 +140,7 @@
 
   :max-dead-nodes   number of nodes allowed to be down simultaneously"
   [opts]
-  (info "Instantiating Full-Nemesis")
+  (info "Instantiating Full-Nemesis! with options:" opts)
   (let [dead (atom #{})
         opts (assoc opts :dead dead)]
     {:nemesis (full-nemesis opts)
