@@ -195,7 +195,7 @@
   operations in the history into different nemeses, as per the spec. Returns
   the nemesis spec, restricted to just those nemeses taking part in this
   history, and with each spec augmented with an :ops key, which contains all
-  operations that nemesis performed."
+  operations that nemesis performed. Skips :hidden? nemeses."
   [nemeses history]
   ; Build an index mapping :fs to nemeses.
   ; TODO: verify no nemesis fs overlap
@@ -221,14 +221,16 @@
         nemeses (if-let [ops (ops-by-nemesis nil)]
                   (conj nemeses {:name "nemesis"
                                  :ops  ops})
-                  nemeses)]
+                  nemeses)
+        ; Skip hidden nemeses
+        nemeses (remove :hidden? nemeses)]
     nemeses))
 
 (defn nemesis-activity
   "Given a nemesis specification and a history, partitions the set of nemesis
   operations in the history into different nemeses, as per the spec. Returns
-  the spec, restricted to just those nemeses taking part in this history, and
-  with each spec augmented with two keys:
+  the spec, restricted to just those non-hidden nemeses taking part in this
+  history, and with each spec augmented with two keys:
 
     :ops        All operations the nemeses performed
     :intervals  A set of [start end] paired ops."
@@ -320,11 +322,12 @@
   "Augments a plot map to render nemesis activity. Takes a nemesis
   specification: a collection of nemesis spec maps, each of which has keys:
 
-    :name   A string uniquely naming this nemesis
-    :color  What color to use for drawing this nemesis (e.g. \"#abcd01\")
-    :start  A set of :f's which begin this nemesis' activity
-    :stop   A set of :f's which end this nemesis' activity
-    :fs     A set of :f's otherwise related to this nemesis"
+    :name     A string uniquely naming this nemesis
+    :color    What color to use for drawing this nemesis (e.g. \"#abcd01\")
+    :start    A set of :f's which begin this nemesis' activity
+    :stop     A set of :f's which end this nemesis' activity
+    :fs       A set of :f's otherwise related to this nemesis
+    :hidden?  Skips rendering this nemesis."
   [plot history nemeses]
   (let [nemeses (nemesis-activity nemeses history)]
     (-> plot
@@ -383,7 +386,9 @@
   (let [data    (mapcat :data (:series plot))
         _       (when-not (seq data)
                   (throw+ {:type ::no-points
-                           :plot plot}))
+                           :plot plot}
+                          nil
+                          "No points in plot"))
         [x0 y0] (first data)
         [xmin xmax ymin ymax] (reduce (fn [[xmin xmax ymin ymax] [x y :as pair]]
                                              [(min xmin x)

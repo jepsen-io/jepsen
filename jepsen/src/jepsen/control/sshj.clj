@@ -10,6 +10,7 @@
                             [scp :as scp]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (com.jcraft.jsch.agentproxy AgentProxy
+                                       AgentProxyException
                                        ConnectorFactory)
            (com.jcraft.jsch.agentproxy.sshj AuthAgent)
            (net.schmizz.sshj SSHClient)
@@ -59,6 +60,8 @@
               methods (auth-methods agent-proxy)]
           (.auth c ^String username methods)
           true)
+        (catch AgentProxyException e
+          false)
         (catch UserAuthException e
           false))
 

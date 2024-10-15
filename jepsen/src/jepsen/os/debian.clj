@@ -1,14 +1,18 @@
 (ns jepsen.os.debian
   "Common tasks for Debian boxes."
-  (:require [clojure.set :as set]
+  (:require [clojure [set :as set]
+                     [string :as str]]
             [clojure.tools.logging :refer [info]]
-            [jepsen.util :refer [meh]]
-            [jepsen.os :as os]
-            [jepsen.control :as c :refer [|]]
+            [jepsen [control :as c :refer [|]]
+                    [net :as net]
+                    [os :as os]
+                    [util :as util :refer [meh]]]
             [jepsen.control.util :as cu]
-            [jepsen.net :as net]
-            [clojure.string :as str]
             [slingshot.slingshot :refer [try+ throw+]]))
+
+(def node-locks
+  "Prevents running apt operations concurrently on the same node."
+  (util/named-locks))
 
 (defn setup-hostfile!
   "Makes sure the hostfile has a loopback entry for the local hostname"
@@ -34,7 +38,8 @@
 (defn update!
   "Apt-get update."
   []
-  (c/su (c/exec :apt-get :--allow-releaseinfo-change :update)))
+  (util/with-named-lock node-locks c/*host*
+    (c/su (c/exec :apt-get :--allow-releaseinfo-change :update))))
 
 (defn maybe-update!
   "Apt-get update if we haven't done so recently."
@@ -58,9 +63,10 @@
 (defn uninstall!
   "Removes a package or packages."
   [pkg-or-pkgs]
-  (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))
-        pkgs (installed pkgs)]
-    (c/su (apply c/exec :apt-get :remove :--purge :-y pkgs))))
+  (util/with-named-lock node-locks c/*host*
+    (let [pkgs (if (coll? pkg-or-pkgs) pkg-or-pkgs (list pkg-or-pkgs))
+          pkgs (installed pkgs)]
+      (c/su (apply c/exec :apt-get :remove :--purge :-y pkgs)))))
 
 (defn installed?
   "Are the given debian packages, or singular package, installed on the current
@@ -90,28 +96,31 @@
      (dorun
        (for [[pkg version] pkgs]
          (when (not= version (installed-version pkg))
-           (info "Installing" pkg version)
-           (c/exec :env "DEBIAN_FRONTEND=noninteractive"
-                   :apt-get :install
-                   :-y
-                   :--allow-downgrades
-                   :--allow-change-held-packages
-                   apt-opts
-                   (str (name pkg) "=" version)))))
+           (util/with-named-lock node-locks c/*host*
+             (info "Installing" pkg version)
+             (c/su
+               (c/exec :env "DEBIAN_FRONTEND=noninteractive"
+                       :apt-get :install
+                       :-y
+                       :--allow-downgrades
+                       :--allow-change-held-packages
+                       apt-opts
+                       (str (name pkg) "=" version)))))))
 
      ; Install any version
      (let [pkgs    (set (map name pkgs))
            missing (set/difference pkgs (installed pkgs))]
        (when-not (empty? missing)
-         (c/su
-           (info "Installing" missing)
-           (apply c/exec :env "DEBIAN_FRONTEND=noninteractive"
-                  :apt-get :install
-                  :-y
-                  :--allow-downgrades
-                  :--allow-change-held-packages
-                  apt-opts
-                  missing)))))))
+         (util/with-named-lock node-locks c/*host*
+           (c/su
+             (info "Installing" missing)
+             (apply c/exec :env "DEBIAN_FRONTEND=noninteractive"
+                    :apt-get :install
+                    :-y
+                    :--allow-downgrades
+                    :--allow-change-held-packages
+                    apt-opts
+                    missing))))))))
 
 (defn add-key!
   "Receives an apt key from the given keyserver."

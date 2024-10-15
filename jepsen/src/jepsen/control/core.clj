@@ -1,7 +1,9 @@
 (ns jepsen.control.core
   "Provides the base protocol for running commands on remote nodes, as well as
   common functions for constructing and evaluating shell commands."
-  (:require [clojure [string :as str]]
+  (:require [clojure [pprint :refer [pprint]]
+                     [string :as str]]
+            [clojure.tools.logging :refer [info warn]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
 (defprotocol Remote
@@ -159,7 +161,7 @@
 (defn throw-on-nonzero-exit
   "Throws when an SSH result has nonzero exit status."
   [{:keys [exit action] :as result}]
-  (if (zero? exit)
+  (if (and exit (zero? exit))
     result
     (throw+
       (merge {:type :jepsen.control/nonzero-exit

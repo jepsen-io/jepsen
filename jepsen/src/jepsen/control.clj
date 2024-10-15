@@ -305,16 +305,21 @@
   ([test f]
    (on-nodes test (:nodes test) f))
   ([test nodes f]
-   (->> nodes
-        (map (fn [node]
-               (let [session (get (:sessions test) node)]
-                 (assert session (str "No session for node " (pr-str node)))
-                 [node session])))
-        (real-pmap (bound-fn [[node session]]
-                     (with-thread-name (str "jepsen node " (name node))
-                       (with-session node session
-                         [node (f test node)]))))
-        (into {}))))
+   (let [mapper (if (< 1 (count nodes))
+                  real-pmap
+                  ; A common case: we call with just one node; no need to spawn
+                  ; a thread.
+                  mapv)]
+     (->> nodes
+          (map (fn [node]
+                 (let [session (get (:sessions test) node)]
+                   (assert session (str "No session for node " (pr-str node)))
+                   [node session])))
+          (mapper (bound-fn [[node session]]
+                    (with-thread-name (str "jepsen node " (name node))
+                      (with-session node session
+                        [node (f test node)]))))
+          (into {})))))
 
 (defmacro with-test-nodes
   "Given a test, evaluates body in parallel on each node, with that node's SSH

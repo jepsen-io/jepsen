@@ -3,8 +3,14 @@
                      [test :refer :all]
                      [set :as set]]
             [clojure.tools.logging :refer [info]]
+            [dom-top.core :refer [loopr]]
             [jepsen [checker :as checker]
-                    [history :as h]]
+                    [generator :as gen]
+                    [history :as h]
+                    [store :as store]
+                    [util :as util]]
+            [jepsen.generator [context :as gen.ctx]
+                              [test :as gen.test]]
             [jepsen.tests.kafka :refer :all]))
 
 (defn deindex
@@ -54,22 +60,24 @@
           ; The write of c at 1 conflicts with the read of b at 1
           :errors [{:key :x, :index 1, :offset 1, :values #{:b :c}}]}
          (version-orders
-           ; Read [a b] at offset 0 and 1
-           [{:type :ok, :f :txn, :value [[:poll {:x [[0 :a] [1 :b]]}]]}
-            ; But write c at offset 1, b at offset 3, and d at offset 4. Even
-            ; though this crashes, we can prove it committed because we read
-            ; :b.
-            {:type :info, :f :txn, :value [[:send :x [1 :c]]
-                                           [:send :x [3 :b]]
-                                           [:send :x [4 :d]]]}]
+           (h/history
+             ; Read [a b] at offset 0 and 1
+             [{:type :ok, :f :txn, :value [[:poll {:x [[0 :a] [1 :b]]}]]}
+              ; But write c at offset 1, b at offset 3, and d at offset 4. Even
+              ; though this crashes, we can prove it committed because we read
+              ; :b.
+              {:type :info, :f :txn, :value [[:send :x [1 :c]]
+                                             [:send :x [3 :b]]
+                                             [:send :x [4 :d]]]}])
            {:ok {:x #{:a :b}}})))
 
   (testing "a real-world example"
-    (let [h [{:type :invoke, :f :send, :value [[:send 11 641]], :time 280153467070, :process 379}
-{:type :ok, :f :send, :value [[:send 11 [537 641]]], :time 280169754615, :process 379}
-{:type :invoke, :f :send, :value [[:send 11 645]], :time 283654729962, :process 363}
-{:type :ok, :f :send, :value [[:send 11 [537 645]]], :time 287474569112, :process 363}
-             ]]
+    (let [h (h/history
+              [{:type :invoke, :f :send, :value [[:send 11 641]], :time 280153467070, :process 379}
+               {:type :ok, :f :send, :value [[:send 11 [537 641]]], :time 280169754615, :process 379}
+               {:type :invoke, :f :send, :value [[:send 11 645]], :time 283654729962, :process 363}
+               {:type :ok, :f :send, :value [[:send 11 [537 645]]], :time 287474569112, :process 363}
+               ])]
       (is (= [{:key 11
                :index  0
                :offset 537
@@ -254,7 +262,122 @@
         ; But subscribes that still cover x, we preserve state
         (is (= errs (nm [poll-1-2 poll-1-2' poll-3 poll-3' sub-xy sub-xy'
                          poll-4 poll-4' assign-xy assign-xy' write-6 write-6'
-                         poll-7 poll-7' write-* write-*'])))))))
+                         poll-7 poll-7' write-* write-*']))))))
+
+  (testing "txn abort"
+    ; Aborted transactions, both info and fail, should a.) pick up where the
+    ; previous txn left off, and b.) reset the offset to the beginning
+    (testing "good"
+      (let [h (h/history
+                [; Send a simple series of ints
+                 (o 0 0 :invoke :send [[:send :x 0]
+                                       [:send :x 1]
+                                       [:send :x 2]])
+                 (o 1 0 :ok     :send [[:send :x [0 0]]
+                                       [:send :x [1 1]]
+                                       [:send :x [2 2]]])
+
+                 ; Poll 0
+                 (o 1 1 :invoke :txn  [[:poll]])
+                 (o 2 1 :ok     :txn  [[:poll {:x [[0 0]]}]])
+
+                 ; Poll 1, 2, abort. This is correct.
+                 (o 3 1 :invoke :txn [[:poll]])
+                 (o 4 1 :fail   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 1, 2, info. This is correct; we should have rewound.
+                 (o 5 1 :invoke :txn [[:poll]])
+                 (o 6 1 :info   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 1, 2, ok. This is correct; we should have rewound.
+                 (o 7 1 :invoke :txn [[:poll]])
+                 (o 8 1 :ok     :txn [[:poll {:x [[1 1] [2 2]]}]])])
+            a (analysis h)]
+        (is (empty? (:errors a)))))
+
+    (testing "abort doesn't roll back"
+      (let [h (h/history
+                [; Send a simple series of ints
+                 (o 0 0 :invoke :send [[:send :x 0]
+                                       [:send :x 1]
+                                       [:send :x 2]
+                                       [:send :x 3]
+                                       [:send :x 4]
+                                       [:send :x 5]])
+                 (o 1 0 :ok     :send [[:send :x [0 0]]
+                                       [:send :x [1 1]]
+                                       [:send :x [2 2]]
+                                       [:send :x [3 3]]
+                                       [:send :x [4 4]]
+                                       [:send :x [5 5]]])
+
+                 ; Poll 0
+                 (o 1 1 :invoke :txn  [[:poll]])
+                 (o 2 1 :ok     :txn  [[:poll {:x [[0 0]]}]])
+
+                 ; Poll 1, 2, abort. This is fine
+                 (o 3 1 :invoke :txn [[:poll]])
+                 (o 4 1 :fail   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 3 4 and fail. Even though it failed, this is bad; we
+                 ; should have rewound.
+                 (o 5 1 :invoke :txn [[:poll]])
+                 (o 6 1 :fail   :txn [[:poll {:x [[3 3] [4 4]]}]])
+
+                 ; Poll 5 OK. This is also bad, we should still be back at 1 2
+                 (o 7 1 :invoke :txn [[:poll]])
+                 (o 8 1 :ok     :txn [[:poll {:x [[5 5]]}]])])
+            a (analysis h)]
+        ; This is a poll skip!
+        (is (= [; When we polled 3, 4, we should have seen 1.
+                {:key :x
+                 :delta 3
+                 :skipped [1 2]
+                 :ops [(h 3) (h 7)]}
+                ; Ditto, when we polled 5, we should have seen 1.
+                {:key :x
+                 :delta 5
+                 :skipped [1 2 3 4]
+                 :ops [(h 3) (h 9)]}]
+               (:poll-skip (:errors a))))))
+
+    (testing "info can be a poll-skip"
+      (let [h (h/history
+                [; Send a simple series of ints
+                 (o 0 0 :invoke :send [[:send :x 0]
+                                       [:send :x 1]
+                                       [:send :x 2]
+                                       [:send :x 3]
+                                       [:send :x 4]
+                                       [:send :x 5]])
+                 (o 1 0 :ok     :send [[:send :x [0 0]]
+                                       [:send :x [1 1]]
+                                       [:send :x [2 2]]
+                                       [:send :x [3 3]]
+                                       [:send :x [4 4]]
+                                       [:send :x [5 5]]])
+
+                 ; Poll 0
+                 (o 1 1 :invoke :txn  [[:poll]])
+                 (o 2 1 :ok     :txn  [[:poll {:x [[0 0]]}]])
+
+                 ; Poll 1, 2, abort. This is fine
+                 (o 3 1 :invoke :txn [[:poll]])
+                 (o 4 1 :fail   :txn [[:poll {:x [[1 1] [2 2]]}]])
+
+                 ; Poll 3 4 and crash. Even though it crashed, this is bad; we
+                 ; should have rewound.
+                 (o 5 1 :invoke :txn [[:poll]])
+                 (o 6 1 :info   :txn [[:poll {:x [[3 3] [4 4]]}]])])
+            a (analysis h)]
+        ; This is a poll skip!
+        (is (= [; When we polled 3, 4, we should have seen 1.
+                {:key :x
+                 :delta 3
+                 :skipped [1 2]
+                 :ops [(h 3) (h 7)]}]
+               (:poll-skip (:errors a))))))
+  ))
 
 (deftest nonmonotonic-poll-test
   ; A nonmonotonic poll occurs when a single process performs two transactions,
@@ -469,21 +592,80 @@
                analysis :errors :int-nonmonotonic-send)))))
 
 (deftest duplicate-test
-  ; A duplicate here means that a single value winds up at multiple positions
-  ; in the log--reading the same log offset multiple times is a nonmonotonic
-  ; poll.
-  (let [; Here we have a send operation which puts a to 1, and a poll which
-        ; reads a at 3; it must have been at both.
-        send-a1  (o 0 0 :invoke :send [[:send :x :a]])
-        send-a1' (o 1 0 :ok     :send [[:send :x [1 :a]]])
-        send-b2  (o 2 1 :invoke :send [[:send :x :b]])
-        send-b2' (o 3 1 :info   :send [[:send :x :b]])
-        poll-a3  (o 4 2 :invoke :poll [[:poll]])
-        poll-a3' (o 5 2 :ok     :poll [[:poll {:x [[2 :b] [3 :a]]}]])]
-    (is (= [{:key   :x
-             :value :a
-             :count 2}]
-           (-> [send-a1 send-a1' send-b2 send-b2' poll-a3 poll-a3'] h/history analysis :errors :duplicate)))))
+  (testing "basic"
+    ; A duplicate here means that a single value winds up at multiple positions
+    ; in the log--reading the same log offset multiple times is a nonmonotonic
+    ; poll.
+    (let [; Here we have a send operation which puts a to 1, and a poll which
+          ; reads a at 3; it must have been at both.
+          send-a1  (o 0 0 :invoke :send [[:send :x :a]])
+          send-a1' (o 1 0 :ok     :send [[:send :x [1 :a]]])
+          send-b2  (o 2 1 :invoke :send [[:send :x :b]])
+          send-b2' (o 3 1 :info   :send [[:send :x :b]])
+          poll-a3  (o 4 2 :invoke :poll [[:poll]])
+          poll-a3' (o 5 2 :ok     :poll [[:poll {:x [[2 :b] [3 :a]]}]])]
+      (is (= [{:key   :x
+               :value :a
+               :count 2
+               :offsets [1 3]}]
+             (-> [send-a1 send-a1' send-b2 send-b2' poll-a3 poll-a3'] h/history analysis :errors :duplicate)))))
+
+  (testing "hash-insensitive"
+    ; Version orders are lossy: they destroy information when presented with
+    ; inconsistent offsets. This can be a little confusing: sometimes you'll
+    ; detect an inconsistent offset as a duplicate, other times not, depending
+    ; on the hash. To test this, we spam a whole bunch of values at the same
+    ; two offsets and verify they're all flagged as dups.
+    (let [n      10
+          values (into (sorted-set) (range n))
+          h (loopr
+              [index 0
+               ops   []]
+              [value values]
+              (recur
+                (+ index 4)
+                (conj ops
+                      ; Send value at offset 0, poll it at 1
+                      (o (+ index 0) 0 :invoke :send [[:send :x value]])
+                      (o (+ index 1) 0 :ok     :send [[:send :x [0 value]]])
+                      (o (+ index 2) 1 :invoke :poll [[:poll]])
+                      (o (+ index 3) 1 :ok     :poll
+                         [[:poll {:x [[1 value]]}]])))
+              (h/history ops))
+          a (analysis h)]
+      (testing "duplicates"
+        (is (= values
+               (->> (:duplicate (:errors a))
+                    (map :value)
+                    (into (sorted-set))))))
+      ; While we're here...
+      (testing "inconsistent offsets"
+        (is (= [{:key :x, :offset 0, :index 0, :values values}
+                {:key :x, :offset 1, :index 1, :values values}]
+               (:inconsistent-offsets (:errors a)))))))
+
+  (testing "aborted txns"
+    ; Transactions which abort can contain polls with duplicate information.
+    ; Because the poller is supposed to never return bad information
+    ; *regardless* of what's happening in the transaction, we want to detect
+    ; these.
+    (let [h (h/history
+              ; We send 0 to offset 1
+              [(o 0 0 :invoke :send [[:send :x 0]])
+               (o 1 0 :ok :send [[:send :x [1 0]]])
+               ; And fail to send 1 to offset 2 (but we get an offset for it!)
+               (o 2 0 :invoke :send [[:send :x 1]])
+               (o 3 0 :fail   :send [[:send :x [2 1]]])
+               ; Now we have an aborted poll that sees both of these at higher
+               ; offsets. We want a duplicate for value 0, but not 1, because
+               ; 1's *writes* never happened. GOD the Kafka transaction model
+               ; is complicated.
+               (o 4 1 :invoke :poll [[:poll]])
+               (o 5 1 :fail :poll [[:poll {:x [[11 0] [12 1]]}]])])
+          a (analysis h)]
+      (is (= [{:key :x, :value 0, :count 2, :offsets [1 11]}]
+             (:duplicate (:errors a))))))
+  )
 
 (deftest realtime-lag-test
   (testing "up to date"
@@ -630,3 +812,93 @@
                       :a-mop-index 1, :b-mop-index 1}]}]
            (-> [t1 t2 t1' t2'] h/history
                (analysis {:ww-deps true}) :errors :G1c)))))
+
+(deftest precommitted-read-test
+  ; Transaction T1 observes its own write, which commits after the poll. This
+  ; would be legal in most databases, but in Kafka's model, consumers at read
+  ; committed are supposed to *never* observe values which haven't yet been
+  ; committed, because consumers may sometimes not be participants in
+  ; transaction control.
+  (let [t1  (o 0 0 :invoke :txn [[:send :x :a] [:poll]])
+        t1' (o 1 0 :ok     :txn [[:send :x [0 :a]] [:poll {:x [[0 :a]]}]])
+        r   (-> [t1 t1']
+                h/history
+                analysis)]
+    (is (= [{:op   t1'
+             :key  :x
+             :value :a}]
+           (:precommitted-read (:errors r))))))
+
+(defn gen-poll-unseen-test-sim
+  "Simulator for gen.test. Takes an atom to the next offset we assign, and a
+  context and invocation. Returns a completed op."
+  [next-offset ctx op]
+  (let [op (update op :time + gen.test/perfect-latency)]
+    (case (:f op)
+      (:poll :send :txn)
+      (let [v' (mapv (fn [mop]
+                       (case (first mop)
+                         :send (let [[f k v] mop]
+                                 [f k [(swap! next-offset inc) v]])
+                         :poll [:poll {}]))
+                     (:value op))]
+        (assoc op :type :ok
+               :value v'))
+
+      ; Otherwise
+      (assoc op :type :ok))))
+
+(deftest gen-poll-unseen-test
+  ; We verify that a laggy DB which accepts sends but never returns them in
+  ; polls causes repeated polling attempts even after the end of the key.
+  (let [gen [(concat
+               ; We do a single write and several (unsuccessful) polls of :x
+               [{:f :send, :value [[:send :x 0]]}]
+               (repeat 5 {:f :assign, :value [:x]})
+               (repeat 5 {:f :poll, :value [[:poll]]})
+               ; Then we move everyone on to :y and do a bunch of assigns.
+               ; We've got a 1/3 chance to rewrite these to :x.
+               (repeat 100 {:f :assign :value [:y]}))]
+        ctx gen.test/default-context
+        ; Returns a map of assigned keys to the number of times we assigned
+        ; that specific combination of keys, e.g. {[:x] 5, [:x :y] 10}
+        assigns-freq (fn [h]
+                       (->> h
+                            (filter (comp #{:assign} :f))
+                            (map :value)
+                            frequencies))
+        sim (fn [gen]
+              (gen.test/invocations
+                (gen.test/simulate ctx gen
+                                   (partial gen-poll-unseen-test-sim
+                                            (atom 0)))))]
+    (testing "without unseen-poll"
+      (let [h (sim gen)]
+        (is (= {[:x] 5
+                [:y] 100}
+               (assigns-freq h)))))
+    (testing "with unseen-poll"
+      (let [h (sim (poll-unseen gen))
+            freqs (assigns-freq h)]
+        ;(pprint freqs)
+        (is (= #{[:x] [:y] [:x :y]} (set (keys freqs))))
+        (is (= 5 (freqs [:x])))
+        (is (< (freqs [:y] 100)))
+        (is (< 0 (freqs [:x :y])))
+        ; Check that our debugging key is present
+        (is (= {:x {:polled -1, :sent 1}}
+               (first (keep :unseen h))))
+        ))))
+
+#_(deftest perf-test
+  ; This is a little helper for performance benchmarking. Grab a
+  ; slow-to-analyze test directory and it'll load the test.jepsen from it.
+  (let [f "slow-kafka"
+        test (store/test f)
+        history (:history test)
+        checker (checker)]
+    (dotimes [i 3]
+      (let [t0 (System/nanoTime)
+            r  (checker/check checker test history {})
+            t1 (System/nanoTime)]
+        (println "Checked in" (util/nanos->secs (- t1 t0)) "seconds")))))

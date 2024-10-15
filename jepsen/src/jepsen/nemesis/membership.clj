@@ -154,7 +154,7 @@
                    nil)
                  (catch Throwable t
                    (warn t "Node view updater caught throwable; will retry")))
-            (Thread/sleep (* 1000 node-view-interval))))))
+            (Thread/sleep (long (* 1000 node-view-interval)))))))
 
 (defrecord Nemesis
   [; An atom that tracks our current state

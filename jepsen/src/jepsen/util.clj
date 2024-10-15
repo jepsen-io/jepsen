@@ -11,7 +11,7 @@
             [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
-            [dom-top.core :as dt :refer [bounded-future]]
+            [dom-top.core :as dt :refer [loopr bounded-future]]
             [fipp [edn :as fipp]
                   [ednize]
                   [engine :as fipp.engine]]
@@ -98,27 +98,68 @@
   [n]
   (-> n dec (/ 3) long))
 
+(defn partition-by-vec
+  "A faster version of partition-by which returns a vector of vectors, rather
+  than using lazy seqs. Comes at the cost of eager evaluation."
+  [f xs]
+  (if (seq xs)
+    (loopr [fx     ::init  ; (f x)
+            chunks (transient [])
+            chunk  (transient [])]
+           [x' xs]
+           (let [fx' (f x')]
+             (cond ; Same chunk
+                   (= fx fx')
+                   (recur fx chunks (conj! chunk x'))
+
+                   ; New chunk. First element?
+                   (identical? ::init fx)
+                   (recur fx' chunks (conj! chunk x'))
+
+                   ; New chunk, later element
+                   true
+                   (recur fx'
+                          (conj! chunks (persistent! chunk))
+                          (transient [x']))))
+           ; Done; fold in last chunk
+           (let [chunk (persistent! chunk)]
+             (persistent!
+               (if (= 0 (count chunk))
+                 chunks
+                 (conj! chunks chunk)))))
+    []))
+
+(defn extreme-by*
+  "Helper for min-by and max-by"
+  [f coll retain?]
+  (loopr [x  nil
+          fx ::init]
+         [x' coll]
+         (let [fx' (f x')]
+           (cond ; First round
+                 (identical? fx ::init)
+                 (recur x' fx')
+
+                 ; x' bigger
+                 (retain? (compare fx fx'))
+                 (recur x' fx')
+
+                 ; Keep looking
+                 true
+                 (recur x fx)))
+         x))
+
 (defn min-by
   "Finds the minimum element of a collection based on some (f element), which
   returns Comparables. If `coll` is empty, returns nil."
   [f coll]
-  (when (seq coll)
-    (reduce (fn [m e]
-              (if (pos? (compare (f m) (f e)))
-                e
-                m))
-            coll)))
+  (extreme-by* f coll pos?))
 
 (defn max-by
   "Finds the maximum element of a collection based on some (f element), which
   returns Comparables. If `coll` is empty, returns nil."
   [f coll]
-  (when (seq coll)
-    (reduce (fn [m e]
-              (if (neg? (compare (f m) (f e)))
-                e
-                m))
-            coll)))
+  (extreme-by* f coll neg?))
 
 (defn fast-last
   "Like last, but O(1) on counted collections."
@@ -455,7 +496,7 @@
    (await-fn f {}))
   ([f opts]
    (let [log-message    (:log-message opts (str "Waiting for " f "..."))
-         retry-interval (:retry-interval opts 1000)
+         retry-interval (long (:retry-interval opts 1000))
          log-interval   (:log-interval opts retry-interval)
          timeout        (:timeout opts 60000)
          t0             (linear-time-nanos)
@@ -758,6 +799,14 @@
   (cond (nil? thing-or-things)        nil
         (sequential? thing-or-things) thing-or-things
         true                          (list thing-or-things)))
+
+(defn nil-if-empty
+  "Takes a seqable and returns it, or nil if (seq seqable) is nil. Helpful when
+  you want to return a vector if non-empty, or nil otherwise."
+  [seqable]
+  (if (nil? (seq seqable))
+    nil
+    seqable))
 
 (defn history->latencies
   "Takes a history--a sequence of operations--and returns a new history where

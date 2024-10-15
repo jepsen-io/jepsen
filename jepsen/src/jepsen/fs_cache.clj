@@ -254,7 +254,7 @@
 
 (defn deploy-remote!
   "Deploys a cached path to the given remote path (a string). Deletes remote
-  path first. Creates parents if necessary."
+  path first. Creates parents if necessary. Returns remote path."
   [cache-path remote-path]
   (when-not (cached? cache-path)
     (throw (IllegalStateException. (str "Path " (pr-str cache-path) " is not cached and cannot be deployed."))))
@@ -266,7 +266,8 @@
   (c/exec :rm :-rf remote-path)
   (let [parent (.getParent (io/file remote-path))]
     (c/exec :mkdir :-p parent)
-    (c/upload (.getCanonicalPath (file cache-path)) remote-path)))
+    (c/upload (.getCanonicalPath (file cache-path)) remote-path)
+    remote-path))
 
 ;; Locks
 
