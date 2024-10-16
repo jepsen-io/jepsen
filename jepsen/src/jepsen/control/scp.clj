@@ -61,8 +61,8 @@
   "Runs an SCP command by shelling out. Takes a conn-spec (used for port, key,
   etc), a seq of sources, and a single destination, all as strings."
   [conn-spec sources dest]
-  ;; bob scp seems to need -O as workaround in current implementation
-  (apply util/sh "scp" "-rpCO"
+  ;; bob scp initially seemed to need -O as workaround in current implementation
+  (apply util/sh "scp" "-rpC"
          "-P" (str (:port conn-spec))
          (concat (when-let [k (:private-key-path conn-spec)]
                    ["-i" k])
