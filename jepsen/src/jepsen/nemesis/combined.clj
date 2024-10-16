@@ -237,7 +237,7 @@
                  :f     :start-partition
                  :value (rand-nth targets)})
         stop  {:type :info, :f :stop-partition, :value nil}
-        gen   (->> (gen/flip-flop start (repeat stop))
+        gen   (->> (gen/flip-flop start (gen/repeat stop))
                    (gen/stagger (:interval opts default-interval)))]
     {:generator       (when needed? gen)
      :final-generator (when needed? stop)
@@ -249,17 +249,20 @@
 
 (defn packet-nemesis
   "A nemesis to disrupt packets, e.g. delay, loss, corruption, etc.
-   Takes a db to work with [[db-nodes]].
+  Takes a db to work with [[db-nodes]].
 
-   The network behavior is applied to all traffic to and from the target nodes.
-   
+  The network behavior is applied to all traffic to and from the target nodes.
+
   This nemesis responds to:
+
   ```
-  {:f :start-packet :value [:node-spec   ; target nodes as interpreted by db-nodes
-                            {:delay {},  ; behaviors that disrupt packets
-                             :loss  {:percent :33%},...}]} 
-  {:f :stop-packet  :value nil}
+  {:f     :start-packet
+   :value [:node-spec   ; target nodes as interpreted by db-nodes
+           {:delay {},  ; behaviors that disrupt packets
+            :loss  {:percent :33%}, ...}]}
+  {:f :stop-packet, :value nil}
    ```
+
   See [[jepsen.net/all-packet-behaviors]]."
   [db]
   (reify

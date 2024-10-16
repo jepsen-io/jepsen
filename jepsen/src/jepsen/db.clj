@@ -197,3 +197,30 @@
                           ; Out of tries, abort!
                           (throw+ e)))))
         (recur (dec tries))))))
+
+(defrecord MapTest [f db]
+  DB
+  (setup!     [_ test node] (setup!     db (f test) node))
+  (teardown!  [_ test node] (teardown!  db (f test) node))
+
+  Kill
+  (kill!      [_ test node] (kill!     db (f test) node))
+  (start!     [_ test node] (start!    db (f test) node))
+
+  Pause
+  (pause!      [_ test node] (pause!   db (f test) node))
+  (resume!     [_ test node] (resume!  db (f test) node))
+
+  LogFiles
+  (log-files   [_ test node] (log-files db (f test) node))
+
+  Primary
+  (primaries      [_ test]      (primaries db (f test)))
+  (setup-primary! [_ test node] (setup-primary! db (f test) node)))
+
+(defn map-test
+  "Wraps a DB in another DB which rewrites every test argument using (f test).
+  Helpful for when you want to compose two DBs together that need different
+  test parameters, like :version."
+  [f db]
+  (MapTest. f db))

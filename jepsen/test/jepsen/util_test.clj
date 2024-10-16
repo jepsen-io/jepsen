@@ -188,3 +188,9 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"\{:type :jepsen\.util/forgotten\}"
                           @f))))
+
+(deftest partition-by-vec-test
+  (is (= [] (partition-by-vec first nil)))
+  (is (= [] (partition-by-vec second [])))
+  (is (= [[1] [2]] (partition-by-vec identity [1 2])))
+  (is (= [[1 2] [-1 -2] [3 3 3]] (partition-by-vec pos? [1 2 -1 -2 3 3 3]))))

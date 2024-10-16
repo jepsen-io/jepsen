@@ -8,25 +8,19 @@
             [clojure.tools.logging :refer [info warn]]
             [jepsen.control :refer :all]
             [jepsen.control.net :as control.net]
-            [jepsen.net.proto :as p]
+            [jepsen.net.proto :as p :refer [Net PartitionAll]]
+            [potemkin :refer [import-vars]]
             [slingshot.slingshot :refer [throw+ try+]]))
 
-; TODO: move this into jepsen.net.proto
-(defprotocol Net
-  (drop! [net test src dest]   "Drop traffic between nodes src and dest.")
-  (heal! [net test]            "End all traffic drops and restores network to fast operation.")
-  (slow! [net test]
-         [net test opts]       "Delays network packets with options:
-                                ```clj
-                                {:mean          ; (in ms)
-                                 :variance      ; (in ms)
-                                 :distribution} ; (e.g. :normal)
-                                ```")
-  (flaky! [net test]           "Introduces randomized packet loss")
-  (fast!  [net test]           "Removes packet loss and delays.")
-  (shape! [net test nodes behavior] "Shapes network behavior,
-                                     i.e. packet delay, loss, corruption, duplication, reordering, and rate
-                                     for the given nodes."))
+; These were extracted to jepsen.net.proto, but we retain them here for
+; compatibility/API simplicity.
+(import-vars [jepsen.net.proto
+              drop!
+              heal!
+              slow!
+              flaky!
+              fast!
+              shape!])
 
 ; Top-level API functions
 (defn drop-all!
@@ -34,7 +28,7 @@
   should drop messages from, and makes those changes to the test's network."
   [test grudge]
   (let [net (:net test)]
-    (if (satisfies? p/PartitionAll net)
+    (if (satisfies? PartitionAll net)
       ; Fast path
       (p/drop-all! net test grudge)
 
@@ -71,15 +65,19 @@
      nil)))
 
 (def all-packet-behaviors
-  "All of the available network packet behaviors, and their default option values.
+  "All of the available network packet behaviors, and their default option
+  values.
 
    Caveats:
-   
-     - behaviors are applied to a node's network interface and effect all db to db node traffic
-     - `:delay` - Use `:normal` distribution of delays for more typical network behavior
-     - `:loss`  - When used locally (not on a bridge or router), the loss is reported to the upper level protocols
-                  This may cause TCP to resend and behave as if there was no loss.
-   
+
+     - Behaviors are applied to a node's network interface and affect all DB to
+       DB node traffic
+     - `:delay` - Use `:normal` distribution of delays for more typical network
+                  behavior
+     - `:loss`  - When used locally (not on a bridge or router), the loss is
+                  reported to the upper level protocols. This may cause TCP to
+                  resend and behave as if there was no loss.
+
    See [tc-netem(8)](https://manpages.debian.org/bullseye/iproute2/tc-netem.8)."
   {:delay     {:time         :50ms
                :jitter       :10ms
@@ -120,8 +118,8 @@
            [])))
 
 (defn- net-shape!
-  "Shared convenience call for iptables/ipfilter.
-   Shape the network with tc qdisc, netem, and filter(s) so target nodes have given behavior."
+  "Shared convenience call for iptables/ipfilter. Shape the network with tc
+  qdisc, netem, and filter(s) so target nodes have given behavior."
   [_net test targets behavior]
   (let [results (on-nodes test
                           (fn [test node]
@@ -178,8 +176,10 @@
   "Default iptables (assumes we control everything)."
   (reify Net
     (drop! [net test src dest]
-      (on dest (su (exec :iptables :-A :INPUT :-s (control.net/ip src) :-j
-                         :DROP :-w))))
+      (on-nodes test [dest]
+                (fn [test node]
+                  (su (exec :iptables :-A :INPUT :-s (control.net/ip src) :-j
+                            :DROP :-w)))))
 
     (heal! [net test]
       (with-test-nodes test
@@ -212,7 +212,7 @@
         (try
           (su (exec tc :qdisc :del :dev :eth0 :root))
           (catch RuntimeException e
-            (if (re-find #"RTNETLINK answers: No such file or directory"
+            (if (re-find #"Error: Cannot delete qdisc with handle of zero."
                          (.getMessage e))
               nil
               (throw e))))))
@@ -220,7 +220,7 @@
     (shape! [net test nodes behavior]
       (net-shape! net test nodes behavior))
 
-    p/PartitionAll
+    PartitionAll
     (drop-all! [net test grudge]
       (on-nodes test
                 (keys grudge)

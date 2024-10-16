@@ -126,7 +126,7 @@
                           :exit  false
 
                           ; Ahhh
-                          :sleep (do (Thread/sleep (* 1000 (:value op)))
+                          :sleep (do (Thread/sleep (long (* 1000 (:value op))))
                                      (.put out op)
                                      true)
 
