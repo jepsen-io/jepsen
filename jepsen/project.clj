@@ -11,7 +11,7 @@
                   :exclusions [org.slf4j/slf4j-api]]
                  [elle "0.2.2"]
                  [clj-time "0.15.2"]
-                 [io.jepsen/history "0.1.3"]
+                 [io.jepsen/history "0.1.4"]
                  [jepsen.txn "0.1.2"]
                  [knossos "0.3.10"]
                  [clj-ssh "0.5.14"]
