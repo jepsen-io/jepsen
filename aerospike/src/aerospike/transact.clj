@@ -60,7 +60,7 @@
               (info "Txn: " (.getId tid) " ..DONE!")
               (reset! cs (.commit client tid))
 
-              (if (not (= @cs CommitStatus/ALREADY_ATTEMPTED))
+              (if (not (= @cs CommitStatus/ALREADY_ABORTED))
                 (assoc op :type :ok :value @txn')
                 (do (info "}> !! DOUBLE-COMMIT !! <{  (" @cs ")") (assoc op :type :fail, :error :commit))))
             (catch AerospikeException$Commit e#
