@@ -148,7 +148,32 @@
    [nil "--heartbeat-interval MS" "Aerospike heartbeat interval in milliseconds"
     :default 150
     :parse-fn #(Long/parseLong %)
-    :validate [pos? "must be positive"]]])
+    :validate [pos? "must be positive"]]
+
+   [nil "--max-txn-length MAX" "Maximum number of micro-ops per transaction"
+    :default 2
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]
+                 ; TODO: must be >= min-txn-length
+    ]
+   [nil "--min-txn-length MIN" "Maximum number of micro-ops per transaction"
+    :default 2
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]
+                 ; TODO: must be <= min-txn-length
+    ]
+   [nil "--key-count N_KEYS" "Number of active keys at any given time"
+    :default  3 ; TODO: make this  default differently based on key-dist 
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]]
+   [nil "--max-writes-per-key N_WRITES" "Limit of writes to a particular key"
+    :default  32 ; TODO: make this  default differently based on key-dist 
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]]
+   [nil "--key-dist DIST" "Uniform or Exponential"
+    :default  :exponential
+    :parse-fn keyword
+    :validate [#{:uniform :exponential} (cli/one-of #{:uniform :exponential})]]])
 
 (def opt-spec
   (if txns-enabled
