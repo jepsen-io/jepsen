@@ -62,14 +62,9 @@
 
               (if (not (= @cs CommitStatus/ALREADY_ABORTED))
                 (assoc op :type :ok :value @txn')
-                (do (info "}> !! DOUBLE-COMMIT !! <{  (" @cs ")") (assoc op :type :fail, :error :commit))))
-            (catch AerospikeException$Commit e#
-              (info "Encountered Commit Error! >> InDoubt:" (.getInDoubt e#) (.getResultCode e#) (.getMessage e#))
-              (if (.getInDoubt e#)
-                (assoc op :type :info, :error :commit)
-                (assoc op :type :fail, :error :commit)
-                ))
-                ;; (do (info "FAILURE COMMITTING") (assoc op :type :fail, :error :commit)))
+                (do (info "}> !! ABORTED STATUS FROM COMMIT !! <{") 
+                    (assoc op :type :fail, :error :commibort))))
+            
             (catch AerospikeException e#
               (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
               (info "Aborting..")
@@ -78,6 +73,7 @@
                 29 (assoc op :type :fail, :error :MRT-blocked)
                 30 (assoc op :type :fail, :error :read-verify)
                 31 (assoc op :type :fail, :error :expired)
+                34 (assoc op :type :fail, :error :aborted)
                 (throw e#))))))
       (info "REGULAR OP!")  ; Should never happen with txn test workloads 
     ))
