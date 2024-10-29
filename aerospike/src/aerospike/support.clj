@@ -321,13 +321,13 @@
   (let [conn (connect node)]
     (try
       (when (= node (jepsen/primary test))
+        (clear-data! "test")
         (info "Setting roster using observed nodes " (:observed_nodes (roster conn ans)))
         (info "Expected to match count of " (:nodes test) " ==> " (count (:nodes test)))
         (asinfo-roster-set! ans (wait-for-all-nodes-observed conn test ans))
         (allow-expunge! ans)
         (wait-for-all-nodes-pending conn test ans)
-        (asadm-recluster!)
-        (clear-data! "test"))
+        (asadm-recluster!))
 
       (jepsen/synchronize test)
       (wait-for-all-nodes-active conn test ans)
