@@ -170,7 +170,6 @@
   [conn namespace]
   (->> (server-info (first (nodes conn))
                     (str "roster:namespace=" namespace))
-       (do (info "Result before split-colons:"))
         split-colons
        (map kv-split)
        (into {})
@@ -322,6 +321,8 @@
   (let [conn (connect node)]
     (try
       (when (= node (jepsen/primary test))
+        (info "Setting roster using observed nodes " (:observed_nodes (roster conn ans)))
+        (info "Expected to match count of " (:nodes test) " ==> " (count (:nodes test)))
         (asinfo-roster-set! ans (wait-for-all-nodes-observed conn test ans))
         (allow-expunge! ans)
         (wait-for-all-nodes-pending conn test ans)
