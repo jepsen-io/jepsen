@@ -3,9 +3,10 @@
   (:require [jepsen.store :as store]
             [clojure.string :as str]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]
+            [clojure.java [io :as io]]
             [clojure.tools.logging :refer :all]
             [clojure.pprint :refer [pprint]]
+            [clj-commons.byte-streams :as bs]
             [clj-time [coerce :as time.coerce]
                       [core :as time]
                       [local :as time.local]
@@ -345,7 +346,7 @@
           entry   (doto (ZipEntry. relpath)
                     (.setCreationTime (FileTime/fromMillis
                                         (.lastModified file))))
-          buf   (byte-array 16384)]
+          buf   (byte-array (* 16 1024 1024))]
       (with-open [input (FileInputStream. file)]
         (.putNextEntry zipper entry)
         (loop []
@@ -356,15 +357,21 @@
               (.closeEntry zipper)))))))
   zipper)
 
-(defn zip
-  "Serves a directory as a zip file. Strips .zip off the extension."
+(defn zip-strip-dir
+  "Strips the .zip off the end of a directory."
+  [^File dir]
+  (-> dir
+      (.getCanonicalFile)
+      str
+      (str/replace #"\.zip\z" "")
+      io/file))
+
+(defn zip-java
+  "Serves a directory as a zip file, using the Java zip library. Strips .zip
+  off the extension."
   [req ^File dir]
-  (let [f (-> dir
-              (.getCanonicalFile)
-              str
-              (str/replace #"\.zip\z" "")
-              io/file)
-        pipe-in (PipedInputStream. 16384)
+  (let [f        (zip-strip-dir dir)
+        pipe-in  (PipedInputStream. (* 16 1024 1024))
         pipe-out (PipedOutputStream. pipe-in)]
     (future
       (try
@@ -378,6 +385,36 @@
     {:status  200
      :headers {"Content-Type" "application/zip"}
      :body    pipe-in}))
+
+(defn zip-shell
+  "Serves a directory as a zip file, shelling out to `zip`. This is
+  significantly faster than zip-java`, but less portable."
+  [req ^File dir]
+  (let [builder (doto (ProcessBuilder. ["/usr/bin/zip" "-r" "-" "."])
+                  (.directory (zip-strip-dir dir)))
+        process (.start builder)]
+    (.close (.getOutputStream process))
+    ; Await process and log output
+    (future
+      (.waitFor process)
+      (let [exit (.exitValue process)]
+        (when-not (= 0 exit)
+          (warn "`zip` exited with non-zero exit" exit "in directory" (.getCanonicalPath dir) ":\n"
+                (bs/convert (.getErrorStream process) String)))))
+
+    {:status 200
+     :headers {"Content-Type" "application/zip"}
+     :body    (.getInputStream process)}))
+
+
+(defn zip
+  "Zips a directory using either zip-java or zip-shell."
+  [req dir]
+  (try
+    (zip-shell req dir)
+    (catch RuntimeException e
+      (warn e "Error zipping directory using `zip`, falling back to JVM zip")
+      (zip-java req dir))))
 
 (defn assert-file-in-scope!
   "Throws if the given file is outside our store directory."
