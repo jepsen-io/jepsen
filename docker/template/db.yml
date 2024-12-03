@@ -1,4 +1,5 @@
   n%%N%%:
     << : *default-node
+    image: %%IMAGE%%
     container_name: jepsen-n%%N%%
-    hostname: n%%N%%
+    hostname: %%HNAME%%

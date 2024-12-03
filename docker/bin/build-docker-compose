@@ -12,15 +12,39 @@ NODE_COUNT=$1
 DEPS=""
 DBS=""
 
+if [ "$NODE_COUNT" -lt 6 ]; then
+  echo "Error: NODE_COUNT must be at least 6"
+  exit 1
+fi
+
+NUM_RANGE_SERVER=$((8 - NODE_COUNT))
+
+
 # For each node
 for ((n=1;n<=NODE_COUNT;n++)); do
   # Build up deps for control
   LINE=`cat template/depends.yml | sed s/%%N%%/${n}/g`
   DEPS="${DEPS}${LINE}"$'\n'
-
-  # Build up DB service
-  DB=`cat template/db.yml | sed s/%%N%%/${n}/g`
+  # Determine which image to use based on node number
+  if [ "$n" -le "$NUM_RANGE_SERVER" ]; then
+    IMAGE="chardonnay-rangeserver"
+    HNAME="chardonnay-range-server-${n}"
+  elif [ "$n" -eq "$((NUM_RANGE_SERVER + 1))" ]; then
+    IMAGE="chardonnay-warden"
+  elif [ "$n" -eq "$((NUM_RANGE_SERVER + 2))" ]; then
+    IMAGE="chardonnay-epoch-publisher"
+  elif [ "$n" -eq "$((NUM_RANGE_SERVER + 3))" ]; then
+    IMAGE="chardonnay-epoch"
+  else
+    IMAGE="chardonnay-universe"
+  fi
+  if [ "$n" -gt "$NUM_RANGE_SERVER" ]; then
+    HNAME="$IMAGE"
+  fi
+  # Build up DB service with appropriate image
+  DB=`cat template/db.yml | sed -e "s/%%N%%/${n}/g" -e "s/%%IMAGE%%/${IMAGE}/g" -e "s/%%HNAME%%/${HNAME}/g"`
   DBS="${DBS}${DB}"$'\n'
+
 done
 
 # Build docker-compose file

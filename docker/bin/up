@@ -32,7 +32,7 @@ pushd "$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/.."
 
 HELP=0
 INIT_ONLY=0
-NODE_COUNT=5
+NODE_COUNT=6
 DEV=""
 COMPOSE=${COMPOSE:-""}
 RUN_AS_DAEMON=0
