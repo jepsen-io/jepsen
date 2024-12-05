@@ -16,8 +16,8 @@
             [jepsen.os.debian :as debian])
   (:gen-class))
 
-(def txns-enabled
-  (string/starts-with? (System/getenv "JAVA_CLIENT_REF") "CLIENT-2848"))
+;; (def txns-enabled
+;;   (string/starts-with? (System/getenv "JAVA_CLIENT_REF") "CLIENT-2848"))
 
 (defn workloads
   "The workloads we can run. Each workload is a map like
@@ -36,14 +36,11 @@
    (let [res {:cas-register (cas-register/workload)
               :counter      (counter/workload)
               :set          (set/workload)}]
-     (if txns-enabled
-       (do (require '[aerospike.transact :as transact]) ; for alias only(?)
+     (do (require '[aerospike.transact :as transact]) ; for alias only(?)
           ;; add MRT workloads iff client branch supports it
-           (assoc res
-                  :transact ((requiring-resolve 'transact/workload) opts)
-                  :list-append ((requiring-resolve 'transact/workload-ListAppend) opts)))
-       ;; otherwise, return SRT workloads only
-       res))))
+         (assoc res
+                :transact ((requiring-resolve 'transact/workload) opts)
+                :list-append ((requiring-resolve 'transact/workload-ListAppend) opts))))))
 
 (defn workload+nemesis
   "Finds the workload and nemesis for a given set of parsed CLI options."
@@ -176,9 +173,7 @@
     :validate [#{:uniform :exponential} (cli/one-of #{:uniform :exponential})]]])
 
 (def opt-spec
-  (if txns-enabled
-    (cli/merge-opt-specs srt-opt-spec mrt-opt-spec)
-    srt-opt-spec))
+  (cli/merge-opt-specs srt-opt-spec mrt-opt-spec))
 
 
 (defn valid-opts
