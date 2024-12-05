@@ -6,7 +6,7 @@
   :main aerospike.core
   :aot [aerospike.core]
   :dependencies [[org.clojure/clojure "1.12.0"]
-                 [jepsen "0.3.7"]
+                 [jepsen "0.3.6a-aerospike"]
                  [com.aerospike/aerospike-client-jdk21-jepsen "8.1.4"]
                  [com.sun.xml.bind/jaxb-core "4.0.4"]
                  [javax.xml.bind/jaxb-api "2.4.0-b180830.0359"]
