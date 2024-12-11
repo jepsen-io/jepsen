@@ -412,7 +412,7 @@
   [req dir]
   (try
     (zip-shell req dir)
-    (catch RuntimeException e
+    (catch java.io.IOException e
       (warn e "Error zipping directory using `zip`, falling back to JVM zip")
       (zip-java req dir))))
 
