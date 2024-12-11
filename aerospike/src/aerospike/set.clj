@@ -50,7 +50,7 @@
     {:client  (set-client)
      :checker (independent/checker (checker/set))
      :generator (independent/concurrent-generator
-                  5  ; TODO - make this dynamic to concurrency?
+                  2  ; TODO - make this dynamic to concurrency?
                      ; -> concurrency // this value = num keys
                   (range)
                   (fn [k]

@@ -184,15 +184,9 @@
         nKeys              (if (= key-dist :uniform)
                              (rand-nth (range 3 8))
                              (rand-nth (range 8 12)))
-        cluster-size       (count (:nodes opts))
-        nClients           (if (= (:workload opts) :set)
-                             (rand-nth (list 10 30 60))
-                             (rand-nth (distinct (list
-                                                  1 2 3 5 8 10 30
-                                                  cluster-size
-                                                  (* cluster-size 2)
-                                                  (* cluster-size 3)))))]
-    {:concurrency          nClients
+        ;; cluster-size       (count (:nodes opts))
+        nClients           (* 2 (+ 1 (rand-int 15)))]
+    {:concurrency          (get opts :concurrency nClients)
      ; Txn Specific
      :min-txn-length       txn-min-ops
      :max-txn-length       (rand-nth (range txn-min-ops 12))

@@ -103,7 +103,7 @@
                  :timeline (timeline/html)}))
    :model (model/cas-register)
    :generator (independent/concurrent-generator
-                10
+                2
                 (range)
                 (fn [k]
                   (->> (gen/reserve 5 r (gen/mix [w cas cas]))
