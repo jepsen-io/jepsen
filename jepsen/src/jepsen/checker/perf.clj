@@ -496,16 +496,21 @@
              (throw (IllegalStateException. "Error rendering plot, verify gnuplot is installed and reachable" e)))))))
 
 (defn point-graph!
-  "Writes a plot of raw latency data points."
-  [test history {:keys [subdirectory nemeses] :as opts}]
+  "Writes a plot of raw latency data points. Options:
+
+    :subdirectory     The directory inside the test dir to put plots in.
+    :filename         The name of the file in that subdirectory.
+    :nemeses          Information about how to render nemesis operations."
+  [test history {:keys [subdirectory filename nemeses] :as opts}]
   (let [nemeses     (or nemeses (:nemeses (:plot test)))
+        filename    (or filename "latency-raw.png")
         history     (util/history->latencies history)
         datasets    (invokes-by-f-type history)
         fs          (util/polysort (keys datasets))
         fs->points- (fs->points fs)
         output-path (.getCanonicalPath (store/path! test
                                                     subdirectory
-                                                    "latency-raw.png"))
+                                                    filename))
         preamble    (latency-preamble test output-path)
         series      (->> (for [f fs, t types]
                            (when-let [data (seq (get-in datasets [f t]))]
