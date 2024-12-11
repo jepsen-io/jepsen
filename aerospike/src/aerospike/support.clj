@@ -120,7 +120,7 @@
         (throw e))
       (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
-      ('retry (dec tries)))))
+      (retry (dec tries)))))
 
 
 (defn connect
