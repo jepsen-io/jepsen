@@ -6,8 +6,9 @@
              [nemesis :as nemesis]
              [set :as set]]
             [clojure.tools.logging :refer [info]]
+            [clojure.stacktrace :refer [print-stack-trace]]
             [clojure.pprint :refer [pprint]]
-            [clojure.string :as string]
+            ;; [clojure.string :as string]
             [jepsen [cli :as cli]
              [control :as c]
              [checker :as checker]
@@ -16,7 +17,7 @@
             [jepsen.os.debian :as debian])
   (:gen-class))
 
-;; (def txns-enabled
+;; (defn txns-enabled
 ;;   (string/starts-with? (System/getenv "JAVA_CLIENT_REF") "CLIENT-2848"))
 
 (defn workloads
@@ -45,6 +46,7 @@
 (defn workload+nemesis
   "Finds the workload and nemesis for a given set of parsed CLI options."
   [opts]
+  (print-stack-trace (Exception. "WORKLOAD+NEMESIS"))
   (info "In Call to (workload+nemesis) with opts: " opts)
   (case (:workload opts)
     {:workload (get (workloads opts) (:workload opts))
@@ -76,6 +78,7 @@
                                 (gen/log "Waiting for quiescence")
                                 (gen/sleep 10)
                                 (gen/clients final-generator)))]
+    (print-stack-trace (Exception. "AEROSPIKE-TEST"))
     (info "constructed jepsen test-map from opts:=" opts "\nWith CLIENT:=" client)
     (merge tests/noop-test
            opts
@@ -215,11 +218,12 @@
   (info "making option map for (all-tests)'s call to `aerospike-test` with options\n"
         (with-out-str (pprint opts)))
   (let [node-opt (:nodes opts)
-        nClients (:concurrency opts)
+        ;; nClients (:concurrency opts)
         duration (:time-limit opts)
         ssh-opts (:ssh opts)
         ;; _ (info "OPT-WRKLD:" (get (workloads opts) (:workload opts)))
         base-opts (valid-opts opts)]
+    (print-stack-trace (Exception. "ALL-TEST-OPTS"))
     (info "VALIDATED OPTION MAP: " base-opts)
     (list
      (merge base-opts opts {:workload :set})
