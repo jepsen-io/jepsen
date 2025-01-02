@@ -181,16 +181,17 @@
 
 (defn bump-gen-select
   "A function which returns a clock bump generator that bumps the clock from
-  -262 to +262 seconds, exponentially distributed. (select test) is used to
+  -288 to +288 seconds, exponentially distributed. (select test) is used to
   select which subset of the test's nodes to use as targets in the generator."
   [select]
   (fn [test process]
     {:type  :info
      :f     :bump
      :value (zipmap (select test)
-                    (repeatedly (fn []
-                                  (long (* (rand-nth [-1 1])
-                                           (Math/pow 2 (+ 2 (rand 16))))))))}))
+                    (repeatedly
+                      (fn []
+                        (long (* (rand-nth [-1 1])
+                                 (Math/pow 1.5 (+ 6 (rand 25))))))))}))
 
 (def bump-gen
   "Randomized clock bump generator targeting a random subsets of nodes."
