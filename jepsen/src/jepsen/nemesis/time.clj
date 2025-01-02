@@ -76,7 +76,7 @@
   "Takes a time in seconds since the epoch, and subtracts the local node time,
   to obtain a relative offset in seconds."
   [remote-time]
-  (- remote-time (/ (System/currentTimeMillis) 1000)))
+  (float (- remote-time (/ (System/currentTimeMillis) 1000.0))))
 
 (defn current-offset
   "Returns the clock offset of this node, in seconds."
@@ -117,9 +117,12 @@
     (setup! [nem test]
       (c/with-test-nodes test
         (install!)
-        ; Try to stop ntpd service in case it is present and running.
-        (try (c/su (c/exec :service :ntpd :stop))
-             (catch RuntimeException e))
+        ; Systemd took over timekeeping so now we also have to go ask systemd...
+        (try+ (c/su (c/exec :timedatectl :set-ntp :false))
+              (catch [:type :jepsen.control/nonzero-exit] _))
+        ; On older Debian platforms, try to stop ntpd service directly
+        (try+ (c/su (c/exec :service :ntpd :stop))
+              (catch [:type :jepsen.control/nonzero-exit] _))
         (try+ (reset-time!)
               (catch [:type :jepsen.control/nonzero-exit, :exit 1] _
                 ; Bit awkward: on some platforms, like containers, we *can't*
