@@ -572,7 +572,7 @@
   "Writes a plot of operation rate by their completion times."
   [test history {:keys [subdirectory nemeses]}]
   (let [nemeses     (or nemeses (:nemeses (:plot test)))
-        dt          1
+        dt          10
         td          (double (/ dt))
         ; Times might technically be out-of-order (and our tests do this
         ; intentionally, just for convenience)
