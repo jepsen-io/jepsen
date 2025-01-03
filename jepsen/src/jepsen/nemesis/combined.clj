@@ -355,7 +355,12 @@
                              :bump           :bump-clock})
                  (gen/stagger (:interval opts default-interval)))]
     {:generator         (when needed? gen)
-     :final-generator   (when needed? {:type :info, :f :reset-clock})
+     :final-generator   (when needed?
+                          (gen/once
+                            (fn [test ctx]
+                              {:type :info
+                               :f :reset-clock
+                               :value (:nodes test)})))
      :nemesis           nemesis
      :perf              #{{:name  "clock"
                            :start #{:bump-clock}
