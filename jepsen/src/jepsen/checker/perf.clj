@@ -572,7 +572,7 @@
   "Writes a plot of operation rate by their completion times."
   [test history {:keys [subdirectory nemeses]}]
   (let [nemeses     (or nemeses (:nemeses (:plot test)))
-        dt          10
+        dt          1
         td          (double (/ dt))
         ; Times might technically be out-of-order (and our tests do this
         ; intentionally, just for convenience)
@@ -610,14 +610,15 @@
         output-path (.getCanonicalPath
                       (store/path! test subdirectory "rate.png"))
         preamble (rate-preamble test output-path)
-        series   (for [f fs, t types]
-                   {:title     (str (util/name+ f) " " (name t))
-                    :with      'linespoints
-                    :linetype  (type->color t)
-                    :pointtype (fs->points- f)
-                    :data      (let [m (get-in datasets [f t])]
-                                 (map (juxt identity #(get m % 0))
-                                      (buckets dt @t-max)))})]
+        series   (->> (for [f fs, t types]
+                        (when-let [data (get-in datasets [f t])]
+                          {:title     (str (util/name+ f) " " (name t))
+                           :with      'linespoints
+                           :linetype  (type->color t)
+                           :pointtype (fs->points- f)
+                           :data      (map (juxt identity #(get data % 0))
+                                           (buckets dt @t-max))}))
+                      (remove nil?))]
     (-> {:preamble  preamble
          :series    series}
         (with-range)
