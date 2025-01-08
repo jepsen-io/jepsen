@@ -291,7 +291,7 @@
 (defn packet-package
   "A nemesis and generator package that disrupts packets,
    e.g. delay, loss, corruption, etc.
-   
+
    Opts:
    ```clj
    {:packet
@@ -440,7 +440,7 @@
    See [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]].
 
    Additional options as for [[nemesis-package]]."
-  [{:keys [faults db file-corruption interval] :as _opts}]
+  [{:keys [faults db file-corruption interval]}]
   (let [needed?     (:file-corruption faults)
         targets     (:targets     file-corruption (node-specs db))
         corruptions (:corruptions file-corruption)
