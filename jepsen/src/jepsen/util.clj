@@ -1,15 +1,15 @@
 (ns jepsen.util
   "Kitchen sink"
   (:refer-clojure :exclude [parse-long]) ; Clojure added this in 1.11.1
-  (:require [clojure.tools.logging :refer [info]]
-            [clojure.core.reducers :as r]
+  (:require [clj-time.core :as time]
+            [clj-time.local :as time.local]
             [clojure [string :as str]
                      [pprint :as pprint :refer [pprint]]
                      [walk :as walk]]
+            [clojure.core.reducers :as r]
+            [clojure.data.generators :as dg]
             [clojure.java [io :as io]
                           [shell :as shell]]
-            [clj-time.core :as time]
-            [clj-time.local :as time.local]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [loopr bounded-future]]
             [fipp [edn :as fipp]
@@ -178,6 +178,49 @@
   [lambda]
   (* (Math/log (- 1 (rand))) (- lambda)))
 
+(defn zipf-b-inverse-cdf
+  "Inverse cumulative distribution function for the zipfian bounding function
+  used in `zipf`."
+  (^double [^double skew ^double t ^double p]
+           (let [tp (* t p)]
+             (if (<= tp 1)
+               ; Clamp so we don't fly off to infinity
+               tp
+               (Math/pow (+ (* tp (- 1 skew))
+                            skew)
+                         (/ (- 1 skew)))))))
+
+(def zipf-default-skew
+  "When we choose zipf-distributed things, what skew do we generally pick?"
+  1.0001)
+
+(defn zipf
+  "Selects a Zipfian-distributed integer in [0, n) with a given skew
+  factor. Adapted from the rejection sampling technique in
+  https://jasoncrease.medium.com/rejection-sampling-the-zipf-distribution-6b359792cffa."
+  ([^long n]
+   (zipf 1.000001 n))
+  ([^double skew ^long n]
+   (if (= n 0)
+     0
+     (do (assert (not= 1.0 skew)
+                 "Sorry, our approximation can't do skew = 1.0! Try a small epsilon, like 1.0001")
+         (let [t (/ (- (Math/pow n (- 1 skew)) skew)
+                    (- 1 skew))]
+           (loop []
+             (let [inv-b         (zipf-b-inverse-cdf skew t (dg/double))
+                   sample-x      (long (+ 1 inv-b))
+                   y-rand        (dg/double)
+                   ratio-top     (Math/pow sample-x (- skew))
+                   ratio-bottom  (/ (if (<= sample-x 1)
+                                      1
+                                      (Math/pow inv-b (- skew)))
+                                    t)
+                   rat (/ ratio-top (* t ratio-bottom))]
+               (if (< y-rand rat)
+                 (dec sample-x)
+                 (recur)))))))))
+
 (defn rand-distribution
   "Generates a random value with a distribution (default `:uniform`) of:
 
@@ -189,6 +232,9 @@
   ; Geometric distribution with mean 1/p.
   {:distribution :geometric, :p 1e-3}
 
+  ; Zipfian integer in [0, n) with skew s (default ~1)
+  {:distribution :zipf, :n 10, :skew 1.5}
+
   ; Select a value from a sequence with equal probability.
   {:distribution :one-of, :values [-1, 4097, 1e+6]}
 
@@ -197,13 +243,14 @@
   ```"
   ([] (rand-distribution {}))
   ([distribution-map]
-   (let [{:keys [distribution min max p values weights]} distribution-map
+   (let [{:keys [distribution min max p n skew values weights]} distribution-map
          distribution (or distribution :uniform)
          min (or min 0)
          max (or max Long/MAX_VALUE)
          _   (assert (case distribution
                        :uniform   (< min max)
                        :geometric (number? p)
+                       :zipf      (and (integer? n) (number? skew))
                        :one-of    (seq values)
                        :weighted  (and (map? weights)
                                        (->> weights
@@ -215,6 +262,9 @@
        :uniform   (long (Math/floor (+ min (* (rand) (- max min)))))
        :geometric (long (Math/ceil  (/ (Math/log (rand))
                                        (Math/log (- 1.0 p)))))
+       :zipf      (if skew
+                    (zipf skew n)
+                    (zipf n))
        :one-of    (rand-nth values)
        :weighted  (let [values  (keys weights)
                         weights (reductions + (vals weights))

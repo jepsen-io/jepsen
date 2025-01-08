@@ -177,6 +177,17 @@
            mean
            (* target-mean 1.3)))))
 
+(deftest zipf-test
+  (let [n       1000
+        skew    1.00001
+        m       5
+        samples (take n (repeatedly (partial zipf skew m)))
+        f       (frequencies samples)]
+    (is (every? #(< -1 % m) samples))
+    (is (< 1.5 (/ (f 0) (f 1)) 2.5))
+    (is (< 2.5 (/ (f 0) (f 2)) 4))
+    (is (< 4   (/ (f 0) (f 4)) 6))))
+
 (deftest forgettable-test
   (let [f (forgettable :foo)]
     (is (= :foo @f))

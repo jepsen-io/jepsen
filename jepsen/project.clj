@@ -6,6 +6,7 @@
   :dependencies [[org.clj-commons/byte-streams "0.3.4"]
                  [org.clojure/clojure "1.12.0"]
                  [org.clojure/data.fressian "1.1.0"]
+                 [org.clojure/data.generators "1.1.0"]
                  [org.clojure/tools.logging "1.3.0"]
                  [org.clojure/tools.cli "1.1.230"]
                  [spootnik/unilog "0.7.32"
