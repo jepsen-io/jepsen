@@ -257,7 +257,7 @@
 
   ```
   {:f     :start-packet
-   :value [:node-spec   ; target nodes as interpreted by db-nodes
+   :value [node-spec    ; target nodes as interpreted by db-nodes
            {:delay {},  ; behaviors that disrupt packets
             :loss  {:percent :33%}, ...}]}
   {:f :stop-packet, :value nil}
@@ -369,14 +369,17 @@
                            :color "#A0E9E3"}}}))
 
 (defn file-corruption-nemesis
-  "Wraps [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]] to corrupt files.
-   
+  "Wraps [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]] to
+  corrupt files.
+
    Responds to:
    ```
-   {:f :bitflip  :value [:node-spec ... ; target nodes as interpreted by db-nodes
-                         {:file \"/path/to/file/or/dir\" :probability 1e-5}]} 
-   {:f :truncate :value [:node-spec ... ; target nodes as interpreted by db-nodes
-                         {:file \"/path/to/file/or/dir\" :drop {:distribution :geometric :p 1e-3}}]} 
+   {:f :bitflip  :value [node-spec ... ; target nodes as interpreted by db-nodes
+                         {:file \"/path/to/file/or/dir\"
+                          :probability 1e-5}]}
+   {:f :truncate :value [node-spec ... ; target nodes as interpreted by db-nodes
+                         {:file \"/path/to/file/or/dir\"
+                          :drop {:distribution :geometric, :p 1e-3}}]}
    ```
   See [[jepsen.nemesis.combined/file-corruption-package]]."
   ([db] (file-corruption-nemesis db (n/bitflip) (n/truncate-file)))
@@ -444,15 +447,22 @@
         gen (->> (fn gen [_test _context]
                    (let [target (rand-nth targets)
                          {:keys [type file probability drop]} (rand-nth corruptions)
-                         corruption (case type
-                                      :bitflip  (let [probability (cond
-                                                                    (number? probability) probability
-                                                                    (map? probability) (rand-distribution probability))]
-                                                  {:file file :probability probability})
-                                      :truncate (let [drop (cond
-                                                             (number? drop) drop
-                                                             (map? drop) (rand-distribution drop))]
-                                                  {:file file :drop drop}))]
+                         corruption
+                         (case type
+                           :bitflip
+                           (let [probability
+                                 (cond
+                                   (number? probability)
+                                   probability
+
+                                   (map? probability)
+                                   (rand-distribution probability))]
+                             {:file file :probability probability})
+                           :truncate
+                           (let [drop (cond
+                                        (number? drop) drop
+                                        (map? drop) (rand-distribution drop))]
+                             {:file file :drop drop}))]
                      {:type  :info
                       :f     type
                       :value [target corruption]}))
