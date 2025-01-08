@@ -199,7 +199,7 @@
   factor. Adapted from the rejection sampling technique in
   https://jasoncrease.medium.com/rejection-sampling-the-zipf-distribution-6b359792cffa."
   ([^long n]
-   (zipf 1.000001 n))
+   (zipf zipf-default-skew n))
   ([^double skew ^long n]
    (if (= n 0)
      0
