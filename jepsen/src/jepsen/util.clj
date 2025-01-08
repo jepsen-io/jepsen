@@ -250,7 +250,8 @@
          _   (assert (case distribution
                        :uniform   (< min max)
                        :geometric (number? p)
-                       :zipf      (and (integer? n) (number? skew))
+                       :zipf      (and (integer? n)
+                                       (or (nil? skew) (number? skew)))
                        :one-of    (seq values)
                        :weighted  (and (map? weights)
                                        (->> weights
