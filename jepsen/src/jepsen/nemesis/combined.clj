@@ -408,9 +408,8 @@
       this))))
 
 (defn file-corruption-package
-  "A nemesis and generator package that corrupts files.
-   
-   Opts:
+  "A nemesis and generator package that corrupts files. Options:
+
    ```clj
    {:file-corruption
     {:targets     [...] ; A collection of node specs, e.g. [:one, [\"n1\", \"n2\"], :all]
@@ -425,15 +424,16 @@
        :file \"path/to/file/or/dir\"
        :drop {:distribution :geometric :p 1e-3}}]}}
    ```
-   
+
    `:type` can be `:bitflip` or `:truncate`.
 
-   If `:file` is a directory,
-   a new random file is selected from that directory on each target node for each operation.
+   If `:file` is a directory, a new random file is selected from that directory
+  on each target node for each operation.
 
-   `:probability` or `:drop` can be specified as a single value or a `distribution-map`.
-   Use a `distribution-map` to generate a new random value for each operation using [[jepsen.util/rand-distribution]].
-   
+   `:probability` or `:drop` can be specified as a single value or a
+  `distribution-map`. Use a `distribution-map` to generate a new random value
+  for each operation using [[jepsen.util/rand-distribution]].
+
    See [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]].
 
    Additional options as for [[nemesis-package]]."

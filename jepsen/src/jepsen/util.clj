@@ -180,19 +180,21 @@
 
 (defn rand-distribution
   "Generates a random value with a distribution (default `:uniform`) of:
-   ```clj
-   ; Uniform distribution from min (inclusive, default 0) to max (exclusive, default Long/MAX_VALUE). 
-   {:distribution :uniform, :min 0, :max 1024}
 
-   ; Geometric distribution with mean 1/p.
-   {:distribution :geometric, :p 1e-3}
+  ```clj
+  ; Uniform distribution from min (inclusive, default 0) to max (exclusive,
+  ; default Long/MAX_VALUE).
+  {:distribution :uniform, :min 0, :max 1024}
 
-   ; Select a value from a sequence with equal probability.
-   {:distribution :one-of, :values [-1, 4097, 1e+6]}
+  ; Geometric distribution with mean 1/p.
+  {:distribution :geometric, :p 1e-3}
 
-   ; Select a value based on weights. :weights are {value weight ...}
-   {:distribution :weighted :weights {1e-3 1 1e-4 3 1e-5 1}}
-   ```"
+  ; Select a value from a sequence with equal probability.
+  {:distribution :one-of, :values [-1, 4097, 1e+6]}
+
+  ; Select a value based on weights. :weights are {value weight ...}
+  {:distribution :weighted :weights {1e-3 1 1e-4 3 1e-5 1}}
+  ```"
   ([] (rand-distribution {}))
   ([distribution-map]
    (let [{:keys [distribution min max p values weights]} distribution-map
