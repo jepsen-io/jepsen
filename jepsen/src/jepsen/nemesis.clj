@@ -338,11 +338,17 @@
     (compose (map #(setup! % test) nemeses)))
 
   (invoke! [this test op]
-    (if-let [n (nth nemeses (get fm (:f op)))]
-      (invoke! n test op)
-      (throw (IllegalArgumentException.
-               (str "No nemesis can handle :f " (pr-str (:f op))
-                    " (expected one of " (pr-str (keys fm)) ")")))))
+    (let [f   (:f op)
+          res (if-let [idx (get fm f)]
+                (if-let [n (nth nemeses (get fm (:f op)))]
+                  (invoke! n test op)
+                  ::no-match)
+                ::no-match)]
+      (if (identical? res ::no-match)
+        (throw (IllegalArgumentException.
+                 (str "No nemesis can handle :f " (pr-str (:f op))
+                      " (expected one of " (pr-str (keys fm)) ")"))))
+      res))
 
   (teardown! [this test]
     (mapv #(teardown! % test) nemeses))
