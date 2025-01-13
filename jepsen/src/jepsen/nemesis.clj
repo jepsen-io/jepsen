@@ -442,7 +442,7 @@
   "Where do we install binaries to?"
   "/opt/jepsen")
 
-(defn compile-reader!
+(defn compile-c-reader!
   "Takes a Reader to C source code, and spits out a binary to `<bin-dir>/<bin>`,
   if it doesn't already exist. Returns bin."
   [reader bin]
@@ -463,12 +463,12 @@
             (.delete tmp-file)))))
     bin))
 
-(defn compile-resource!
+(defn compile-c-resource!
   "Given a resource name (e.g. a string filename in resources/) containing C
   source code, spits out a binary to `<bin-dir>/<bin>`"
   [resource bin]
   (with-open [r (io/reader (io/resource resource))]
-    (compile-reader! r bin)))
+    (compile-c-reader! r bin)))
 
 ;; Specific nemeses
 

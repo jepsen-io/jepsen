@@ -17,8 +17,8 @@
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
   []
-  (nemesis/compile-resource! "strobe-time.c" "strobe-time")
-  (nemesis/compile-resource! "bump-time.c" "bump-time"))
+  (nemesis/compile-c-resource! "strobe-time.c" "strobe-time")
+  (nemesis/compile-c-resource! "bump-time.c" "bump-time"))
 
 (defn parse-time
   "Parses a decimal time in unix seconds since the epoch, provided as a string,
