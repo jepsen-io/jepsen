@@ -123,5 +123,7 @@
   survive it. In particular, systems which keep their on-disk representation
   very close across different nodes may be able to recover from the intact
   copies on other nodes."
-  [default-opts]
-  (CorruptFileChunksHelixGen. default-opts))
+  ([]
+   (corrupt-file-chunks-helix-gen {}))
+  ([default-opts]
+   (CorruptFileChunksHelixGen. default-opts)))
