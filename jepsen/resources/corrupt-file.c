@@ -77,7 +77,7 @@ int corrupt(off_t chunk_size, uint32_t node_mod, uint32_t node_index,
 }
 
 int main (int argc, char **argv) {
-  if (argc < 4) {
+  if (argc < 5) {
     fprintf(stderr, "usage: %s <chunk_size> <modulus> <index> <file>\n",
         argv[0]);
     fprintf(stderr,
