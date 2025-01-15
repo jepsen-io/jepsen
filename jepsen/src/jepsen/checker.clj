@@ -870,7 +870,7 @@
   false otherwise, along with a :count of the number of matches, and a :matches
   list of maps, each with the node and matching string from the file.
 
-    (log-file-pattern-checker #\"panic: (\\w+)$\" \"db.log\")
+    (log-file-pattern #\"panic: (\\w+)$\" \"db.log\")
 
     {:valid? false
      :count  5
