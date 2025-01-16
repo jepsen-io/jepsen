@@ -14,7 +14,7 @@
             (when start [:--start start])
             (when end [:--end end])
             (when chunk-size [:--chunk-size chunk-size])
-            (when mod [:--mod mod])
+            (when mod [:--modulus mod])
             (when i [:--index i])
             file)))
 
