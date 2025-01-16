@@ -272,7 +272,7 @@ int corrupt(struct opts opts) {
 
   close(fd);
 
-  fprintf(stderr, "Corrupted %ld chunks (%ld bytes)\n",
+  fprintf(stdout, "Corrupted %ld chunks (%ld bytes)\n",
       chunks_corrupted, bytes_corrupted);
   return 0;
 }

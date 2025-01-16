@@ -1,6 +1,7 @@
 (ns jepsen.nemesis.file
   "Fault injection involving files on disk."
-  (:require [jepsen [control :as c]
+  (:require [clojure.tools.logging :refer [info warn]]
+            [jepsen [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]]))
 
