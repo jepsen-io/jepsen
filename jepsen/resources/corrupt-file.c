@@ -244,6 +244,11 @@ int corrupt(struct opts opts) {
   off_t source_offset;
   off_t dest_offset;
   ssize_t copied;
+
+  // Stats
+  off_t bytes_corrupted = 0;
+  off_t chunks_corrupted = 0;
+
   for (off_t chunk = opts.index; chunk < chunk_count_; chunk += opts.mod) {
     dest_offset = chunk_offset(opts, chunk);
 
@@ -259,10 +264,16 @@ int corrupt(struct opts opts) {
         close(fd);
         return 4;
       }
+
+      bytes_corrupted += copied;
+      chunks_corrupted += 1;
     }
   }
 
   close(fd);
+
+  fprintf(stderr, "Corrupted %ld chunks (%ld bytes)\n",
+      chunks_corrupted, bytes_corrupted);
   return 0;
 }
 
