@@ -4,6 +4,20 @@
                     [generator :as gen]
                     [nemesis :as nemesis]]))
 
+(defn corrupt-file!
+  "Calls corrupt-file on the currently bound remote node, taking a map of
+  options."
+  [{:keys [file start end chunk-size mod i]}]
+  (assert (string? file))
+  (c/su
+    (c/exec (str nemesis/bin-dir "/corrupt-file")
+            (when start [:--start start])
+            (when end [:--end end])
+            (when chunk-size [:--chunk-size chunk-size])
+            (when mod [:--mod mod])
+            (when i [:--index i])
+            file)))
+
 (defrecord CorruptFileNemesis
   ; A map of default options, e.g. {:chunk-size ..., :file, ...}, which are
   ; merged as defaults into each corruption we perform.
@@ -29,26 +43,11 @@
                   ; Apply each relevant corruption
                   (->> value
                        (keep (fn corruption [corruption]
-                               (let [{:keys [node file chunk-size mod i]}
-                                     (merge default-opts corruption)
-                                     _     (assert node)
-                                     nodes (:nodes test)
-                                     mod   (or mod (count nodes))
-                                     i     (or i (.indexOf
-                                                   ^java.util.List nodes node))]
-                                 (assert (pos? chunk-size))
-                                 (assert (pos? mod))
-                                 (assert (integer? i))
-                                 (assert (< i mod))
-                                 (assert (string? file))
-                                 (assert (string? node))
+                               (let [{:keys [node file chunk-size mod i]
+                                      :as corruption}
+                                     (merge default-opts corruption)]
                                  (when (= this-node node)
-                                   (c/su
-                                     (c/exec (str nemesis/bin-dir "/corrupt-file")
-                                             chunk-size
-                                             mod
-                                             i
-                                             file))))))
+                                   (corrupt-file! corruption)))))
                        (into []))))]
         (assoc op :value v))))
 
@@ -60,20 +59,23 @@
     {:f     :corrupt-file-chunks
      :value [{:node       \"n2\"
               :file       \"/foo/bar\"
-              :chunk-size 16384
+              :start      128
+              :end        256
+              :chunk-size 16
               :mod        5
               :i          2}}
              ...]}
 
-  This corrupts the file /foo/bar on n2, dividing in into 16 KB chunks, then
-  corrupting every fifth chunk, starting with (zero-indexed) chunk 2: 2, 7, 12,
-  17, .... Data is drawn from other chunks in the file which are *not*
-  interfered with by this command. The idea is that this gives us a chance to
-  produce valid-looking structures which might be dereferenced by later
-  pointers.
+  This corrupts the file /foo/bar on n2 in the region [128, 256) bytes,
+  dividing that region into 16 KB chunks, then corrupting every fifth chunk,
+  starting with (zero-indexed) chunk 2: 2, 7, 12, 17, .... Data is drawn from
+  other chunks in the region which are *not* interfered with by this command,
+  unless mod is 1, in which case chunks are randomly selected. The idea is that
+  this gives us a chance to produce valid-looking structures which might be
+  dereferenced by later pointers.
 
-  If `mod` and `i` are omitted, uses number of nodes, and the index of the node
-  in (:nodes test).
+  All options are optional, except for :node and :file. See
+  resources/corrupt-file.c for defaults.
 
   This function can take an optional map with defaults for each file-corruption
   operation."

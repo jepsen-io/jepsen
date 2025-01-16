@@ -14,7 +14,7 @@
 
 (use-fixtures :once quiet-logging)
 
-(deftest ^:integration corrupt-file-chunks-helix-test
+(deftest ^:focus ^:integration corrupt-file-chunks-helix-test
   ; This isn't going to work on containers, but I at least want to test that it
   ; uploads and compiles the binary.
   (let [file "/tmp/corrupt-demo"
