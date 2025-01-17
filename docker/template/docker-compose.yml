@@ -1,0 +1,65 @@
+x-node:
+  &default-node
+  build: ./node
+  env_file: ./secret/node.env
+  secrets:
+    - authorized_keys
+  tty: true
+  tmpfs:
+    - /run:size=100M
+    - /run/lock:size=100M
+  cgroup: host
+  volumes:
+    - "/sys/fs/cgroup:/sys/fs/cgroup:rw"
+    - "jepsen-shared:/var/jepsen/shared"
+  networks:
+    - jepsen
+  cap_add:
+    - ALL
+  ports:
+    - ${JEPSEN_PORT:-22}
+  stop_signal: SIGRTMIN+3
+  healthcheck:
+    test: [ 'CMD-SHELL', 'systemctl status sshd | grep "Active: active (running)"' ]
+    interval: 1s
+    timeout: 1s
+    retries: 3
+    start_period: 3s
+  depends_on: 
+    setup:
+      condition: service_completed_successfully
+
+volumes:
+  jepsen-shared:
+
+secrets:
+  authorized_keys:
+    file: ./secret/authorized_keys
+
+networks:
+  jepsen:
+
+services:
+  setup:
+    image: jgoerzen/debian-base-standard:bookworm
+    container_name: jepsen-setup
+    hostname: setup
+    volumes:
+      - "jepsen-shared:/var/jepsen/shared"
+    entrypoint: [ 'rm', '-rf', '/var/jepsen/shared/nodes' ] 
+  control:
+    container_name: jepsen-control
+    hostname: control
+    depends_on:
+%%DEPS%%
+    build: ./control
+    env_file: ./secret/control.env
+    ports:
+      - "22"
+      - "8080"
+    networks:
+      - jepsen
+    volumes:
+      - "jepsen-shared:/var/jepsen/shared"
+    stop_signal: SIGRTMIN+3
+%%DBS%%

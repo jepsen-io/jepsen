@@ -1,0 +1,70 @@
+version: '3.7'
+services:
+  control:
+    volumes:
+      - ${GOPATH}/bin:/gobin # Mounts $GOPATH/bin on host to /gobin for easy access to binaries.
+  jaeger:
+    networks:
+      - jepsen
+    image: jaegertracing/all-in-one:1.16
+    container_name: jaeger
+    hostname: jaeger
+    ports:
+      - "16686:16686" # UI
+      - "14268:14268" # Collector
+      - "14269:14269" # Admin endpoint for metrics & pprof
+    environment:
+      - SPAN_STORAGE_TYPE=badger
+      - BADGER_EPHEMERAL=false
+      - BADGER_DIRECTORY_KEY=/working/jaeger
+      - BADGER_DIRECTORY_VALUE=/working/jaeger
+      - BADGER_SPAN_STORE_TTL=87600h
+  grafana:
+    networks:
+      - jepsen
+    image: grafana/grafana:6.5.3
+    container_name: grafana
+    hostname: grafana
+    environment:
+    - GF_AUTH_ANONYMOUS_ENABLED=true
+    - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    ports:
+    - 3000:3000
+    volumes:
+    - type: volume
+      source: grafana-volume
+      target: /var/lib/grafana
+      read_only: false
+  node-exporter:
+    networks:
+      - jepsen
+    image: quay.io/prometheus/node-exporter:v0.18.1
+    container_name: node-exporter
+    pid: host
+    working_dir: /working/jaeger
+    volumes:
+    - type: bind
+      source: /
+      target: /host
+      read_only: true
+  prometheus:
+    networks:
+      - jepsen
+    image: prom/prometheus:v2.15.1
+    container_name: prometheus
+    hostname: prometheus
+    ports:
+    - 9090:9090
+    volumes:
+    - type: volume
+      source: prometheus-volume
+      target: /prometheus
+      read_only: false
+    - type: bind
+      source: $JEPSEN_ROOT/dgraph/docker/prometheus.yml
+      target: /etc/prometheus/prometheus.yml
+      read_only: true
+
+volumes:
+  grafana-volume: {}
+  prometheus-volume: {}
