@@ -1,13 +1,16 @@
 (ns jepsen.stolon
   "Constructs tests, handles CLI arguments, etc."
   (:require [clojure.tools.logging :refer [info warn]]
-            [clojure [pprint :refer [pprint]]
+            [clojure [edn :as edn]
+                     [pprint :refer [pprint]]
                      [string :as str]]
+            [clojure.java [io :as io]]
             [jepsen [cli :as cli]
                     [checker :as checker]
                     [db :as jdb]
                     [generator :as gen]
                     [os :as os]
+                    [rds :as rds]
                     [tests :as tests]
                     [util :as util :refer [parse-long]]]
             [jepsen.os.debian :as debian]
@@ -56,6 +59,10 @@
    :read-committed      "RC"
    :read-uncommitted    "RU"})
 
+(def rds-file
+  "Where do we store RDS cluster info?"
+  "rds.edn")
+
 (defn stolon-test
   "Given an options map from the command line runner (e.g. :nodes, :ssh,
   :concurrency, ...), constructs a test map."
@@ -98,7 +105,12 @@
                          (->> (:generator workload)
                               (gen/stagger (/ (:rate opts)))
                               (gen/nemesis (:generator nemesis))
-                              (gen/time-limit (:time-limit opts))))})))
+                              (gen/time-limit (:time-limit opts))))}
+           ; If we're using an existing postgres install, disable all SSH
+           ; capabilities, including fault injection.
+           (when (:existing-postgres opts)
+             {:ssh {:dummy? true}}))))
+
 (def cli-opts
   "Additional CLI options"
   [[nil "--etcd-version STRING" "What version of etcd should we install?"
@@ -113,7 +125,7 @@
                  :serializable}
                "Should be one of read-uncommitted, read-committed, repeatable-read, or serializable"]]
 
-   [nil "--existing-postgres" "If set, assumes nodes already have a running Postgres instance, skipping any OS and DB setup and teardown. Suitable for debugging issues against a local instance of Postgres (or some sort of pre-built cluster) when you don't want to set up a whole-ass Jepsen environment."
+   [nil "--existing-postgres" "If set, assumes nodes already have a running Postgres instance, skipping any OS and DB setup and teardown. Suitable for debugging issues against a local instance of Postgres (or some sort of pre-built cluster, like RDS) when you don't want to set up a whole-ass Jepsen environment."
     :default false]
 
    [nil "--expected-consistency-model MODEL" "What level of isolation do we *expect* to observe? Defaults to the same as --isolation."
@@ -172,10 +184,18 @@
     :parse-fn read-string
     :validate [pos? "Must be a positive number."]]
 
+   [nil "--rds" "Runs tests against the RDS cluster stored in ./rds.edn. Overrides nodes, postgres-username, postgres-password, --existing-postgres, etc."
+    :assoc-fn
+    (fn rds-assoc [m k v]
+      (let [r (edn/read-string (slurp rds-file))]
+        (assert r "No rds.edn found; try running `lein run rds-create`.")
+        (assoc m :nodes nil)))]
+
    ["-v" "--version STRING" "What version of Stolon should we test?"
     :default "0.16.0"]
 
    ["-w" "--workload NAME" "What workload should we run?"
+    :default :append
     :parse-fn keyword
     :validate [workloads (cli/one-of workloads)]]
    ])
@@ -206,6 +226,27 @@
   (update-in parsed [:options :expected-consistency-model]
              #(or % (get-in parsed [:options :isolation]))))
 
+(def rds-setup-cmd
+  "A command which creates an RDS cluster."
+  {:opt-spec  [["-s" "--security-group ID" "The ID of a security group you'd like to associate with this cluster."]]
+   :usage     "Creates a fresh RDS cluster, writing its details to ./rds.edn"
+   :opt-fn    identity
+   :run (fn run [{:keys [options]}]
+          (let [c (rds/create-postgres!
+                    {:security-group-id (:security-group options)})]
+            (pprint c)
+            (spit rds-file (with-out-str (pprint c)))
+            (info "RDS cluster ready.")))})
+
+(def rds-teardown-cmd
+  "A command which tears down all RDS clusters."
+  {:opt-spec  []
+   :usage     "Tears down all RDS clusters. Yes, all. ALL. DANGER."
+   :opt-fn    identity
+   :run (fn run [{:keys [options]}]
+          (.delete (io/file rds-file))
+          (rds/teardown!))})
+
 (defn -main
   "Handles command line arguments. Can either run a test, or a web server for
   browsing results."
@@ -216,5 +257,7 @@
                    (cli/test-all-cmd {:tests-fn (partial all-tests stolon-test)
                                       :opt-spec cli-opts
                                       :opt-fn   opt-fn})
-                   (cli/serve-cmd))
+                   (cli/serve-cmd)
+                   {"rds-setup"    rds-setup-cmd
+                    "rds-teardown" rds-teardown-cmd})
             args))

@@ -1,6 +1,7 @@
 # jepsen.stolon
 
-Jepsen tests for the Stolon Postgres replication system. Also happens to test single-node Postgres installs.
+Jepsen tests for the Stolon Postgres replication system. Also happens to test
+single-node Postgres installs.
 
 ## Usage
 
