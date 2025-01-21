@@ -4,7 +4,6 @@
 #define OFF_MAX (sizeof(off_t) == sizeof(long long) ? LLONG_MAX : sizeof(off_t) == sizeof(int) ? INT_MAX : -999999)
 #define OFF_MIN (sizeof(off_t) == sizeof(long long) ? LLONG_MIN : sizeof(off_t) == sizeof(int) ? INT_MIN : -999999)
 
-
 #include <argp.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -21,13 +20,17 @@
 #include <unistd.h>
 
 static char doc[] =
-  "Corrupts a file on disk, for testing the safety of distributed databases.\n"
+  "Corrupts a file on disk, for testing database safety.\n"
   "\n"
-  "Takes a chunk size in bytes, a modulus m, an index i, and a file. "
-  "Divides file into chunks, each chunk_size bytes, and overwrites "
-  "all chunks where `(chunk-index mod m) == i` with garbage, selected "
-  "from other chunks of the file. The range within the file can be limited "
-  "with --start and --end.";
+  "Takes a `file`. Affects a region of bytes within that file: "
+  "[`start`, `end`). Divides this region into chunks, each `chunk-size` "
+  "bytes. Numbering those chunks 0, 1, ..., affects every `modulus` "
+  "chunks, starting with chunk number `index`. The `mode` flag determines "
+  "what we do to those chunks.\n"
+  "\n"
+  "The `copy` mode replaces chunks with other, random chunks from the same "
+  "file. The `snapshot` mode saves copies of these chunks to /tmp. These "
+  "copies can be restored back into the file using the `restore` mode.";
 
 const char *argp_program_version = "corrupt-file 0.0.1";
 const char *argp_program_bug_address = "<aphyr@jepsen.io>";
