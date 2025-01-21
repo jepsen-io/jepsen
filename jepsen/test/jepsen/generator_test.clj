@@ -588,3 +588,18 @@
                gen/clients
                gen.test/perfect
                (map (juxt (comp long util/nanos->secs :time) :f :value))))))
+
+(deftest single-threaded-test
+  (is (= [[:w :invoke]
+          [:w :ok]
+          [:r :invoke]
+          [:r :ok]
+          [:r :invoke]
+          [:r :ok]]
+         (->> (gen/any (gen/repeat {:f :w})
+                       (gen/repeat {:f :r}))
+              gen/clients
+              (gen/concurrency-limit 1)
+              (gen/limit 3)
+              gen.test/perfect*
+              (map (juxt :f :type))))))
