@@ -89,7 +89,7 @@
              count
              (= 1) is)))))
 
-(deftest ^:focus ^:integration snapshot-file-chunks-helix-test
+(deftest ^:integration snapshot-file-chunks-helix-test
   (let [file "/tmp/snapshot-demo"
         start      1
         end        5
