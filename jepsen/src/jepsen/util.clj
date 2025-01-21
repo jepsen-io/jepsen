@@ -90,7 +90,13 @@
 (defn majority
   "Given a number, returns the smallest integer strictly greater than half."
   [n]
-  (inc (int (Math/floor (/ n 2)))))
+  (inc (long (Math/floor (/ n 2)))))
+
+(defn minority
+  "Given a number, returns the largest integer strictly less than half. Minimum
+  0."
+  [n]
+  (max 0 (dec (long (Math/ceil (/ n 2))))))
 
 (defn minority-third
   "Given a number, returns the largest integer strictly less than 1/3rd.

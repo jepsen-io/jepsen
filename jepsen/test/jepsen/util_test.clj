@@ -14,6 +14,16 @@
   (is (= 3 (majority 4)))
   (is (= 3 (majority 5))))
 
+(deftest minority-test
+  (are [expected n] (= expected (minority n))
+       0 0
+       0 1
+       0 2
+       1 3
+       1 4
+       2 5
+       2 6))
+
 (deftest integer-interval-set-str-test
   (is (= (integer-interval-set-str [])
          "#{}"))
