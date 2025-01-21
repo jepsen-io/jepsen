@@ -1,22 +1,24 @@
 (ns jepsen.nemesis.file-test
   (:require [clojure [pprint :refer [pprint]]
+                     [set :as set]
                      [string :as str]
                      [test :refer :all]]
             [clojure.tools.logging :refer [info warn]]
             [dom-top.core :refer [loopr]]
-            [jepsen [core :as jepsen]
+            [jepsen [client :as client]
+                    [core :as jepsen]
                     [common-test :refer [quiet-logging]]
                     [control :as c]
                     [generator :as gen]
-                    [tests :as tests]]
+                    [history :as h]
+                    [tests :as tests]
+                    [util :as util]]
             [jepsen.control.util :as cu]
             [jepsen.nemesis.file :as nf]))
 
 (use-fixtures :once quiet-logging)
 
-(deftest ^:focus ^:integration corrupt-file-chunks-helix-test
-  ; This isn't going to work on containers, but I at least want to test that it
-  ; uploads and compiles the binary.
+(deftest ^:integration copy-file-chunks-helix-test
   (let [file "/tmp/corrupt-demo"
         ; A file is a series of chunks made up of words.
         word-size   3 ; the word "32 " denotes word 2 in chunk 3.
@@ -26,7 +28,7 @@
                     :name      "corrupt-file-test"
                     :nemesis   (nf/corrupt-file-nemesis)
                     :generator
-                    (->> (nf/corrupt-file-chunks-helix-gen
+                    (->> (nf/copy-file-chunks-helix-gen
                            {:file       file
                             :chunk-size chunk-size})
                          ; We do three passes to make sure it leaves
@@ -86,3 +88,73 @@
              set
              count
              (= 1) is)))))
+
+(deftest ^:focus ^:integration snapshot-file-chunks-helix-test
+  (let [file "/tmp/snapshot-demo"
+        start      1
+        end        5
+        test (assoc tests/noop-test
+                    :nodes     (take 3 (:nodes tests/noop-test))
+                    :name      "snapshot-file-test"
+                    :nemesis   (nf/corrupt-file-nemesis)
+                    ; We want to change the contents of the file between
+                    ; nemesis ops
+                    :client (reify client/Client
+                              (open! [this test node] this)
+                              (setup! [this test]
+                                (c/with-test-nodes test
+                                  (c/su
+                                    (cu/write-file! "aa" file))))
+                              (invoke! [this test op]
+                                (let [res (c/with-test-nodes test
+                                            (c/su
+                                              (let [before (c/exec :cat file)
+                                                    _ (cu/write-file! (:value op) file)
+                                                    after (c/exec :cat file)]
+                                                [before after])))]
+                                  (assoc op :type :ok, :value res)))
+                              (teardown! [this test])
+                              (close! [this test]))
+                    :generator
+                    (->> (gen/flip-flop
+                           (gen/nemesis
+                             (nf/snapshot-file-chunks-nodes-gen
+                               (comp dec util/majority count :nodes)
+                               {:file       file
+                                :start      start
+                                :end        end}))
+                           (gen/clients
+                             [{:f :w, :value "bbbb"}
+                              {:f :w, :value "ccccccccccc"}
+                              {:f :w, :value "dddddddddd"}
+                              {:f :w, :value "e"}]))
+                         (gen/limit 8)
+                         (gen/concurrency-limit 1)))
+        ; Run test
+        test' (jepsen/run! test)
+        h (:history test')
+        ;_ (pprint h)
+        ; Extract the nodes we acted on
+        affected-nodes (->> (filter (comp #{:nemesis} :process) h)
+                            (map :value)
+                            (filter map?)
+                            (map (comp set keys))
+                            (reduce set/union))]
+    ; Should be just one node
+    (is (= 1 (count affected-nodes)))
+
+    ; On affected nodes...
+    (is (= [; We start with a, snapshot, and write out four bs
+            ["aa" "bbbb"]
+            ; Nemesis restores [ a], we write c
+            ["babb" "ccccccccccc"]
+            ; Nemesis snapshots c, we write d
+            ["ccccccccccc" "dddddddddd"]
+            ; Nemesis restores c, we write e
+            ["dccccddddd" "e"]
+            ]
+           (->> (h/client-ops h)
+                (h/filter h/ok?)
+                (h/map (fn [op]
+                         (get (:value op)
+                              (first affected-nodes)))))))))
