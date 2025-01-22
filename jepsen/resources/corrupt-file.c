@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <libgen.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,11 +27,8 @@ static char doc[] =
   "[`start`, `end`). Divides this region into chunks, each `chunk-size` "
   "bytes. Numbering those chunks 0, 1, ..., affects every `modulus` "
   "chunks, starting with chunk number `index`. The `mode` flag determines "
-  "what we do to those chunks.\n"
-  "\n"
-  "The `copy` mode replaces chunks with other, random chunks from the same "
-  "file. The `snapshot` mode saves copies of these chunks to /tmp. These "
-  "copies can be restored back into the file using the `restore` mode.";
+  "what we do to those chunks: copying them around, flipping bits, taking "
+  "and restoring snapshots, etc.";
 
 const char *argp_program_version = "corrupt-file 0.0.1";
 const char *argp_program_bug_address = "<aphyr@jepsen.io>";
@@ -38,26 +36,48 @@ const char *argp_program_bug_address = "<aphyr@jepsen.io>";
 /* We take one argument: a file to corrupt. */
 static char args_doc[] = "FILE";
 
-/* Our options */
+/* Our exit statuses. Should I just use ERRNO codes? I don't really know the
+ * conventions. */
+const int EXIT_OK = 0;    // Fine
+const int EXIT_ARGS = 1;  // Argument parsing problem
+const int EXIT_IO = 2;    // IO error
+const int EXIT_INT = 3;   // Some sort of internal error, like string concat
 
+/* Our options */
 #define OPT_START 1
 #define OPT_END 2
 #define OPT_MODULUS 3
 #define OPT_CLEAR_SNAPSHOTS 4
 
 static struct argp_option opt_spec[] = {
-  {"chunk-size", 'c', "BYTES", 0, "The size of each chunk, in bytes. Default 1 MB."},
-  {"clear-snapshots", OPT_CLEAR_SNAPSHOTS, NULL, 0, "If set, wipes out the entire snapshot directory before doing anything else. This can be run without any file."},
-  {"end", OPT_END, "BYTES", 0, "Index into the file, in bytes, exclusive, where corruption stops. Defaults to the largest file offset on this platform."},
-  {"index", 'i', "INDEX", 0, "The index of the first chunk to corrupt. 0 means the first chunk, starting from --start. Default 0."},
-  {"mode", 'm', "MODE", 0, "What to do with affected regions of the file. "
-    "Use `copy` to replace a chunk with some other chunk. Use `snapshot` to "
+  {"chunk-size", 'c', "BYTES", 0,
+    "The size of each chunk, in bytes. Default 1 MB."},
+  {"clear-snapshots", OPT_CLEAR_SNAPSHOTS, NULL, 0,
+    "If set, wipes out the entire snapshot directory before doing "
+    "anything else. This can be run without any file."},
+  {"end", OPT_END, "BYTES", 0,
+    "Index into the file, in bytes, exclusive, where corruption stops. "
+    "Defaults to the largest file offset on this platform."},
+  {"index", 'i', "INDEX", 0,
+    "The index of the first chunk to corrupt. 0 means the first chunk, "
+    "starting from --start. Default 0."},
+  {"mode", 'm', "MODE", 0,
+    "What to do with affected regions of the file. "
+    "Use `copy` to replace a chunk with some other chunk. Use `bitflip` to "
+    "flip random bits with a per-bit `--probability`. Use `snapshot` to "
     "take a snapshot of the chunk for use later, leaving the chunk unchanged. "
     "Snapshots are stored in `/tmp/jepsen/corrupt-file/snapshots/`. Use "
     "`restore` to restore snapshots (when available). If -m is not provided, "
     "does not corrupt the file."},
-  {"modulus", OPT_MODULUS, "MOD", 0, "After index, corrupt every MOD chunks. 3 means every third chunk. Default 1."},
-  {"start", OPT_START, "BYTES", 0, "Index into the file, in bytes, inclusive, where corruption starts. Default 0."},
+  {"modulus", OPT_MODULUS, "MOD", 0,
+    "After index, corrupt every MOD chunks. 3 means every third chunk. "
+    "Default 1: every chunk"},
+  {"probability", 'p', "PROB", 0,
+    "For --mode bitflip, determines the probability that any given bit "
+    "in the file flips. Default 1e-6: roughly one error per megabyte."},
+  {"start", OPT_START, "BYTES", 0,
+    "Index into the file, in bytes, inclusive, where corruption starts. "
+      "Default 0."},
   { 0 }
 };
 
@@ -66,6 +86,7 @@ static struct argp_option opt_spec[] = {
 #define MODE_COPY 1
 #define MODE_SNAPSHOT 2
 #define MODE_RESTORE 3
+#define MODE_BITFLIP 4
 
 /* Where do we stash snapshots? */
 static char SNAPSHOT_DIR[] = "/tmp/jepsen/corrupt-file/snapshots";
@@ -79,6 +100,7 @@ struct opts {
   off_t chunk_size;
   uint32_t index;
   uint32_t mod;
+  double probability;
   bool clear_snapshots;
 };
 
@@ -91,60 +113,68 @@ struct opts default_opts() {
   opts.chunk_size = 1024 * 1024; // 1 MB
   opts.index = 0;                // Starting at 0
   opts.mod = 1;                  // Every chunk
+  opts.probability = 1e-6;       // Roughly 1/MB
   opts.clear_snapshots = false;
   return opts;
 }
 
 /* Print an options map */
 void print_opts(struct opts opts) {
-  fprintf(stderr, "{:mode      %d,\n"
+  fprintf(stderr,
+      "{:mode             %d,\n"
       " :start            %ld,\n"
       " :end              %ld,\n"
       " :chunk_size       %ld,\n"
       " :index            %d,\n"
       " :mod              %d,\n"
-      " :file             \"%s\""
-      " :clear_snaphots"  "%d}\n",
+      " :probability      %f.\n"
+      " :file             \"%s\"\n"
+      " :clear_snaphots   %d}\n",
       opts.mode, opts.start, opts.end, opts.chunk_size, opts.index, opts.mod,
-      opts.file, opts.clear_snapshots);
+      opts.probability, opts.file, opts.clear_snapshots);
 }
 
-/* Validate an options map. Returns 0 for OK, any other number for an error. */
+/* Validate an options map. Returns EXIT_OK for OK, EXIT_ARGS for an error. */
 int validate_opts(struct opts opts) {
   if (opts.start < 0) {
     fprintf(stderr, "start %ld must be 0 or greater\n", opts.start);
-    return 1;
+    return EXIT_ARGS;
   }
 
   if (opts.end < 0) {
     fprintf(stderr, "end %ld must be 0 or greater\n", opts.end);
-    return 1;
+    return EXIT_ARGS;
   }
 
   if (OFF_MAX < opts.end) {
     fprintf(stderr, "end %ld must be less than OFF_MAX (%lld)\n",
         opts.end, OFF_MAX);
-    return 1;
+    return EXIT_ARGS;
   }
 
   if (opts.end < opts.start) {
     fprintf(stderr, "start %ld must be less than or equal to end %ld\n",
         opts.start, opts.end);
-    return 1;
+    return EXIT_ARGS;
   }
 
   if ((opts.index < 0) || (opts.mod <= opts.index)) {
     fprintf(stderr, "index %u must fall in [0, %u)\n",
         opts.index, opts.mod);
-    return 1;
+    return EXIT_ARGS;
+  }
+
+  if (opts.probability < 0.0 || 1.0 < opts.probability) {
+    fprintf(stderr, "Probability %f must be within [0,1]", opts.probability);
+    return EXIT_ARGS;
   }
 
   if (opts.chunk_size <= 0) {
     fprintf(stderr, "chunk size %ld must be positive\n", opts.chunk_size);
-    return 1;
+    return EXIT_ARGS;
   }
 
-  return 0;
+  return EXIT_OK;
 }
 
 /* Called at each step of option parsing */
@@ -181,6 +211,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     case 'm':
       if (strcmp(arg, "copy") == 0) {
         opts->mode = MODE_COPY;
+      } else if (strcmp(arg, "bitflip") == 0) {
+        opts->mode = MODE_BITFLIP;
       } else if (strcmp(arg, "snapshot") == 0) {
         opts->mode = MODE_SNAPSHOT;
       } else if (strcmp(arg, "restore") == 0) {
@@ -188,6 +220,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       } else {
         argp_error(state, "Unknown mode %s", arg);
       }
+      break;
+    case 'p':
+      opts->probability = strtod(arg, NULL);
       break;
     case ARGP_KEY_ARG:
       if (1 < state->arg_num) {
@@ -213,10 +248,23 @@ static struct argp argp = { opt_spec, parse_opt, args_doc, doc };
 
 /* Utilities */
 
-/* Generates a random off_t in [0, max) */
+/* Generates a uniform random off_t in [0, max) */
 off_t rand_int(off_t max) {
-  // Not well-dispersed, but whatever
-  return (rand() % max);
+  if (0 < max) {
+    // Not well-dispersed, but whatever.
+    // TODO: this is only from [0, 2^31). Need to roll twice to get a full
+    // off_t.
+    return (lrand48() % max);
+  } else {
+    return 0;
+  }
+}
+
+/* Generates a random exponentially distributed off_t\, with rate parameter
+ * lambda. */
+off_t rand_exp_int(double lambda) {
+  double u = drand48();
+  return (-1 / lambda) * log(u);
 }
 
 /* Create directory, recursively. Returns an error, or 0. */
@@ -290,7 +338,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
   int err = mkdir_p(dir);
   if (err != 0) {
     fprintf(stderr, "Creating directory %s failed: %s\n", dir, strerror(err));
-    return err;
+    return EXIT_IO;
   }
   //free(snapshot);
 
@@ -324,14 +372,14 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
       // Fuck me, how do people manage memory leaks with early return? This
       // feels awful
       //free(dir);
-      return err;
+      return EXIT_IO;
     }
     dest_fd = open(snapshot, O_CREAT | O_WRONLY, S_IWUSR | S_IRUSR);
     if (dest_fd == -1) {
       fprintf(stderr, "open() failed\n");
       //free(snapshot);
       //free(dir);
-      return 2;
+      return EXIT_IO;
     }
 
     // Snapshot region
@@ -342,7 +390,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
       close(dest_fd);
       //free(snapshot);
       //free(dir);
-      return 4;
+      return EXIT_IO;
     }
 
     // Stats
@@ -357,7 +405,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
       chunks_snapped, bytes_snapped);
 
   //free(dir);
-  return 0;
+  return EXIT_OK;
 }
 
 /* Corrupt chunks of a file by restoring them from snapshot files in /tmp. */
@@ -398,7 +446,7 @@ int corrupt_restore(struct opts opts, int fd, off_t file_size, off_t
       }
       fprintf(stderr, "open() failed\n");
       free(snapshot);
-      return 2;
+      return EXIT_IO;
     }
 
     // Restore chunk
@@ -408,7 +456,7 @@ int corrupt_restore(struct opts opts, int fd, off_t file_size, off_t
       close(source_fd);
       close(fd);
       free(snapshot);
-      return 4;
+      return EXIT_IO;
     }
 
     // Stats
@@ -422,7 +470,7 @@ int corrupt_restore(struct opts opts, int fd, off_t file_size, off_t
   fprintf(stdout, "Restored %ld chunks (%ld bytes)\n",
       chunks_restored, bytes_restored);
 
-  return 0;
+  return EXIT_OK;
 }
 
 /* Generates the starting offset of a chunk. Try to prefer chunks that we
@@ -480,7 +528,7 @@ int corrupt_copy(struct opts opts, int fd, off_t file_size, off_t chunk_count) {
       if (copied == -1) {
         fprintf(stderr, "copy error: %s\n", strerror(errno));
         close(fd);
-        return 4;
+        return EXIT_IO;
       }
 
       bytes_corrupted += copied;
@@ -489,8 +537,91 @@ int corrupt_copy(struct opts opts, int fd, off_t file_size, off_t chunk_count) {
   }
   fprintf(stdout, "Corrupted %ld chunks (%ld bytes)\n",
       chunks_corrupted, bytes_corrupted);
-  return 0;
+  return EXIT_OK;
 }
+
+/* Flip random bits in affected chunks. */
+int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
+    off_t chunk_count) {
+  /* We model bitflips as poisson processes with lambda = opts.probability; the
+   * distance in bits between flips is therefore an exponentially distributed
+   * process with rate parameter lambda. I'm not entirely confident about this
+   * approach--it yields roughly the right number of bitflips total, but the
+   * number of unaffected bytes in the file seems a little high. */
+
+  // For read/write retvals
+  ssize_t ret_size;
+
+  // Start and end of chunk
+  off_t start = 0;
+  off_t end = 0;
+  // Size of this chunk
+  off_t chunk_size = 0;
+  // Bit to flip
+  uint8_t target_bit = 0;
+
+  // In-memory buffer--we go one byte at a time.
+  uint8_t buf = 0;
+  uint8_t mask = 0; // The mask we xor with
+
+  // Stats
+  off_t chunks_processed = 0;
+  off_t bits_flipped = 0;
+
+  // Start at chunk 0
+  off_t chunk = 0;
+  // The next offset, relative to the start of the current chunk, which we will
+  // flip. This offset works as if chunks were contiguous, rather than spread
+  // out by mod-1 chunks.
+  off_t offset = rand_exp_int(opts.probability);
+
+  // Work our way through chunks until we have to flip.
+  while (chunk < chunk_count) {
+    // How big is this chunk?
+    start = chunk_offset(opts, chunk);
+    end = start + opts.chunk_size;
+    if (file_size < end) {
+      end = file_size;
+    }
+    chunk_size = end - start;
+
+    while (offset < chunk_size) {
+      // We're flipping in this chunk.
+      target_bit = rand_int(8);
+      mask = (0x01 << target_bit);
+
+      // Read
+      ret_size = pread(fd, &buf, 1, start + offset);
+      if (ret_size < 0) {
+        fprintf(stderr, "pread() failed: %s\n", strerror(errno));
+        return EXIT_IO;
+      }
+      // Flip
+      buf = buf ^ mask;
+      // Write
+      ret_size = pwrite(fd, &buf, 1, start + offset);
+      if (ret_size < 0) {
+        fprintf(stderr, "pwrite() failed: %s\n", strerror(errno));
+        return EXIT_IO;
+      }
+
+      bits_flipped += 1;
+
+      // Roll a new inter-arrival interval
+      offset += rand_exp_int(opts.probability);
+    }
+
+    // Next chunk
+    chunks_processed += 1;
+    offset -= chunk_size;
+    chunk += opts.mod;
+  }
+
+  fprintf(stdout, "Processed %ld chunks (%ld bitflips)\n",
+      chunks_processed, bits_flipped);
+  return EXIT_OK;
+}
+
 
 /* Ugh I am SO bad at C numbers, please forgive me. I intend to do everything
  * here supporting large (e.g. terabyte) file sizes; hopefully that's how it
@@ -500,7 +631,7 @@ int corrupt(struct opts opts) {
   int fd = open(opts.file, O_RDWR);
   if (fd == -1) {
     fprintf(stderr, "open() failed\n");
-    return 2;
+    return EXIT_IO;
   }
 
   /* How big is this file? */
@@ -509,7 +640,7 @@ int corrupt(struct opts opts) {
     fprintf(stderr, "fstat failed: %s\n",
         strerror(errno));
     close(fd);
-    return 3;
+    return EXIT_IO;
   }
   off_t file_size = finfo.st_size;
   off_t chunk_count_ = chunk_count(opts, file_size);
@@ -526,6 +657,9 @@ int corrupt(struct opts opts) {
     case MODE_RESTORE:
       ret = corrupt_restore(opts, fd, file_size, chunk_count_);
       break;
+    case MODE_BITFLIP:
+      ret = corrupt_bitflip(opts, fd, file_size, chunk_count_);
+      break;
   }
 
   close(fd);
@@ -539,7 +673,7 @@ int clear_snapshots() {
   int written = snprintf(cmd, limit, "rm -rf '%s'", SNAPSHOT_DIR);
   if (written < 0) {
     fprintf(stderr, "error writing string: %d", written);
-    return -1;
+    return EXIT_INT;
   }
   int ret = system(cmd);
   free(cmd);
@@ -553,23 +687,24 @@ int main (int argc, char **argv) {
   error_t err = argp_parse (&argp, argc, argv, 0, 0, &opts);
   if (err != 0) {
     fprintf(stderr, "Error parsing args: %d\n", err);
-    return 1;
+    return EXIT_ARGS;
   }
   int err2 = validate_opts(opts);
-  if (err2 != 0) {
+  if (err2 != EXIT_OK) {
     return err2;
   }
-  // print_opts(opts);
+  //print_opts(opts);
 
   // Init rand
+  srand48(time(NULL));
   srand(time(NULL));
 
   // Go
   if (opts.clear_snapshots) {
     int exit = clear_snapshots();
-    if (exit != 0) {
+    if (exit != EXIT_OK) {
       fprintf(stderr, "Error clearing snapshot directory %s: %d", SNAPSHOT_DIR, exit);
-      return 6;
+      return EXIT_IO;
     }
   }
   if (opts.mode != MODE_NONE) {
