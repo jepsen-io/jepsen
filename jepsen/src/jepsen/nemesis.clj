@@ -457,7 +457,7 @@
           (c/exec :chmod "a+rwx" bin-dir)
           (c/upload (.getCanonicalPath tmp-file) (str bin-dir "/" bin ".c"))
           (c/cd bin-dir
-                (c/exec :gcc (str bin ".c"))
+                (c/exec :gcc (str bin ".c") :-lm)
                 (c/exec :mv "a.out" bin))
           (finally
             (.delete tmp-file)))))

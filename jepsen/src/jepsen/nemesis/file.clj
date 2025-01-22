@@ -43,7 +43,9 @@
 
   nemesis/Reflection
   (fs [this]
-    #{:corrupt-file-chunks})
+    #{:copy-file-chunks
+      :snapshot-file-chunks
+      :restore-file-chunks})
 
   nemesis/Nemesis
   (setup! [this test]
@@ -207,7 +209,10 @@
                                      (util/random-nonempty-subset nodes))]
                      (assoc op :value value)))
                  f-gen)
-        test ctx))))
+        test ctx)))
+
+  (update [this test ctx event]
+    this))
 
 (defn snapshot-file-chunks-nodes-gen
   "Generates alternating :snapshot-file-chunks and :restore-file-chunks
