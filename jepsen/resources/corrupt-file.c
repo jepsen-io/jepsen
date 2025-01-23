@@ -508,7 +508,9 @@ off_t rand_source_offset(struct opts opts, off_t dest_offset, off_t file_size) {
 /* Corrupt by copying chunks from other chunks */
 int corrupt_copy(struct opts opts, int fd, off_t file_size, off_t chunk_count) {
   off_t source_offset;
-  off_t dest_offset;
+  off_t start;      // Start of current chunk
+  off_t end;        // End of current chunk
+  off_t chunk_size; // Size of current chunk
   ssize_t copied;
 
   // Stats
@@ -516,17 +518,23 @@ int corrupt_copy(struct opts opts, int fd, off_t file_size, off_t chunk_count) {
   off_t chunks_corrupted = 0;
 
   for (off_t chunk = opts.index; chunk < chunk_count; chunk += opts.mod) {
-    dest_offset = chunk_offset(opts, chunk);
+    start = chunk_offset(opts, chunk);
+    end = start + opts.chunk_size;
+    // Don't go past the end of the file or region
+    if (file_size < end) {
+      end = file_size;
+    }
+    if (opts.end < end) {
+      end = opts.end;
+    }
+    chunk_size = end - start;
 
     // Negative offset indicates there are no other chunks we can copy from
-    source_offset = rand_source_offset(opts, dest_offset, file_size);
+    source_offset = rand_source_offset(opts, start, file_size);
     if (0 <= source_offset) {
-      // fprintf(stderr, "copy %lu\t-> %lu ...\t", source_offset, dest_offset);
-      copied = copy_file_range(fd, &source_offset, fd, &dest_offset,
-          opts.chunk_size, 0);
-      // fprintf(stderr, "%ld bytes copied\n", copied);
+      copied = copy_file_range(fd, &source_offset, fd, &start,
+          chunk_size, 0);
       if (copied == -1) {
-        fprintf(stderr, "copy error: %s\n", strerror(errno));
         close(fd);
         return EXIT_IO;
       }
@@ -580,8 +588,12 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
     // How big is this chunk?
     start = chunk_offset(opts, chunk);
     end = start + opts.chunk_size;
+    // Don't go past the end of the file or region
     if (file_size < end) {
       end = file_size;
+    }
+    if (opts.end < end) {
+      end = opts.end;
     }
     chunk_size = end - start;
 
