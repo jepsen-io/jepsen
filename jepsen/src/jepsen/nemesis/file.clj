@@ -1,5 +1,6 @@
 (ns jepsen.nemesis.file
-  "Fault injection involving files on disk."
+  "Fault injection involving files on disk. This nemesis can copy chunks
+  randomly within a file, induce bitflips, or snapshot and restore chunks."
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as c]
                     [generator :as gen]
@@ -9,7 +10,7 @@
 (defn corrupt-file!
   "Calls corrupt-file on the currently bound remote node, taking a map of
   options."
-  [{:keys [mode file start end chunk-size mod i]}]
+  [{:keys [mode file start end chunk-size mod i probability]}]
   (assert (string? file))
   (c/su
     (c/exec (str nemesis/bin-dir "/corrupt-file")
@@ -19,6 +20,7 @@
             (when chunk-size  [:--chunk-size chunk-size])
             (when mod         [:--modulus mod])
             (when i           [:--index i])
+            (when probability [:--probability probability])
             file)))
 
 (defn clear-snapshots!
@@ -32,9 +34,10 @@
   "Turns an op :f into a mode for the corrupt-file binary."
   [f]
   (case f
+    :bitflip-file-chunks    "bitflip"
     :copy-file-chunks       "copy"
-    :snapshot-file-chunks   "snapshot"
-    :restore-file-chunks    "restore"))
+    :restore-file-chunks    "restore"
+    :snapshot-file-chunks   "snapshot"))
 
 (defrecord CorruptFileNemesis
   ; A map of default options, e.g. {:chunk-size ..., :file, ...}, which are
@@ -43,9 +46,10 @@
 
   nemesis/Reflection
   (fs [this]
-    #{:copy-file-chunks
-      :snapshot-file-chunks
-      :restore-file-chunks})
+    #{:bitflip-file-chunks
+      :copy-file-chunks
+      :restore-file-chunks
+      :snapshot-file-chunks})
 
   nemesis/Nemesis
   (setup! [this test]
@@ -57,11 +61,13 @@
   (invoke! [this test {:keys [f value] :as op}]
     (assert (every? string? (map :node value)))
     (case f
-      (:copy-file-chunks
-       :snapshot-file-chunks
-       :restore-file-chunks)
+      (:bitflip-file-chunks
+       :copy-file-chunks
+       :restore-file-chunks
+       :snapshot-file-chunks)
       (let [v (c/on-nodes
-                test (distinct (map :node value))
+                test
+                (distinct (map :node value))
                 (fn node [test node]
                   ; Apply each relevant corruption
                   (->> value
@@ -97,6 +103,17 @@
   unless mod is 1, in which case chunks are randomly selected. The idea is that
   this gives us a chance to produce valid-looking structures which might be
   dereferenced by later pointers.
+
+    {:f     :bitflip-file-chunks
+     :value [{:node        \"n3\"
+              :file        \"/foo/bar\"
+              :start       512
+              :end         1024
+              :probability 1e-3}]}
+
+  This flips roughly one in a thousand bits, in the region of /foo/bar between
+  512 and 1024 bytes. The `mod`, `i`, and `chunk-size` settings all work as
+  you'd expect.
 
     {:f     :snapshot-file-chunks
      :value [{:node       \"n2\"
@@ -162,15 +179,20 @@
   (update [this test ctx op]
     this))
 
-(defn copy-file-chunks-helix-gen
-  "Generates copy-file-chunks operations in a 'helix' around the cluster.
-  Once per test, picks random `i`s for the nodes in the test. Takes default
-  options for file corruptions, as per `corrupt-file-nemesis`. Emits a series
-  of `copy-file-chunks` operations, where each operation has a file
-  corruption on every node. Because the `i` for each node is fixed, this
-  ensures that no two nodes ever corrupt the same bit of the file. If the
-  permutation of node is is [n1, n2, n3], and with a chunk size of 2 bytes,
-  this looks like:
+(defn helix-gen
+  "Takes default options for a single file corruption map (see
+  `corrupt-file-nemesis`), and a generator which produces operations like {:f
+  :bitflip-file-chunks}. Returns a generator which fills in values for those
+  operations, such that in each operation, every node corrupts the file, but
+  they all corrupt different, stable regions.
+
+    (helix-gen {:chunk-size 2}
+               (gen/repeat {:type :info, :f :copy-file-chunks}))
+
+  When first invoked, selects a permutation of the nodes in the test, assigning
+  each a random index from 0 to n-1. Each value emitted by the generator uses
+  that index, and `modulus` n. If the permutation of node is is [n1, n2, n3],
+  and the chunk size is 2 bytes, the affected chunks look like:
 
     node   file bytes
            0123456789abcde ...
@@ -182,13 +204,10 @@
   survive it. In particular, systems which keep their on-disk representation
   very close across different nodes may be able to recover from the intact
   copies on other nodes."
-  ([]
-   (copy-file-chunks-helix-gen {}))
-  ([default-opts]
-   (HelixGen. (gen/repeat {:type :info, :f :copy-file-chunks})
-              default-opts)))
+  [default-corruption-opts f-gen]
+  (HelixGen. f-gen default-corruption-opts))
 
-(defrecord NodesGen [n f-gen default-opts]
+(defrecord NodesGen [n default-opts f-gen]
   gen/Generator
   (op [this test ctx]
     ; Pick nodes we're allowed to interfere with
@@ -214,24 +233,28 @@
   (update [this test ctx event]
     this))
 
-(defn snapshot-file-chunks-nodes-gen
-  "Generates alternating :snapshot-file-chunks and :restore-file-chunks
-  operations on up to `n` nodes in the cluster. Selects up to n nodes when
-  first invoked, and always chooses random non-empty subsets of those nodes.
-  Takes default options for file corruptions, as per `corrupt-file-nemesis.`
+(defn nodes-gen
+  "Takes a number of nodes `n`, a map of default file corruption options (see
+  `corrupt-file-nemesis`), and a generator of operations like `{:type :info, :f
+  :snapshot-file-chunk}` with `nil` `:value`s. Returns a generator which fills
+  in values with file corruptions, restricted to at most `n` nodes over the
+  course of the test. This corrupts bytes [128, 256) on at most two nodes over
+  the course of the test.
+
+    (nodes-gen 2
+              {:start 128, :end 256}
+              (gen/repeat {:type :info, :f :bitflip-file-chunks}))
 
   `n` can also be a function `(n test)`, which can be used to select (e.g.) a
   minority of nodes. For example, try `(comp jepsen.util/minority count
   :nodes)`.
 
-  This generator is intended to stress systems which can tolerate up to n disk
-  faults, but no more."
-  ([n]
-   (snapshot-file-chunks-nodes-gen n {}))
-  ([n default-opts]
+  This generator is intended to stress systems which can tolerate disk faults
+  on up to n nodes, but no more."
+  ([n f-gen]
+   (nodes-gen n {}))
+  ([n f-gen default-opts]
    (NodesGen.
      n
-     (gen/flip-flop
-       (gen/repeat {:type :info, :f :snapshot-file-chunks})
-       (gen/repeat {:type :info, :f :restore-file-chunks}))
+     f-gen
      default-opts)))

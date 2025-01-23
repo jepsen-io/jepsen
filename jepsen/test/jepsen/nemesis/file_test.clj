@@ -28,7 +28,9 @@
                     :name      "corrupt-file-test"
                     :nemesis   (nf/corrupt-file-nemesis)
                     :generator
-                    (->> (nf/copy-file-chunks-helix-gen
+                    (->> {:type :info, :f :copy-file-chunks}
+                         gen/repeat
+                         (nf/helix-gen
                            {:file       file
                             :chunk-size chunk-size})
                          ; We do three passes to make sure it leaves
@@ -117,12 +119,13 @@
                               (close! [this test]))
                     :generator
                     (->> (gen/flip-flop
-                           (gen/nemesis
-                             (nf/snapshot-file-chunks-nodes-gen
-                               (comp dec util/majority count :nodes)
-                               {:file       file
-                                :start      start
-                                :end        end}))
+                           (->> (gen/flip-flop (gen/repeat {:type :info, :f :snapshot-file-chunks})
+                                               (gen/repeat {:type :info, :f :restore-file-chunks}))
+                                (nf/nodes-gen (comp dec util/majority count :nodes)
+                                              {:file       file
+                                               :start      start
+                                               :end        end})
+                                gen/nemesis)
                            (gen/clients
                              [{:f :w, :value "bbbb"}
                               {:f :w, :value "ccccccccccc"}
@@ -158,3 +161,54 @@
                 (h/map (fn [op]
                          (get (:value op)
                               (first affected-nodes)))))))))
+
+(deftest ^:integration bitflip-file-chunks-helix-test
+  (let [file "/tmp/bitflip-demo"
+        start      4
+        end        11
+        chunk-size 3
+        index      2
+        probability 0.5
+        test (assoc tests/noop-test
+                    :nodes     (take 3 (:nodes tests/noop-test))
+                    :name      "bitflip-file-test"
+                    :nemesis   (nf/corrupt-file-nemesis)
+                    :generator
+                    (->> {:type :info, :f :bitflip-file-chunks}
+                         (nf/nodes-gen
+                           (comp util/minority count :nodes)
+                           {:file       file
+                            :start      start
+                            :end        end
+                            :chunk-size chunk-size
+                            :index      index
+                            :probability probability})
+                         gen/nemesis
+                         (gen/limit 1)))
+        ; Run test
+        data "ffffffffffffffffffffffff"
+        _ (c/on-many (:nodes test)
+            (c/su (cu/write-file! data file)))
+        ; Read back as hex
+        data (c/on (first (:nodes test))
+                   (c/su (c/exec :xxd :-p file)))
+        test' (jepsen/run! test)
+        h (:history test')
+        ;_ (pprint h)
+        ; Extract the nodes we acted on
+        affected-nodes (->> (filter (comp #{:nemesis} :process) h)
+                            (map :value)
+                            (filter map?)
+                            (map (comp set keys))
+                            (reduce set/union))
+        ; Should be just one node
+        _ (is (= 1 (count affected-nodes)))
+        node (first affected-nodes)
+        ; What's the file like there?
+        data' (c/on node
+                   (c/su (c/exec :xxd :-p file)))]
+    ; Should be unaffected outside range
+    (is (= (subs data 0 (* 2 start)) (subs data' 0 (* 2 start))))
+    (is (= (subs data (* 2 end)) (subs data' (* 2 end))))
+    ; But modified in the range!
+    (is (not= data data'))))
