@@ -204,8 +204,10 @@
   survive it. In particular, systems which keep their on-disk representation
   very close across different nodes may be able to recover from the intact
   copies on other nodes."
-  [default-corruption-opts f-gen]
-  (HelixGen. f-gen default-corruption-opts))
+  ([f-gen]
+   (helix-gen {} f-gen))
+  ([default-corruption-opts f-gen]
+   (HelixGen. f-gen default-corruption-opts)))
 
 (defrecord NodesGen [n default-opts f-gen]
   gen/Generator
