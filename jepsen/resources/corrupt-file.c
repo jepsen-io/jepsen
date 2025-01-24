@@ -576,8 +576,8 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
   off_t chunks_processed = 0;
   off_t bits_flipped = 0;
 
-  // Start at chunk 0
-  off_t chunk = 0;
+  // Starting chunk
+  off_t chunk = opts.index;
   // The next offset, relative to the start of the current chunk, which we will
   // flip. This offset works as if chunks were contiguous, rather than spread
   // out by mod-1 chunks.
