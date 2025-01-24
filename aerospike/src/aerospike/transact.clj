@@ -59,6 +59,8 @@
            ;; (info "TRANSACTION!" tid "begin")
               (info "Txn: " (.getId tid) " ..DONE!")
               (reset! cs (.commit client tid))
+              (if (not (= @cs CommitStatus/OK))
+                (info "Commit Status := " cs))
               (assoc op :type :ok :value @txn'))
 
             (catch AerospikeException e#
