@@ -254,9 +254,9 @@
   This generator is intended to stress systems which can tolerate disk faults
   on up to n nodes, but no more."
   ([n f-gen]
-   (nodes-gen n {}))
-  ([n f-gen default-opts]
+   (nodes-gen n {} f-gen))
+  ([n default-opts f-gen]
    (NodesGen.
      n
-     f-gen
-     default-opts)))
+     default-opts
+     f-gen)))
