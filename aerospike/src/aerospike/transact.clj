@@ -59,23 +59,28 @@
            ;; (info "TRANSACTION!" tid "begin")
               (info "Txn: " (.getId tid) " ..DONE!")
               (reset! cs (.commit client tid))
+              (if (not (= @cs CommitStatus/OK))
+                (info "Commit Status := " cs))
+              (assoc op :type :ok :value @txn'))
 
-              (if (not (= @cs CommitStatus/ALREADY_ABORTED))
-                (assoc op :type :ok :value @txn')
-                (do (info "}> !! ABORTED STATUS FROM COMMIT !! <{") 
-                    (assoc op :type :fail, :error :commibort))))
-            
             (catch AerospikeException e#
               (info "Exception caught:" (.getResultCode e#) (.getMessage e#))
               (info "Aborting..")
-              (.abort client tid)
+              (try
+                (.abort client tid)
+                (catch AerospikeException e#
+                  (if (= (.getResultCode e#) -18)
+                    (do (info "<?IMPOSSIBLE?> ABORT AFTER COMMIT!")
+                        (assoc op :type :ok, :value @txn'))
+                    (throw e#))))
               (case (.getResultCode e#)
+                -19 (assoc op :type :fail, :error :aborted-already)
                 120 (assoc op :type :fail, :error :MRT-blocked)
                 121 (assoc op :type :fail, :error :read-verify)
                 122 (assoc op :type :fail, :error :expired)
                 125 (assoc op :type :fail, :error :aborted)
                 (throw e#))))))
-      (info "REGULAR OP!")  ; Should never happen with txn test workloads 
+      (info "<?IMPOSSIBLE?> REGULAR OP!")  ; Should never happen with txn test workloads 
     ))
   (teardown! [_ test])
   (close! [this test]
