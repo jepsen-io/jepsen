@@ -88,7 +88,6 @@
 (defn killer-gen-seq
   "Sequence of kills, restarts, revivals, and reclusterings"
   [test]
-  (info "in (killer-gen-seq [test]) call")
   (let [patterns (->> [[kill-gen]
                        [restart-gen]
                        ; Revive then recluster
@@ -96,15 +95,12 @@
                          [revive-gen recluster-gen])]
                       (remove nil?)
                       vec)]
-    (info "Kill-Seq::PATTERNS=>" patterns)
     (mapcat rand-nth (repeat 960 patterns))))
 
 (defn killer-gen
   "A mix of kills, restarts, revivals, and reclusterings"
   [test]
-  (let [disrupts (killer-gen-seq test)]
-    (info "(killer-gen-seq) returned: [" (take 5 disrupts) "..]")
-    (gen/mix (seq disrupts))))
+  (gen/mix (seq (killer-gen-seq test))))
 
 (defn full-nemesis
   "Handles kills, restarts, revives, reclusters, clock skew, and partitions."
@@ -140,7 +136,6 @@
 
   :max-dead-nodes   number of nodes allowed to be down simultaneously"
   [opts]
-  (info "Instantiating Full-Nemesis! with options:" opts)
   (let [dead (atom #{})
         opts (assoc opts :dead dead)]
     {:nemesis (full-nemesis opts)

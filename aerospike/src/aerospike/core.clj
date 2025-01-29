@@ -4,13 +4,9 @@
              [counter :as counter]
              [cas-register :as cas-register]
              [nemesis :as nemesis]
-             [set :as set]]
-            [clojure.tools.logging :refer [info]]
-            [clojure.stacktrace :refer [print-stack-trace]]
-            [clojure.pprint :refer [pprint]]
-            ;; [clojure.string :as string]
+             [set :as set]
+             [transact :as transact]]
             [jepsen [cli :as cli]
-             [control :as c]
              [checker :as checker]
              [generator :as gen]
              [tests :as tests]]
@@ -34,20 +30,16 @@
   ([]
    (workloads {}))
   ([opts]
-   (let [res {:cas-register (cas-register/workload)
-              :counter      (counter/workload)
-              :set          (set/workload)}]
-     (do (require '[aerospike.transact :as transact]) ; for alias only(?)
-          ;; add MRT workloads iff client branch supports it
-         (assoc res
-                :transact ((requiring-resolve 'transact/workload) opts)
-                :list-append ((requiring-resolve 'transact/workload-ListAppend) opts))))))
+   {:cas-register (cas-register/workload)
+    :counter      (counter/workload)
+    :set          (set/workload)
+    :transact     (transact/workload opts)
+    :list-append  (transact/workload-ListAppend opts)
+    }))
 
 (defn workload+nemesis
   "Finds the workload and nemesis for a given set of parsed CLI options."
   [opts]
-  (print-stack-trace (Exception. "WORKLOAD+NEMESIS"))
-  (info "In Call to (workload+nemesis) with opts: " opts)
   (case (:workload opts)
     {:workload (get (workloads opts) (:workload opts))
      :nemesis  (nemesis/full opts)}))
@@ -61,7 +53,6 @@
                 client
                 checker
                 model]} workload
-        time-limit (:time-limit opts)
         generator (->> generator
                        (gen/nemesis
                         (->> (:generator nemesis)
@@ -78,8 +69,6 @@
                                 (gen/log "Waiting for quiescence")
                                 (gen/sleep 10)
                                 (gen/clients final-generator)))]
-    (print-stack-trace (Exception. "AEROSPIKE-TEST"))
-    (info "constructed jepsen test-map from opts:=" opts "\nWith CLIENT:=" client)
     (merge tests/noop-test
            opts
            {:name     (str "aerospike " (name (:workload opts)))
@@ -95,21 +84,17 @@
 
 (def mrt-opt-spec "Options for Elle-based workloads"
   [[nil "--max-txn-length MAX" "Maximum number of micro-ops per transaction"
-    :default 2
     :parse-fn #(Long/parseLong %)
                  ; TODO: must be >= min-txn-length
     :validate [pos? "must be positive"]]
    [nil "--min-txn-length MIN" "Maximum number of micro-ops per transaction"
-    :default 2
     :parse-fn #(Long/parseLong %)
                  ; TODO: must be <= min-txn-length
     :validate [pos? "must be positive"]]
    [nil "--key-count N_KEYS" "Number of active keys at any given time"
-    :default  3 ; TODO: make this  default differently based on key-dist 
     :parse-fn #(Long/parseLong %)
     :validate [pos? "must be positive"]]
    [nil "--max-writes-per-key N_WRITES" "Limit of writes to a particular key"
-    :default  32 ; TODO: make this  default differently based on key-dist 
     :parse-fn #(Long/parseLong %)
     :validate [pos? "must be positive"]]])
 
@@ -124,84 +109,38 @@
     :parse-fn #(Long/parseLong %)
     :default  2
     :validate [(complement neg?) "must be non-negative"]]
-   [nil "--clean-kill" "Terminate processes with SIGTERM to simulate fsync before commit"
-    :default false]
-   [nil "--no-revives" "Don't revive during the test (but revive at the end)"
-    :default false]
+   [nil "--clean-kill" "Terminate processes with SIGTERM to simulate fsync before commit"]
+   [nil "--no-revives" "Don't revive during the test (but revive at the end)"]
    [nil "--no-clocks" "Allow the nemesis to change the clock"
-    :default  false
     :assoc-fn (fn [m k v] (assoc m :no-clocks v))]
    [nil "--no-partitions" "Allow the nemesis to introduce partitions"
-    :default  false
     :assoc-fn (fn [m k v] (assoc m :no-partitions v))]
    [nil "--nemesis-interval SECONDS" "How long between nemesis actions?"
-    :default 5
     :parse-fn #(Long/parseLong %)
     :validate [(complement neg?) "Must be non-negative"]]
    [nil "--no-kills" "Allow the nemesis to kill processes."
-    :default  false
-    :assoc-fn (fn [m k v] (assoc m :no-kills v))]
-   [nil "--pause-mode MODE" "Whether to pause nodes by pausing the process, or slowing the network"
-    :default :process
-    :parse-fn keyword
-    :validate [#{:process :net :clock} "Must be one of :clock, :process, :net."]]
-   [nil "--heartbeat-interval MS" "Aerospike heartbeat interval in milliseconds"
-    :default 150
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "must be positive"]]
-
-   [nil "--max-txn-length MAX" "Maximum number of micro-ops per transaction"
-    :default 2
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "must be positive"]
-                 ; TODO: must be >= min-txn-length
-    ]
-   [nil "--min-txn-length MIN" "Maximum number of micro-ops per transaction"
-    :default 2
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "must be positive"]
-                 ; TODO: must be <= min-txn-length
-    ]
-   [nil "--key-count N_KEYS" "Number of active keys at any given time"
-    :default  3 ; TODO: make this  default differently based on key-dist 
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "must be positive"]]
-   [nil "--max-writes-per-key N_WRITES" "Limit of writes to a particular key"
-    :default  32 ; TODO: make this  default differently based on key-dist 
-    :parse-fn #(Long/parseLong %)
-    :validate [pos? "must be positive"]]
-   [nil "--key-dist DIST" "Uniform or Exponential"
-    :default  :exponential
-    :parse-fn keyword
-    :validate [#{:uniform :exponential} (cli/one-of #{:uniform :exponential})]]])
+    :assoc-fn (fn [m k v] (assoc m :no-kills v))]])
 
 (def opt-spec
   (cli/merge-opt-specs srt-opt-spec mrt-opt-spec))
 
 
 (defn valid-opts
-  "returns a map with valid choices for each test option."
+  "returns a map with randomized valid choices for missing test options."
   [opts]
-  (let [txn-min-ops        (rand-nth (range 1 6))
-        key-dist           (rand-nth (list :exponential :uniform))
-        nKeys              (if (= key-dist :uniform)
-                             (rand-nth (range 3 8))
-                             (rand-nth (range 8 12)))
-        ;; cluster-size       (count (:nodes opts))
-        nClients           (* 2 (+ 1 (rand-int 15)))]
-    {:concurrency          (get opts :concurrency nClients)
-     ; Txn Specific
-     :min-txn-length       txn-min-ops
-     :max-txn-length       (rand-nth (range txn-min-ops 12))
-     :key-count            nKeys
-     :key-dist             key-dist
-     ; Nemesis related
-     :no-kills             (rand-nth (list true false))
-     :clean-kills          (rand-nth (list true false))
-     :no-partitions        (rand-nth (list true false))
-     :no-clocks            (rand-nth (list true false))
-     :no-revives           (rand-nth (list true false))
-     :nemesis-interval     (rand-nth (list 5 8 10 15 20))}))
+  (let [; Only use command-line provided concurrency, ignore default (1n)
+        nClients           (if (.contains (:argv opts) "--concurrency")
+                             (:concurrency opts)
+                             (* 2 (+ 1 (rand-int 15))))]
+    (merge opts
+           {:concurrency          nClients
+            ; Nemesis related
+            :no-kills             (:no-kills opts (rand-nth (list true false))) 
+            :clean-kill           (:clean-kill opts (rand-nth (list true false)))
+            :no-partitions        (:no-partitions opts (rand-nth (list true false))) 
+            :no-clocks            (:no-clocks opts (rand-nth (list true false))) 
+            :no-revives           (:no-revives opts (rand-nth (list true false))) 
+            :nemesis-interval     (:nemesis-interval opts (rand-nth (list 5 8 10 15 20))) })))
 
 ;; -- Why did we merge in the webserver before?
 ;; (defn -main
@@ -215,42 +154,31 @@
 (defn all-test-opts
   "Creates a list of valid maps for each to be passed to `aerospike-test`"
   [opts]
-  (info "making option map for (all-tests)'s call to `aerospike-test` with options\n"
-        (with-out-str (pprint opts)))
-  (let [node-opt (:nodes opts)
-        ;; nClients (:concurrency opts)
-        duration (:time-limit opts)
-        ssh-opts (:ssh opts)
-        ;; _ (info "OPT-WRKLD:" (get (workloads opts) (:workload opts)))
-        base-opts (valid-opts opts)]
-    (print-stack-trace (Exception. "ALL-TEST-OPTS"))
-    (info "VALIDATED OPTION MAP: " base-opts)
-    (list
-     (merge base-opts opts {:workload :set})
-     (merge base-opts opts {:workload :counter})
-     (merge base-opts opts {:workload :cas-register})
-     (merge base-opts opts {:workload :list-append})
-     (merge base-opts opts {:workload :transact}))))
+  (list
+   (merge (valid-opts opts) {:workload :set})
+   (merge (valid-opts opts) {:workload :counter})
+   (merge (valid-opts opts) {:workload :cas-register})
+   (merge (valid-opts opts) {:workload :list-append})
+   (merge (valid-opts opts) {:workload :transact})))
+
 
 (defn all-tests
-  "
-  Takes base CLI options and constructs a sequence of test option maps to be used with test-all-cmd.
-  "
-  [opts]
-  ;; (info "Constructing -all-tests- from map! options:" (with-out-str (pprint opts)))
-  (let [res (map aerospike-test (all-test-opts opts))]
-    ;; (info "Returning from (all-tests)") 
-    ;; (info (:workload (first res)))
-    res))
+    "Takes base CLI options and constructs a sequence of test option maps
+     to be used with test-all-cmd."
+    [opts]
+    (map aerospike-test (all-test-opts opts)))
+
+(defn single-test [opts]
+  (aerospike-test (valid-opts opts)))
 
 (defn -main
-  "Handles command-line arguments, running a Jepsen command."
-  [& args]
-  (cli/run!
-   (merge (cli/single-test-cmd
-           {:test-fn   aerospike-test
-            :opt-spec  opt-spec})
-          (cli/test-all-cmd
-           {:tests-fn  all-tests
-            :opt-spec  opt-spec}))
-   args))
+    "Handles command-line arguments, running a Jepsen command."
+    [& args]
+    (cli/run!
+     (merge (cli/single-test-cmd
+             {:test-fn   single-test
+              :opt-spec  opt-spec})
+            (cli/test-all-cmd
+             {:tests-fn  all-tests
+              :opt-spec  opt-spec}))
+     args))
