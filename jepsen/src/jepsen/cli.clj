@@ -325,6 +325,7 @@ Options:\n")
           (System/exit 254))
 
         ; Run!
+        (info "parsed" parsed-opts)
         (run parsed-opts)
         (System/exit 0)))
 

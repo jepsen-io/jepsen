@@ -161,6 +161,7 @@
    (merge (valid-opts opts) {:workload :list-append})
    (merge (valid-opts opts) {:workload :transact})))
 
+
 (defn all-tests
     "Takes base CLI options and constructs a sequence of test option maps
      to be used with test-all-cmd."

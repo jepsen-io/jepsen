@@ -1,0 +1,33 @@
+---
+cluster_name: "fauna"
+network_coordinator_http_address: "127.0.0.1"
+network_coordinator_http_port: 8443
+network_admin_http_address: "127.0.0.1"
+network_admin_http_port: 8444
+network_peer_port: 7500
+network_peer_secure_port: 7501
+log_rotate_size_mb: 131072 # 128GB
+stats_host: localhost
+stats_port: 8125
+#log_level: debug
+
+# Speed up timeouts?
+network_round_trip_time_ms: 50
+
+# Speeds up time to indexes being active, maybe? It's hard to tell
+# accelerate_indexes: false
+
+# Try to prevent executor backoff from slowing things down
+#   Nope this seems waaaaay slower
+# background_task_exec_sleep_time_seconds: 1
+
+# Try to keep fauna from spawning enormous numbers of threads
+runtime_processors: 2
+
+# The default for this value was false before 2.6.0.rc10. Allowing sync for
+# polite stop/restart cycles happens to make it easier to see a catastrophic
+# bank test failure in 2.6.0.rc9, so we turn it on explicitly here.
+storage_sync_on_shutdown: true
+
+# Speed up graceful shutdowns a bit? Default is 30s
+shutdown_grace_period_seconds: 10
