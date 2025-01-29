@@ -1,17 +1,14 @@
 (ns aerospike.transact
   "Tests MRTs"
   (:require [aerospike.support :as s]
-            [clojure.tools.logging :refer [debug info warn]]
+            [clojure.tools.logging :refer [info]]
             [jepsen
-             [client :as client]
-             [independent :as independent]]
+             [client :as client]]
             [jepsen.tests.cycle
              [wr :as rw]
              [append :as la]])
   (:import (com.aerospike.client Txn
                                  AerospikeException
-                                 AerospikeException$Commit
-                                ;;  CommitError
                                  CommitStatus)))
 
 
@@ -59,7 +56,7 @@
            ;; (info "TRANSACTION!" tid "begin")
               (info "Txn: " (.getId tid) " ..DONE!")
               (reset! cs (.commit client tid))
-              (if (not (= @cs CommitStatus/OK))
+              (when (not (= @cs CommitStatus/OK))
                 (info "Commit Status := " cs))
               (assoc op :type :ok :value @txn'))
 
@@ -86,34 +83,29 @@
   (close! [this test]
     (s/close client)))
 
+(defn elle-gen-opts [opts]
+  (let [kDist (:key-dist opts (rand-nth (list :exponential :uniform)))
+        kCount (:key-count opts (if (= kDist :uniform)
+                                  (rand-nth (range 3 8))
+                                  (rand-nth (range 8 12))))
+        minOps (:min-txn-length opts (rand-nth (range 1 6)))
+        maxOps (:max-txn-length opts (rand-nth (range minOps 12)))]
+    {:key-dist kDist
+     :key-count kCount
+     :min-txn-length minOps
+     :max-txn-length maxOps
+     :max-writes-per-key (:max-writes-per-key opts 32)}))
 
-(defn workload 
-  ([]
-   {:client (TranClient. nil s/ans "vals")
-    :checker (rw/checker)
-    :generator (rw/gen {:key-dist :uniform, :key-count 3})})
-  ([opts]
+(defn workload
+  [opts]
    {:client (TranClient. nil s/ans "vals")
     :checker (rw/checker)
     :generator (rw/gen
-                {:key-dist        (:key-dist opts :uniform),
-                 :key-count       (:key-count opts 3)
-                 :min-txn-length  (:min-txn-length opts 1)
-                 :max-txn-length  (:max-txn-length opts 3)
-                 :max-writes-per-key (:max-writes-per-key opts 32)})})
-  )
+                (elle-gen-opts opts))})
 
 (defn workload-ListAppend 
-  ([]
-   (workload-ListAppend {}))
-  ([opts]
+  [opts]
    {:client (TranClient. nil s/ans "vals")
     :checker (la/checker)
-    :generator (la/gen 
-                {:key-dist        (:key-dist opts :uniform), 
-                 :key-count       (:key-count opts 3)
-                 :min-txn-length  (:min-txn-length opts 1)
-                 :max-txn-length  (:max-txn-length opts 3)
-                 :max-writes-per-key (:max-writes-per-key opts 32)
-                 })})
-)
+    :generator (la/gen
+                (elle-gen-opts opts))})
