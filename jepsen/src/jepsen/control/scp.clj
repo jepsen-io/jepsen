@@ -31,7 +31,7 @@
   exist, and re-evals body. We do this to avoid the overhead of checking for
   existence every time someone wants to upload/download a file."
   [remote ctx & body]
-  `(try+ ~@body 
+  `(try+ ~@body
         (catch (#{:jepsen.control/nonzero-exit
                   :jepsen.util/nonzero-exit}
                  (:type ~'%)) e#
