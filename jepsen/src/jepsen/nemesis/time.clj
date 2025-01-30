@@ -14,57 +14,11 @@
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
-(def dir
-  "Where do we install binaries to?"
-  "/opt/jepsen")
-
-(defn compile!
-  "Takes a Reader to C source code and spits out a binary to /opt/jepsen/<bin>,
-  if it doesn't already exist."
-  [reader bin]
-  (c/su
-    (when-not (cu/exists? (str dir "/" bin))
-      (info "Compiling" bin)
-      (let [tmp-file (File/createTempFile "jepsen-upload" ".c")]
-        (try
-          (io/copy reader tmp-file)
-          ; Upload
-          (c/exec :mkdir :-p dir)
-          (c/exec :chmod "a+rwx" dir)
-          (c/upload (.getCanonicalPath tmp-file) (str dir "/" bin ".c"))
-          (c/cd dir
-                (c/exec :gcc (str bin ".c"))
-                (c/exec :mv "a.out" bin))
-          (finally
-            (.delete tmp-file)))))
-    bin))
-
-(defn compile-resource!
-  "Given a resource name, spits out a binary to /opt/jepsen/<bin>."
-  [resource bin]
-  (with-open [r (io/reader (io/resource resource))]
-    (compile! r bin)))
-
-(defn compile-tools!
-  []
-  (compile-resource! "strobe-time.c" "strobe-time")
-  (compile-resource! "bump-time.c" "bump-time"))
-
 (defn install!
   "Uploads and compiles some C programs for messing with clocks."
   []
-  (c/su
-    (try+ (compile-tools!)
-          (catch [:exit 127] e
-            (if (re-find #"command not found" (:err e))
-              ; No build tools?
-              (try+ (debian/install [:build-essential])
-                    (catch [:exit 127] e
-                      (if (re-find #"command not found" (:err e))
-                        (centos/install [:gcc])
-                        (throw+ e))))
-              (throw+ e))
-            (compile-tools!)))))
+  (nemesis/compile-c-resource! "strobe-time.c" "strobe-time")
+  (nemesis/compile-c-resource! "bump-time.c" "bump-time"))
 
 (defn parse-time
   "Parses a decimal time in unix seconds since the epoch, provided as a string,
@@ -76,12 +30,37 @@
   "Takes a time in seconds since the epoch, and subtracts the local node time,
   to obtain a relative offset in seconds."
   [remote-time]
-  (- remote-time (/ (System/currentTimeMillis) 1000)))
+  (float (- remote-time (/ (System/currentTimeMillis) 1000.0))))
 
 (defn current-offset
   "Returns the clock offset of this node, in seconds."
   []
   (clock-offset (parse-time (c/exec :date "+%s.%N"))))
+
+(defn maybe-disable-ntp!
+  "Tries to turn off any running NTP service. We let these fail
+  quietly--there are lots of ways to run (or not run) NTP."
+  []
+  (c/su
+    ; Systemd took over timekeeping so now we also have to go ask systemd
+    ; to turn that off. Hilariously, the program to control that does an
+    ; RPC call to systemd-timedated, which will then *time out* after 30
+    ; seconds if the service is disabled--which is normal in containers.
+    ;
+    ; root@n1:~# timedatectl status
+    ; Failed to query server: Connection timed out
+    ;
+    ; To work around this, we probe the timedated service first and only
+    ; ask it to disable NTP if it's running. I hate everything about this.
+    (try+ (c/exec :service :timedated :status)
+          ; If this succeeds, we can ask it to stop managing NTP.
+          (c/exec :timedatectl :set-ntp :false)
+          (catch [:type :jepsen.control/nonzero-exit] _
+            ; Service not running
+            ))
+    ; On older Debian platforms, try to stop ntpd service directly
+    (try+ (c/exec :service :ntpd :stop)
+          (catch [:type :jepsen.control/nonzero-exit] _))))
 
 (defn reset-time!
   "Resets the local node's clock to NTP. If a test is given, resets time on all
@@ -117,9 +96,7 @@
     (setup! [nem test]
       (c/with-test-nodes test
         (install!)
-        ; Try to stop ntpd service in case it is present and running.
-        (try (c/su (c/exec :service :ntpd :stop))
-             (catch RuntimeException e))
+        (maybe-disable-ntp!)
         (try+ (reset-time!)
               (catch [:type :jepsen.control/nonzero-exit, :exit 1] _
                 ; Bit awkward: on some platforms, like containers, we *can't*
@@ -181,17 +158,17 @@
 
 (defn bump-gen-select
   "A function which returns a clock bump generator that bumps the clock from
-  -262 to +262 seconds, exponentially distributed. (select test) is used to
+  -288 to +288 seconds, exponentially distributed. (select test) is used to
   select which subset of the test's nodes to use as targets in the generator."
   [select]
-  (fn [test process]
+  (fn gen [test process]
     {:type  :info
      :f     :bump
      :value (zipmap (select test)
-                    (repeatedly (fn []
-                                  (long (* (rand-nth [-1 1])
-                                          ;;  (Math/pow 2 (+ 2 (rand 16)))
-                                           (+ 1 (rand 27000)))))))}))
+                    (repeatedly
+                      (fn rand-offset []
+                        (long (* (rand-nth [-1 1])
+                                 (Math/pow 1.5 (+ 6 (rand 25))))))))}))
 
 (def bump-gen
   "Randomized clock bump generator targeting a random subsets of nodes."

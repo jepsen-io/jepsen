@@ -257,7 +257,7 @@
 
   ```
   {:f     :start-packet
-   :value [:node-spec   ; target nodes as interpreted by db-nodes
+   :value [node-spec    ; target nodes as interpreted by db-nodes
            {:delay {},  ; behaviors that disrupt packets
             :loss  {:percent :33%}, ...}]}
   {:f :stop-packet, :value nil}
@@ -291,7 +291,7 @@
 (defn packet-package
   "A nemesis and generator package that disrupts packets,
    e.g. delay, loss, corruption, etc.
-   
+
    Opts:
    ```clj
    {:packet
@@ -355,7 +355,12 @@
                              :bump           :bump-clock})
                  (gen/stagger (:interval opts default-interval)))]
     {:generator         (when needed? gen)
-     :final-generator   (when needed? {:type :info, :f :reset-clock})
+     :final-generator   (when needed?
+                          (gen/once
+                            (fn [test ctx]
+                              {:type :info
+                               :f :reset-clock
+                               :value (:nodes test)})))
      :nemesis           nemesis
      :perf              #{{:name  "clock"
                            :start #{:bump-clock}
@@ -364,14 +369,17 @@
                            :color "#A0E9E3"}}}))
 
 (defn file-corruption-nemesis
-  "Wraps [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]] to corrupt files.
-   
+  "Wraps [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]] to
+  corrupt files.
+
    Responds to:
    ```
-   {:f :bitflip  :value [:node-spec ... ; target nodes as interpreted by db-nodes
-                         {:file \"/path/to/file/or/dir\" :probability 1e-5}]} 
-   {:f :truncate :value [:node-spec ... ; target nodes as interpreted by db-nodes
-                         {:file \"/path/to/file/or/dir\" :drop {:distribution :geometric :p 1e-3}}]} 
+   {:f :bitflip  :value [node-spec ... ; target nodes as interpreted by db-nodes
+                         {:file \"/path/to/file/or/dir\"
+                          :probability 1e-5}]}
+   {:f :truncate :value [node-spec ... ; target nodes as interpreted by db-nodes
+                         {:file \"/path/to/file/or/dir\"
+                          :drop {:distribution :geometric, :p 1e-3}}]}
    ```
   See [[jepsen.nemesis.combined/file-corruption-package]]."
   ([db] (file-corruption-nemesis db (n/bitflip) (n/truncate-file)))
@@ -403,9 +411,8 @@
       this))))
 
 (defn file-corruption-package
-  "A nemesis and generator package that corrupts files.
-   
-   Opts:
+  "A nemesis and generator package that corrupts files. Options:
+
    ```clj
    {:file-corruption
     {:targets     [...] ; A collection of node specs, e.g. [:one, [\"n1\", \"n2\"], :all]
@@ -420,34 +427,42 @@
        :file \"path/to/file/or/dir\"
        :drop {:distribution :geometric :p 1e-3}}]}}
    ```
-   
+
    `:type` can be `:bitflip` or `:truncate`.
 
-   If `:file` is a directory,
-   a new random file is selected from that directory on each target node for each operation.
+   If `:file` is a directory, a new random file is selected from that directory
+  on each target node for each operation.
 
-   `:probability` or `:drop` can be specified as a single value or a `distribution-map`.
-   Use a `distribution-map` to generate a new random value for each operation using [[jepsen.util/rand-distribution]].
-   
+   `:probability` or `:drop` can be specified as a single value or a
+  `distribution-map`. Use a `distribution-map` to generate a new random value
+  for each operation using [[jepsen.util/rand-distribution]].
+
    See [[jepsen.nemesis/bitflip]] and [[jepsen.nemesis/truncate-file]].
 
    Additional options as for [[nemesis-package]]."
-  [{:keys [faults db file-corruption interval] :as _opts}]
+  [{:keys [faults db file-corruption interval]}]
   (let [needed?     (:file-corruption faults)
         targets     (:targets     file-corruption (node-specs db))
         corruptions (:corruptions file-corruption)
         gen (->> (fn gen [_test _context]
                    (let [target (rand-nth targets)
                          {:keys [type file probability drop]} (rand-nth corruptions)
-                         corruption (case type
-                                      :bitflip  (let [probability (cond
-                                                                    (number? probability) probability
-                                                                    (map? probability) (rand-distribution probability))]
-                                                  {:file file :probability probability})
-                                      :truncate (let [drop (cond
-                                                             (number? drop) drop
-                                                             (map? drop) (rand-distribution drop))]
-                                                  {:file file :drop drop}))]
+                         corruption
+                         (case type
+                           :bitflip
+                           (let [probability
+                                 (cond
+                                   (number? probability)
+                                   probability
+
+                                   (map? probability)
+                                   (rand-distribution probability))]
+                             {:file file :probability probability})
+                           :truncate
+                           (let [drop (cond
+                                        (number? drop) drop
+                                        (map? drop) (rand-distribution drop))]
+                             {:file file :drop drop}))]
                      {:type  :info
                       :f     type
                       :value [target corruption]}))

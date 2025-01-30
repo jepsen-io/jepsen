@@ -1374,6 +1374,27 @@
   [n gen]
   (ProcessLimit. n #{} gen))
 
+
+(defrecord ConcurrencyLimit [n gen]
+  Generator
+  (op [this test ctx]
+    (if (< (- (context/all-thread-count ctx)
+              (context/free-thread-count ctx))
+           n)
+      (when-let [[op gen'] (op gen test ctx)]
+        [op (ConcurrencyLimit. n gen')])
+      [:pending this]))
+
+  (update [this test ctx event]
+    (ConcurrencyLimit. n (update gen test ctx event))))
+
+(defn concurrency-limit
+  "Limits the number of concurrent operations performed by a generator to at
+  most n. This generator returns :pending whenever there are n or more threads
+  busy."
+  [n gen]
+  (ConcurrencyLimit. n gen))
+
 (defrecord TimeLimit [limit cutoff gen]
   Generator
   (op [_ test ctx]

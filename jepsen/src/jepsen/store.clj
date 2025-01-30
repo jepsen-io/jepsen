@@ -471,7 +471,9 @@
 
 (def default-logging-overrides
   "Logging overrides that we apply by default"
-  {"net.schmizz.concurrent.Promise"                            :fatal
+  ; SSHJ loves to spew log errors everywhere when your SSH dir doesn't contain
+  ; literally every kind of key.
+  {"net.schmizz.concurrent.Promise"                            :off
    "net.schmizz.sshj.transport.random.JCERandom"               :warn
    "net.schmizz.sshj.transport.TransportImpl"                  :warn
    "net.schmizz.sshj.connection.channel.direct.SessionChannel" :warn

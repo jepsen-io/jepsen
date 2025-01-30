@@ -163,6 +163,7 @@
     (c/su
       ; Packages!
       (install [:apt-transport-https
+                :build-essential
                 :libzip4
                 :wget
                 :curl

@@ -30,7 +30,7 @@
          (if (pos? tries#)
            (do (Thread/sleep (+ (/ backoff-time 2) (rand-int backoff-time)))
                (~'retry (dec tries#)))
-           (throw e#))))))
+           (throw+ e#))))))
 
 (defrecord Remote [remote conn]
   core/Remote

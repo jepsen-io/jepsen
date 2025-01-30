@@ -1,17 +1,19 @@
-(defproject jepsen "0.3.6a-aerospike"
+(defproject jepsen "0.3.8-SNAPSHOT"
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.12.0"]
+  :dependencies [[org.clj-commons/byte-streams "0.3.4"]
+                 [org.clojure/clojure "1.12.0"]
                  [org.clojure/data.fressian "1.1.0"]
+                 [org.clojure/data.generators "1.1.0"]
                  [org.clojure/tools.logging "1.3.0"]
                  [org.clojure/tools.cli "1.1.230"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
                  [elle "0.2.2"]
                  [clj-time "0.15.2"]
-                 [io.jepsen/history "0.1.3"]
+                 [io.jepsen/history "0.1.4"]
                  [jepsen.txn "0.1.2"]
                  [knossos "0.3.10"]
                  [clj-ssh "0.5.14"]
@@ -25,7 +27,6 @@
                  [org.bouncycastle/bcprov-jdk15on "1.70"]
                  [hiccup "1.0.5"]
                  [metametadata/multiset "0.1.1"]
-                 [byte-streams "0.2.5-alpha2"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.2.0"]
                  [fipp "0.6.26"]]

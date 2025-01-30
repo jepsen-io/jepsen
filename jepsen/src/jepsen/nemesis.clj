@@ -1,5 +1,6 @@
 (ns jepsen.nemesis
   (:require [clojure.set :as set]
+            [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [fipp.ednize :as fipp.ednize]
             [jepsen [client   :as client]
@@ -7,7 +8,8 @@
                     [net      :as net]
                     [util     :as util]]
             [jepsen.control [util :as cu]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import (java.io File)))
 
 (defprotocol Nemesis
   (setup! [this test] "Set up the nemesis to work with the cluster. Returns the
@@ -338,11 +340,17 @@
     (compose (map #(setup! % test) nemeses)))
 
   (invoke! [this test op]
-    (if-let [n (nth nemeses (get fm (:f op)))]
-      (invoke! n test op)
-      (throw (IllegalArgumentException.
-               (str "No nemesis can handle :f " (pr-str (:f op))
-                    " (expected one of " (pr-str (keys fm)) ")")))))
+    (let [f   (:f op)
+          res (if-let [idx (get fm f)]
+                (if-let [n (nth nemeses (get fm (:f op)))]
+                  (invoke! n test op)
+                  ::no-match)
+                ::no-match)]
+      (if (identical? res ::no-match)
+        (throw (IllegalArgumentException.
+                 (str "No nemesis can handle :f " (pr-str (:f op))
+                      " (expected one of " (pr-str (keys fm)) ")"))))
+      res))
 
   (teardown! [this test]
     (mapv #(teardown! % test) nemeses))
@@ -427,6 +435,42 @@
                   [0 {}]
                   nemeses)]
       (ReflCompose. fm nemeses))))
+
+;; Installing programs
+
+(def bin-dir
+  "Where do we install binaries to?"
+  "/opt/jepsen")
+
+(defn compile-c-reader!
+  "Takes a Reader to C source code, and spits out a binary to `<bin-dir>/<bin>`,
+  if it doesn't already exist. Returns bin."
+  [reader bin]
+  (c/su
+    (when-not (cu/exists? (str bin-dir "/" bin))
+      (info "Compiling" bin)
+      (let [tmp-file (File/createTempFile "jepsen-upload" ".c")]
+        (try
+          (io/copy reader tmp-file)
+          ; Upload
+          (c/exec :mkdir :-p bin-dir)
+          (c/exec :chmod "a+rwx" bin-dir)
+          (c/upload (.getCanonicalPath tmp-file) (str bin-dir "/" bin ".c"))
+          (c/cd bin-dir
+                (c/exec :gcc (str bin ".c") :-lm)
+                (c/exec :mv "a.out" bin))
+          (finally
+            (.delete tmp-file)))))
+    bin))
+
+(defn compile-c-resource!
+  "Given a resource name (e.g. a string filename in resources/) containing C
+  source code, spits out a binary to `<bin-dir>/<bin>`"
+  [resource bin]
+  (with-open [r (io/reader (io/resource resource))]
+    (compile-c-reader! r bin)))
+
+;; Specific nemeses
 
 (defn set-time!
   "Set the local node time in POSIX seconds."

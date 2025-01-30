@@ -2,6 +2,7 @@
   "Validates that a history is correct with respect to some model."
   (:refer-clojure :exclude [set])
   (:require [clojure [core :as c]
+                     [datafy :refer [datafy]]
                      [pprint :refer [pprint]]
                      [set :as set]
                      [stacktrace :as trace]
@@ -79,7 +80,8 @@
 (defn check-safe
   "Like check, but wraps exceptions up and returns them as a map like
 
-  {:valid? :unknown :error \"...\"}"
+      {:valid? :unknown
+       :error {:via [{:type clojure.lang.Exceptioninfo, ...}] ...}"
   ([checker test history]
    (check-safe checker test history {}))
   ([checker test history opts]
@@ -87,7 +89,7 @@
         (catch Exception t
           (warn t "Error while checking history:")
           {:valid? :unknown
-           :error (with-out-str (trace/print-cause-trace t))}))))
+           :error (datafy t)}))))
 
 (defn compose
   "Takes a map of names to checkers, and returns a checker which runs each
@@ -868,7 +870,7 @@
   false otherwise, along with a :count of the number of matches, and a :matches
   list of maps, each with the node and matching string from the file.
 
-    (log-file-pattern-checker #\"panic: (\\w+)$\" \"db.log\")
+    (log-file-pattern #\"panic: (\\w+)$\" \"db.log\")
 
     {:valid? false
      :count  5

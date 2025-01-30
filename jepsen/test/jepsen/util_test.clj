@@ -14,6 +14,16 @@
   (is (= 3 (majority 4)))
   (is (= 3 (majority 5))))
 
+(deftest minority-test
+  (are [expected n] (= expected (minority n))
+       0 0
+       0 1
+       0 2
+       1 3
+       1 4
+       2 5
+       2 6))
+
 (deftest integer-interval-set-str-test
   (is (= (integer-interval-set-str [])
          "#{}"))
@@ -176,6 +186,17 @@
     (is (< (* target-mean 0.7)
            mean
            (* target-mean 1.3)))))
+
+(deftest zipf-test
+  (let [n       1000
+        skew    1.00001
+        m       5
+        samples (take n (repeatedly (partial zipf skew m)))
+        f       (frequencies samples)]
+    (is (every? #(< -1 % m) samples))
+    (is (< 1.5 (/ (f 0) (f 1)) 2.5))
+    (is (< 2.5 (/ (f 0) (f 2)) 4))
+    (is (< 4   (/ (f 0) (f 4)) 6))))
 
 (deftest forgettable-test
   (let [f (forgettable :foo)]
