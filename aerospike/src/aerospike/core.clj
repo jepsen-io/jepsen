@@ -1,20 +1,18 @@
 (ns aerospike.core
   "Entry point for aerospike tests"
   (:require [aerospike [support :as support]
-             [counter :as counter]
-             [cas-register :as cas-register]
-             [nemesis :as nemesis]
-             [set :as set]
-             [transact :as transact]]
-            [jepsen [cli :as cli]
-             [checker :as checker]
-             [generator :as gen]
-             [tests :as tests]]
+                       [counter :as counter]
+                       [cas-register :as cas-register]
+                       [nemesis :as nemesis]
+                       [set :as set]
+                       [transact :as transact]]
+            [jepsen    [cli :as cli]
+                       [checker :as checker]
+                       [generator :as gen]
+                       [tests :as tests]]
             [jepsen.os.debian :as debian])
   (:gen-class))
 
-;; (defn txns-enabled
-;;   (string/starts-with? (System/getenv "JAVA_CLIENT_REF") "CLIENT-2848"))
 
 (defn workloads
   "The workloads we can run. Each workload is a map like
@@ -37,12 +35,14 @@
     :list-append  (transact/workload-ListAppend opts)
     }))
 
+
 (defn workload+nemesis
   "Finds the workload and nemesis for a given set of parsed CLI options."
   [opts]
   (case (:workload opts)
     {:workload (get (workloads opts) (:workload opts))
      :nemesis  (nemesis/full opts)}))
+
 
 (defn aerospike-test
   "Constructs a Jepsen test map from CLI options."
@@ -81,6 +81,7 @@
                        {:perf (checker/perf)
                         :workload checker})
             :model    model})))
+
 
 (def mrt-opt-spec "Options for Elle-based workloads"
   [[nil "--max-txn-length MAX" "Maximum number of micro-ops per transaction"
@@ -121,6 +122,7 @@
    [nil "--no-kills" "Allow the nemesis to kill processes."
     :assoc-fn (fn [m k v] (assoc m :no-kills v))]])
 
+
 (def opt-spec
   (cli/merge-opt-specs srt-opt-spec mrt-opt-spec))
 
@@ -142,7 +144,9 @@
             :no-revives           (:no-revives opts (rand-nth (list true false))) 
             :nemesis-interval     (:nemesis-interval opts (rand-nth (list 5 8 10 15 20))) })))
 
-;; -- Why did we merge in the webserver before?
+
+;; -- Why did we merge in the webserver before? .. 
+;; idk but reluctant to fully remove this..
 ;; (defn -main
 ;;   "Handles command-line arguments, running a Jepsen command."
 ;;   [& args]
@@ -150,6 +154,7 @@
 ;;                                          :opt-spec  opt-spec})
 ;;                    (cli/serve-cmd))
 ;;             args))
+
 
 (defn all-test-opts
   "Creates a list of valid maps for each to be passed to `aerospike-test`"

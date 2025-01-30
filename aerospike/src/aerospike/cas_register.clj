@@ -1,44 +1,14 @@
 (ns aerospike.cas-register
   "Compare-and-set register test"
   (:require [aerospike.support :as s]
-            [clojure [pprint :refer [pprint]]
-                     [string :as str]]
-            [clojure.java.io :as io]
-            [clojure.tools.logging :refer [debug info warn]]
-            [dom-top.core :refer [with-retry letr]]
-            [jepsen [core      :as jepsen]
-                    [db        :as db]
-                    [util      :as util :refer [meh timeout]]
-                    [control   :as c :refer [|]]
-                    [client    :as client]
-                    [checker   :as checker]
-                    [generator :as gen]
-                    [independent :as independent]
-                    [nemesis   :as nemesis]
-                    [os        :as os]
-                    [store     :as store]
-                    [tests     :as tests]]
-            [jepsen.control [net :as net]
-                            [util :as netUtil]]
+            [jepsen
+             [client    :as client]
+             [checker   :as checker]
+             [generator :as gen]
+             [independent :as independent]]
             [jepsen.checker.timeline :as timeline]
-            [jepsen.nemesis.time :as nt]
-            [jepsen.os.debian :as debian]
             [knossos.model :as model]
-            [wall.hack])
-  (:import (clojure.lang ExceptionInfo)
-           (com.aerospike.client AerospikeClient
-                                 AerospikeException
-                                 AerospikeException$Connection
-                                 AerospikeException$Timeout
-                                 Bin
-                                 Info
-                                 Key
-                                 Record)
-           (com.aerospike.client.cluster Node)
-           (com.aerospike.client.policy Policy
-                                        ;; ConsistencyLevel
-                                        GenerationPolicy
-                                        WritePolicy)))
+            [wall.hack]))
 
 (defrecord CasRegisterClient [client namespace set]
   client/Client

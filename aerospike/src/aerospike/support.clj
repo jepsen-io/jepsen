@@ -451,7 +451,6 @@
   ([client namespace set key bins]
    (put! client (write-policy) namespace set key bins))
   ([^IAerospikeClient client, ^WritePolicy policy, namespace set key bins]
-   (info "CALLING PUT() w/ key: (" namespace ", " set ", " key   ") -- bins: " bins)
    (.put client policy (Key. namespace set key) (map->bins bins))))
 
 (defn put-if-absent!
@@ -501,7 +500,6 @@
   ([^IAerospikeClient client namespace set key trid]
    (let [p (linearize-read-policy)]
      (set! (.txn p) trid)
-     (info "CALLING GET() w/ key: (" namespace ", " set ", " key   ")" )
      (-> client
          (.get p (Key. namespace set key))
          record->map))))
