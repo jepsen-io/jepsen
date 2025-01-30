@@ -182,7 +182,6 @@
       (throw+ {:type :jepsen.control/dummy}))
     (with-errors conn-spec ctx
       (with-open [sftp (.newSFTPClient client)]
-        (info "UPLOADING " (FileSystemFile. (io/file local-paths)) " as " ^String remote-path)
         (.put sftp (FileSystemFile. (io/file local-paths))
               ^String remote-path))))
 

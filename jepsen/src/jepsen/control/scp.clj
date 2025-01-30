@@ -33,12 +33,12 @@
   existence every time someone wants to upload/download a file."
   [remote ctx & body]
   `(try+ ~@body
-        (catch (#{:jepsen.control/nonzero-exit
-                  :jepsen.util/nonzero-exit}
+         (catch (#{:jepsen.control/nonzero-exit
+                   :jepsen.util/nonzero-exit}
                  (:type ~'%)) e#
-          (exec! ~remote ~ctx [:mkdir :-p tmp-dir])
-          (exec! ~remote ~ctx [:chmod "a+rwx" tmp-dir])
-          ~@body)))
+           (exec! ~remote ~ctx [:mkdir :-p tmp-dir])
+           (exec! ~remote ~ctx [:chmod "a+rwx" tmp-dir])
+           ~@body)))
 
 (defn tmp-file
   "Returns a randomly generated tmpfile for use during uploads/downloads"
@@ -109,9 +109,8 @@
             ; Upload to tmpfile
             (core/upload! this {} src tmp nil)
             ; Chown and move to dest, as root
-            (info "Moving <"src"> as <"tmp"> to <"dest">")
             (exec! cmd-remote {:sudo "root"} [:chown sudo tmp])
-	    (exec! cmd-remote {:sudo "root"} [:mv tmp dest]))))))
+            (exec! cmd-remote {:sudo "root"} [:mv tmp dest]))))))
 
   (download! [this ctx srcs dest _]
     (let [sudo (:sudo ctx)]
