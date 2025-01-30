@@ -3,7 +3,6 @@
   SCP for copying even medium-sized files of a few GB. This provides a faster
   implementation of a Remote which shells out to SCP."
   (:require [clojure.string :as str]
-            [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util]
             [jepsen.control.core :as core]
@@ -32,13 +31,13 @@
   exist, and re-evals body. We do this to avoid the overhead of checking for
   existence every time someone wants to upload/download a file."
   [remote ctx & body]
-  `(try+ ~@body
-         (catch (#{:jepsen.control/nonzero-exit
-                   :jepsen.util/nonzero-exit}
+  `(try+ ~@body 
+        (catch (#{:jepsen.control/nonzero-exit
+                  :jepsen.util/nonzero-exit}
                  (:type ~'%)) e#
-           (exec! ~remote ~ctx [:mkdir :-p tmp-dir])
-           (exec! ~remote ~ctx [:chmod "a+rwx" tmp-dir])
-           ~@body)))
+          (exec! ~remote ~ctx [:mkdir :-p tmp-dir])
+          (exec! ~remote ~ctx [:chmod "a+rwx" tmp-dir])
+          ~@body)))
 
 (defn tmp-file
   "Returns a randomly generated tmpfile for use during uploads/downloads"
@@ -61,7 +60,6 @@
   "Runs an SCP command by shelling out. Takes a conn-spec (used for port, key,
   etc), a seq of sources, and a single destination, all as strings."
   [conn-spec sources dest]
-  ;; bob scp initially seemed to need -O as workaround in current implementation
   (apply util/sh "scp" "-rpC"
          "-P" (str (:port conn-spec))
          (concat (when-let [k (:private-key-path conn-spec)]

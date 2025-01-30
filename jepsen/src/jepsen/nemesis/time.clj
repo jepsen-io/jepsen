@@ -185,8 +185,7 @@
      :f     :strobe
      :value (zipmap (select test)
                     (repeatedly (fn []
-                                  {:delta (long  ;(Math/pow 2 (+ 2 (rand 16))) 
-                                           (+ 1 (rand 27000)))
+                                  {:delta (long (Math/pow 2 (+ 2 (rand 16))))
                                    :period (long (Math/pow 2 (rand 10)))
                                    :duration (rand 32)})))}))
 
