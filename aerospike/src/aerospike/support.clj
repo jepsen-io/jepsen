@@ -314,8 +314,7 @@
   (info "Syncronized!")
   (info "Starting...")
   ;; Use bob image wrapper with workaround for jepsen spawned process issue
-  (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl start asd || echo 'started with ulimit'")
-  (info "Started")
+  (c/exec "bash" "-c" "ulimit -n 15000 ; exec aerospikectl start asd && echo 'started with ulimit'")
   (jepsen/synchronize test) ;; Wait for all servers to start
 
   (let [conn (connect node)]
