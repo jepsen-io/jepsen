@@ -74,7 +74,7 @@ static struct argp_option opt_spec[] = {
     "Default 1: every chunk"},
   {"probability", 'p', "PROB", 0,
     "For --mode bitflip, determines the probability that any given bit "
-    "in the file flips. Default 1e-6: roughly one error per megabyte."},
+    "in the file flips. Default 1e-6: roughly eight errors per megabyte."},
   {"start", OPT_START, "BYTES", 0,
     "Index into the file, in bytes, inclusive, where corruption starts. "
       "Default 0."},
@@ -554,8 +554,9 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
   /* We model bitflips as poisson processes with lambda = opts.probability; the
    * distance in bits between flips is therefore an exponentially distributed
    * process with rate parameter lambda. I'm not entirely confident about this
-   * approach--it yields roughly the right number of bitflips total, but the
-   * number of unaffected bytes in the file seems a little high. */
+   * approach--it seems to yield a higher number of bitflips than I'd otherwise
+   * expect with p=1.0 or 0.5. Small ps look better--this might be a weird
+   * behavior around 0 inter-bit distances. */
 
   // For read/write retvals
   ssize_t ret_size;
@@ -578,10 +579,17 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
 
   // Starting chunk
   off_t chunk = opts.index;
-  // The next offset, relative to the start of the current chunk, which we will
-  // flip. This offset works as if chunks were contiguous, rather than spread
-  // out by mod-1 chunks.
-  off_t offset = rand_exp_int(opts.probability);
+  // The next offset, in bit number, relative to the start of the current
+  // chunk, which we will flip. This offset works as if chunks were contiguous,
+  // rather than spread out by mod-1 chunks. Note that our probability is per
+  // *bit*, so we translate this to bytes later. Also note that this will break
+  // us if we get within 1/8th of the max file size, which I expect will never
+  // happen.
+  off_t bit_offset = rand_exp_int(opts.probability);
+  // byte_offset is always 1/8th bit_offset
+  off_t byte_offset = bit_offset / 8;
+  // For later, we're going to advance by this factor.
+  off_t bit_offset_delta = 0;
 
   // Work our way through chunks until we have to flip.
   while (chunk < chunk_count) {
@@ -597,13 +605,13 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
     }
     chunk_size = end - start;
 
-    while (offset < chunk_size) {
+    while (byte_offset < chunk_size) {
       // We're flipping in this chunk.
-      target_bit = rand_int(8);
+      target_bit = bit_offset % 8;
       mask = (0x01 << target_bit);
 
       // Read
-      ret_size = pread(fd, &buf, 1, start + offset);
+      ret_size = pread(fd, &buf, 1, start + byte_offset);
       if (ret_size < 0) {
         fprintf(stderr, "pread() failed: %s\n", strerror(errno));
         return EXIT_IO;
@@ -611,7 +619,7 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
       // Flip
       buf = buf ^ mask;
       // Write
-      ret_size = pwrite(fd, &buf, 1, start + offset);
+      ret_size = pwrite(fd, &buf, 1, start + byte_offset);
       if (ret_size < 0) {
         fprintf(stderr, "pwrite() failed: %s\n", strerror(errno));
         return EXIT_IO;
@@ -620,12 +628,27 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
       bits_flipped += 1;
 
       // Roll a new inter-arrival interval
-      offset += rand_exp_int(opts.probability);
+      //
+      // This math is wrong, and I don't really know why. With high
+      // probabilities, advancing by rand_exp_int(p) tends to over-flip, and
+      // advancing by 1+rand_exp_int(p) tends to under-flip. There's something
+      // here, I think, about what happens when inter-arrival times are zero.
+      // My Weird Hack, which is totally unjustifiable, is to force 0 -> 1.
+      // This brings us closer to the expected number of flips per file (and
+      // stops us from flipping the same bit redundantly) but I think it's
+      // still wrong.
+      bit_offset_delta = rand_exp_int(opts.probability);
+      if (bit_offset_delta == 0) {
+        bit_offset_delta = 1;
+      }
+      bit_offset += bit_offset_delta;
+      byte_offset = bit_offset / 8;
     }
 
     // Next chunk
     chunks_processed += 1;
-    offset -= chunk_size;
+    bit_offset  -= (chunk_size * 8);
+    byte_offset -= chunk_size;
     chunk += opts.mod;
   }
 
