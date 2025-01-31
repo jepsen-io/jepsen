@@ -53,7 +53,8 @@
   :profiles {:uberjar {:aot :all}
              :dev {; experimenting with faster startup
                    ;:aot [jepsen.core]
-                   :dependencies [[org.clojure/test.check "1.1.1"]]
+                   :dependencies [[org.clojure/test.check "1.1.1"]
+                                  [com.gfredericks/test.chuck "0.2.14"]]
                    :jvm-opts ["-Xmx32g"
                               "-server"
                               "-XX:-OmitStackTraceInFastThrow"]}})

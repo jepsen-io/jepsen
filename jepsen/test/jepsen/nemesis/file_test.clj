@@ -1,9 +1,20 @@
 (ns jepsen.nemesis.file-test
-  (:require [clojure [pprint :refer [pprint]]
+  (:require [clj-commons.byte-streams :as bs]
+            [clojure [pprint :refer [pprint]]
                      [set :as set]
                      [string :as str]
                      [test :refer :all]]
+            [clojure.java [io :as io]
+                          [shell :as shell]]
+            [clojure.test.check [clojure-test :refer [defspec]]
+                                [generators :as g]
+                                [properties :as prop]
+                                [results :as results :refer [Result]]
+                                [rose-tree :as rose]]
             [clojure.tools.logging :refer [info warn]]
+            [com.gfredericks.test.chuck.clojure-test
+             :as chuck
+             :refer [checking for-all]]
             [dom-top.core :refer [loopr]]
             [jepsen [client :as client]
                     [core :as jepsen]
@@ -14,7 +25,18 @@
                     [tests :as tests]
                     [util :as util]]
             [jepsen.control.util :as cu]
-            [jepsen.nemesis.file :as nf]))
+            [jepsen.nemesis.file :as nf]
+            [slingshot.slingshot :refer [try+ throw+]])
+  (:import (java.nio.channels FileChannel
+                              FileChannel$MapMode)
+           (java.nio.file Files
+                          Path
+                          Paths
+                          StandardOpenOption)))
+
+(def test-n
+  "Number of trials for generative tests"
+  100)
 
 (use-fixtures :once quiet-logging)
 
@@ -212,3 +234,353 @@
     (is (= (subs data (* 2 end)) (subs data' (* 2 end))))
     ; But modified in the range!
     (is (not= data data'))))
+
+(def src
+  "Source file."
+  "resources/corrupt-file.c")
+
+(def dir
+  "Temp dir for binaries, data files, etc."
+  "/tmp/jepsen/nemesis/file")
+
+(def data-file
+  "Our original data file."
+  (str dir "/data"))
+
+(def data-file'
+  "Our corrupted data file."
+  (str dir "/data2"))
+
+(def data-file''
+  "Sometimes you need three steps, you know?"
+  (str dir "/data3"))
+
+(def bin
+  "Binary file"
+  (str dir "/corrupt-file"))
+
+(defn sh
+  "Runs shell command, throws on nonzero exit"
+  [& args]
+  (let [res (apply shell/sh args)]
+    (when (not= 0 (:exit res))
+      (throw+ (assoc res
+                     :cmd args)))
+    res))
+
+(defn build-local!
+  "Fixture for tests. Compiles the corrupt-file binary locally, stashing it in
+  /tmp/jepsen/bin/corrupt-file. Wipes the directory when done."
+  [f]
+  (sh "mkdir" "-p" dir)
+  (sh "gcc" src "-o" bin "-lm" "-Wall" "-Wextra")
+  (f)
+  #_(sh "rm" "-rf" dir))
+
+(use-fixtures :once build-local!)
+
+(def large-pos-int
+  "Large positive integer generator."
+  (g/large-integer* {:min 0
+                     ; We explicitly want to test over the 4 GB limit
+                     :max (* 8 1024 1024 1024)}))
+
+(def chunk-opts
+  "Generator for chunk options."
+  (g/let [i          g/nat
+          mod        g/nat
+          chunk-size large-pos-int
+          start      large-pos-int
+          end        large-pos-int
+          size       large-pos-int]
+    {:index       i
+     :modulus     (+ i (inc mod))
+     :chunk-size  (inc chunk-size)
+     :start       start
+     :end         (+ start end)
+     ; We provide a file size here too
+     :size        size}))
+
+(defn corrupt!
+  "Calls corrupt-file with options from the given map."
+  [opts]
+  (apply sh bin
+         (map str
+              (concat
+                (when-let [c (:chunk-size opts)]  ["--chunk-size" c])
+                (when-let [m (:mode opts)]        ["--mode" m])
+                (when-let [i (:index opts)]       ["--index" i])
+                (when-let [m (:modulus opts)]     ["--modulus" m])
+                (when-let [s (:start opts)]       ["--start" s])
+                (when-let [e (:end opts)]         ["--end" e])
+                (when-let [p (:probability opts)] ["--probability" p])
+                [data-file']))))
+
+(defn make-file!
+  "Creates a data file of size, drawn from device dev. Returns file."
+  ([dev size]
+   (make-file! dev size data-file))
+  ([dev size data-file]
+   (sh "rm" "-f" data-file)
+   (let [chunk-size (* 1024 1024)
+         remainder (rem size chunk-size)
+         chunks (long (/ (- size remainder) chunk-size))]
+     (assert (= size (+ (* chunks chunk-size) remainder)))
+     (sh "touch" data-file)
+     (when (pos? chunks)
+       ; Fill with chunks (for large files)
+       (sh "dd"
+           (str "if=" dev)
+           (str "of=" data-file)
+           (str "bs=" chunk-size)
+           (str "count=" chunks)))
+     (when (pos? remainder)
+       ; Then leftovers
+       (sh "dd"
+           "conv=notrunc"
+           "oflag=append"
+           (str "if=" dev)
+           (str "of=" data-file)
+           (str "bs=" remainder)
+           "count=1"))
+     ; Double-check
+     (assert (= size
+                (-> data-file
+                    io/file
+                    .length))))
+   data-file))
+
+(defn make-files!
+  "Like make-file!, but also creates an identical data-file'."
+  [dev size]
+  (let [f (make-file! dev size)]
+    (sh "cp" f data-file'))
+  data-file')
+
+(defn corrupted-chunks
+  "Which chunk indices are affected by the given options? Infinite seq."
+  [{:keys [index modulus]}]
+  (->> (range)
+       (filter (fn [i]
+                 (= index (mod i modulus))))))
+
+(defn intact-chunks
+  "Which chunk indices are unaffected by the given options? Infinite seq."
+  [{:keys [index modulus]}]
+  (if (< modulus 2)
+    nil
+    (->> (range)
+         (remove (fn [i]
+                   (= index (mod i modulus)))))))
+
+(defn open
+  "Opens a filechannel to the given path, as a string"
+  [file]
+  (-> file
+      io/file
+      .toPath
+      (FileChannel/open
+        (into-array [StandardOpenOption/READ]))))
+
+(defn buffers
+  "Takes a FileChannel and an options map. Returns a map of:
+
+    {:corrupted (ByteBuffer...)
+     :intact    (ByteBuffer...)
+
+  For all the regions of the file which we think should have been corrupted, or
+  left intact."
+  [^FileChannel file, {:keys [start end chunk-size] :as opts}]
+  (let [ro FileChannel$MapMode/READ_ONLY
+        file-size (.size file)
+        start     (or start 0)
+        end       (or end file-size)
+        ; Turn an upper bound, a maximum buffer size, and an offset into a
+        ; ByteBuf into the file, or nil if out of bounds.
+        buffer (fn buffer [upper-bound max-size start]
+                 (let [end (min (+ start max-size)
+                                file-size
+                                upper-bound)
+                       size (- end start)]
+                   (when (< 0 size)
+                     (.map file ro start size))))
+        ; The region before/after the chunks might be bigger than we can map,
+        ; so we break it up into 16M buffers
+        buf-size  (* 16 1024 1024)
+        ; The intact region before the start
+        prefix (->> (range 0 start buf-size)
+                    (keep (partial buffer start buf-size)))
+        ; And at the end
+        postfix (->> (range end file-size buf-size)
+                    (keep (partial buffer file-size buf-size))
+                    (take-while identity))
+        ; Turn a chunk number into a buffer, or nil if out of bounds.
+        chunk (fn chunk [i]
+                (let [chunk-start (+ start (* i chunk-size))]
+                  (buffer end chunk-size chunk-start)))
+        ; Corrupted chunks
+        corrupted (->> (corrupted-chunks opts)
+                       (map chunk)
+                       (take-while identity))
+        intact    (->> (intact-chunks opts)
+                       (map chunk)
+                       (take-while identity))
+        intact    (concat prefix
+                          intact
+                          postfix)]
+    {:corrupted corrupted
+     :intact    intact}))
+
+(defn equal-p
+  "Given two sequences of bytebuffers, what is the probability two
+  corresponding buffers are equal? We do this probabilistically because
+  sometimes a copy or bitflip or whatever will actually leave data intact."
+  [as bs]
+  (if (and (nil? (seq as))
+           (nil? (seq bs)))
+    ; Trivial case: no chunks in either
+    1
+    (loop [count  0
+           equal  0
+           as     as
+           bs     bs]
+      (let [[a & as'] as
+            [b & bs'] bs]
+        ;(prn :compare a b)
+        (cond ; Clean exit
+              (and (nil? a) (nil? b))
+              (/ equal count)
+
+              ; Out of as
+              (nil? a) (recur (inc count) equal as' bs')
+
+              ; Out of bs
+              (nil? b) (recur (inc count) equal as' bs')
+
+              true
+              (recur (inc count)
+                     (if (bs/bytes= a b)
+                       (inc equal)
+                       equal)
+                     as'
+                     bs'))))))
+
+(defn not-equal-p
+  "Given two sequences of bytebuffers, what is the probability the two are not
+  equal?"
+  [as bs]
+  (- 1 (equal-p as bs)))
+
+(defn prob-gen
+  "Probability generator. Double between 0 and 1. Takes chunk options."
+  [{:keys [chunk-size start end size]}]
+  (g/let [scale (g/double* {:min 0.5, :max 1.5})]
+    ; For small files, we want a high probability, otherwise we won't change
+    ; anything. For large files, smaller p is fine; we want a few flips per
+    ; chunk though.
+    (let [bytes (-> (- (min size end) start)  ; Bytes in region
+                    (min chunk-size)          ; Or bytes in chunk
+                    (max 0))]
+      (if (= 0 bytes)
+        ; Doesn't matter
+        nil
+        (-> bytes
+            (* 8)          ; Bytes->bits
+            /              ; Mean probability of one per chunk
+            (* 3)          ; To be safe
+            (* scale)      ; Noise
+            (min 1.0)))))) ; Probability
+
+(deftest ^:slow bitflip-test
+  (checking "basic" test-n
+            [opts chunk-opts
+             p    (prob-gen opts)]
+            (println "------")
+            (pprint (assoc opts :probability p))
+
+            (make-files! "/dev/zero" (:size opts))
+            (let [res (corrupt! (assoc opts
+                                       :probability p
+                                       :mode "bitflip"))]
+              (print (:out res)))
+
+            ; Check that file sizes are equal
+            (is (= (-> data-file  io/file .length)
+                   (-> data-file' io/file .length)))
+
+            ; Check chunks
+            (with-open [data  (open data-file)
+                        data' (open data-file')]
+              (let [{:keys [corrupted intact]}  (buffers data  opts)
+                    buffers' (buffers data' opts)
+                    corrupted' (:corrupted buffers')
+                    intact'    (:intact buffers')]
+                (is (= 1 (equal-p intact intact')))
+                (when (seq corrupted')
+                  ; This is fairly weak--with higher p and chunks we should be
+                  ; able to do better.
+                  (is (< (equal-p corrupted corrupted') 1)))))))
+
+(deftest ^:slow copy-test
+  (checking "basic" test-n
+            [opts chunk-opts]
+            (println "------")
+            (pprint opts)
+
+            (make-files! "/dev/random" (:size opts))
+            (let [res (corrupt! (assoc opts
+                                       :mode "copy"))]
+              (print (:out res)))
+
+            ; Check that file sizes are equal
+            (is (= (-> data-file  io/file .length)
+                   (-> data-file' io/file .length)))
+
+            ; Check chunks
+            (with-open [data  (open data-file)
+                        data' (open data-file')]
+              (let [{:keys [corrupted intact]}  (buffers data opts)
+                    buffers' (buffers data' opts)
+                    corrupted' (:corrupted buffers')
+                    intact'    (:intact buffers')]
+                (is (= 1 (equal-p intact intact')))
+                (when (and (seq corrupted')
+                           ; We need somewhere else to copy from
+                           (seq intact'))
+                  (is (< (equal-p corrupted corrupted') 1/4)))))))
+
+(deftest ^:slow snapshot-test
+  (checking "basic" test-n
+            [opts chunk-opts]
+            (println "------")
+            (pprint opts)
+
+            (make-files! "/dev/random" (:size opts))
+            (sh bin "--clear-snapshots")
+            ; Take snapshots of original file
+            (let [res (corrupt! (assoc opts :mode "snapshot"))]
+              (print (:out res)))
+            ; Now overwrite the fresh file with zeroes
+            (make-file! "/dev/zero" (:size opts) data-file')
+            ; And restore into it
+            (let [res (corrupt! (assoc opts :mode "restore"))]
+              (print (:out res)))
+
+            ; Check that file sizes are equal
+            (is (= (-> data-file  io/file .length)
+                   (-> data-file' io/file .length)))
+
+            ; Check chunks
+            (with-open [data  (open data-file)
+                        zero  (open "/dev/zero") ; Can you mmap /dev/zero? We'll find out
+                        data' (open data-file')]
+              (let [buffers   (buffers data opts)
+                    buffers'  (buffers data' opts)
+                    zero      (buffers zero opts)]
+                ; The "intact" regions should be all zeroes
+                (is (= 1 (equal-p (:intact zero) (:intact buffers'))))
+                ; And if we corrupted something, it should be identical to the
+                ; original data
+                (when (seq (:corrupted buffers'))
+                  (is (= 1 (equal-p (:corrupted buffers)
+                                    (:corrupted buffers')))))))))
