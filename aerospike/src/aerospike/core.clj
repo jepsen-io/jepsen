@@ -118,12 +118,12 @@
    [nil "--no-revives" "Don't revive during the test (but revive at the end)"]
    [nil "--no-clocks" "Allow the nemesis to change the clock"
     :assoc-fn (fn [m k v] (assoc m :no-clocks v))]
-   [nil "--no-partitions" "Allow the nemesis to introduce partitions"
+   [nil "--no-partitions" "Disallow the nemesis from introduce partitions"
     :assoc-fn (fn [m k v] (assoc m :no-partitions v))]
    [nil "--nemesis-interval SECONDS" "How long between nemesis actions?"
     :parse-fn #(Long/parseLong %)
     :validate [(complement neg?) "Must be non-negative"]]
-   [nil "--no-kills" "Allow the nemesis to kill processes."
+   [nil "--no-kills" "Disallow the nemesis from killing processes."
     :assoc-fn (fn [m k v] (assoc m :no-kills v))]])
 
 

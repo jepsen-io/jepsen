@@ -38,3 +38,7 @@ docker/docker-compose.yml
 **/.lsp/**
 **/target/
 jepsen/pom.xml
+
+aerospike/*host*
+*/settings.json
+aerospike/resources/features.conf
