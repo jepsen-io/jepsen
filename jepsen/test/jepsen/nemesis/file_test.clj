@@ -235,6 +235,8 @@
     ; But modified in the range!
     (is (not= data data'))))
 
+;; Local generative tests
+
 (def src
   "Source file."
   "resources/corrupt-file.c")
@@ -279,20 +281,31 @@
 
 (use-fixtures :once build-local!)
 
-(def large-pos-int
-  "Large positive integer generator."
+(def smol-int
+  "Very small positive integers, like mod and index."
+  (g/large-integer* {:min 0
+                     :max 3}))
+
+(def medium-int
+  "Medium-sized positive integers. 1 K at most keeps our tests reasonably
+  fast."
+  (g/large-integer* {:min 0
+                     :max (* 1024)}))
+
+(def large-int
+  "Large integer generator for file sizes"
   (g/large-integer* {:min 0
                      ; We explicitly want to test over the 4 GB limit
                      :max (* 8 1024 1024 1024)}))
 
 (def chunk-opts
   "Generator for chunk options."
-  (g/let [i          g/nat
-          mod        g/nat
-          chunk-size large-pos-int
-          start      large-pos-int
-          end        large-pos-int
-          size       large-pos-int]
+  (g/let [i          smol-int
+          mod        smol-int
+          chunk-size g/nat
+          start      medium-int
+          end        medium-int
+          size       medium-int]
     {:index       i
      :modulus     (+ i (inc mod))
      :chunk-size  (inc chunk-size)
@@ -300,6 +313,27 @@
      :end         (+ start end)
      ; We provide a file size here too
      :size        size}))
+
+(defn prob-gen
+  "Probability generator. Double between 0 and 1. Takes chunk options."
+  [{:keys [chunk-size start end size]}]
+  (g/let [scale (g/double* {:min 0.5, :max 1.5})]
+    ; For small files, we want a high probability, otherwise we won't change
+    ; anything. For large files, smaller p is fine; we want a few flips per
+    ; chunk though.
+    (let [bytes (-> (min size end)    ; Last byte in file we affect
+                    (- start)         ; Bytes in affected region
+                    (min chunk-size)  ; Or bytes in chunk, whichever is smaller
+                    (max 0))]
+      (if (= 0 bytes)
+        ; Doesn't matter
+        nil
+        (-> bytes
+            (* 8)          ; Bytes->bits
+            /              ; Mean probability of one per chunk
+            (* 3)          ; To be safe
+            (* scale)      ; Noise
+            (min 1.0)))))) ; Probability
 
 (defn corrupt!
   "Calls corrupt-file with options from the given map."
@@ -471,116 +505,147 @@
   [as bs]
   (- 1 (equal-p as bs)))
 
-(defn prob-gen
-  "Probability generator. Double between 0 and 1. Takes chunk options."
-  [{:keys [chunk-size start end size]}]
-  (g/let [scale (g/double* {:min 0.5, :max 1.5})]
-    ; For small files, we want a high probability, otherwise we won't change
-    ; anything. For large files, smaller p is fine; we want a few flips per
-    ; chunk though.
-    (let [bytes (-> (- (min size end) start)  ; Bytes in region
-                    (min chunk-size)          ; Or bytes in chunk
-                    (max 0))]
-      (if (= 0 bytes)
-        ; Doesn't matter
-        nil
-        (-> bytes
-            (* 8)          ; Bytes->bits
-            /              ; Mean probability of one per chunk
-            (* 3)          ; To be safe
-            (* scale)      ; Noise
-            (min 1.0)))))) ; Probability
+(defn bitflip-test-
+  "Helper for bitflip tests."
+  [opts]
+  (println "------")
+  (pprint opts)
 
-(deftest ^:slow bitflip-test
+  (make-files! "/dev/zero" (:size opts))
+  (let [res (corrupt! (assoc opts
+                             :mode "bitflip"))]
+    (print (:out res)))
+
+  ; Check that file sizes are equal
+  (is (= (-> data-file  io/file .length)
+         (-> data-file' io/file .length)))
+
+  ; Check chunks
+  (with-open [data  (open data-file)
+              data' (open data-file')]
+    (let [{:keys [corrupted intact]}  (buffers data  opts)
+          buffers' (buffers data' opts)
+          corrupted' (:corrupted buffers')
+          intact'    (:intact buffers')]
+      (is (= 1 (equal-p intact intact')))
+      (when (seq corrupted')
+        ; This is fairly weak--with higher p and chunks we should be
+        ; able to do better.
+        (is (< (equal-p corrupted corrupted') 1))))))
+
+(deftest bitflip-test
   (checking "basic" test-n
             [opts chunk-opts
-             p    (prob-gen opts)]
-            (println "------")
-            (pprint (assoc opts :probability p))
+             ; Our prob-gen isn't smart enough to figure out when the mod and
+             ; index would end up just picking, say, one byte out of the
+             ; file--it can generate far too small probabilties. We hardcode
+             ; this to 1/8.
+             ;p    (prob-gen opts)
+             ]
+            (bitflip-test- (assoc opts :probability 0.125))))
 
-            (make-files! "/dev/zero" (:size opts))
-            (let [res (corrupt! (assoc opts
-                                       :probability p
-                                       :mode "bitflip"))]
-              (print (:out res)))
+(deftest ^:slow bitflip-large-test
+  ; This stresses our large file dynamics. 8 GB file, trimmed 1 GB from both
+  ; ends.
+  (let [size (* 1024 1024 1024 8)]
+    (bitflip-test- {:modulus 128
+                    :index 1
+                    :chunk-size (* 1024 1024 16)
+                    :start  (* 1 1024 1024 1024)
+                    :end    (- size (* 1 1024 1024 1024))
+                    :size   size
+                    :probability (double (/ 1 1024 1024 8))})))
 
-            ; Check that file sizes are equal
-            (is (= (-> data-file  io/file .length)
-                   (-> data-file' io/file .length)))
+(defn copy-test-
+  "Helper for copy tests."
+  [opts]
+  (println "------")
+  (pprint opts)
 
-            ; Check chunks
-            (with-open [data  (open data-file)
-                        data' (open data-file')]
-              (let [{:keys [corrupted intact]}  (buffers data  opts)
-                    buffers' (buffers data' opts)
-                    corrupted' (:corrupted buffers')
-                    intact'    (:intact buffers')]
-                (is (= 1 (equal-p intact intact')))
-                (when (seq corrupted')
-                  ; This is fairly weak--with higher p and chunks we should be
-                  ; able to do better.
-                  (is (< (equal-p corrupted corrupted') 1)))))))
+  (make-files! "/dev/random" (:size opts))
+  (let [res (corrupt! (assoc opts
+                             :mode "copy"))]
+    (print (:out res)))
 
-(deftest ^:slow copy-test
+  ; Check that file sizes are equal
+  (is (= (-> data-file  io/file .length)
+         (-> data-file' io/file .length)))
+
+  ; Check chunks
+  (with-open [data  (open data-file)
+              data' (open data-file')]
+    (let [{:keys [corrupted intact]}  (buffers data opts)
+          buffers' (buffers data' opts)
+          corrupted' (:corrupted buffers')
+          intact'    (:intact buffers')]
+      (is (= 1 (equal-p intact intact')))
+      (when (and (seq corrupted')
+                 ; We need somewhere else to copy from
+                 (seq intact'))
+        (is (< (equal-p corrupted corrupted') 1/4))))))
+
+(deftest copy-test
   (checking "basic" test-n
             [opts chunk-opts]
-            (println "------")
-            (pprint opts)
+            (copy-test- opts)))
 
-            (make-files! "/dev/random" (:size opts))
-            (let [res (corrupt! (assoc opts
-                                       :mode "copy"))]
-              (print (:out res)))
+(deftest ^:slow copy-slow-test
+  ; This stresses large file dynamics. 8GB file, trimmed 1 GB from both ends.
+  (let [size (* 1024 1024 1024 8)]
+    (copy-test- {:modulus 128
+                 :index 1
+                 :chunk-size (* 1024 1024 16)
+                 :start  (* 1 1024 1024 1024)
+                 :end    (- size (* 1 1024 1024 1024))
+                 :size   size})))
 
-            ; Check that file sizes are equal
-            (is (= (-> data-file  io/file .length)
-                   (-> data-file' io/file .length)))
+(defn snapshot-test-
+  "Helper for snapshot tests."
+  [opts]
+  (println "------")
+  (pprint opts)
 
-            ; Check chunks
-            (with-open [data  (open data-file)
-                        data' (open data-file')]
-              (let [{:keys [corrupted intact]}  (buffers data opts)
-                    buffers' (buffers data' opts)
-                    corrupted' (:corrupted buffers')
-                    intact'    (:intact buffers')]
-                (is (= 1 (equal-p intact intact')))
-                (when (and (seq corrupted')
-                           ; We need somewhere else to copy from
-                           (seq intact'))
-                  (is (< (equal-p corrupted corrupted') 1/4)))))))
+  (make-files! "/dev/random" (:size opts))
+  (sh bin "--clear-snapshots")
+  ; Take snapshots of original file
+  (let [res (corrupt! (assoc opts :mode "snapshot"))]
+    (print (:out res)))
+  ; Now overwrite the fresh file with zeroes
+  (make-file! "/dev/zero" (:size opts) data-file')
+  ; And restore into it
+  (let [res (corrupt! (assoc opts :mode "restore"))]
+    (print (:out res)))
 
-(deftest ^:slow snapshot-test
+  ; Check that file sizes are equal
+  (is (= (-> data-file  io/file .length)
+         (-> data-file' io/file .length)))
+
+  ; Check chunks
+  (with-open [data  (open data-file)
+              zero  (open "/dev/zero") ; Can you mmap /dev/zero? We'll find out
+              data' (open data-file')]
+    (let [buffers   (buffers data opts)
+          buffers'  (buffers data' opts)
+          zero      (buffers zero opts)]
+      ; The "intact" regions should be all zeroes
+      (is (= 1 (equal-p (:intact zero) (:intact buffers'))))
+      ; And if we corrupted something, it should be identical to the
+      ; original data
+      (when (seq (:corrupted buffers'))
+        (is (= 1 (equal-p (:corrupted buffers)
+                          (:corrupted buffers'))))))))
+
+(deftest ^:focus snapshot-test
   (checking "basic" test-n
             [opts chunk-opts]
-            (println "------")
-            (pprint opts)
+            (snapshot-test- opts)))
 
-            (make-files! "/dev/random" (:size opts))
-            (sh bin "--clear-snapshots")
-            ; Take snapshots of original file
-            (let [res (corrupt! (assoc opts :mode "snapshot"))]
-              (print (:out res)))
-            ; Now overwrite the fresh file with zeroes
-            (make-file! "/dev/zero" (:size opts) data-file')
-            ; And restore into it
-            (let [res (corrupt! (assoc opts :mode "restore"))]
-              (print (:out res)))
-
-            ; Check that file sizes are equal
-            (is (= (-> data-file  io/file .length)
-                   (-> data-file' io/file .length)))
-
-            ; Check chunks
-            (with-open [data  (open data-file)
-                        zero  (open "/dev/zero") ; Can you mmap /dev/zero? We'll find out
-                        data' (open data-file')]
-              (let [buffers   (buffers data opts)
-                    buffers'  (buffers data' opts)
-                    zero      (buffers zero opts)]
-                ; The "intact" regions should be all zeroes
-                (is (= 1 (equal-p (:intact zero) (:intact buffers'))))
-                ; And if we corrupted something, it should be identical to the
-                ; original data
-                (when (seq (:corrupted buffers'))
-                  (is (= 1 (equal-p (:corrupted buffers)
-                                    (:corrupted buffers')))))))))
+(deftest ^:slow snapshot-slow-test
+  ; This stresses large file dynamics. 8GB file, trimmed 1 GB from both ends.
+  (let [size (* 1024 1024 1024 8)]
+    (snapshot-test- {:modulus 128
+                     :index 1
+                     :chunk-size (* 1024 1024 16)
+                     :start  (* 1 1024 1024 1024)
+                     :end    (- size (* 1 1024 1024 1024))
+                     :size   size})))

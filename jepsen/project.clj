@@ -42,7 +42,8 @@
   :test-selectors {:default (fn [m]
                               (not (or (:perf m)
                                        (:integration m)
-                                       (:logging m))))
+                                       (:logging m)
+                                       (:slow m))))
                    :focus       :focus
                    :perf        :perf
                    :logging     :logging
