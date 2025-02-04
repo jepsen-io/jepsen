@@ -9,7 +9,8 @@
     [core      :as jepsen]
     [db        :as db]
     [util      :as util :refer [meh timeout]]
-    [control   :as c :refer [|]]]
+    [control   :as c]]
+   [jepsen.control [net :as net]]
    [jepsen.nemesis.time :as nt]
    [jepsen.os.debian :as debian])
 
@@ -45,7 +46,7 @@
   "/tmp/packages/")
 
 (def ans "Aerospike namespace"
-  "test")
+  "jepsen")
 
 ;;; asinfo helpers:
 (defn kv-split
@@ -168,9 +169,11 @@
 
 (defn roster
   [conn namespace]
+  (info "NS:=" namespace " -- " (server-info (first (nodes conn))
+               (str "roster:namespace=" namespace)))
   (->> (server-info (first (nodes conn))
                     (str "roster:namespace=" namespace))
-        split-colons
+       split-colons
        (map kv-split)
        (into {})
        (util/map-vals split-commas)))
@@ -264,22 +267,22 @@
    (c/exec :mkdir :-p remote-package-dir)
    (c/exec :chmod :a+rwx remote-package-dir)
    (doseq [[name file] (local-packages)]
-       (c/trace
-    ;;   ;;  (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/"))
-       (c/upload (.getCanonicalPath file) (str remote-package-dir name)))
-       (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
+     (c/trace
+      (c/upload (.getCanonicalPath file) (str remote-package-dir name)))
+    ;;  (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
     ;;    (info "--AND" (.getPath (io/resource "features.conf")) " to /etc/aerospike/features.conf")       
-
+     
       ; handle "dpkg was interrupted, you must manually run 
       ; 'sudo dpkg --configure -a' to correct the problem."
-       (c/exec :dpkg :--configure :-a)    
+     (c/exec :dpkg :--configure :-a)    
+    ;;  (c/exec :dpkg :--remove "aerospike-tools" "aerospike-server-enterprise")    
       ; do package install
-       (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
+     (info "dpkg Installing " name)
+     (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
    ;; Bob should already handle updating features.conf
-   ;;(c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/")
    ; sigh
    ;; systemctl not applicable for docker
-   ;;(c/exec :systemctl :daemon-reload)
+   (c/exec :systemctl :daemon-reload)
 
    ; debian packages don't do this?
    (c/exec :mkdir :-p "/var/log/aerospike")
@@ -301,26 +304,49 @@
 ;; Bob owns the initial static config file - but diff may result in expected failures
   (c/su
     ; Copy test data's Config & Feature-Key files
-      (c/exec :cp "/data/aerospike_a/etc/aerospike/aerospike.conf" "/etc/aerospike/aerospike.conf")
-      (c/exec :cp "/data/aerospike_a/etc/aerospike/features.conf" "/etc/aerospike/features.conf")
+      (c/exec :echo (-> "aerospike.conf"
+                        io/resource
+                        slurp
+                        (str/replace "$NODE_ADDRESS" (net/local-ip))
+                        (str/replace "$MESH_ADDRESS"
+                                      (net/ip (jepsen/primary test)))
+                        (str/replace "$REPLICATION_FACTOR"
+                                      (str (:replication-factor opts)))
+                        (str/replace "$HEARTBEAT_INTERVAL"
+                                      (str (:heartbeat-interval opts)))
+                        (str/replace "$COMMIT_TO_DEVICE"
+                                      (if (:commit-to-device opts)
+                                        "commit-to-device true"
+                                        "")))
+              :> "/etc/aerospike/aerospike.conf")
+      (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/features.conf")
+      ;; (c/upload (.getPath (io/resource "aerospike.conf")) "/etc/aerospike/aerospike.conf")
+  ;;  (c/exec :cp "/data/aerospike_a/etc/aerospike/aerospike.conf" "/etc/aerospike/aerospike.conf")
+  ;;  (c/exec :cp "/data/aerospike_a/etc/aerospike/features.conf" "/etc/aerospike/features.conf")
    )
   )
 
 (defn start!
   "Starts aerospike."
   [node test]
-  (info "Syncronizing...")
+  ;; (info "Syncronizing...")
   (jepsen/synchronize test)
-  (info "Syncronized!")
   (info "Starting...")
-  ;; Use bob image wrapper with workaround for jepsen spawned process issue
-  (c/exec "bash" "-c" "ulimit -n 15000 ; exec aerospikectl start asd && echo 'started with ulimit'")
+  (c/su (c/exec :service :aerospike :start))
+  (clear-data! "test")
+  (info "Started")
   (jepsen/synchronize test) ;; Wait for all servers to start
+  ;; (info "Syncronized!")
+  ;; (info "Starting...")
+  ;; ;; Use bob image wrapper with workaround for jepsen spawned process issue
+  ;; (c/exec "bash" "-c" "ulimit -n 15000 && exec aerospikectl start asd && echo 'started with ulimit'")
+  ;; (jepsen/synchronize test) ;; Wait for all servers to start
 
   (let [conn (connect node)]
     (try
       (when (= node (jepsen/primary test))
-        (clear-data! "test")
+        ;; (clear-data! "test")
+        (Thread/sleep 10)
         (info "Setting roster using observed nodes " (:observed_nodes (roster conn ans)))
         (info "Expected to match count of " (:nodes test) " ==> " (count (:nodes test)))
         (asinfo-roster-set! ans (wait-for-all-nodes-observed conn test ans))
@@ -340,10 +366,12 @@
   "Stops aerospike."
   [node]
   (info node "stopping aerospike")
-  (c/su
-    ;; use bob asd process wrapper
-    (meh (c/exec :aerospikectl :stop :asd))
-    (meh (c/exec :killall :-9 :asd))))
+  ;; (c/su
+  ;;   ;; use bob asd process wrapper
+  ;;  (meh (c/exec :aerospikectl :stop :asd))
+  ;;  (meh (c/exec :killall :-9 :asd)))
+  (meh (c/su (c/exec :service :aerospike :stop)))
+)
 
 (defn wipe!
   "Shuts down the server and wipes data."
@@ -353,7 +381,8 @@
   (c/su
    ;; bob runs shouldn't need to wipe logs
    ;;(meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
-   ;;(meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
+  ;;  (meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
+   (c/exec :ipcrm :--all=shm)
    (doseq [dir ["data" "smd" "udf"]]
      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
 
@@ -370,6 +399,7 @@
       (nt/reset-time!)
       (info "Running Install & Configuration!")
       (doto node
+        ;; (stop!)
         (install!)
         ;; Bob owns the initial static config file - but diff may result in expected failures
         (configure! test opts)
@@ -378,18 +408,20 @@
 
     ;; Bob will teardown
     (teardown! [_ test node]
-               (info "IN db/teardown! CALL!") 
-              ;; (clear-data! "test")
-              ;; (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
-               )
+               (info "IN db/teardown! CALL!")
+              ;;  (clear-data! "test")
+               (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
+               (wipe! node)
+            
+    
       ;;(wipe! node))
-
+    
     )
     ;;db/LogFiles
     ;;(log-files [_ test node]
     ;;  ["/var/log/aerospike/aerospike.log"]))
   ;; (info "DONE!!  (DB->)" (db opts))
-  )
+))
 
 (def ^Policy policy
   "General operation policy"

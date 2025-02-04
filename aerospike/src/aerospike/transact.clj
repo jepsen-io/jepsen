@@ -88,8 +88,10 @@
         kCount (:key-count opts (if (= kDist :uniform)
                                   (rand-nth (range 3 8))
                                   (rand-nth (range 8 12))))
-        minOps (:min-txn-length opts (rand-nth (range 1 6)))
+        minOps (:min-txn-length opts (rand-nth (range 1 (:max-txn-length opts 6))))
         maxOps (:max-txn-length opts (rand-nth (range minOps 12)))]
+    ;; (info "MinOps:" minOps " -- MaxOps:" maxOps)
+    ;; (info "KeyDist:" kDist " -- KeyCt:" kCount)
     {:key-dist kDist
      :key-count kCount
      :min-txn-length minOps

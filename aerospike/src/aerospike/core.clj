@@ -1,15 +1,15 @@
 (ns aerospike.core
   "Entry point for aerospike tests"
   (:require [aerospike [support :as support]
-                       [counter :as counter]
-                       [cas-register :as cas-register]
-                       [nemesis :as nemesis]
-                       [set :as set]
-                       [transact :as transact]]
+             [counter :as counter]
+             [cas-register :as cas-register]
+             [nemesis :as nemesis]
+             [set :as set]
+             [transact :as transact]]
             [jepsen    [cli :as cli]
-                       [checker :as checker]
-                       [generator :as gen]
-                       [tests :as tests]]
+             [checker :as checker]
+             [generator :as gen]
+             [tests :as tests]]
             [jepsen.os.debian :as debian])
   (:gen-class))
 
@@ -92,6 +92,9 @@
     :parse-fn #(Long/parseLong %)
                  ; TODO: must be <= min-txn-length
     :validate [pos? "must be positive"]]
+   [nil "--key-dist DISTRIBUTION" "exponential / uniform distribution for elle txn generator to use"
+    :parse-fn keyword
+    :validate [#{:exponential :uniform} (cli/one-of [:exponential :uniform])]]
    [nil "--key-count N_KEYS" "Number of active keys at any given time"
     :parse-fn #(Long/parseLong %)
     :validate [pos? "must be positive"]]
@@ -105,7 +108,8 @@
     :parse-fn keyword
     :default :all
     :missing (str "--workload " (cli/one-of (workloads)))
-    :validate [(assoc (workloads) :all "all") (cli/one-of (assoc (workloads) :all "all"))]]
+    :validate [(assoc (workloads) :all "all") 
+               (cli/one-of (assoc (workloads) :all "all"))]]
    [nil "--max-dead-nodes NUMBER" "Number of nodes that can simultaneously fail"
     :parse-fn #(Long/parseLong %)
     :default  2
