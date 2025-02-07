@@ -28,7 +28,7 @@
                 (s/fetch s/ans txn-set k tid)
                 :bins
                 :value
-                (or []))
+                (or (throw (AerospikeException. 2 "RecordNotFound"))))
          :w (do
               (let [wp (txn-wp tid)]
                 (s/put! conn wp s/ans txn-set k {:value v}))
