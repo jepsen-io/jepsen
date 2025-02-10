@@ -114,16 +114,21 @@
     :parse-fn #(Long/parseLong %)
     :default  2
     :validate [(complement neg?) "must be non-negative"]]
-   [nil "--clean-kill" "Terminate processes with SIGTERM to simulate fsync before commit"]
-   [nil "--no-revives" "Don't revive during the test (but revive at the end)"]
-   [nil "--no-clocks" "Allow the nemesis to change the clock"
-    :assoc-fn (fn [m k v] (assoc m :no-clocks v))]
-   [nil "--no-partitions" "Disallow the nemesis from introduce partitions"
-    :assoc-fn (fn [m k v] (assoc m :no-partitions v))]
    [nil "--nemesis-interval SECONDS" "How long between nemesis actions?"
     :parse-fn #(Long/parseLong %)
     :validate [(complement neg?) "Must be non-negative"]]
+   [nil "--clean-kill" "Terminate processes with SIGTERM to simulate fsync before commit"
+    :default false]
+   [nil "--no-revives" "Don't revive during the test (but revive at the end)"
+    :default false]
+   [nil "--no-clocks" "Allow the nemesis to change the clock"
+    :default false
+    :assoc-fn (fn [m k v] (assoc m :no-clocks v))]
+   [nil "--no-partitions" "Disallow the nemesis from introduce partitions"
+    :default false
+    :assoc-fn (fn [m k v] (assoc m :no-partitions v))]
    [nil "--no-kills" "Disallow the nemesis from killing processes."
+    :default false
     :assoc-fn (fn [m k v] (assoc m :no-kills v))]])
 
 
