@@ -178,6 +178,7 @@
        (into {})
        (util/map-vals split-commas)))
 
+;;; asinfo utilities:
 (defn asinfo-roster-set!
   [namespace node-list]
   (c/trace
@@ -186,18 +187,15 @@
                      (str/join "," node-list)))))
 (defn allow-expunge!
   [namespace]
-  ;; (info "Setting ns-config item `strong-consistency-allow-expunge` to TRUE")
-  (c/trace 
-   (c/exec :asinfo :-v 
-           (str "set-config:context=namespace;id=" namespace ";strong-consistency-allow-expunge=true"))))
+  (c/exec :asinfo :-v
+          (str "set-config:context=namespace;id=" namespace 
+               ";strong-consistency-allow-expunge=true")))
 
 (defn clear-data!
   [namespace]
   (c/trace (c/su (c/exec 
         :asinfo :-v (str "truncate-namespace:namespace=" namespace)))))
 
-
-;;; asinfo utilities:
 (defmacro poll
   "Calls `expr` repeatedly, binding the result to `sym`, and evaluating `pred`
   with `sym` bound. When predicate evaluates truthy, returns the value of sym."
@@ -236,8 +234,8 @@
         (and (= (:migrate_allowed stats) "true")
              (= (:migrate_partitions_remaining stats) 0))))
 
-;;; Server setup
 
+;;; Server setup
 (defn local-packages
   "An array of canonical paths for local packages, from local-package-dir.
   Ensures that we have all required deb packages."
@@ -249,9 +247,8 @@
                              (when (re-find #"\.deb$" (.getName f))
                                [name f]))))
                    (into (sorted-map)))]
-    ;; Bob tests already have server installed
-    ;;(assert (some (partial re-find #"aerospike-server") (keys files))
-    ;;        (str "Expected an aerospike-server .deb in " local-package-dir))
+    (assert (some (partial re-find #"aerospike-server") (keys files))
+           (str "Expected an aerospike-server .deb in " local-package-dir))
     (assert (some (partial re-find #"aerospike-tools") (keys files))
             (str "Expected an aerospike-tools .deb in " local-package-dir))
     files))
@@ -260,30 +257,19 @@
   [node]
   (info "Installing Aerospike packages")
   (c/su
-   ;; Bob tests should not need to clean up before test run
-   ;;(debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
+   (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
    (debian/install ["python-is-python3"])
-  ;;  (debian/install ["python"])
    (c/exec :mkdir :-p remote-package-dir)
    (c/exec :chmod :a+rwx remote-package-dir)
    (doseq [[name file] (local-packages)]
-     (c/trace
-      (c/upload (.getCanonicalPath file) (str remote-package-dir name)))
-    ;;  (info "Uploaded" (.getCanonicalPath file) " to " (str remote-package-dir name))
-    ;;    (info "--AND" (.getPath (io/resource "features.conf")) " to /etc/aerospike/features.conf")       
-     
-      ; handle "dpkg was interrupted, you must manually run 
-      ; 'sudo dpkg --configure -a' to correct the problem."
-     (c/exec :dpkg :--configure :-a)    
-    ;;  (c/exec :dpkg :--remove "aerospike-tools" "aerospike-server-enterprise")    
+     (c/upload (.getCanonicalPath file) (str remote-package-dir name))
+     (c/exec :dpkg :--configure :-a) ; handles "dpkg was interrupted"
+     (c/exec :dpkg :--remove "aerospike-tools" "aerospike-server-enterprise")    
       ; do package install
      (info "dpkg Installing " name)
      (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
-   ;; Bob should already handle updating features.conf
    ; sigh
-   ;; systemctl not applicable for docker
    (c/exec :systemctl :daemon-reload)
-
    ; debian packages don't do this?
    (c/exec :mkdir :-p "/var/log/aerospike")
    (c/exec :chown "aerospike:aerospike" "/var/log/aerospike")
@@ -301,10 +287,8 @@
   "Uploads configuration files to the given node."
   [node test opts]
   (info "Configuring...")
-;; Bob owns the initial static config file - but diff may result in expected failures
-  (c/su
-    ; Copy test data's Config & Feature-Key files
-      (c/exec :echo (-> "aerospike.conf"
+  ; Copy test data's Config & Feature-Key files
+  (c/su (c/exec :echo (-> "aerospike.conf"
                         io/resource
                         slurp
                         (str/replace "$NODE_ADDRESS" (net/local-ip))
@@ -320,32 +304,21 @@
                                         "")))
               :> "/etc/aerospike/aerospike.conf")
       (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/features.conf")
-      ;; (c/upload (.getPath (io/resource "aerospike.conf")) "/etc/aerospike/aerospike.conf")
-  ;;  (c/exec :cp "/data/aerospike_a/etc/aerospike/aerospike.conf" "/etc/aerospike/aerospike.conf")
-  ;;  (c/exec :cp "/data/aerospike_a/etc/aerospike/features.conf" "/etc/aerospike/features.conf")
    )
   )
 
 (defn start!
   "Starts aerospike."
   [node test]
-  ;; (info "Syncronizing...")
   (jepsen/synchronize test)
   (info "Starting...")
   (c/su (c/exec :service :aerospike :start))
   (clear-data! "test")
-  (info "Started")
   (jepsen/synchronize test) ;; Wait for all servers to start
-  ;; (info "Syncronized!")
-  ;; (info "Starting...")
-  ;; ;; Use bob image wrapper with workaround for jepsen spawned process issue
-  ;; (c/exec "bash" "-c" "ulimit -n 15000 && exec aerospikectl start asd && echo 'started with ulimit'")
-  ;; (jepsen/synchronize test) ;; Wait for all servers to start
 
   (let [conn (connect node)]
     (try
       (when (= node (jepsen/primary test))
-        ;; (clear-data! "test")
         (Thread/sleep 10)
         (info "Setting roster using observed nodes " (:observed_nodes (roster conn ans)))
         (info "Expected to match count of " (:nodes test) " ==> " (count (:nodes test)))
@@ -366,10 +339,6 @@
   "Stops aerospike."
   [node]
   (info node "stopping aerospike")
-  ;; (c/su
-  ;;   ;; use bob asd process wrapper
-  ;;  (meh (c/exec :aerospikectl :stop :asd))
-  ;;  (meh (c/exec :killall :-9 :asd)))
   (meh (c/su (c/exec :service :aerospike :stop)))
 )
 
@@ -379,9 +348,8 @@
   (stop! node)
   (info node "deleting data files")
   (c/su
-   ;; bob runs shouldn't need to wipe logs
-   ;;(meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
-  ;;  (meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
+   (meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
+   (meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
    (c/exec :ipcrm :--all=shm)
    (doseq [dir ["data" "smd" "udf"]]
      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
@@ -391,37 +359,20 @@
   "Aerospike for a particular version."
   [opts]
   (info "CREATING DB")
-  ;; (Asx/disableDebugMode)
-  ;; (Asx/enableStaticPortMode)
   (reify db/DB
     (setup! [_ test node]
       (info "Resetting clocktimes!")
       (nt/reset-time!)
       (info "Running Install & Configuration!")
       (doto node
-        ;; (stop!)
         (install!)
-        ;; Bob owns the initial static config file - but diff may result in expected failures
         (configure! test opts)
         (start! test))
       (info "Done w/ db.setup! call."))
-
-    ;; Bob will teardown
     (teardown! [_ test node]
-               (info "IN db/teardown! CALL!")
-              ;;  (clear-data! "test")
-               (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
-               (wipe! node)
-            
-    
-      ;;(wipe! node))
-    
-    )
-    ;;db/LogFiles
-    ;;(log-files [_ test node]
-    ;;  ["/var/log/aerospike/aerospike.log"]))
-  ;; (info "DONE!!  (DB->)" (db opts))
-))
+      (info "IN db/teardown! CALL!")
+      (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
+      (wipe! node))))
 
 (def ^Policy policy
   "General operation policy"
@@ -435,7 +386,7 @@
   "Policy needed for linearizability testing."
   []
   (let [p (Policy. policy)]
-      ;; needed reads to retry for set workload
+    ;; needed reads to retry for set workload
     (set! (.maxRetries p) 2)
     (set! (.sleepBetweenRetries p) 300)
     (set! (.readModeSC p) ReadModeSC/LINEARIZE)
