@@ -124,8 +124,8 @@
   [default]
   (package-opt "tarball" default))
 
-(defn test-usage 
-  [] 
+(defn test-usage
+  []
   "Usage: lein run -- COMMAND [OPTIONS ...]
 
 Runs a Jepsen test and exits with a status code:
