@@ -156,12 +156,6 @@
                              (* 2 (+ 1 (rand-int 15))))]
     (merge opts
            {:concurrency          nClients
-            ; Nemesis related
-            :no-kills             (:no-kills opts (rand-nth (list true false))) 
-            :clean-kill           (:clean-kill opts (rand-nth (list true false)))
-            :no-partitions        (:no-partitions opts (rand-nth (list true false))) 
-            :no-clocks            (:no-clocks opts (rand-nth (list true false))) 
-            :no-revives           (:no-revives opts (rand-nth (list true false))) 
             :nemesis-interval     (:nemesis-interval opts (rand-nth (list 5 8 10 15 20))) })))
 
 
