@@ -129,7 +129,18 @@
     :assoc-fn (fn [m k v] (assoc m :no-partitions v))]
    [nil "--no-kills" "Disallow the nemesis from killing processes."
     :default false
-    :assoc-fn (fn [m k v] (assoc m :no-kills v))]])
+    :assoc-fn (fn [m k v] (assoc m :no-kills v))]
+   [nil "--commit-to-device" "Force writes to disk before commit"
+    :default false]
+   [nil "--heartbeat-interval MS" "Aerospike heartbeat interval in milliseconds"
+    :default 150
+    :parse-fn #(Long/parseLong %)
+    :validate [pos? "must be positive"]]
+   [nil "--replication-factor NUMBER" "Number of nodes which must store data"
+    :parse-fn #(Long/parseLong %)
+    :default 2
+    :validate [pos? "must be positive"]]
+   ])
 
 
 (def opt-spec

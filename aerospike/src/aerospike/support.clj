@@ -346,7 +346,7 @@
       (doto node
         (install!)
         (configure! test opts)
-        (start! test))
+        (start! test)))
     (teardown! [_ test node]
       (wipe! node))))
 
