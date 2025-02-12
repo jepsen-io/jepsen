@@ -113,13 +113,11 @@
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
-  ;; (info "CREATING CLIENT")
   (with-retry [tries 30]
     (AerospikeClient. (fSingleNode-policy) node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
-      (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
 
@@ -132,8 +130,6 @@
     ; Wait for connection
     (while (not (.isConnected ^IAerospikeClient client))
       (Thread/sleep 100))
-
-    ;; (info "CLIENT CONNECTED!")
     ; Wait for workable ops
     (while (try (server-info (first (nodes client)))
                 false
@@ -154,23 +150,16 @@
   ([]
    (revive! ans))
   ([namespace]
-   (c/trace 
-    (c/su (c/exec :asinfo :-v (str "revive:namespace=" namespace)))
-   )
-  ))
+   (c/trace
+    (c/su (c/exec :asinfo :-v (str "revive:namespace=" namespace))))))
 
 (defn recluster!
   "Reclusters the local node."
   []
-  (c/trace
-    (c/su (c/exec :asinfo :-v "recluster:"))
-  )
-  )
+  (c/trace (c/su (c/exec :asinfo :-v "recluster:"))))
 
 (defn roster
   [conn namespace]
-  (info "NS:=" namespace " -- " (server-info (first (nodes conn))
-               (str "roster:namespace=" namespace)))
   (->> (server-info (first (nodes conn))
                     (str "roster:namespace=" namespace))
        split-colons
@@ -264,18 +253,16 @@
    (doseq [[name file] (local-packages)]
      (c/upload (.getCanonicalPath file) (str remote-package-dir name))
      (c/exec :dpkg :--configure :-a) ; handles "dpkg was interrupted"
-     (c/exec :dpkg :--remove "aerospike-tools" "aerospike-server-enterprise")    
-      ; do package install
-     (info "dpkg Installing " name)
+     ;; do package install
      (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
    ; sigh
    (c/exec :systemctl :daemon-reload)
-   ; debian packages don't do this?
+   ;; debian packages don't do this? 
+   ;; - well, log path depends on config not sure if / why `/var/run` is needed
    (c/exec :mkdir :-p "/var/log/aerospike")
    (c/exec :chown "aerospike:aerospike" "/var/log/aerospike")
    (c/exec :mkdir :-p "/var/run/aerospike")
    (c/exec :chown "aerospike:aerospike" "/var/run/aerospike")
-   (info "DONE with install & config!")
    ;; Replace /usr/bin/asd with a wrapper that skews time a bit
    ;(c/exec :mv "/usr/bin/asd" "/usr/local/bin/asd")
    ;(c/exec :echo
@@ -289,23 +276,21 @@
   (info "Configuring...")
   ; Copy test data's Config & Feature-Key files
   (c/su (c/exec :echo (-> "aerospike.conf"
-                        io/resource
-                        slurp
-                        (str/replace "$NODE_ADDRESS" (net/local-ip))
-                        (str/replace "$MESH_ADDRESS"
-                                      (net/ip (jepsen/primary test)))
-                        (str/replace "$REPLICATION_FACTOR"
-                                      (str (:replication-factor opts)))
-                        (str/replace "$HEARTBEAT_INTERVAL"
-                                      (str (:heartbeat-interval opts)))
-                        (str/replace "$COMMIT_TO_DEVICE"
-                                      (if (:commit-to-device opts)
-                                        "commit-to-device true"
-                                        "")))
-              :> "/etc/aerospike/aerospike.conf")
-      (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/features.conf")
-   )
-  )
+                          io/resource
+                          slurp
+                          (str/replace "$NODE_ADDRESS" (net/local-ip))
+                          (str/replace "$MESH_ADDRESS"
+                                       (net/ip (jepsen/primary test)))
+                          (str/replace "$REPLICATION_FACTOR"
+                                       (str (:replication-factor opts)))
+                          (str/replace "$HEARTBEAT_INTERVAL"
+                                       (str (:heartbeat-interval opts)))
+                          (str/replace "$COMMIT_TO_DEVICE"
+                                       (if (:commit-to-device opts)
+                                         "commit-to-device true"
+                                         "")))
+                :> "/etc/aerospike/aerospike.conf")
+        (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/features.conf")))
 
 (defn start!
   "Starts aerospike."
@@ -320,8 +305,6 @@
     (try
       (when (= node (jepsen/primary test))
         (Thread/sleep 10)
-        (info "Setting roster using observed nodes " (:observed_nodes (roster conn ans)))
-        (info "Expected to match count of " (:nodes test) " ==> " (count (:nodes test)))
         (asinfo-roster-set! ans (wait-for-all-nodes-observed conn test ans))
         (allow-expunge! ans)
         (wait-for-all-nodes-pending conn test ans)
@@ -339,8 +322,7 @@
   "Stops aerospike."
   [node]
   (info node "stopping aerospike")
-  (meh (c/su (c/exec :service :aerospike :stop)))
-)
+  (meh (c/su (c/exec :service :aerospike :stop))))
 
 (defn wipe!
   "Shuts down the server and wipes data."
@@ -350,7 +332,7 @@
   (c/su
    (meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
    (meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
-   (c/exec :ipcrm :--all=shm)
+   (c/exec :ipcrm :--all=shm) ; for in-memory namespace
    (doseq [dir ["data" "smd" "udf"]]
      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
 
@@ -358,20 +340,14 @@
 (defn db
   "Aerospike for a particular version."
   [opts]
-  (info "CREATING DB")
   (reify db/DB
     (setup! [_ test node]
-      (info "Resetting clocktimes!")
       (nt/reset-time!)
-      (info "Running Install & Configuration!")
       (doto node
         (install!)
         (configure! test opts)
         (start! test))
-      (info "Done w/ db.setup! call."))
     (teardown! [_ test node]
-      (info "IN db/teardown! CALL!")
-      (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
       (wipe! node))))
 
 (def ^Policy policy
