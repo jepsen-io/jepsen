@@ -342,13 +342,16 @@
   [opts]
   (reify db/DB
     (setup! [_ test node]
-            (nt/reset-time!)
-            (doto node
-              (install!)
-              (configure! test opts)
-              (start! test)))
+      (nt/reset-time!)
+      (doto node
+        (install!)
+        (configure! test opts)
+        (start! test)))
     (teardown! [_ test node]
-      (wipe! node))))
+      (wipe! node))
+    db/LogFiles
+    (log-files [_ test node]
+               ["/var/log/aerospike/aerospike.log"])))
 
 (def ^Policy policy
   "General operation policy"

@@ -87,7 +87,7 @@
     :parse-fn #(Long/parseLong %)
                  ; TODO: must be >= min-txn-length
     :validate [pos? "must be positive"]]
-   [nil "--min-txn-length MIN" "Maximum number of micro-ops per transaction"
+   [nil "--min-txn-length MIN" "Minimum number of micro-ops per transaction"
     :parse-fn #(Long/parseLong %)
                  ; TODO: must be <= min-txn-length
     :validate [pos? "must be positive"]]
@@ -157,17 +157,6 @@
             :nemesis-interval     (:nemesis-interval opts (rand-nth (list 5 8 10 15 20)))})))
 
 
-;; -- Why did we merge in the webserver before? .. 
-;; idk but reluctant to fully remove this..
-;; (defn -main
-;;   "Handles command-line arguments, running a Jepsen command."
-;;   [& args]
-;;   (cli/run! (merge (cli/single-test-cmd {:test-fn   aerospike-test
-;;                                          :opt-spec  opt-spec})
-;;                    (cli/serve-cmd))
-;;             args))
-
-
 (defn all-test-opts
   "Creates a list of valid maps for each to be passed to `aerospike-test`"
   [opts]
@@ -188,6 +177,8 @@
 (defn single-test [opts]
   (aerospike-test (valid-opts opts)))
 
+;; Q - Why did we merge in the webserver before? .. 
+;; A - Having the web server lets you run lein run serve to browse results.
 (defn -main
   "Handles command-line arguments, running a Jepsen command."
   [& args]
@@ -197,5 +188,6 @@
             :opt-spec  opt-spec})
           (cli/test-all-cmd
            {:tests-fn  all-tests
-            :opt-spec  opt-spec}))
+            :opt-spec  opt-spec})
+          (cli/serve-cmd))
    args))
