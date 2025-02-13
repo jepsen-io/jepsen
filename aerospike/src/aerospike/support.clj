@@ -180,11 +180,6 @@
           (str "set-config:context=namespace;id=" namespace
                ";strong-consistency-allow-expunge=true")))
 
-(defn clear-data!
-  [namespace]
-  (c/trace (c/su (c/exec
-                  :asinfo :-v (str "truncate-namespace:namespace=" namespace)))))
-
 (defmacro poll
   "Calls `expr` repeatedly, binding the result to `sym`, and evaluating `pred`
   with `sym` bound. When predicate evaluates truthy, returns the value of sym."
@@ -298,7 +293,6 @@
   (jepsen/synchronize test)
   (info "Starting...")
   (c/su (c/exec :service :aerospike :start))
-  (clear-data! "test")
   (jepsen/synchronize test) ;; Wait for all servers to start
 
   (let [conn (connect node)]
