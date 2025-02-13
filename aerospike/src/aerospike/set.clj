@@ -50,8 +50,7 @@
     {:client  (set-client)
      :checker (independent/checker (checker/set))
      :generator (independent/concurrent-generator
-                 2  ; TODO - make this dynamic to concurrency?
-                     ; -> concurrency // this value = num keys
+                 10
                  (range)
                  (fn [k]
                    (swap! max-key max k)
