@@ -78,7 +78,8 @@
                  (net/heal! (:net test) test)
                  (c/on-nodes test (remove #{node} (:nodes test))
                              (fn restart [test node]
-                               (c/su (c/exec :service :aerospike :restart))))))
+			       ;; Jepsen spawned process issue workaround
+			       (c/exec "bash" "-c" "ulimit -n 15000 && aerospikectl restart asd || echo 'started with ulimit'")))))
   :resumed)
 
 (defn nemesis
@@ -110,7 +111,7 @@
 
   (invoke! [this test op]
     (let [[k v] (:value op)]
-      (s/with-errors op #{}
+      (s/with-modern-errors op
         (case (:f op)
           :read (assoc op
                        :type :ok,
@@ -213,15 +214,14 @@
                 :checker (independent/checker (checker/set))
                 :generator gen
                 :final-generator
-                (gen/derefer
-                  (delay
-                    (locking state
-                      (independent/concurrent-generator
-                        (count (:nodes test))
-                        (range (peek (:keys @state)))
-                        (fn [k]
-                          (gen/once {:type :invoke
-                                     :f    :read}))))))}
+                (delay
+                  (locking state
+                    (independent/concurrent-generator
+                      (count (:nodes test))
+                      (range (peek (:keys @state)))
+                      (fn [k]
+                        (gen/once {:type :invoke
+                                    :f    :read})))))}
      :nemesis {:nemesis           (nemesis state)
                :generator         gen
                :final-generator   (gen/concat
