@@ -1,9 +1,10 @@
 (ns aerospike.nemesis
   (:require [aerospike [support :as s]]
+            [clojure.tools.logging :refer [debug info warn]]
             [jepsen [control :as c]
-                    [generator :as gen]
-                    [nemesis :as nemesis]
-                    [util :refer [meh random-nonempty-subset]]]
+             [generator :as gen]
+             [nemesis :as nemesis]
+             [util :refer [meh random-nonempty-subset]]]
             [jepsen.nemesis.time :as nt]))
 
 ; Nemeses
@@ -24,36 +25,35 @@
 
     (invoke! [this test op]
       (assoc
-        op :value
-        (c/on-nodes
-          test (:value op)
-          (fn [test node]
-            (case (:f op)
-              :kill (if ((swap! dead capped-conj node max-dead) node)
-                      (do (meh (c/su (c/exec :killall
-                                             (str "-" signal)
-                                             :asd)))
-                          :killed)
-                      :still-alive)
+       op :value
+       (c/on-nodes
+        test (:value op)
+        (fn [test node]
+          (case (:f op)
+            :kill (if ((swap! dead capped-conj node max-dead) node)
+                    (do (meh (c/su (c/exec :killall
+                                           (str "-" signal)
+                                           :asd)))
+                        :killed)
+                    :still-alive)
 
-              :restart (do (c/su
-                             (c/exec :service :aerospike :restart))
-                           (swap! dead disj node)
-                           :started)
+            :restart (do (c/su (c/exec :service :aerospike :restart))
+                         (swap! dead disj node)
+                         :started)
 
-              :revive
-              (try (s/revive!)
-                   (catch java.lang.RuntimeException e
-                     (if (re-find #"Could not connect to node" (.getMessage e))
-                       :not-running
-                       (throw e))))
+            :revive
+            (try (s/revive!)
+                 (catch java.lang.RuntimeException e
+                   (if (re-find #"Could not connect to node" (.getMessage e))
+                     :not-running
+                     (throw e))))
 
-              :recluster
-              (try (s/recluster!)
-                   (catch java.lang.RuntimeException e
-                     (if (re-find #"Could not connect to node" (.getMessage e))
-                       :not-running
-                       (throw e)))))))))
+            :recluster
+            (try (s/recluster!)
+                 (catch java.lang.RuntimeException e
+                   (if (re-find #"Could not connect to node" (.getMessage e))
+                     :not-running
+                     (throw e)))))))))
 
     (teardown! [this test])))
 
@@ -87,41 +87,39 @@
                          [revive-gen recluster-gen])]
                       (remove nil?)
                       vec)]
-    (mapcat rand-nth (repeat patterns))))
+    (mapcat rand-nth (repeat 960 patterns))))
 
 (defn killer-gen
   "A mix of kills, restarts, revivals, and reclusterings"
   [test]
-  (gen/seq (killer-gen-seq test)))
+  (gen/mix (seq (killer-gen-seq test))))
 
 (defn full-nemesis
   "Handles kills, restarts, revives, reclusters, clock skew, and partitions."
   [opts]
   (nemesis/compose
-    {{:partition-start :start
-      :partition-stop  :stop} (nemesis/partition-random-halves)
-
-     #{:kill :restart :revive :recluster} (kill-nemesis (if (:clean-kill opts)
-                                                          15 ; SIGTERM
-                                                          9) ; SIGKILL
-                                                        (:max-dead-nodes opts)
-                                                        (:dead opts))
-
-     {:clock-reset  :reset
-      :clock-bump   :bump
-      :clock-strobe :strobe} (nt/clock-nemesis)}))
+   {{:partition-start :start
+     :partition-stop  :stop} (nemesis/partition-random-halves)
+    #{:kill :restart :revive :recluster} (kill-nemesis (if (:clean-kill opts)
+                                                         15 ; SIGTERM
+                                                         9) ; SIGKILL
+                                                       (:max-dead-nodes opts)
+                                                       (:dead opts))
+    {:clock-reset  :reset
+     :clock-bump   :bump
+     :clock-strobe :strobe} (nt/clock-nemesis)}))
 
 (defn full-gen
-  [opts]
   "Generates kills, restarts, revives, reclusters, clock skews, and partitions."
+  [opts]
   (->> [(when-not (:no-clocks opts) (gen/f-map {:strobe :clock-strobe
                                                 :reset  :clock-reset
                                                 :bump   :clock-bump}
                                                (nt/clock-gen)))
         (when-not (:no-kills opts) (killer-gen opts))
         (when-not (:no-partitions opts)
-          (gen/seq (cycle [{:type :info, :f :partition-start}
-                           {:type :info, :f :partition-stop}])))]
+          (cycle [{:type :info, :f :partition-start}
+                  {:type :info, :f :partition-stop}]))]
        (remove nil?)
        gen/mix))
 
@@ -135,11 +133,11 @@
     {:nemesis (full-nemesis opts)
      :generator (full-gen opts)
      :final-generator (gen/concat
-                        (gen/once {:type :info, :f :partition-stop})
-                        (gen/once {:type :info, :f :clock-reset})
-                        (gen/once
-                          (fn [test _]
-                            {:type :info, :f :restart, :value (:nodes test)}))
-                        (gen/sleep 10)
-                        (gen/once revive-gen)
-                        (gen/once recluster-gen))}))
+                       (gen/once {:type :info, :f :partition-stop})
+                       (gen/once {:type :info, :f :clock-reset})
+                       (gen/once
+                        (fn [test _]
+                          {:type :info, :f :restart, :value (:nodes test)}))
+                       (gen/sleep 15)
+                       (gen/once revive-gen)
+                       (gen/once recluster-gen))}))

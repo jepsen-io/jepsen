@@ -35,6 +35,25 @@ Data loss due to process pauses
 lein run test --username admin --nodes-file ~/nodes --workload pause --time-limit 300 --concurrency 100 --test-count 1
 ```
 
+
+
+Run a transactional workload 
+```sh
+lein run -- test                            \
+    --workload list-append                  \
+    --test-count 1                          \
+    --ssh-private-key /path/to/pem-file     \
+    --nodes-file /path/to/hosts-file        \
+    --username admin                        \
+    --no-kills --no-clocks --no-partitions  \
+    --concurrency 3                         \
+    --key-dist uniform                      \
+    --min-txn-length 2                      \
+    --max-txn-length 3                      \
+    --replication-factor 3                  \
+    --commit-to-device                      \
+    --max-writes-per-key 1000
+```
 ## Packages
 
 ## License

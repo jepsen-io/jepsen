@@ -5,19 +5,18 @@
             [jepsen [client :as client]
                     [checker :as checker]
                     [generator :as gen]
-                    [independent :as independent]]
-            [jepsen.checker.timeline :as timeline]))
+                    [independent :as independent]]))
 
 (defrecord SetClient [client namespace set]
   client/Client
   (open! [this test node]
     (assoc this :client (s/connect node)))
 
-  (setup! [this test])
+  (setup! [this test] this)
 
   (invoke! [this test op]
     (let [[k v] (:value op)]
-      (s/with-errors op #{}
+      (s/with-modern-errors op
         (case (:f op)
           :read (assoc op
                        :type :ok,
@@ -51,22 +50,22 @@
     {:client  (set-client)
      :checker (independent/checker (checker/set))
      :generator (independent/concurrent-generator
-                  5
+                  2  ; TODO - make this dynamic to concurrency?
+                     ; -> concurrency // this value = num keys
                   (range)
                   (fn [k]
                     (swap! max-key max k)
                     (->> (range 10000)
                          (map (fn [x] {:type :invoke, :f :add, :value x}))
-                         gen/seq
                          (gen/stagger 1/10))))
-     :final-generator (gen/derefer
-                        (delay
+     :final-generator (delay
                           (locking keys
                             (independent/concurrent-generator
-                              5
-                              (range (inc @max-key))
+                              2  ; number of times to read each key @ end
+                              
+                              (range (inc @max-key))  ; which keys to read.
+                              
                               (fn [k]
                                 (gen/stagger 10
-                                   (gen/each
-                                     (gen/once {:type :invoke
-                                                :f    :read}))))))))}))
+                                   (gen/each-thread
+                                     (gen/once {:type :invoke  :f    :read})))))))}))

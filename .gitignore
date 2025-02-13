@@ -34,3 +34,11 @@ bench/**
 jepsen/doc
 .eastwood
 docker/docker-compose.yml
+**/.clj-kondo/**
+**/.lsp/**
+**/target/
+jepsen/pom.xml
+
+aerospike/*host*
+*/settings.json
+aerospike/resources/features.conf
