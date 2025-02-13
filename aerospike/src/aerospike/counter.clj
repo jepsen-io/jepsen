@@ -1,7 +1,7 @@
 (ns aerospike.counter
   "Incrementing a counter"
   (:require [aerospike.support :as s]
-            [jepsen 
+            [jepsen
              [client    :as client]
              [checker   :as checker]
              [generator :as gen]]

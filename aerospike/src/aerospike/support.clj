@@ -5,7 +5,7 @@
    [clojure.java.io :as io]
    [clojure.tools.logging :refer [debug info warn]]
    [dom-top.core :refer [with-retry]]
-   [jepsen 
+   [jepsen
     [core      :as jepsen]
     [db        :as db]
     [util      :as util :refer [meh timeout]]
@@ -177,13 +177,13 @@
 (defn allow-expunge!
   [namespace]
   (c/exec :asinfo :-v
-          (str "set-config:context=namespace;id=" namespace 
+          (str "set-config:context=namespace;id=" namespace
                ";strong-consistency-allow-expunge=true")))
 
 (defn clear-data!
   [namespace]
-  (c/trace (c/su (c/exec 
-        :asinfo :-v (str "truncate-namespace:namespace=" namespace)))))
+  (c/trace (c/su (c/exec
+                  :asinfo :-v (str "truncate-namespace:namespace=" namespace)))))
 
 (defmacro poll
   "Calls `expr` repeatedly, binding the result to `sym`, and evaluating `pred`
@@ -237,7 +237,7 @@
                                [name f]))))
                    (into (sorted-map)))]
     (assert (some (partial re-find #"aerospike-server") (keys files))
-           (str "Expected an aerospike-server .deb in " local-package-dir))
+            (str "Expected an aerospike-server .deb in " local-package-dir))
     (assert (some (partial re-find #"aerospike-tools") (keys files))
             (str "Expected an aerospike-tools .deb in " local-package-dir))
     files))
@@ -342,11 +342,11 @@
   [opts]
   (reify db/DB
     (setup! [_ test node]
-      (nt/reset-time!)
-      (doto node
-        (install!)
-        (configure! test opts)
-        (start! test)))
+            (nt/reset-time!)
+            (doto node
+              (install!)
+              (configure! test opts)
+              (start! test)))
     (teardown! [_ test node]
       (wipe! node))))
 
@@ -358,7 +358,7 @@
     (set! (.maxRetries p) 0)
     p))
 
-(defn ^Policy linearize-read-policy 
+(defn ^Policy linearize-read-policy
   "Policy needed for linearizability testing."
   []
   (let [p (Policy. policy)]
@@ -439,9 +439,9 @@
   (let [pk (Key. namespace set key)
         binName (name :value)
         binVal (:value bins)
-        op (ListOperation/append 
-            ^ListPolicy (ListPolicy.) 
-            ^String binName 
+        op (ListOperation/append
+            ^ListPolicy (ListPolicy.)
+            ^String binName
             ^Value (Value/get binVal) nil)]
     (doto (.operate ^IAerospikeClient client
                     ^WritePolicy policy
@@ -490,12 +490,12 @@
    attempt definitely failed"
   [op & body]
   `(try ~@body
-       (catch AerospikeException e#
-         (if (.getInDoubt e#)
-           (assoc ~op :type :info, :error (.getMessage e#))
-           (assoc ~op :type :fail, :error (.getMessage e#))))
-       (catch ExceptionInfo e#
-         (case (.getMessage e#)
+        (catch AerospikeException e#
+          (if (.getInDoubt e#)
+            (assoc ~op :type :info, :error (.getMessage e#))
+            (assoc ~op :type :fail, :error (.getMessage e#))))
+        (catch ExceptionInfo e#
+          (case (.getMessage e#)
                   ; Skipping a CAS can't affect the DB state
-           "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
-           "cas not found" (assoc ~op :type :fail, :error :not-found)))))
+            "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
+            "cas not found" (assoc ~op :type :fail, :error :not-found)))))

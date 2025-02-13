@@ -41,7 +41,9 @@
   client/Client
   (open! [this _ node]
     (assoc this :client (s/connect node)))
+
   (setup! [this _] this)
+
   (invoke! [this test op]
     (info "Invoking" op)
     (if (= (:f op) :txn)
@@ -53,8 +55,6 @@
             (let [txn (:value op)
                   txn-res (mapv (partial mop! client tid) txn)]
               (reset! txn' txn-res)
-           ;; (info "TRANSACTION!" tid "begin")
-              (info "Txn: " (.getId tid) " ..DONE!")
               (reset! cs (.commit client tid))
               (when (not (= @cs CommitStatus/OK))
                 (info "Commit Status := " cs))
@@ -77,9 +77,10 @@
                 122 (assoc op :type :fail, :error :expired)
                 125 (assoc op :type :fail, :error :aborted)
                 (throw e#))))))
-      (info "<?IMPOSSIBLE?> REGULAR OP!")  ; Should never happen with txn test workloads 
-    ))
+      (info "<?IMPOSSIBLE?> REGULAR OP!")))
+
   (teardown! [_ test])
+
   (close! [this test]
     (s/close client)))
 
@@ -90,8 +91,6 @@
                                   (rand-nth (range 8 12))))
         minOps (:min-txn-length opts (rand-nth (range 1 (:max-txn-length opts 6))))
         maxOps (:max-txn-length opts (rand-nth (range minOps 12)))]
-    ;; (info "MinOps:" minOps " -- MaxOps:" maxOps)
-    ;; (info "KeyDist:" kDist " -- KeyCt:" kCount)
     {:key-dist kDist
      :key-count kCount
      :min-txn-length minOps
@@ -100,14 +99,14 @@
 
 (defn workload
   [opts]
-   {:client (TranClient. nil s/ans "vals")
-    :checker (rw/checker)
-    :generator (rw/gen
-                (elle-gen-opts opts))})
+  {:client (TranClient. nil s/ans "vals")
+   :checker (rw/checker)
+   :generator (rw/gen
+               (elle-gen-opts opts))})
 
-(defn workload-ListAppend 
+(defn workload-ListAppend
   [opts]
-   {:client (TranClient. nil s/ans "vals")
-    :checker (la/checker)
-    :generator (la/gen
-                (elle-gen-opts opts))})
+  {:client (TranClient. nil s/ans "vals")
+   :checker (la/checker)
+   :generator (la/gen
+               (elle-gen-opts opts))})

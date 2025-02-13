@@ -32,8 +32,7 @@
     :counter      (counter/workload)
     :set          (set/workload)
     :transact     (transact/workload opts)
-    :list-append  (transact/workload-ListAppend opts)
-    }))
+    :list-append  (transact/workload-ListAppend opts)}))
 
 
 (defn workload+nemesis
@@ -108,7 +107,7 @@
     :parse-fn keyword
     :default :all
     :missing (str "--workload " (cli/one-of (workloads)))
-    :validate [(assoc (workloads) :all "all") 
+    :validate [(assoc (workloads) :all "all")
                (cli/one-of (assoc (workloads) :all "all"))]]
    [nil "--max-dead-nodes NUMBER" "Number of nodes that can simultaneously fail"
     :parse-fn #(Long/parseLong %)
@@ -139,8 +138,7 @@
    [nil "--replication-factor NUMBER" "Number of nodes which must store data"
     :parse-fn #(Long/parseLong %)
     :default 2
-    :validate [pos? "must be positive"]]
-   ])
+    :validate [pos? "must be positive"]]])
 
 
 (def opt-spec
@@ -156,7 +154,7 @@
                              (* 2 (+ 1 (rand-int 15))))]
     (merge opts
            {:concurrency          nClients
-            :nemesis-interval     (:nemesis-interval opts (rand-nth (list 5 8 10 15 20))) })))
+            :nemesis-interval     (:nemesis-interval opts (rand-nth (list 5 8 10 15 20)))})))
 
 
 ;; -- Why did we merge in the webserver before? .. 
@@ -182,22 +180,22 @@
 
 
 (defn all-tests
-    "Takes base CLI options and constructs a sequence of test option maps
+  "Takes base CLI options and constructs a sequence of test option maps
      to be used with test-all-cmd."
-    [opts]
-    (map aerospike-test (all-test-opts opts)))
+  [opts]
+  (map aerospike-test (all-test-opts opts)))
 
 (defn single-test [opts]
   (aerospike-test (valid-opts opts)))
 
 (defn -main
-    "Handles command-line arguments, running a Jepsen command."
-    [& args]
-    (cli/run!
-     (merge (cli/single-test-cmd
-             {:test-fn   single-test
-              :opt-spec  opt-spec})
-            (cli/test-all-cmd
-             {:tests-fn  all-tests
-              :opt-spec  opt-spec}))
-     args))
+  "Handles command-line arguments, running a Jepsen command."
+  [& args]
+  (cli/run!
+   (merge (cli/single-test-cmd
+           {:test-fn   single-test
+            :opt-spec  opt-spec})
+          (cli/test-all-cmd
+           {:tests-fn  all-tests
+            :opt-spec  opt-spec}))
+   args))

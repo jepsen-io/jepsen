@@ -11,6 +11,4 @@
                  [com.sun.xml.bind/jaxb-core "4.0.4"]
                  [javax.xml.bind/jaxb-api "2.4.0-b180830.0359"]
                  [com.sun.xml.bind/jaxb-impl "4.0.4"]
-                 [clj-wallhack "1.0.1"]
-                 ]
-)
+                 [clj-wallhack "1.0.1"]])

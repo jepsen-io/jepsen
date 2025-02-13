@@ -8,7 +8,6 @@
             [jepsen.nemesis.time :as nt]))
 
 ; Nemeses
-
 (defn capped-conj
   "Conj's x into set s so long as (count x) would remain at cap or lower."
   [s x cap]
