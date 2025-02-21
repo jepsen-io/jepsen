@@ -85,11 +85,13 @@ static struct argp_option opt_spec[] = {
 };
 
 /* Different modes we can run in. Love too see. */
-#define MODE_NONE 0
-#define MODE_COPY 1
-#define MODE_SNAPSHOT 2
-#define MODE_RESTORE 3
-#define MODE_BITFLIP 4
+enum Modes {
+  MODE_NONE = 0,
+  MODE_COPY = 1,
+  MODE_SNAPSHOT = 2,
+  MODE_RESTORE = 3,
+  MODE_BITFLIP = 4,
+};
 
 /* Where do we stash snapshots? */
 static char SNAPSHOT_DIR[] = "/tmp/jepsen/corrupt-file/snapshots";
