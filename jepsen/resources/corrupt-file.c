@@ -393,7 +393,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
 
     // Clean up
     close(dest_fd);
-    //free(snapshot);
+    free(snapshot);
   }
   fprintf(stdout, "Snapshot %ld chunks (%ld bytes)\n",
       chunks_snapped, bytes_snapped);
@@ -721,10 +721,12 @@ int main (int argc, char **argv) {
   error_t err = argp_parse (&argp, argc, argv, 0, 0, &opts);
   if (err != 0) {
     fprintf(stderr, "Error parsing args: %d\n", err);
+    free(opts.file);
     return EXIT_ARGS;
   }
   int err2 = validate_opts(opts);
   if (err2 != EXIT_OK) {
+    free(opts.file);
     return err2;
   }
   //print_opts(opts);
@@ -738,6 +740,7 @@ int main (int argc, char **argv) {
     int exit = clear_snapshots();
     if (exit != EXIT_OK) {
       fprintf(stderr, "Error clearing snapshot directory %s: %d", SNAPSHOT_DIR, exit);
+      free(opts.file);
       return EXIT_IO;
     }
   }
