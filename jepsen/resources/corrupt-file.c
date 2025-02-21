@@ -745,4 +745,6 @@ int main (int argc, char **argv) {
   if (opts.mode != MODE_NONE) {
     return corrupt(opts);
   }
+
+  return EXIT_OK;
 }
