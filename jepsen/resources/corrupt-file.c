@@ -45,10 +45,12 @@ enum ExitCode {
 };
 
 /* Our options */
-#define OPT_START 1
-#define OPT_END 2
-#define OPT_MODULUS 3
-#define OPT_CLEAR_SNAPSHOTS 4
+enum Options {
+  OPT_START = 1,
+  OPT_END = 2,
+  OPT_MODULUS = 3,
+  OPT_CLEAR_SNAPSHOTS = 4,
+};
 
 static struct argp_option opt_spec[] = {
   {"chunk-size", 'c', "BYTES", 0,
