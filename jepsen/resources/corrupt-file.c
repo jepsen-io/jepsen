@@ -74,7 +74,8 @@ static struct argp_option opt_spec[] = {
     "Default 1: every chunk"},
   {"probability", 'p', "PROB", 0,
     "For --mode bitflip, determines the probability that any given bit "
-    "in the file flips. Default 1e-6: roughly eight errors per megabyte."},
+    "in the file flips. For --mode restore, controls the probability of "
+    "any single chunk being restored. Default 1: everything is corrupted."},
   {"start", OPT_START, "BYTES", 0,
     "Index into the file, in bytes, inclusive, where corruption starts. "
       "Default 0."},
@@ -113,7 +114,7 @@ struct opts default_opts() {
   opts.chunk_size = 1024 * 1024; // 1 MB
   opts.index = 0;                // Starting at 0
   opts.mod = 1;                  // Every chunk
-  opts.probability = 1e-6;       // Roughly 1/MB
+  opts.probability = 1.0;
   opts.clear_snapshots = false;
   return opts;
 }
@@ -426,6 +427,11 @@ int corrupt_restore(struct opts opts, int fd, off_t file_size, off_t
   off_t chunks_restored = 0;
 
   for (off_t chunk = opts.index; chunk < chunk_count; chunk += opts.mod) {
+    // We want to restore blocks with probability p
+    if (opts.probability < drand48()) {
+      continue;
+    }
+
     // Where are we corrupting?
     start = chunk_offset(opts, chunk);
     end   = end + opts.chunk_size;
