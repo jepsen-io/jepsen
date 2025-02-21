@@ -357,7 +357,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
   for (off_t chunk = opts.index; chunk < chunk_count; chunk += opts.mod) {
     // Where are we corrupting?
     start = chunk_offset(opts, chunk);
-    end   = end + opts.chunk_size;
+    end   = start + opts.chunk_size;
     // Don't read off the end of the region
     if (opts.end < end) {
       end = opts.end;
