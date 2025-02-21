@@ -656,6 +656,11 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
  * here supporting large (e.g. terabyte) file sizes; hopefully that's how it
  * works out */
 int corrupt(struct opts opts) {
+  if (opts.mode == MODE_NONE) {
+      // If mode is MODE_NONE, bail immediately.
+      return EXIT_OK;
+  }
+
   /* Open file */
   int fd = open(opts.file, O_RDWR);
   if (fd == -1) {
@@ -736,9 +741,10 @@ int main (int argc, char **argv) {
       return EXIT_IO;
     }
   }
-  if (opts.mode != MODE_NONE) {
-    return corrupt(opts);
-  }
 
-  return EXIT_OK;
+  int result = corrupt(opts);
+
+  free(opts.file);
+
+  return result;
 }
