@@ -9,3 +9,7 @@ pom.xml.asc
 /.nrepl-port
 .hgignore
 .hg/
+/.clj-kondo/*
+/.lsp/*
+/store/*
+**/settings.json

@@ -1,44 +1,42 @@
 (ns aerospike.support
   "Core DB setup and support features"
-  (:require [clojure [pprint :refer [pprint]]
-                     [string :as str]]
-            [clojure.java.io :as io]
-            [clojure.tools.logging :refer [debug info warn]]
-            [dom-top.core :refer [with-retry letr]]
-            [jepsen [core      :as jepsen]
-                    [db        :as db]
-                    [util      :as util :refer [meh timeout]]
-                    [control   :as c :refer [|]]
-                    [client    :as client]
-                    [checker   :as checker]
-                    [generator :as gen]
-                    [independent :as independent]
-                    [nemesis   :as nemesis]
-                    [os        :as os]
-                    [store     :as store]
-                    [tests     :as tests]]
-            [jepsen.control [net :as net]
-                            [util :as net/util]]
-            [jepsen.checker.timeline :as timeline]
-            [jepsen.nemesis.time :as nt]
-            [jepsen.os.debian :as debian]
-            [knossos.model :as model]
-            [wall.hack])
-  (:import (clojure.lang ExceptionInfo)
-           (com.aerospike.client AerospikeClient
-                                 AerospikeException
-                                 AerospikeException$Connection
-                                 AerospikeException$Timeout
-                                 Bin
-                                 Info
-                                 Key
-                                 Record)
-           (com.aerospike.client.cluster Node)
-           (com.aerospike.client.policy Policy
-                                        ConsistencyLevel
-                                        GenerationPolicy
-                                        WritePolicy
-                                        RecordExistsAction)))
+  (:require
+   [clojure [string :as str]]
+   [clojure.java.io :as io]
+   [clojure.tools.logging :refer [debug info warn]]
+   [dom-top.core :refer [with-retry]]
+   [jepsen
+    [core      :as jepsen]
+    [db        :as db]
+    [util      :as util :refer [meh timeout]]
+    [control   :as c]]
+   [jepsen.control [net :as net]]
+   [jepsen.nemesis.time :as nt]
+   [jepsen.os.debian :as debian])
+
+  (:import
+  ;;  (asx Asx
+  ;;       AsxClient)
+   (clojure.lang ExceptionInfo)
+   (com.aerospike.client IAerospikeClient
+                         AerospikeClient
+                         AerospikeException
+                         AerospikeException$Timeout
+                         Bin
+                         Info
+                         Operation
+                         Key
+                         Record
+                         Value)
+   (com.aerospike.client.cdt ListOperation
+                             ListPolicy)
+   (com.aerospike.client.cluster Node)
+   (com.aerospike.client.policy Policy
+                                ClientPolicy
+                                RecordExistsAction
+                                ReadModeSC
+                                GenerationPolicy
+                                WritePolicy)))
 
 (def local-package-dir
   "Local directory for Aerospike packages."
@@ -78,7 +76,7 @@
 ;;; Client functions:
 (defn nodes
   "Nodes known to a client."
-  [^AerospikeClient client]
+  [^IAerospikeClient client]
   (vec (.getNodes client)))
 
 (defn server-info
@@ -100,20 +98,29 @@
 
 (defn close
   [^java.io.Closeable x]
-  (.close x))
+  (.close x)
+  ;; (.terminateServer x)
+  )
+
+
+(defn fSingleNode-policy
+  []
+  (let [cp (ClientPolicy.)]
+    (set! (.forceSingleNode cp) true)
+    cp))
 
 (defn create-client
   "Spinloop to create a client, since our hacked version will crash on init if
   it can't connect."
   [node]
   (with-retry [tries 30]
-    (AerospikeClient. node 3000)
+    (AerospikeClient. (fSingleNode-policy) node 3000)
     (catch com.aerospike.client.AerospikeException e
       (when (zero? tries)
         (throw e))
-      ; (info "Retrying client creation -" (.getMessage e))
       (Thread/sleep 1000)
       (retry (dec tries)))))
+
 
 (defn connect
   "Returns a client for the given node. Blocks until the client is available."
@@ -121,9 +128,8 @@
   ;; FIXME - client no longer blocks till cluster is ready.
   (let [client (create-client node)]
     ; Wait for connection
-    (while (not (.isConnected client))
+    (while (not (.isConnected ^IAerospikeClient client))
       (Thread/sleep 100))
-
     ; Wait for workable ops
     (while (try (server-info (first (nodes client)))
                 false
@@ -137,19 +143,20 @@
   "Reclusters all connected nodes."
   []
   ;; Sends to all clustered nodes.
-  (c/trace (c/su (c/exec :asadm :-e "asinfo -v recluster:"))))
+  (c/trace (c/su (c/exec :asadm :-e "enable; asinfo -v recluster:"))))
 
 (defn revive!
   "Revives a namespace on the local node."
   ([]
    (revive! ans))
   ([namespace]
-   (c/su (c/exec :asinfo :-v (str "revive:namespace=" namespace)))))
+   (c/trace
+    (c/su (c/exec :asinfo :-v (str "revive:namespace=" namespace))))))
 
 (defn recluster!
   "Reclusters the local node."
   []
-  (c/su (c/exec :asinfo :-v "recluster:")))
+  (c/trace (c/su (c/exec :asinfo :-v "recluster:"))))
 
 (defn roster
   [conn namespace]
@@ -160,14 +167,19 @@
        (into {})
        (util/map-vals split-commas)))
 
+;;; asinfo utilities:
 (defn asinfo-roster-set!
   [namespace node-list]
   (c/trace
    (c/exec
-     :asinfo :-v (str "roster-set:namespace=" namespace ";nodes="
-                      (str/join "," node-list)))))
+    :asinfo :-v (str "roster-set:namespace=" namespace ";nodes="
+                     (str/join "," node-list)))))
+(defn allow-expunge!
+  [namespace]
+  (c/exec :asinfo :-v
+          (str "set-config:context=namespace;id=" namespace
+               ";strong-consistency-allow-expunge=true")))
 
-;;; asinfo utilities:
 (defmacro poll
   "Calls `expr` repeatedly, binding the result to `sym`, and evaluating `pred`
   with `sym` bound. When predicate evaluates truthy, returns the value of sym."
@@ -183,31 +195,31 @@
 
 (defn wait-for-all-nodes-observed
   [conn test namespace]
-  ; (info "Waiting for all nodes observed")
+  (info "Waiting for all nodes observed")
   (poll [result (:observed_nodes (roster conn namespace))]
         (= (count result) (count (:nodes test)))))
 
 (defn wait-for-all-nodes-pending
   [conn test namespace]
-  ; (info "Waiting for all nodes pending")
+  (info "Waiting for all nodes pending")
   (poll [result (:pending_roster (roster conn namespace))]
         (= (count result) (count (:nodes test)))))
 
 (defn wait-for-all-nodes-active
   [conn test namespace]
-  ; (info "Waiting for all nodes active")
+  (info "Waiting for all nodes active")
   (poll [result (:roster (roster conn namespace))]
         (= (count result) (count (:nodes test)))))
 
 (defn wait-for-migrations
   [conn]
-  ; (info "Waiting for migrations")
+  (info "Waiting for migrations")
   (poll [stats (:statistics (server-info (first (nodes conn))))]
         (and (= (:migrate_allowed stats) "true")
              (= (:migrate_partitions_remaining stats) 0))))
 
-;;; Server setup
 
+;;; Server setup
 (defn local-packages
   "An array of canonical paths for local packages, from local-package-dir.
   Ensures that we have all required deb packages."
@@ -230,23 +242,22 @@
   (info "Installing Aerospike packages")
   (c/su
    (debian/uninstall! ["aerospike-server-*" "aerospike-tools"])
-   (debian/install ["python"])
+   (debian/install ["python-is-python3"])
    (c/exec :mkdir :-p remote-package-dir)
    (c/exec :chmod :a+rwx remote-package-dir)
    (doseq [[name file] (local-packages)]
-     (c/trace
-       (c/upload (.getCanonicalPath file) remote-package-dir))
-       (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
-
+     (c/upload (.getCanonicalPath file) (str remote-package-dir name))
+     (c/exec :dpkg :--configure :-a) ; handles "dpkg was interrupted"
+     ;; do package install
+     (c/exec :dpkg :-i :--force-confnew (str remote-package-dir name)))
    ; sigh
    (c/exec :systemctl :daemon-reload)
-
-   ; debian packages don't do this?
+   ;; debian packages don't do this? 
+   ;; - well, log path depends on config not sure if / why `/var/run` is needed
    (c/exec :mkdir :-p "/var/log/aerospike")
    (c/exec :chown "aerospike:aerospike" "/var/log/aerospike")
    (c/exec :mkdir :-p "/var/run/aerospike")
    (c/exec :chown "aerospike:aerospike" "/var/run/aerospike")
-
    ;; Replace /usr/bin/asd with a wrapper that skews time a bit
    ;(c/exec :mv "/usr/bin/asd" "/usr/local/bin/asd")
    ;(c/exec :echo
@@ -258,23 +269,23 @@
   "Uploads configuration files to the given node."
   [node test opts]
   (info "Configuring...")
-  (c/su
-    ; Config file
-    (c/exec :echo (-> "aerospike.conf"
-                      io/resource
-                      slurp
-                      (str/replace "$NODE_ADDRESS" (net/local-ip))
-                      (str/replace "$MESH_ADDRESS"
-                                   (net/ip (jepsen/primary test)))
-                      (str/replace "$REPLICATION_FACTOR"
-                                   (str (:replication-factor opts)))
-                      (str/replace "$HEARTBEAT_INTERVAL"
-                                   (str (:heartbeat-interval opts)))
-                      (str/replace "$COMMIT_TO_DEVICE"
-                                   (if (:commit-to-device opts)
-                                     "commit-to-device true"
-                                     "")))
-            :> "/etc/aerospike/aerospike.conf")))
+  ; Copy test data's Config & Feature-Key files
+  (c/su (c/exec :echo (-> "aerospike.conf"
+                          io/resource
+                          slurp
+                          (str/replace "$NODE_ADDRESS" (net/local-ip))
+                          (str/replace "$MESH_ADDRESS"
+                                       (net/ip (jepsen/primary test)))
+                          (str/replace "$REPLICATION_FACTOR"
+                                       (str (:replication-factor opts)))
+                          (str/replace "$HEARTBEAT_INTERVAL"
+                                       (str (:heartbeat-interval opts)))
+                          (str/replace "$COMMIT_TO_DEVICE"
+                                       (if (:commit-to-device opts)
+                                         "commit-to-device true"
+                                         "")))
+                :> "/etc/aerospike/aerospike.conf")
+        (c/upload (.getPath (io/resource "features.conf")) "/etc/aerospike/features.conf")))
 
 (defn start!
   "Starts aerospike."
@@ -282,13 +293,14 @@
   (jepsen/synchronize test)
   (info "Starting...")
   (c/su (c/exec :service :aerospike :start))
-  (info "Started")
   (jepsen/synchronize test) ;; Wait for all servers to start
 
   (let [conn (connect node)]
     (try
       (when (= node (jepsen/primary test))
+        (Thread/sleep 10)
         (asinfo-roster-set! ans (wait-for-all-nodes-observed conn test ans))
+        (allow-expunge! ans)
         (wait-for-all-nodes-pending conn test ans)
         (asadm-recluster!))
 
@@ -304,9 +316,7 @@
   "Stops aerospike."
   [node]
   (info node "stopping aerospike")
-  (c/su
-    (meh (c/exec :service :aerospike :stop))
-    (meh (c/exec :killall :-9 :asd))))
+  (meh (c/su (c/exec :service :aerospike :stop))))
 
 (defn wipe!
   "Shuts down the server and wipes data."
@@ -316,13 +326,14 @@
   (c/su
    (meh (c/exec :cp :-f (c/lit "/var/log/aerospike/aerospike.log{,.bac}")))
    (meh (c/exec :truncate :--size 0 (c/lit "/var/log/aerospike/aerospike.log")))
+   (c/exec :ipcrm :--all=shm) ; for in-memory namespace
    (doseq [dir ["data" "smd" "udf"]]
      (c/exec :rm :-rf (c/lit (str "/opt/aerospike/" dir "/*"))))))
 
 ;;; Test:
 (defn db
-  [opts]
   "Aerospike for a particular version."
+  [opts]
   (reify db/DB
     (setup! [_ test node]
       (nt/reset-time!)
@@ -330,36 +341,39 @@
         (install!)
         (configure! test opts)
         (start! test)))
-
     (teardown! [_ test node]
       (wipe! node))
-
     db/LogFiles
     (log-files [_ test node]
-      ["/var/log/aerospike/aerospike.log"])))
+               ["/var/log/aerospike/aerospike.log"])))
 
 (def ^Policy policy
   "General operation policy"
   (let [p (Policy.)]
-    (set! (.socketTimeout p) 10000)
+    (set! (.socketTimeout p) 30000)
+    (set! (.totalTimeout p) 5000)
     (set! (.maxRetries p) 0)
     p))
 
-(def ^Policy linearize-read-policy
-   "Policy needed for linearizability testing."
-   ;; FIXME - need supported client - prefer to install client from packages/.
-   (let [p (Policy. policy)]
-     (set! (.linearizeRead p) true)
-     p))
+(defn ^Policy linearize-read-policy
+  "Policy needed for linearizability testing."
+  []
+  (let [p (Policy. policy)]
+    ;; needed reads to retry for set workload
+    (set! (.maxRetries p) 2)
+    (set! (.sleepBetweenRetries p) 300)
+    (set! (.readModeSC p) ReadModeSC/LINEARIZE)
+    p))
 
-(def ^WritePolicy write-policy
+(defn ^WritePolicy write-policy
+  []
   (let [p (WritePolicy. policy)]
     p))
 
 (defn ^WritePolicy generation-write-policy
   "Write policy for a particular generation."
   [^long g]
-  (let [p (WritePolicy. write-policy)]
+  (let [p (WritePolicy. (write-policy))]
     (set! (.generationPolicy p) GenerationPolicy/EXPECT_GEN_EQUAL)
     (set! (.generation p) (int g))
     p))
@@ -390,16 +404,16 @@
   "Writes a map of bin names to values to the record at the given namespace,
   set, and key."
   ([client namespace set key bins]
-   (put! client write-policy namespace set key bins))
-  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+   (put! client (write-policy) namespace set key bins))
+  ([^IAerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (.put client policy (Key. namespace set key) (map->bins bins))))
 
 (defn put-if-absent!
   "Writes a map of bin names to bin values to the record at the given
   namespace, set, and key, if and only if the record does not presently exist."
   ([client namespace set key bins]
-   (put-if-absent! client write-policy namespace set key bins))
-  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+   (put-if-absent! client (write-policy) namespace set key bins))
+  ([^IAerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (let [p (WritePolicy. policy)]
      (set! (.recordExistsAction p) RecordExistsAction/CREATE_ONLY)
      (put! client p namespace set key bins))))
@@ -409,22 +423,46 @@
   identified by key, appends each value in `bins` to the current value of the
   corresponding bin key."
   ([client namespace set key bins]
-   (append! client write-policy namespace set key bins))
-  ([^AerospikeClient client, ^WritePolicy policy, namespace set key bins]
+   (append! client (write-policy) namespace set key bins))
+  ([^IAerospikeClient client, ^WritePolicy policy, namespace set key bins]
    (.append client policy (Key. namespace set key) (map->bins bins))))
 
+(def sendKey-WritePolicy
+  (let [p (write-policy)]
+    (set! (.sendKey p) true)
+    p))
+
+(defn list-append!  [^IAerospikeClient client, ^WritePolicy policy, namespace set key bins]
+  (let [pk (Key. namespace set key)
+        binName (name :value)
+        binVal (:value bins)
+        op (ListOperation/append
+            ^ListPolicy (ListPolicy.)
+            ^String binName
+            ^Value (Value/get binVal) nil)]
+    (doto (.operate ^IAerospikeClient client
+                    ^WritePolicy policy
+                    ^Key pk
+                    (into-array [^Operation op])))))
 
 (defn fetch
   "Reads a record as a map of bin names to bin values from the given namespace,
   set, and key. Returns nil if no record found."
-  [^AerospikeClient client namespace set key]
-  (-> client
-      (.get linearize-read-policy (Key. namespace set key))
-      record->map))
+  ([^IAerospikeClient client namespace set key]
+   (-> client
+       (.get (linearize-read-policy) (Key. namespace set key))
+       record->map))
+  ([^IAerospikeClient client namespace set key trid]
+   (let [p (linearize-read-policy)]
+     (set! (.txn p) trid)
+     (-> client
+         (.get p (Key. namespace set key))
+         record->map))))
+
 
 (defn cas!
   "Atomically applies a function f to the current bins of a record."
-  [^AerospikeClient client namespace set key f]
+  [^IAerospikeClient client namespace set key f]
   (let [r (fetch client namespace set key)]
     (when (nil? r)
       (throw (ex-info "cas not found" {:namespace namespace
@@ -440,62 +478,21 @@
 (defn add!
   "Takes a client, a key, and a map of bin names to numbers, and adds those
   numbers to the corresponding bins on that record."
-  [^AerospikeClient client namespace set key bins]
-  (.add client write-policy (Key. namespace set key) (map->bins bins)))
+  [^IAerospikeClient client namespace set key bins]
+  (.add client (write-policy) (Key. namespace set key) (map->bins bins)))
 
-(defmacro with-errors
-  "Takes an invocation operation, a set of idempotent operations :f's which can
-  safely be assumed to fail without altering the model state, and a body to
-  evaluate. Catches errors and maps them to failure ops matching the
-  invocation."
-  [op idempotent-ops & body]
-  `(let [error-type# (if (~idempotent-ops (:f ~op))
-                       :fail
-                       :info)]
-     (try
-       ~@body
-
-       ; Timeouts could be either successful or failing
-       (catch AerospikeException$Timeout e#
-         (assoc ~op :type error-type#, :error :timeout))
-
-       ;; Connection errors could be either successful or failing
-       (catch AerospikeException$Connection e#
-         (assoc ~op :type error-type#, :error :connection))
-
-       (catch ExceptionInfo e#
-         (case (.getMessage e#)
-           ; Skipping a CAS can't affect the DB state
-           "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
-           "cas not found" (assoc ~op :type :fail, :error :not-found)
-           (throw e#)))
-
-       (catch com.aerospike.client.AerospikeException e#
-         (case (.getResultCode e#)
-           ; This is error code "OK", which I guess also means "dunno"?
-           0 (condp instance? (.getCause e#)
-               java.io.EOFException
-               (assoc ~op :type error-type#, :error :eof)
-
-               java.net.SocketException
-               (assoc ~op :type error-type#, :error :socket-error)
-
-               (throw e#))
-
-           ; Generation error; CAS can't have taken place.
-           3 (assoc ~op :type :fail, :error :generation-mismatch)
-
-           -8 (assoc ~op :type error-type#, :error :server-unavailable)
-
-           ; With our custom client, these are guaranteed failures. Not so in
-           ; the stock client!
-           11 (assoc ~op :type :fail, :error :partition-unavailable)
-
-           ; Hot key
-           14 (assoc ~op :type :fail, :error :hot-key)
-
-           ;; Forbidden
-           22 (assoc ~op :type :fail, :error [:forbidden (.getMessage e#)])
-
-           (do (info :error-code (.getResultCode e#))
-               (throw e#)))))))
+(defmacro with-modern-errors
+  "Takes an invocation operation as `with-errors`, but uses Exception's Indoubt
+   instead of relying on idempotent ops to determine more strictly whether an
+   attempt definitely failed"
+  [op & body]
+  `(try ~@body
+        (catch AerospikeException e#
+          (if (.getInDoubt e#)
+            (assoc ~op :type :info, :error (.getMessage e#))
+            (assoc ~op :type :fail, :error (.getMessage e#))))
+        (catch ExceptionInfo e#
+          (case (.getMessage e#)
+                  ; Skipping a CAS can't affect the DB state
+            "skipping cas"  (assoc ~op :type :fail, :error :value-mismatch)
+            "cas not found" (assoc ~op :type :fail, :error :not-found)))))
