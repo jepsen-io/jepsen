@@ -36,12 +36,13 @@ const char *argp_program_bug_address = "<aphyr@jepsen.io>";
 /* We take one argument: a file to corrupt. */
 static char args_doc[] = "FILE";
 
-/* Our exit statuses. Should I just use ERRNO codes? I don't really know the
- * conventions. */
-const int EXIT_OK = 0;    // Fine
-const int EXIT_ARGS = 1;  // Argument parsing problem
-const int EXIT_IO = 2;    // IO error
-const int EXIT_INT = 3;   // Some sort of internal error, like string concat
+/* Our exit statuses. */
+enum ExitCode {
+  EXIT_OK   = 0, // Fine
+  EXIT_ARGS = 1, // Argument parsing problem
+  EXIT_IO   = 2, // IO error
+  EXIT_INT  = 3, // Some sort of internal error, like string concat
+};
 
 /* Our options */
 #define OPT_START 1
