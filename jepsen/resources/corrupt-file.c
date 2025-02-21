@@ -275,9 +275,7 @@ int mkdir_p(const char *path) {
   if (strlen(parent) > 1) {
     res = mkdir_p(parent);
   }
-  // Why does freeing these corrupt memory? I'm so confused.
-  //free(parent);
-  //free(path_);
+  free(path_);
   if (res != 0 && errno != EEXIST) {
     return errno;
   }
@@ -340,7 +338,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
     fprintf(stderr, "Creating directory %s failed: %s\n", dir, strerror(err));
     return EXIT_IO;
   }
-  //free(snapshot);
+  free(snapshot);
 
   // Destination file
   int dest_fd;
@@ -369,16 +367,13 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
     err = unlink(snapshot);
     if (err != 0 && errno != ENOENT) {
       fprintf(stderr, "unlink() failed: %s (%d)", strerror(errno), errno);
-      // Fuck me, how do people manage memory leaks with early return? This
-      // feels awful
-      //free(dir);
+      free(snapshot);
       return EXIT_IO;
     }
     dest_fd = open(snapshot, O_CREAT | O_WRONLY, S_IWUSR | S_IRUSR);
     if (dest_fd == -1) {
       fprintf(stderr, "open() failed\n");
-      //free(snapshot);
-      //free(dir);
+      free(snapshot);
       return EXIT_IO;
     }
 
@@ -388,8 +383,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
       fprintf(stderr, "copy error: %s\n", strerror(errno));
       close(fd);
       close(dest_fd);
-      //free(snapshot);
-      //free(dir);
+      free(snapshot);
       return EXIT_IO;
     }
 
