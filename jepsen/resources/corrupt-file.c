@@ -707,15 +707,13 @@ int corrupt(struct opts opts) {
 
 /* Deletes the snapshot directory recursively. */
 int clear_snapshots() {
-  size_t limit = sizeof(SNAPSHOT_DIR) + 10;
-  char *cmd = malloc(limit);
-  int written = snprintf(cmd, limit, "rm -rf '%s'", SNAPSHOT_DIR);
+  char cmd[sizeof(SNAPSHOT_DIR) + 10] = {0};
+  int written = snprintf(cmd, sizeof(cmd), "rm -rf '%s'", SNAPSHOT_DIR);
   if (written < 0) {
     fprintf(stderr, "error writing string: %d", written);
     return EXIT_INT;
   }
   int ret = system(cmd);
-  free(cmd);
   return ret;
 }
 
