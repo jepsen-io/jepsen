@@ -36,18 +36,21 @@ const char *argp_program_bug_address = "<aphyr@jepsen.io>";
 /* We take one argument: a file to corrupt. */
 static char args_doc[] = "FILE";
 
-/* Our exit statuses. Should I just use ERRNO codes? I don't really know the
- * conventions. */
-const int EXIT_OK = 0;    // Fine
-const int EXIT_ARGS = 1;  // Argument parsing problem
-const int EXIT_IO = 2;    // IO error
-const int EXIT_INT = 3;   // Some sort of internal error, like string concat
+/* Our exit statuses. */
+enum ExitCode {
+  EXIT_OK   = 0, // Fine
+  EXIT_ARGS = 1, // Argument parsing problem
+  EXIT_IO   = 2, // IO error
+  EXIT_INT  = 3, // Some sort of internal error, like string concat
+};
 
 /* Our options */
-#define OPT_START 1
-#define OPT_END 2
-#define OPT_MODULUS 3
-#define OPT_CLEAR_SNAPSHOTS 4
+enum Options {
+  OPT_START = 1,
+  OPT_END = 2,
+  OPT_MODULUS = 3,
+  OPT_CLEAR_SNAPSHOTS = 4,
+};
 
 static struct argp_option opt_spec[] = {
   {"chunk-size", 'c', "BYTES", 0,
@@ -83,17 +86,19 @@ static struct argp_option opt_spec[] = {
 };
 
 /* Different modes we can run in. Love too see. */
-#define MODE_NONE 0
-#define MODE_COPY 1
-#define MODE_SNAPSHOT 2
-#define MODE_RESTORE 3
-#define MODE_BITFLIP 4
+enum Modes {
+  MODE_NONE = 0,
+  MODE_COPY = 1,
+  MODE_SNAPSHOT = 2,
+  MODE_RESTORE = 3,
+  MODE_BITFLIP = 4,
+};
 
 /* Where do we stash snapshots? */
 static char SNAPSHOT_DIR[] = "/tmp/jepsen/corrupt-file/snapshots";
 
 /* We bundle these options into a single structure, for passing around */
-struct opts {
+typedef struct {
   char *file;
   int mode;
   off_t start;
@@ -103,11 +108,11 @@ struct opts {
   uint32_t mod;
   double probability;
   bool clear_snapshots;
-};
+} opts_t;
 
 /* Constructs a default options map */
-struct opts default_opts() {
-  struct opts opts;
+opts_t default_opts() {
+  opts_t opts;
   opts.mode = MODE_NONE;
   opts.start = 0;
   opts.end = OFF_MAX;
@@ -120,7 +125,7 @@ struct opts default_opts() {
 }
 
 /* Print an options map */
-void print_opts(struct opts opts) {
+void print_opts(opts_t opts) {
   fprintf(stderr,
       "{:mode             %d,\n"
       " :start            %ld,\n"
@@ -136,7 +141,7 @@ void print_opts(struct opts opts) {
 }
 
 /* Validate an options map. Returns EXIT_OK for OK, EXIT_ARGS for an error. */
-int validate_opts(struct opts opts) {
+int validate_opts(opts_t opts) {
   if (opts.start < 0) {
     fprintf(stderr, "start %ld must be 0 or greater\n", opts.start);
     return EXIT_ARGS;
@@ -159,7 +164,7 @@ int validate_opts(struct opts opts) {
     return EXIT_ARGS;
   }
 
-  if ((opts.index < 0) || (opts.mod <= opts.index)) {
+  if (opts.mod <= opts.index) {
     fprintf(stderr, "index %u must fall in [0, %u)\n",
         opts.index, opts.mod);
     return EXIT_ARGS;
@@ -183,7 +188,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
   //fprintf(stderr, "parse_opt key %i, arg %s\n", key, arg);
 
   /* Fetch input from argp_parse: a pointer to our opts structure */
-  struct opts *opts = state->input;
+  opts_t *opts = state->input;
 
   // What option (or phase of parsing) are we at?
   switch (key) {
@@ -276,9 +281,7 @@ int mkdir_p(const char *path) {
   if (strlen(parent) > 1) {
     res = mkdir_p(parent);
   }
-  // Why does freeing these corrupt memory? I'm so confused.
-  //free(parent);
-  //free(path_);
+  free(path_);
   if (res != 0 && errno != EEXIST) {
     return errno;
   }
@@ -292,12 +295,12 @@ int mkdir_p(const char *path) {
 /* Working with chunks */
 
 /* Returns the offset of a given chunk. */
-off_t chunk_offset(struct opts opts, off_t chunk) {
+off_t chunk_offset(opts_t opts, off_t chunk) {
   return opts.start + (chunk * opts.chunk_size);
 }
 
 /* How many chunks can fit (without running over) the region in this file? */
-off_t chunk_count(struct opts opts, off_t file_size) {
+off_t chunk_count(opts_t opts, off_t file_size) {
   off_t start = opts.start;
   off_t end = opts.end;
   if (file_size < end) {
@@ -329,7 +332,7 @@ char *snapshot_path(char* file, off_t start, off_t end) {
 
 /* Corrupt (well, really, just save chunks of) a file by copying chunks to
  * files in /tmp, to be restored later. */
-int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
+int corrupt_snapshot(opts_t opts, int fd, off_t file_size, off_t
     chunk_count) {
 
   // Make snapshot directory
@@ -341,7 +344,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
     fprintf(stderr, "Creating directory %s failed: %s\n", dir, strerror(err));
     return EXIT_IO;
   }
-  //free(snapshot);
+  free(snapshot);
 
   // Destination file
   int dest_fd;
@@ -358,7 +361,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
   for (off_t chunk = opts.index; chunk < chunk_count; chunk += opts.mod) {
     // Where are we corrupting?
     start = chunk_offset(opts, chunk);
-    end   = end + opts.chunk_size;
+    end   = start + opts.chunk_size;
     // Don't read off the end of the region
     if (opts.end < end) {
       end = opts.end;
@@ -370,16 +373,13 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
     err = unlink(snapshot);
     if (err != 0 && errno != ENOENT) {
       fprintf(stderr, "unlink() failed: %s (%d)", strerror(errno), errno);
-      // Fuck me, how do people manage memory leaks with early return? This
-      // feels awful
-      //free(dir);
+      free(snapshot);
       return EXIT_IO;
     }
     dest_fd = open(snapshot, O_CREAT | O_WRONLY, S_IWUSR | S_IRUSR);
     if (dest_fd == -1) {
       fprintf(stderr, "open() failed\n");
-      //free(snapshot);
-      //free(dir);
+      free(snapshot);
       return EXIT_IO;
     }
 
@@ -389,8 +389,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
       fprintf(stderr, "copy error: %s\n", strerror(errno));
       close(fd);
       close(dest_fd);
-      //free(snapshot);
-      //free(dir);
+      free(snapshot);
       return EXIT_IO;
     }
 
@@ -400,7 +399,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
 
     // Clean up
     close(dest_fd);
-    //free(snapshot);
+    free(snapshot);
   }
   fprintf(stdout, "Snapshot %ld chunks (%ld bytes)\n",
       chunks_snapped, bytes_snapped);
@@ -410,7 +409,7 @@ int corrupt_snapshot(struct opts opts, int fd, off_t file_size, off_t
 }
 
 /* Corrupt chunks of a file by restoring them from snapshot files in /tmp. */
-int corrupt_restore(struct opts opts, int fd, off_t file_size, off_t
+int corrupt_restore(opts_t opts, int fd, off_t file_size, off_t
     chunk_count) {
 
   // Source file
@@ -482,7 +481,7 @@ int corrupt_restore(struct opts opts, int fd, off_t file_size, off_t
 /* Generates the starting offset of a chunk. Try to prefer chunks that we
  * won't corrupt. This is impossible if there is only one chunk or we intend
  * to corrupt every chunk. In the latter case, we choose random chunks. */
-off_t rand_source_offset(struct opts opts, off_t dest_offset, off_t file_size) {
+off_t rand_source_offset(opts_t opts, off_t dest_offset, off_t file_size) {
   off_t chunk_count_ = chunk_count(opts, file_size);
   /* Not sure exactly what to do here. There's only 0 or 1 chunks. We *want* to
    * corrupt something. But we can't corrupt it by copying another chunk! */
@@ -512,7 +511,7 @@ off_t rand_source_offset(struct opts opts, off_t dest_offset, off_t file_size) {
 }
 
 /* Corrupt by copying chunks from other chunks */
-int corrupt_copy(struct opts opts, int fd, off_t file_size, off_t chunk_count) {
+int corrupt_copy(opts_t opts, int fd, off_t file_size, off_t chunk_count) {
   off_t source_offset;
   off_t start;      // Start of current chunk
   off_t end;        // End of current chunk
@@ -555,7 +554,7 @@ int corrupt_copy(struct opts opts, int fd, off_t file_size, off_t chunk_count) {
 }
 
 /* Flip random bits in affected chunks. */
-int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
+int corrupt_bitflip(opts_t opts, int fd, off_t file_size,
     off_t chunk_count) {
   /* We model bitflips as poisson processes with lambda = opts.probability; the
    * distance in bits between flips is therefore an exponentially distributed
@@ -667,7 +666,12 @@ int corrupt_bitflip(struct opts opts, int fd, off_t file_size,
 /* Ugh I am SO bad at C numbers, please forgive me. I intend to do everything
  * here supporting large (e.g. terabyte) file sizes; hopefully that's how it
  * works out */
-int corrupt(struct opts opts) {
+int corrupt(opts_t opts) {
+  if (opts.mode == MODE_NONE) {
+      // If mode is MODE_NONE, bail immediately.
+      return EXIT_OK;
+  }
+
   /* Open file */
   int fd = open(opts.file, O_RDWR);
   if (fd == -1) {
@@ -709,29 +713,29 @@ int corrupt(struct opts opts) {
 
 /* Deletes the snapshot directory recursively. */
 int clear_snapshots() {
-  size_t limit = sizeof(SNAPSHOT_DIR) + 10;
-  char *cmd = malloc(limit);
-  int written = snprintf(cmd, limit, "rm -rf '%s'", SNAPSHOT_DIR);
+  char cmd[sizeof(SNAPSHOT_DIR) + 10] = {0};
+  int written = snprintf(cmd, sizeof(cmd), "rm -rf '%s'", SNAPSHOT_DIR);
   if (written < 0) {
     fprintf(stderr, "error writing string: %d", written);
     return EXIT_INT;
   }
   int ret = system(cmd);
-  free(cmd);
   return ret;
 }
 
 /* Go go go! */
 int main (int argc, char **argv) {
   /* Parse args */
-  struct opts opts = default_opts();
+  opts_t opts = default_opts();
   error_t err = argp_parse (&argp, argc, argv, 0, 0, &opts);
   if (err != 0) {
     fprintf(stderr, "Error parsing args: %d\n", err);
+    free(opts.file);
     return EXIT_ARGS;
   }
   int err2 = validate_opts(opts);
   if (err2 != EXIT_OK) {
+    free(opts.file);
     return err2;
   }
   //print_opts(opts);
@@ -745,10 +749,14 @@ int main (int argc, char **argv) {
     int exit = clear_snapshots();
     if (exit != EXIT_OK) {
       fprintf(stderr, "Error clearing snapshot directory %s: %d", SNAPSHOT_DIR, exit);
+      free(opts.file);
       return EXIT_IO;
     }
   }
-  if (opts.mode != MODE_NONE) {
-    return corrupt(opts);
-  }
+
+  int result = corrupt(opts);
+
+  free(opts.file);
+
+  return result;
 }
