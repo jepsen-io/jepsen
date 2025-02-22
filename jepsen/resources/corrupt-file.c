@@ -163,7 +163,7 @@ int validate_opts(struct opts opts) {
     return EXIT_ARGS;
   }
 
-  if ((opts.index < 0) || (opts.mod <= opts.index)) {
+  if (opts.mod <= opts.index) {
     fprintf(stderr, "index %u must fall in [0, %u)\n",
         opts.index, opts.mod);
     return EXIT_ARGS;
