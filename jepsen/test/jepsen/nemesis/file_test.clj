@@ -27,7 +27,8 @@
             [jepsen.control.util :as cu]
             [jepsen.nemesis.file :as nf]
             [slingshot.slingshot :refer [try+ throw+]])
-  (:import (java.nio.channels FileChannel
+  (:import (java.nio ByteBuffer)
+           (java.nio.channels FileChannel
                               FileChannel$MapMode)
            (java.nio.file Files
                           Path
@@ -465,6 +466,11 @@
     {:corrupted corrupted
      :intact    intact}))
 
+(defn buf-size
+  "Counts bytes in a ByteBuffer."
+  [^ByteBuffer b]
+  (.limit b))
+
 (defn equal-p
   "Given two sequences of bytebuffers, what is the probability two
   corresponding buffers are equal? We do this probabilistically because
@@ -508,13 +514,13 @@
 (defn bitflip-test-
   "Helper for bitflip tests."
   [opts]
-  (println "------")
-  (pprint opts)
+  ;(println "------")
+  ;(pprint opts)
 
   (make-files! "/dev/zero" (:size opts))
   (let [res (corrupt! (assoc opts
                              :mode "bitflip"))]
-    (print (:out res)))
+    #_(print (:out res)))
 
   ; Check that file sizes are equal
   (is (= (-> data-file  io/file .length)
@@ -528,7 +534,10 @@
           corrupted' (:corrupted buffers')
           intact'    (:intact buffers')]
       (is (= 1 (equal-p intact intact')))
-      (when (seq corrupted')
+      (when (and (seq corrupted')
+                 ; We need at least a few bytes to know we probabilistically
+                 ; flipped something.
+                 (< 8 (reduce + (map buf-size corrupted'))))
         ; This is fairly weak--with higher p and chunks we should be
         ; able to do better.
         (is (< (equal-p corrupted corrupted') 1))))))
@@ -559,13 +568,13 @@
 (defn copy-test-
   "Helper for copy tests."
   [opts]
-  (println "------")
-  (pprint opts)
+  ;(println "------")
+  ;(pprint opts)
 
   (make-files! "/dev/random" (:size opts))
   (let [res (corrupt! (assoc opts
                              :mode "copy"))]
-    (print (:out res)))
+    #_(print (:out res)))
 
   ; Check that file sizes are equal
   (is (= (-> data-file  io/file .length)
@@ -581,7 +590,15 @@
       (is (= 1 (equal-p intact intact')))
       (when (and (seq corrupted')
                  ; We need somewhere else to copy from
-                 (seq intact'))
+                 (seq intact')
+                 ; And because there's a small chance we (e.g.) copied a single
+                 ; identical byte from another region, we require a minimum
+                 ; number of corrupted bytes. This is going to make shrinking
+                 ; miserable but I don't know a better option--this thing is
+                 ; fundamentally random and there IS a chance for it to be a
+                 ; noop and still be "correct".
+                 (< 8 (reduce + (map buf-size corrupted'))))
+
         (is (< (equal-p corrupted corrupted') 1/4))))))
 
 (deftest copy-test
@@ -602,19 +619,19 @@
 (defn snapshot-test-
   "Helper for snapshot tests."
   [opts]
-  (println "------")
-  (pprint opts)
+  ;(println "------")
+  ;(pprint opts)
 
   (make-files! "/dev/random" (:size opts))
   (sh bin "--clear-snapshots")
   ; Take snapshots of original file
   (let [res (corrupt! (assoc opts :mode "snapshot"))]
-    (print (:out res)))
+    #_(print (:out res)))
   ; Now overwrite the fresh file with zeroes
   (make-file! "/dev/zero" (:size opts) data-file')
   ; And restore into it
   (let [res (corrupt! (assoc opts :mode "restore"))]
-    (print (:out res)))
+    #_(print (:out res)))
 
   ; Check that file sizes are equal
   (is (= (-> data-file  io/file .length)
