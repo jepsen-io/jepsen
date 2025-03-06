@@ -3,7 +3,8 @@
   :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clj-commons/byte-streams "0.3.4"]
+  :dependencies [[org.clj-commons/byte-streams "0.3.4"
+                  :exclusions [potemkin]]
                  [org.clojure/clojure "1.12.0"]
                  [org.clojure/data.fressian "1.1.0"]
                  [org.clojure/data.generators "1.1.0"]
@@ -15,11 +16,11 @@
                  [clj-time "0.15.2"]
                  [io.jepsen/history "0.1.4"]
                  [jepsen.txn "0.1.2"]
-                 [knossos "0.3.10"]
+                 [knossos "0.3.11"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.0"]
-                 [ring "1.12.2"]
+                 [ring "1.13.0"]
                  [com.hierynomus/sshj "0.39.0"]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
                  [com.jcraft/jsch.agentproxy.sshj "0.0.9"
@@ -29,7 +30,7 @@
                  [metametadata/multiset "0.1.1"]
                  [slingshot "0.12.2"]
                  [org.clojure/data.codec "0.2.0"]
-                 [fipp "0.6.26"]]
+                 [fipp "0.6.27"]]
   :java-source-paths ["src"]
   :javac-options ["--release" "11"]
   :main jepsen.cli
