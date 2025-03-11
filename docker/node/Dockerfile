@@ -29,6 +29,7 @@ RUN chmod +x /usr/local/preinit/03-setup-jepsen
 
 # Configure SSHD
 RUN sed -i "s/#PermitRootLogin prohibit-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
+RUN sed -i 's/^#*UsePAM.*/UsePAM no/' /etc/ssh/sshd_config
 
 # Enable SSH server
 ENV DEBBASE_SSH enabled
