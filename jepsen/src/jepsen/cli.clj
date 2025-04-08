@@ -329,6 +329,11 @@ Options:\n")
         (run parsed-opts)
         (System/exit 0)))
 
+    (catch clojure.lang.ExceptionInfo e
+      (fatal e (str "Oh jeez, I'm sorry, Jepsen broke. Here's why:\n\n"
+                    (with-out-str
+                      (pprint (ex-data e))))))
+
     (catch Throwable t
       (fatal t "Oh jeez, I'm sorry, Jepsen broke. Here's why:")
       (System/exit 255))))
