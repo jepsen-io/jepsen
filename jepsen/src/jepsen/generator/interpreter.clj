@@ -10,7 +10,7 @@
                     [generator      :as gen]
                     [history        :as h]
                     [nemesis        :as nemesis]
-                    [util           :as util]]
+                    [util           :as util :refer [exception-message]]]
             [jepsen.generator.context :as context]
             [jepsen.store.format :as store.format]
             [slingshot.slingshot :refer [try+ throw+]])
@@ -53,7 +53,7 @@
                       (set! (.process this) (:process op))
                      nil
                      (catch Exception e
-                       (warn e "Error opening client")
+                       (warn e (exception-message e "Error opening client"))
                        (set! (.client this) nil)
                        (assoc op
                               :type :fail
@@ -145,7 +145,8 @@
                         (catch Throwable e
                           ; Yes, we want to capture throwable here;
                           ; assertion errors aren't Exceptions. D-:
-                          (warn e "Process" (:process op) "crashed")
+                          (warn e (exception-message
+                                    e "Process" (:process op) "crashed"))
 
                           ; Convert this to an info op.
                           (.put out

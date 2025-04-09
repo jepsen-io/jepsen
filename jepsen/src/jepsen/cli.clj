@@ -12,7 +12,7 @@
             [dom-top.core :refer [assert+]]
             [jepsen [core :as jepsen]
                     [store :as store]
-                    [util :as util :refer [map-vals]]
+                    [util :as util :refer [exception-message map-vals]]
                     [web :as web]]))
 
 (def default-nodes ["n1" "n2" "n3" "n4" "n5"])
@@ -329,13 +329,9 @@ Options:\n")
         (run parsed-opts)
         (System/exit 0)))
 
-    (catch clojure.lang.ExceptionInfo e
-      (fatal e (str "Oh jeez, I'm sorry, Jepsen broke. Here's why:\n\n"
-                    (with-out-str
-                      (pprint (ex-data e))))))
-
     (catch Throwable t
-      (fatal t "Oh jeez, I'm sorry, Jepsen broke. Here's why:")
+      (fatal t (exception-message t
+                 "Oh jeez, I'm sorry, Jepsen broke. Here's why:"))
       (System/exit 255))))
 
 (defn serve-cmd

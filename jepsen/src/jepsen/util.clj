@@ -48,6 +48,19 @@
     (try (apply f args)
          (catch Exception e e))))
 
+(defn exception-message
+  "In several places we catch ExceptionInfos, and their string representations
+  usually conceal the important information in their data maps. This function
+  returns a string, suitable for logging, describing an error. It takes a
+  Throwable and any number of args, joined together with spaces. For ex-infos,
+  it follows that with a pretty-printed ex-data map."
+  ([^Throwable t, msg]
+   (if (instance? clojure.lang.ExceptionInfo t)
+     (str msg "\n" (with-out-str (pprint (ex-data t))))
+     msg))
+  ([t msg & more-messages]
+   (exception-message t (str msg " " (str/join " " more-messages)))))
+
 (defn random-nonempty-subset
   "A randomly selected, randomly ordered, non-empty subset of the given
   collection. Returns nil if collection is empty."
