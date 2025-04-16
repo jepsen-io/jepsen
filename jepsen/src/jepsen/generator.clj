@@ -1607,8 +1607,7 @@
   which a.) introduced dt seconds of delay between *completion* and subsequent
   invocation, and b.) emitted 1/dt ops/sec *per thread*, rather than globally."
   [dt gen]
-  (when gen
-    (Delay. (long (util/secs->nanos dt)) nil gen)))
+  (Delay. (long (util/secs->nanos dt)) nil gen))
 
 (defn sleep
   "Emits exactly one special operation which causes its receiving process to do
@@ -1632,8 +1631,7 @@
 (defn synchronize
   "Takes a generator, and waits for all workers to be free before it begins."
   [gen]
-  (when gen
-    (Synchronize. gen)))
+  (Synchronize. gen))
 
 (defn phases
   "Takes several generators, and constructs a generator which evaluates

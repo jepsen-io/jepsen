@@ -74,7 +74,8 @@
 
 (deftest delay-test
   (testing "nil passthrough"
-    (is (nil? (gen/delay 1 nil))))
+    ; We may want to intentionally delay a nil!
+    (is (not (nil? (gen/delay 1 nil)))))
 
   (is (= [{:type :invoke, :process 0, :time 0, :f :write, :value nil}
           {:type :invoke, :process 1, :time 3, :f :write, :value nil}
@@ -212,7 +213,8 @@
 
 (deftest synchronize-test
   (testing "nil passthrough"
-    (is (nil? (gen/synchronize nil))))
+    ; We may want to intentioanlly sync and do nothing.
+    (is (not (nil? (gen/synchronize nil)))))
 
   (is (= [{:f :a, :process 0, :time 2, :type :invoke, :value nil}
           {:f :a, :process 1, :time 3, :type :invoke, :value nil}
