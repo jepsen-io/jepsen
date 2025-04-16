@@ -42,9 +42,13 @@
              "-server"]
   :test-selectors {:default (fn [m]
                               (not (or (:perf m)
-                                       (:integration m)
                                        (:logging m)
                                        (:slow m))))
+                   :quick (fn [m]
+                            (not (or (:perf m)
+                                     (:integration m)
+                                     (:logging m)
+                                     (:slow m))))
                    :focus       :focus
                    :perf        :perf
                    :logging     :logging
