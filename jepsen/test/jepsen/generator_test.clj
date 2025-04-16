@@ -260,6 +260,20 @@
               gen.test/perfect
               (map (juxt :f :process :time))))))
 
+(deftest shortest-any-test
+  ; We take two generators, each of which is restricted to a single process,
+  ; and each of which takes time to schedule. When we bind them together with
+  ; Any, they can interleave--and end as soon as one does.
+  (is (= [[:a 0 0]
+          [:b 1 0]
+          [:b 1 20]
+          [:a 0 20]]
+         (->> (gen/shortest-any
+                (gen/limit 2 (gen/on #{0} (gen/delay 20e-9 (repeat {:f :a}))))
+                (gen/on #{1} (gen/delay 20e-9 (repeat {:f :b}))))
+              gen.test/perfect
+              (map (juxt :f :process :time))))))
+
 (deftest each-thread-test
   (is (= [[0 :nemesis :a]
           [0 1 :a]

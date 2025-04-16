@@ -492,6 +492,42 @@
    (let [gen (java.util.Random. seed)]
      (repeatedly #(.nextDouble gen)))))
 
+(defn dissoc-vec
+  "Cut a single index out of a vector, returning a vector one shorter, without
+  the element at that index."
+  [v i]
+  (into (subvec v 0 i)
+        (subvec v (inc i))))
+
+(defn assoc-or-dissoc-vec
+  "Like (assoc v i x), but if `x` is nil, deletes that index from the vector
+  instead. Returns `nil` if the resulting vector would be empty. This is
+  particularly helpful for generators that have to track a vector of
+  sub-generators."
+  [v i x]
+  (if (nil? x)
+    ; Dissoc
+    (let [v' (dissoc-vec v i)]
+      (when (< 0 (count v'))
+        v'))
+    ; Assoc
+    (assoc v i x)))
+
+(defn update-all-
+  "Takes a vector of generators and updates them all with the given test,
+  context, and event. Returns the resulting vector, removing generators that
+  return `nil`. Returns `nil` if the vector would be empty."
+  [gens test ctx event]
+  (let [gens' (persistent!
+                (reduce (fn [gens' gen]
+                          (if-let [gen' (update gen test ctx event)]
+                            (conj! gens' gen')
+                            gens'))
+                        (transient [])
+                        gens))]
+    (when (seq gens')
+      gens')))
+
 ;; Generators!
 
 (defn tracking-get!
@@ -961,16 +997,55 @@
       [op (Any. (assoc gens i gen'))]))
 
   (update [this test ctx event]
-    (Any. (mapv (fn updater [gen] (update gen test ctx event)) gens))))
+    (when-let [gens' (update-all- gens test ctx event)]
+      (Any. gens'))))
 
 (defn any
   "Takes multiple generators and binds them together. Operations are taken from
   any generator. Updates are propagated to all generators."
   [& gens]
-  (condp = (count gens)
+  (let [gens (vec (remove nil? gens))]
+    (case (count gens)
+      0 nil
+      1 (first gens)
+      (Any. (vec gens)))))
+
+(defrecord ShortestAny [gens]
+  Generator
+  (op [this test ctx]
+    (let [; Ask each generator for an op
+          candidates (->> gens
+                          (map-indexed
+                            (fn [i gen]
+                              (when-let [[op gen'] (op gen test ctx)]
+                                {:i i
+                                 :op op
+                                 :gen' gen'}))))]
+      (when (not-any? nil? candidates)
+        ; Everyone has an operation for us. Pick the soonest.
+        (let [{:keys [i op gen']} (reduce soonest-op-map nil candidates)]
+          ; If this generator is exhausted, we can terminate immediately.
+          [op (when gen' (ShortestAny. (assoc gens i gen')))]))))
+
+  (update [this test ctx event]
+    (when-let [gens' (update-all- gens test ctx event)]
+      (when (= (count gens') (count gens))
+        ; All generators are still here, we can keep going
+        (ShortestAny. gens')))))
+
+(defn shortest-any
+  "Like `any`, binds multiple generators into a single one. Operations are
+  taken from any generator, updates are propagated to all generators. As soon
+  as any generator is exhausted, this generator is too.
+
+  This is particularly helpful when you have a workload generator you'd like to
+  run while doing some sequence of nemesis operations, and stop as soon as the
+  nemesis is done."
+  [& gens]
+  (case (count gens)
     0 nil
     1 (first gens)
-      (Any. (vec gens))))
+    (ShortestAny. (vec gens))))
 
 (defn each-thread-ensure-context-filters!
   "Ensures an EachThread has context filters for each thread."
@@ -1224,13 +1299,6 @@
   ([nemesis-gen client-gen]
    (any (nemesis nemesis-gen)
         (clients client-gen))))
-
-(defn dissoc-vec
-  "Cut a single index out of a vector, returning a vector one shorter, without
-  the element at that index."
-  [v i]
-  (into (subvec v 0 i)
-        (subvec v (inc i))))
 
 (defrecord Mix [i gens]
   ; i is the next generator index we intend to work with; we reset it randomly
