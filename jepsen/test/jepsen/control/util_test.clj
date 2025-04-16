@@ -89,3 +89,27 @@
     (let [url "https://aphyr.com/jepsen-auth/test.zip"]
       (util/cached-wget! url {:force? true :user?  "jepsen" :pw? "hunter2"})
       (assert-file-cached url))))
+
+(deftest ^:integration tarball-test
+  ; Populate a temporary directory
+  (let [dir (util/tmp-dir!)]
+    (try
+      (util/write-file! "foo" (str dir "/foo.txt"))
+      (util/write-file! "bar" (str dir "/bar.txt"))
+      ; Tar it up
+      (let [tarball (util/tarball! dir)]
+        (try
+          (is (string? tarball))
+          (is (re-find #"^/.+\.tar\.gz$" tarball))
+          ; Extract it
+          (let [dir2 (util/tmp-dir!)]
+            (try
+              (util/install-archive! (str "file://" tarball) dir2)
+              (is (= "foo" (c/exec :cat (str dir2 "/foo.txt"))))
+              (is (= "bar" (c/exec :cat (str dir2 "/bar.txt"))))
+              (finally
+                (c/exec :rm :-rf dir2))))
+          (finally
+            (c/exec :rm :-rf tarball))))
+      (finally
+        (c/exec :rm :-rf dir)))))
