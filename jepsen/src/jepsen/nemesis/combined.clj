@@ -125,8 +125,8 @@
                           :value  (rand-nth pause-targets)})
 
         ; Flip-flop generators
-        kill-start (gen/flip-flop kill (repeat start))
-        pause-resume (gen/flip-flop pause (repeat resume))
+        kill-start (gen/flip-flop kill (gen/repeat start))
+        pause-resume (gen/flip-flop pause (gen/repeat resume))
 
         ; Automatically generate nemesis failure modes based on what the DB
         ; supports.
@@ -319,7 +319,7 @@
         stop      {:type  :info
                    :f     :stop-packet
                    :value nil}
-        gen       (->> (gen/flip-flop start (repeat stop))
+        gen       (->> (gen/flip-flop start (gen/repeat stop))
                        (gen/stagger (:interval opts default-interval)))]
     {:generator       (when needed? gen)
      :final-generator (when needed? stop)
