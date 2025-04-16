@@ -18,6 +18,9 @@
   (is (= [] (gen.test/perfect nil))))
 
 (deftest map-test
+  (testing "nil passthrough"
+    (is (nil? (gen/map inc nil))))
+
   (testing "once"
     (is (= [{:time 0
              :process 0
@@ -49,6 +52,9 @@
       (is (= {:foo :bar} (.__extmap op))))))
 
 (deftest limit-test
+  (testing "nil passthrough"
+    (is (nil? (gen/limit 5 nil))))
+
   (is (= [{:type :invoke, :process 0, :time 0, :f :write, :value 1}
           {:type :invoke, :process 1, :time 0, :f :write, :value 1}]
          (->> (repeat {:f :write :value 1})
@@ -56,6 +62,9 @@
               gen.test/quick))))
 
 (deftest repeat-test
+  (testing "nil passthrough"
+    (is (nil? (gen/repeat 3 nil))))
+
   (is (= [0 0 0]
          (->> (range)
               (map (partial hash-map :value))
@@ -64,6 +73,9 @@
               (map :value)))))
 
 (deftest delay-test
+  (testing "nil passthrough"
+    (is (nil? (gen/delay 1 nil))))
+
   (is (= [{:type :invoke, :process 0, :time 0, :f :write, :value nil}
           {:type :invoke, :process 1, :time 3, :f :write, :value nil}
           {:type :invoke, :process :nemesis, :time 6, :f :write, :value nil}
@@ -199,6 +211,9 @@
     (is (= (Set/from [0 1]) (ctx/free-threads @eval-ctx)))))
 
 (deftest synchronize-test
+  (testing "nil passthrough"
+    (is (nil? (gen/synchronize nil))))
+
   (is (= [{:f :a, :process 0, :time 2, :type :invoke, :value nil}
           {:f :a, :process 1, :time 3, :type :invoke, :value nil}
           {:f :a, :process :nemesis, :time 5, :type :invoke, :value nil}
@@ -222,7 +237,14 @@
                (gen/synchronize (repeat 2 {:f :b}))]
               gen.test/perfect))))
 
+(deftest on-test
+  (testing "nil passthrough"
+    (is (nil? (gen/on true nil)))))
+
 (deftest clients-test
+  (testing "nil passthrough"
+    (is (nil? (gen/clients nil))))
+
   (is (= #{0 1}
          (->> {}
               gen/repeat
@@ -233,6 +255,11 @@
               set))))
 
 (deftest phases-test
+  (testing "nil passthrough"
+    (is (nil? (gen/phases)))
+    (is (nil? (gen/phases nil)))
+    (is (nil? (gen/phases nil nil))))
+
   (is (= [[:a 0 0]
           [:a 1 0]
           [:b 0 10]
@@ -245,6 +272,16 @@
               gen/clients
               gen.test/perfect
               (map (juxt :f :process :time))))))
+
+(deftest then-test
+  (testing "nil passthrough"
+    (is (= {:f :r} (gen/then nil {:f :r})))
+    (is (= {:f :r} (gen/then {:f :r} nil)))
+    (is (nil? (gen/then nil nil)))))
+
+(deftest until-ok-test
+  (testing "nil passthrough"
+    (is (nil? (gen/until-ok nil)))))
 
 (deftest any-test
   ; We take two generators, each of which is restricted to a single process,
@@ -275,6 +312,9 @@
               (map (juxt :f :process :time))))))
 
 (deftest each-thread-test
+  (testing "nil passthrough"
+    (is (nil? (gen/each-thread nil))))
+
   (is (= [[0 :nemesis :a]
           [0 1 :a]
           [0 0 :a]
@@ -292,7 +332,14 @@
                {}
                gen.test/default-context)))))
 
+(deftest each-process-test
+  (testing "nil passthrough"
+    (is (nil? (gen/each-process nil)))))
+
 (deftest stagger-test
+  (testing "nil passthrough"
+    (is (nil? (gen/stagger 1 nil))))
+
   (let [n           1000
         dt          20
         concurrency (ctx/all-thread-count gen.test/default-context)
@@ -315,6 +362,9 @@
     (is (= nil (gen/f-map {:a :b} nil)))))
 
 (deftest filter-test
+  (testing "nil passthrough"
+    (is (nil? (gen/filter odd? nil))))
+
   (is (= [0 2 4 6 8]
          (->> (range)
               (map (fn [x] {:value x}))
@@ -333,6 +383,9 @@
            (= [:a :b]))))
 
 (deftest mix-test
+  (testing "nil passthrough"
+    (is (nil? (gen/mix [nil nil]))))
+
   (let [fs (->> (gen/mix [(repeat 5  {:f :a})
                           (repeat 10 {:f :b})])
                 gen.test/perfect
@@ -343,6 +396,10 @@
     (is (not= (concat (repeat 5 :a) (repeat 5 :b)) fs))))
 
 (deftest process-limit-test
+  (testing "nil passthrough"
+    (is (nil? (gen/process-limit 2 nil)))
+    (is (nil? (gen/process-limit 0 [:x]))))
+
   (is (= [[0 0]
           [1 1]
           [3 2]
@@ -355,7 +412,16 @@
               gen.test/perfect-info
               (map (juxt :process :value))))))
 
+(deftest concurrency-limit-test
+  (testing "nil passthrough"
+    (is (nil? (gen/concurrency-limit 2 nil)))
+    (is (nil? (gen/concurrency-limit 0 [:x])))))
+
 (deftest time-limit-test
+  (testing "nil passthrough"
+    (is (nil? (gen/time-limit 2 nil)))
+    (is (nil? (gen/time-limit 0 [:x]))))
+
   (is (= [[0  :a] [0  :a] [0 :a]
           [10 :a] [10 :a] [10 :a]
           [20 :b] [20 :b] [20 :b]]
@@ -524,6 +590,9 @@
                           (gen/limit 3))))))))
 
 (deftest concat-test
+  (testing "nil passthrough"
+    (is (= nil (gen/concat nil nil))))
+
   (is (= [:a :b :c :d]
          (->> (gen/concat [{:value :a}
                            {:value :b}]
@@ -558,6 +627,11 @@
     (is (< 4.5 (mean-interval bs) 5.5))))
 
 (deftest cycle-test
+  (testing "nil passthrough"
+    (is (nil? (gen/cycle nil)))
+    (is (nil? (gen/cycle 3 nil)))
+    (is (nil? (gen/cycle 0 [:x]))))
+
   (is (= [; With two concurrent clients, we can process 2 of the 3 a's
           ;concurrently, then the third, and when that's done, we can move on
           ;to the b. We repeat that twice.
