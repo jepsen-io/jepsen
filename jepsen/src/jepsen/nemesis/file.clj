@@ -20,7 +20,7 @@
             (when chunk-size  [:--chunk-size chunk-size])
             (when mod         [:--modulus mod])
             (when i           [:--index i])
-            (when probability [:--probability probability])
+            (when probability [:--probability (double probability)])
             file)))
 
 (defn clear-snapshots!
