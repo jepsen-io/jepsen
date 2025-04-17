@@ -286,15 +286,25 @@
 (defn tarball!
   "Takes a path and creates a .tar.gz file of it, stored in a Jepsen temporary
   directory. Returns the path to the tarball. Especially useful for tarring up
-  data directories on a DB node."
+  data directories on a DB node.
+
+  Ignores failed reads--these happen often when tarring up data and log files
+  from nodes that are crashing, and getting some data is better than crashing
+  the test."
   [path]
   (let [tarball          (tmp-file! ".tar.gz")
         [match dir file] (re-find #"^(.+/)(.+)$" path)]
     (try (if match
            ; Only create one directory level deep
            (cd dir
-               (exec :tar "czf" tarball file))
-           (exec :tar "czf" tarball path))
+               (exec :tar
+                     "czf" tarball
+                     "--ignore-failed-read"
+                     file))
+           (exec :tar
+                 "czf" tarball
+                 "--ignore-failed-read"
+                 path))
          (catch RuntimeException e
            (meh (exec :rm :f tarball))
            (throw e)))
