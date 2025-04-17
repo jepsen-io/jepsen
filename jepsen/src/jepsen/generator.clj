@@ -832,16 +832,6 @@
   (when gen
     (Trace. k gen)))
 
-(defrecord Map [f gen]
-  Generator
-  (op [_ test ctx]
-    (when-let [[op gen'] (op gen test ctx)]
-      [(if (= :pending op) op (f op))
-       (Map. f gen')]))
-
-  (update [_ test ctx event]
-    (Map. f (update gen test ctx event))))
-
 (defn concat
   "Where your generators are sequences, you can use Clojure's `concat` to make
   them a generator. This `concat` is useful when you're trying to concatenate
@@ -849,14 +839,34 @@
   [& gens]
   (seq (remove nil? gens)))
 
+(defrecord Map [f ^long arity gen]
+  Generator
+  (op [_ test ctx]
+    (when-let [[op gen'] (op gen test ctx)]
+      [(if (= :pending op)
+         op
+         ; Transform op
+         (case arity
+           1 (f op)
+           3 (f op test ctx)))
+       (Map. f arity gen')]))
+
+  (update [_ test ctx event]
+    (Map. f arity (update gen test ctx event))))
+
 (defn map
   "A generator which wraps another generator g, transforming operations it
   generates with (f op). When the underlying generator yields :pending or nil,
   this generator does too, without calling `f`. Passes updates to underlying
-  generator."
+  generator.
+
+  f may optionally take additional arguments: `(f op test context)`."
   [f gen]
-  (when gen
-    (Map. f gen)))
+  (let [arity (reduce max 0 (util/arities (class f)))]
+    (assert (or (= 1 arity) (= 3 arity))
+            "`map` requires a function of one or three arguments")
+    (when gen
+      (Map. f arity gen))))
 
 (defn f-map
   "Takes a function `f-map` converting op functions (:f op) to other functions,

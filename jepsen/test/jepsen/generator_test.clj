@@ -21,6 +21,29 @@
   (testing "nil passthrough"
     (is (nil? (gen/map inc nil))))
 
+  (testing "just the op"
+    (is (= [{:time 0
+             :process 0
+             :type :invoke
+             :f :write
+             :value 2}]
+           (->> {:f :write :value 1}
+                (gen/map #(update % :value inc))
+                (gen.test/perfect)))))
+
+  (testing "op, test, context"
+    (is (= [{:time 0
+             :process 0
+             :type :invoke
+             :f :write
+             :value [{:nodes ["n1" "n2"]}
+                     {:time 0}]}]
+           (->> {:f :write :value 1}
+                (gen/map (fn [op test ctx]
+                           (assoc op :value [test ctx])))
+                (gen.test/perfect))))))
+
+(deftest clojure-map-test
   (testing "once"
     (is (= [{:time 0
              :process 0
