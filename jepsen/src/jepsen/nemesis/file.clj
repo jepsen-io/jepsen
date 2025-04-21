@@ -5,7 +5,8 @@
             [jepsen [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]
-                    [util :as util]]))
+                    [util :as util]]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 (defn corrupt-file!
   "Calls corrupt-file on the currently bound remote node, taking a map of
@@ -71,13 +72,17 @@
                 (fn node [test node]
                   ; Apply each relevant corruption
                   (->> value
-                       (keep (fn corruption [corruption]
+                       (keep (fn corrupt! [corruption]
                                (let [corruption
                                      (-> default-opts
                                          (assoc :mode (f->mode f))
                                          (merge corruption))]
                                  (when (= node (:node corruption))
-                                   (corrupt-file! corruption)))))
+                                   (try+
+                                     (corrupt-file! corruption)
+                                     (catch [:type :jepsen.control/nonzero-exit
+                                             :exit 2] e
+                                       [:io-error (:err e)]))))))
                        (into []))))]
         (assoc op :value v))))
 
