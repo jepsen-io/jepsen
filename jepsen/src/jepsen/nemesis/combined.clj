@@ -568,18 +568,18 @@
   Partition options:
 
     :targets    A collection of partition specs, e.g. [:majorities-ring, ...]
-  
+
   Packet options:
-    
+
     :targets    A collection of node specs, e.g. [:one, :all]
     :behaviors  A collection of network packet behaviors, e.g. [{:delay {}}]
-    
+
   Kill and Pause options:
 
     :targets    A collection of node specs, e.g. [:one, :all]
 
   File corruption options:
-    
+
     :targets     A collection of node specs, e.g. [:one, :all]
     :corruptions A collection of file corruptions, e.g. [{:type :bitflip, :file \"/path/to/file\" :probability 1e-3}]"
   [opts]
