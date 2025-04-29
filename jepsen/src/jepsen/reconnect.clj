@@ -10,7 +10,8 @@
   Connect/close/reconnect lock the wrapper, but multiple threads may acquire
   the current connection at once."
   (:require [clojure.tools.logging :refer [info warn]]
-            [jepsen.util :as util])
+            [jepsen.util :as util]
+            [slingshot.slingshot :refer [try+ throw+]])
   (:import (java.io InterruptedIOException)
            (java.util.concurrent.locks ReentrantReadWriteLock)))
 
@@ -102,7 +103,10 @@
   `(let [read-lock# (.readLock ^ReentrantReadWriteLock (:lock ~wrapper))]
      (.lock read-lock#)
      (let [~c (conn ~wrapper)]
-       (try ~@body
+       (try (when (nil? ~c)
+              (throw+ {:type    ::no-conn
+                       :wrapper ~wrapper}))
+            ~@body
             (catch InterruptedException e#
               ; When threads are interrupted, we're generally
               ; terminating--there's no reason to reopen or log a message here.
