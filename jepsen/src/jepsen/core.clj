@@ -107,6 +107,14 @@
       (info "Snarfing log files")
       (control/on-nodes test
         (fn [test node]
+          ; Unless we're leaving the DB running for debugging purposes, we'll
+          ; kill it, if possible, before downloading logs. This means we're not
+          ; trying to read files as they're changing under us.
+          (when (and (not (:leave-db-running? test))
+                     (satisfies? db/Kill (:db test)))
+            (db/kill! (:db test) test node))
+
+          ; Actually download files
           (doseq [[remote local] (db/log-files-map (:db test) test node)]
             (when (cu/exists? remote)
               (info "downloading" remote "to" local)
