@@ -11,7 +11,7 @@
   locked, during which the watchdog takes no actions."
   (:refer-clojure :exclude [run! locking])
   (:require [clojure [core :as clj]]
-            [clojure.tools.logging :refer [info warn]]
+            [clojure.tools.logging :refer [debug info warn]]
             [jepsen [control :as c]
                     [db :as db]
                     [util :as util]]
@@ -68,7 +68,7 @@
       (clj/locking this
         (when @enabled?
           (when-not (let [running? (running? test node)]
-                      (info node "is" (if running? "running" "dead"))
+                      (debug node "is" (if running? "running" "dead"))
                       running?)
             (let [r (start! test node)]
               (info "Watchdog started:" r)))))))
@@ -142,9 +142,8 @@
 
   (teardown! [this test node]
     (when-let [w (get @watchdogs node)]
-      (let [r (kill! w)]
-        (info :kill :watchdog r)))
-    (db/teardown! db test node))
+      (kill! w)
+      (db/teardown! db test node)))
 
   db/Kill
   (kill! [_ test node]
