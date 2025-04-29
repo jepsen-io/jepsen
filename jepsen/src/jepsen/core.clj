@@ -152,21 +152,27 @@
   logs in the event of JVM shutdown, so you can ctrl-c a test and get something
   useful."
   [test & body]
-  `(let [^Runnable hook-fn#
+  `(let [snarfed?# (atom false)
+         ^Runnable hook-fn#
          (bound-fn []
-           (with-thread-name "Jepsen shutdown hook"
-             (info "Downloading DB logs before JVM shutdown...")
-             (snarf-logs! ~test)
-             (store/update-symlinks! ~test)))
-
+           (when-not @snarfed?#
+             (with-thread-name "Jepsen shutdown hook"
+               (info "Downloading DB logs before JVM shutdown...")
+               (snarf-logs! ~test)
+               (store/update-symlinks! ~test)
+               (reset! snarfed?# true))))
          ^Thread hook# (Thread. hook-fn#)]
      (.. (Runtime/getRuntime) (addShutdownHook hook#))
      (try
        (let [res# (do ~@body)]
-         (snarf-logs! ~test)
+         (when-not @snarfed?#
+           (snarf-logs! ~test)
+           (reset! snarfed?# true))
          res#)
        (finally
-         (maybe-snarf-logs! ~test)
+         (when-not @snarfed?#
+           (maybe-snarf-logs! ~test)
+           (reset! snarfed?# true))
          (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
 
 (defmacro with-db
