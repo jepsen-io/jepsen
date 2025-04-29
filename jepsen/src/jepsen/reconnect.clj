@@ -20,7 +20,7 @@
   :name     An optional name for this wrapper (for debugging logs)
   :open     A function which generates a new conn
   :close    A function which closes a conn
-  :log?     Whether to log reconnect messages. A special value, minimal
+  :log?     Whether to log reconnect messages. A special value, :minimal
             logs only a single line rather than a full stacktrace."
   [options]
   (assert (ifn? (:open options)))
