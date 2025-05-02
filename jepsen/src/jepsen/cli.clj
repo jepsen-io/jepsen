@@ -58,6 +58,41 @@
        vals
        (map first)))
 
+(defn without-default
+  "Removes a :default x from a vector (e.g. a single option specification for
+  tools.cli)."
+  ([opt-spec]
+   (without-default [] opt-spec))
+  ([filtered [x & xs :as opt-spec]]
+   (cond ; All done
+         (empty? opt-spec)
+         filtered
+
+         ; :default pair
+         (= x :default)
+         (recur filtered (next xs))
+
+         ; Other
+         true
+         (recur (conj filtered x) xs))))
+
+(defn without-defaults-for
+  "Takes a collection of option names like [:workload :nemesis] and a CLI
+  option specification--a vector of option vectors. Rewrites that CLI spec to
+  remove the defaults for the given options. Useful for taking a single opt
+  spec and passing it to `test`, which wants default options, and `test-all`,
+  which often wants to treat the absence of an option specially."
+  [opt-names opt-spec]
+  (let [opt-names (mapv name opt-names)]
+    (mapv (fn without [[_ name-str :as option]]
+            (if (some (fn match? [opt-name]
+                        (= opt-name
+                           (nth (re-find #"--(\[no-\])?([^ ]+)" name-str) 2)))
+                      opt-names)
+              (without-default option)
+              option))
+          opt-spec)))
+
 (def help-opt
   ["-h" "--help" "Print out this message and exit"])
 
