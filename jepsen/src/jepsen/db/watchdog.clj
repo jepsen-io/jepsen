@@ -14,7 +14,7 @@
             [clojure.tools.logging :refer [debug info warn]]
             [jepsen [control :as c]
                     [db :as db]
-                    [util :as util]]
+                    [util :as util :refer [timeout]]]
             [dom-top.core :refer [with-retry]]
             [potemkin :refer [definterface+]]))
 
@@ -67,7 +67,13 @@
     (util/with-thread-name (str "jepsen watchdog " node)
       (clj/locking this
         (when @enabled?
-          (when-not (let [running? (running? test node)]
+          (when-not (let [running?
+                          (timeout interval
+                                   (do (warn "Watchdog's `running?` function"
+                                             running? "timed out after"
+                                             interval "ms.")
+                                       false)
+                                   (running? test node))]
                       (debug node "is" (if running? "running" "dead"))
                       running?)
             (let [r (start! test node)]
