@@ -31,7 +31,8 @@
                     [util :as util :refer [with-thread-name
                                           fcatch
                                           real-pmap
-                                          relative-time-nanos]]]
+                                          relative-time-nanos
+                                          with-shutdown-hook]]]
             [jepsen.store.format :as store.format]
             [jepsen.control.util :as cu]
             [jepsen.generator [interpreter :as gen.interpreter]]
@@ -103,37 +104,40 @@
   [test]
   ; Download logs
   (locking snarf-logs!
-    (when (satisfies? db/LogFiles (:db test))
-      (info "Snarfing log files")
-      (control/on-nodes test
-        (fn [test node]
-          ; Unless we're leaving the DB running for debugging purposes, we'll
-          ; kill it, if possible, before downloading logs. This means we're not
-          ; trying to read files as they're changing under us.
-          (when (and (not (:leave-db-running? test))
-                     (satisfies? db/Kill (:db test)))
-            (db/kill! (:db test) test node))
+    (try
+      (when (satisfies? db/LogFiles (:db test))
+        (info "Snarfing log files")
+        (control/on-nodes
+          test
+          (fn [test node]
+            ; Unless we're leaving the DB running for debugging purposes, we'll
+            ; kill it, if possible, before downloading logs. This means we're
+            ; not trying to read files as they're changing under us.
+            (when (and (not (:leave-db-running? test))
+                       (satisfies? db/Kill (:db test)))
+              (db/kill! (:db test) test node))
 
-          ; Actually download files
-          (doseq [[remote local] (db/log-files-map (:db test) test node)]
-            (when (cu/exists? remote)
-              (info "downloading" remote "to" local)
-              (try
-                (control/download
-                  remote
-                  (.getCanonicalPath
-                    (store/path! test (name node)
-                                 ; strip leading /
-                                 (str/replace local #"^/" ""))))
-                (catch java.io.IOException e
-                  (if (= "Pipe closed" (.getMessage e))
-                    (info remote "pipe closed")
-                    (throw e)))
-                (catch java.lang.IllegalArgumentException e
-                  ; This is a jsch bug where the file is just being
-                  ; created
-                  (info remote "doesn't exist"))))))))
-    (store/update-symlinks! test)))
+            ; Actually download files
+            (doseq [[remote local] (db/log-files-map (:db test) test node)]
+              (when (cu/exists? remote)
+                (info "downloading" remote "to" local)
+                (try
+                  (control/download
+                    remote
+                    (.getCanonicalPath
+                      (store/path! test (name node)
+                                   ; strip leading /
+                                   (str/replace local #"^/" ""))))
+                  (catch java.io.IOException e
+                    (if (= "Pipe closed" (.getMessage e))
+                      (info remote "pipe closed")
+                      (throw e)))
+                  (catch java.lang.IllegalArgumentException e
+                    ; This is a jsch bug where the file is just being
+                    ; created
+                    (info remote "doesn't exist"))))))))
+      (finally
+        (store/update-symlinks! test)))))
 
 (defn maybe-snarf-logs!
   "Snarfs logs, swallows and logs all throwables. Why? Because we do this when
@@ -152,28 +156,21 @@
   logs in the event of JVM shutdown, so you can ctrl-c a test and get something
   useful."
   [test & body]
-  `(let [snarfed?# (atom false)
-         ^Runnable hook-fn#
-         (bound-fn []
-           (when-not @snarfed?#
-             (with-thread-name "Jepsen shutdown hook"
-               (info "Downloading DB logs before JVM shutdown...")
-               (snarf-logs! ~test)
-               (store/update-symlinks! ~test)
-               (reset! snarfed?# true))))
-         ^Thread hook# (Thread. hook-fn#)]
-     (.. (Runtime/getRuntime) (addShutdownHook hook#))
-     (try
-       (let [res# (do ~@body)]
-         (when-not @snarfed?#
-           (snarf-logs! ~test)
-           (reset! snarfed?# true))
-         res#)
-       (finally
-         (when-not @snarfed?#
-           (maybe-snarf-logs! ~test)
-           (reset! snarfed?# true))
-         (.. (Runtime/getRuntime) (removeShutdownHook hook#))))))
+  `(let [snarfed?# (atom false)]
+     (with-shutdown-hook (do (info "SIGTERM caught; aborting...")
+                             (when-not @snarfed?#
+                               (snarf-logs! ~test)
+                               (reset! snarfed?# true))
+                             (info "Test aborted."))
+       (try (let [res# (do ~@body)]
+              (when-not @snarfed?#
+                (snarf-logs! ~test)
+                (reset! snarfed?# true))
+              res#)
+            (finally
+              (when-not @snarfed?#
+                (maybe-snarf-logs! ~test)
+                (reset! snarfed?# true)))))))
 
 (defmacro with-db
   "Wraps body in DB setup and teardown."

@@ -100,6 +100,19 @@
   []
   (.. Runtime getRuntime availableProcessors))
 
+(defmacro with-shutdown-hook
+  "Takes an expression and a body. Registers the expression as a shutdown hook.
+  Evaluates body, then unregisters the shutdown hook."
+  [hook & body]
+  `(let [^Runnable hook-fn# (bound-fn []
+                              (with-thread-name "Jepsen shutdown hook"
+                                ~hook))
+         ^Thread hook-thread# (Thread. hook-fn#)]
+     (.. (Runtime/getRuntime) (addShutdownHook hook-thread#))
+     (try ~@body
+          (finally
+              (.. (Runtime/getRuntime) (removeShutdownHook hook-thread#))))))
+
 (defn majority
   "Given a number, returns the smallest integer strictly greater than half."
   [n]
