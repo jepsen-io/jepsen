@@ -67,17 +67,17 @@
     (util/with-thread-name (str "jepsen watchdog " node)
       (clj/locking this
         (when @enabled?
-          (when-not (let [running?
-                          (timeout interval
-                                   (do (warn "Watchdog's `running?` function"
-                                             running? "timed out after"
-                                             interval "ms.")
-                                       false)
-                                   (running? test node))]
-                      (debug node "is" (if running? "running" "dead"))
-                      running?)
-            (let [r (start! test node)]
-              (info "Watchdog started:" r)))))))
+          (let [running?
+                (timeout interval
+                         (do (warn "Watchdog's `running?` function"
+                                   running? "timed out after"
+                                   interval "ms.")
+                             false)
+                         (running? test node))]
+            (debug node "is" (if running? "running" "dead"))
+            (when-not running?
+              (let [r (start! test node)]
+                (info "Watchdog started:" r))))))))
 
   (run! [this test node]
     (when (realized? fut)
