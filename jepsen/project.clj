@@ -20,7 +20,7 @@
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.0"]
-                 [ring "1.13.0"]
+                 [ring "1.14.1"]
                  [com.hierynomus/sshj "0.39.0"]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
                  [com.jcraft/jsch.agentproxy.sshj "0.0.9"
@@ -60,7 +60,7 @@
              :dev {; experimenting with faster startup
                    ;:aot [jepsen.core]
                    :dependencies [[org.clojure/test.check "1.1.1"]
-                                  [com.gfredericks/test.chuck "0.2.14"]]
+                                  [com.gfredericks/test.chuck "0.2.15"]]
                    :jvm-opts ["-Xmx32g"
                               "-server"
                               "-XX:-OmitStackTraceInFastThrow"]}})
