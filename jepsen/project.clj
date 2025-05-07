@@ -12,7 +12,7 @@
                  [org.clojure/tools.cli "1.1.230"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
-                 [elle "0.2.4-SNAPSHOT"]
+                 [elle "0.2.4"]
                  [clj-time "0.15.2"]
                  [io.jepsen/history "0.1.5"]
                  [jepsen.txn "0.1.2"]
