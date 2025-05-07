@@ -38,11 +38,12 @@ results are maintained at each level for convenience.
 ## Documentation
 
 This [tutorial](doc/tutorial/index.md) walks you through writing a Jepsen test
-from scratch.
+from scratch. An independent translation is available in [Chinese](https://jaydenwen123.gitbook.io/zh_jepsen_doc/).
 
 For reference, see the [API documentation](http://jepsen-io.github.io/jepsen/).
 
-An independent translation is available in [Chinese](https://jaydenwen123.gitbook.io/zh_jepsen_doc/).
+[What's Here](doc/whats-here.md) provides an overview of Jepsen's namespaces
+and how they work together.
 
 ## Setting up a Jepsen Environment
 
