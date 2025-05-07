@@ -21,7 +21,8 @@
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.0"]
                  [ring "1.14.1"]
-                 [com.hierynomus/sshj "0.39.0"]
+                 [com.hierynomus/sshj "0.39.0"
+                  :exclusions [org.slf4j/slf4j-api]]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
                  [com.jcraft/jsch.agentproxy.sshj "0.0.9"
                   :exclusions [net.schmizz/sshj]]
