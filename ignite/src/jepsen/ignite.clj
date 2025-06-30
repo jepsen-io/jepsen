@@ -64,7 +64,7 @@
   constructing one from the version."
   [test]
   (or (:url test)
-    (str "https://archive.apache.org/dist/ignite/"(:version test)"/apache-ignite-"(:version test)"-bin.zip")))
+    (str "https://www.apache.org/dyn/closer.lua/ignite/"(:version test)"/apache-ignite-"(:version test)"-bin.zip?action=download")))
 
 (defn start!
   "Starts server for the given node."
