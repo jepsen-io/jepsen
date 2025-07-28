@@ -1,5 +1,6 @@
 x-node:
   &default-node
+  privileged: true
   build: ./node
   env_file: ./secret/node.env
   secrets:
