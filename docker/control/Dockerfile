@@ -17,8 +17,8 @@ ENV LEIN_ROOT true
 #
 RUN apt-get -qy update && \
     apt-get -qy install \
-        curl dos2unix emacs git gnuplot graphviz htop iputils-ping libjna-java pssh screen vim wget && \
-    curl -L https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_linux-x64_bin.tar.gz | tar -xz --strip-components=1 -C /usr/local/
+    curl dos2unix emacs git gnuplot graphviz htop iputils-ping libjna-java pssh screen vim wget && \
+    curl -L https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.8_9.tar.gz | tar -xz --strip-components=1 -C /usr/local/
 
 RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && \
     mv lein /usr/bin && \
