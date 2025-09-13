@@ -5,7 +5,7 @@
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clj-commons/byte-streams "0.3.4"
                   :exclusions [potemkin]]
-                 [org.clojure/clojure "1.12.0"]
+                 [org.clojure/clojure "1.12.2"]
                  [org.clojure/data.fressian "1.1.0"]
                  [org.clojure/data.generators "1.1.0"]
                  [org.clojure/tools.logging "1.3.0"]
@@ -14,7 +14,7 @@
                   :exclusions [org.slf4j/slf4j-api]]
                  [elle "0.2.4"]
                  [clj-time "0.15.2"]
-                 [io.jepsen/history "0.1.5"]
+                 [io.jepsen/generator "0.1.0-SNAPSHOT"]
                  [jepsen.txn "0.1.2"]
                  [knossos "0.3.12"]
                  [clj-ssh "0.5.14"]
@@ -30,8 +30,7 @@
                  [hiccup "1.0.5"]
                  [metametadata/multiset "0.1.1"]
                  [slingshot "0.12.2"]
-                 [org.clojure/data.codec "0.2.0"]
-                 [fipp "0.6.27"]]
+                 [org.clojure/data.codec "0.2.0"]]
   :java-source-paths ["src"]
   :javac-options ["--release" "11"]
   :main jepsen.cli

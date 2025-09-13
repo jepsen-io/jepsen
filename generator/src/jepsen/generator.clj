@@ -384,12 +384,12 @@
             [clojure.pprint :as pprint :refer [pprint]]
             [dom-top.core :refer [loopr]]
             [fipp.ednize :as fipp.ednize]
-            [jepsen [history :as history]
-                    [util :as util]]
+            [jepsen [history :as history]]
             [jepsen.generator.context :as context]
             [potemkin :refer [import-vars]]
             [slingshot.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan Set)
+           (java.lang.reflect Method)
            (java.util ArrayList)))
 
 ;; These used to be a part of jepsen.generator directly, and it makes sense for
@@ -475,6 +475,20 @@
 ; efficient nth.
 
 ;; Helpers
+
+(defn secs->nanos
+  "Converts seconds to long nanoseconds. We do our internal timekeeping in
+  nanos."
+  (^long [s]
+         (long (* s 1000000000))))
+
+(defn arities
+  "The arities of a function class."
+  [^Class c]
+  (keep (fn [^Method method]
+          (when (re-find #"invoke" (.getName method))
+            (alength (.getParameterTypes method))))
+        (-> c .getDeclaredMethods)))
 
 (defn rand-int-seq
   "Generates a reproducible sequence of random longs, given a random seed. If
@@ -600,7 +614,7 @@
   "Wraps a function into a wrapper which makes it more efficient to invoke. We
   memoize the function's arity, in particular, to reduce reflection."
   [f]
-  (Fn. (first (util/arities (class f))) f))
+  (Fn. (first (arities (class f))) f))
 
 (extend-protocol Generator
   nil
@@ -645,15 +659,7 @@
                 gen')]
 
           ; This generator is exhausted; move on
-          (recur (next this) test ctx)))))
-
-  ; Forgettables are transparently unwrapped when treated as generators.
-  jepsen.util.Forgettable
-  (update [this test ctx event]
-    (update @this test ctx event))
-
-  (op [this test ctx]
-    (op @this test ctx)))
+          (recur (next this) test ctx))))))
 
 (defmacro extend-protocol-runtime
   "Extends a protocol to a runtime-defined class. Helpful because some Clojure
@@ -862,7 +868,7 @@
 
   f may optionally take additional arguments: `(f op test context)`."
   [f gen]
-  (let [arity (reduce max 0 (util/arities (class f)))]
+  (let [arity (reduce max 0 (arities (class f)))]
     (assert (or (= 1 arity) (= 3 arity))
             "`map` requires a function of one or three arguments")
     (when gen
@@ -1512,7 +1518,7 @@
   for dt seconds."
   [dt gen]
   (when (and gen (pos? dt))
-    (TimeLimit. (long (util/secs->nanos dt)) nil gen)))
+    (TimeLimit. (secs->nanos dt) nil gen)))
 
 (defrecord Stagger [dt next-time gen]
   Generator
@@ -1551,7 +1557,7 @@
   2."
   [dt gen]
   (when gen
-    (let [dt (long (util/secs->nanos (* 2 dt)))]
+    (let [dt (secs->nanos (* 2 dt))]
       (Stagger. dt nil gen))))
 
 ; This isn't actually DelayTil. It spreads out *all* requests evenly. Feels
@@ -1617,7 +1623,7 @@
   which a.) introduced dt seconds of delay between *completion* and subsequent
   invocation, and b.) emitted 1/dt ops/sec *per thread*, rather than globally."
   [dt gen]
-  (Delay. (long (util/secs->nanos dt)) nil gen))
+  (Delay. (secs->nanos dt) nil gen))
 
 (defn sleep
   "Emits exactly one special operation which causes its receiving process to do
@@ -1804,7 +1810,7 @@
     (let [intervals       (->> specs
                                (partition 1 2)
                                (mapcat identity)
-                               (mapv (comp long util/secs->nanos)))
+                               (mapv secs->nanos))
           gens            (->> specs next (partition 1 2) vec)
           period          (reduce + intervals)
           cutoffs         (vec (reductions + intervals))]

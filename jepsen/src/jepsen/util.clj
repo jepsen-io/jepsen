@@ -15,7 +15,8 @@
             [fipp [edn :as fipp]
                   [ednize]
                   [engine :as fipp.engine]]
-            [jepsen [history :as h]]
+            [jepsen [generator :as gen]
+                    [history :as h]]
             [jepsen.history.fold :refer [loopf]]
             [potemkin :refer [definterface+]]
             [slingshot.slingshot :refer [try+ throw+]]
@@ -1173,6 +1174,14 @@
   (forget! [this]
     (set! x ::forgotten)
     this)
+
+  ; When used as a generator, Forgettables are transparently unwrapped.
+  jepsen.generator.Generator
+  (update [this test ctx event]
+    (gen/update @this test ctx event))
+
+  (op [this test ctx]
+    (gen/op @this test ctx))
 
   clojure.lang.IDeref
   (deref [this]
