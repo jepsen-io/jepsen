@@ -297,7 +297,12 @@ ssh-keyscan -t ed25519 n1 >> ~/.ssh/known_hosts
 
 Additional projects that may be of interest:
 
-- [Jecci](https://github.com/michaelzenz/jecci): A wrapper framework around Jepsen
-- [Porcupine](https://github.com/anishathalye/porcupine): a linearizability checker written in Go.
+- [Jecci](https://github.com/michaelzenz/jecci): A wrapper framework around
+  Jepsen
+- [Porcupine](https://github.com/anishathalye/porcupine): a linearizability
+  checker written in Go.
 - [elle-cli](https://github.com/ligurio/elle-cli): command-line frontend to
   transactional consistency checkers for black-box databases.
+- [Tickloom](https://github.com/unmeshjoshi/tickloom): a framework for writing
+  distributed systems which support deterministic simulation. Integrates with
+  Jepsen's history format and checkers.
