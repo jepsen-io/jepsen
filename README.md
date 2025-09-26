@@ -301,3 +301,4 @@ Additional projects that may be of interest:
 - [Porcupine](https://github.com/anishathalye/porcupine): a linearizability checker written in Go.
 - [elle-cli](https://github.com/ligurio/elle-cli): command-line frontend to
   transactional consistency checkers for black-box databases.
+- [Tickloom](https://github.com/unmeshjoshi/tickloom): A deterministic-simulation framework for building distributed systems, with Jepsen integration for consistency checks. 
