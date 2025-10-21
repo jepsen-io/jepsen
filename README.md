@@ -303,6 +303,4 @@ Additional projects that may be of interest:
   checker written in Go.
 - [elle-cli](https://github.com/ligurio/elle-cli): command-line frontend to
   transactional consistency checkers for black-box databases.
-- [Tickloom](https://github.com/unmeshjoshi/tickloom): a framework for writing
-  distributed systems which support deterministic simulation. Integrates with
-  Jepsen's history format and checkers.
+- [Tickloom](https://github.com/unmeshjoshi/tickloom): A deterministic-simulation framework for building distributed systems, with Jepsen integration for consistency checks.
