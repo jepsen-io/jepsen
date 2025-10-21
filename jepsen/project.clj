@@ -5,7 +5,7 @@
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clj-commons/byte-streams "0.3.4"
                   :exclusions [potemkin]]
-                 [org.clojure/clojure "1.12.2"]
+                 [org.clojure/clojure "1.12.3"]
                  [org.clojure/data.fressian "1.1.0"]
                  [org.clojure/data.generators "1.1.0"]
                  [org.clojure/tools.logging "1.3.0"]
