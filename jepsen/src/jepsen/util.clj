@@ -16,9 +16,10 @@
                   [ednize]
                   [engine :as fipp.engine]]
             [jepsen [generator :as gen]
-                    [history :as h]]
+                    [history :as h]
+                    [random :as rand]]
             [jepsen.history.fold :refer [loopf]]
-            [potemkin :refer [definterface+]]
+            [potemkin :refer [definterface+ import-vars]]
             [slingshot.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (java.lang.reflect Method)
@@ -27,6 +28,13 @@
            (java.io File
                     RandomAccessFile)
            (jepsen.history Op)))
+
+; These are functions that used to live in util, but are now in their own
+; namespaces.
+(import-vars [jepsen.random
+              :refer [zipf exp nonempty-subset rand-nth-empty]
+              :rename {exp              rand-exp
+                       nonempty-subset  random-nonempty-subset}])
 
 
 (defn default
@@ -61,13 +69,6 @@
      msg))
   ([t msg & more-messages]
    (exception-message t (str msg " " (str/join " " more-messages)))))
-
-(defn random-nonempty-subset
-  "A randomly selected, randomly ordered, non-empty subset of the given
-  collection. Returns nil if collection is empty."
-  [coll]
-  (when (seq coll)
-    (take (inc (rand-int (count coll))) (shuffle coll))))
 
 (defn name+
   "Tries name, falls back to pr-str."
@@ -199,61 +200,6 @@
   [coll]
   (nth coll (dec (count coll))))
 
-(defn rand-nth-empty
-  "Like rand-nth, but returns nil if the collection is empty."
-  [coll]
-  (try (rand-nth coll)
-       (catch IndexOutOfBoundsException e nil)))
-
-(defn rand-exp
-  "Generates a exponentially distributed random value with rate parameter
-  lambda."
-  [lambda]
-  (* (Math/log (- 1 (rand))) (- lambda)))
-
-(defn zipf-b-inverse-cdf
-  "Inverse cumulative distribution function for the zipfian bounding function
-  used in `zipf`."
-  (^double [^double skew ^double t ^double p]
-           (let [tp (* t p)]
-             (if (<= tp 1)
-               ; Clamp so we don't fly off to infinity
-               tp
-               (Math/pow (+ (* tp (- 1 skew))
-                            skew)
-                         (/ (- 1 skew)))))))
-
-(def zipf-default-skew
-  "When we choose zipf-distributed things, what skew do we generally pick?"
-  1.0001)
-
-(defn zipf
-  "Selects a Zipfian-distributed integer in [0, n) with a given skew
-  factor. Adapted from the rejection sampling technique in
-  https://jasoncrease.medium.com/rejection-sampling-the-zipf-distribution-6b359792cffa."
-  ([^long n]
-   (zipf zipf-default-skew n))
-  ([^double skew ^long n]
-   (if (= n 0)
-     0
-     (do (assert (not= 1.0 skew)
-                 "Sorry, our approximation can't do skew = 1.0! Try a small epsilon, like 1.0001")
-         (let [t (/ (- (Math/pow n (- 1 skew)) skew)
-                    (- 1 skew))]
-           (loop []
-             (let [inv-b         (zipf-b-inverse-cdf skew t (dg/double))
-                   sample-x      (long (+ 1 inv-b))
-                   y-rand        (dg/double)
-                   ratio-top     (Math/pow sample-x (- skew))
-                   ratio-bottom  (/ (if (<= sample-x 1)
-                                      1
-                                      (Math/pow inv-b (- skew)))
-                                    t)
-                   rat (/ ratio-top (* t ratio-bottom))]
-               (if (< y-rand rat)
-                 (dec sample-x)
-                 (recur)))))))))
-
 (defn rand-distribution
   "Generates a random value with a distribution (default `:uniform`) of:
 
@@ -262,7 +208,7 @@
   ; default Long/MAX_VALUE).
   {:distribution :uniform, :min 0, :max 1024}
 
-  ; Geometric distribution with mean 1/p.
+  ; Geometric distribution with mean 1/p, starting at 0.
   {:distribution :geometric, :p 1e-3}
 
   ; Zipfian integer in [0, n) with skew s (default ~1)
@@ -293,22 +239,13 @@
                        false)
                      (str "Invalid distribution-map: " distribution-map))]
      (case distribution
-       :uniform   (long (Math/floor (+ min (* (rand) (- max min)))))
-       :geometric (long (Math/ceil  (/ (Math/log (rand))
-                                       (Math/log (- 1.0 p)))))
+       :uniform   (rand/long min max)
+       :geometric (rand/geometric p)
        :zipf      (if skew
-                    (zipf skew n)
-                    (zipf n))
-       :one-of    (rand-nth values)
-       :weighted  (let [values  (keys weights)
-                        weights (reductions + (vals weights))
-                        total   (last weights)
-                        choices (map vector values weights)]
-                    (let [choice (rand-int total)]
-                      (loop [[[v w] & more] choices]
-                        (if (< choice w)
-                          v
-                          (recur more)))))))))
+                    (rand/zipf skew n)
+                    (rand/zipf n))
+       :one-of    (rand/rand-nth values)
+       :weighted  (rand/weighted weights)))))
 
 (defn fraction
   "a/b, but if b is zero, returns unity."

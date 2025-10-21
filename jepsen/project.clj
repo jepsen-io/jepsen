@@ -16,7 +16,7 @@
                  [clj-time "0.15.2"]
                  [io.jepsen/generator "0.1.0-SNAPSHOT"]
                  [jepsen.txn "0.1.2"]
-                 [knossos "0.3.12"]
+                 [knossos "0.3.13-SNAPSHOT"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.0"]
@@ -59,7 +59,8 @@
   :profiles {:uberjar {:aot :all}
              :dev {; experimenting with faster startup
                    ;:aot [jepsen.core]
-                   :dependencies [[org.clojure/test.check "1.1.1"]
+                   :dependencies [[criterium "0.4.6"]
+                                  [org.clojure/test.check "1.1.1"]
                                   [com.gfredericks/test.chuck "0.2.15"]]
                    :jvm-opts ["-Xmx32g"
                               "-server"
