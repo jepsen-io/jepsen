@@ -4,7 +4,8 @@
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clj-commons/byte-streams "0.3.4"
-                  :exclusions [potemkin]]
+                  :exclusions [potemkin
+                               org.clj-commons/primitive-math]]
                  [org.clojure/clojure "1.12.3"]
                  [org.clojure/data.fressian "1.1.0"]
                  [org.clojure/data.generators "1.1.0"]
@@ -22,7 +23,8 @@
                  [http-kit "2.8.1"]
                  [ring "1.15.3"]
                  [com.hierynomus/sshj "0.40.0"
-                  :exclusions [org.slf4j/slf4j-api]]
+                  :exclusions [org.slf4j/slf4j-api
+                               org.bouncycastle/bcutil-jdk18on]]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
                  [com.jcraft/jsch.agentproxy.sshj "0.0.9"
                   :exclusions [net.schmizz/sshj]]
