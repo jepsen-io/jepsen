@@ -222,6 +222,14 @@
 
 ; Perf
 
+(deftest ^:perf weighted-perf
+  (println "## weighted")
+  (quick-bench (r/weighted {:x 1 :y 2 :z 3}))
+
+  (println "## weighted fn")
+  (let [f (r/weighted-fn {:x 1 :y 2 :z 3})]
+    (quick-bench (f))))
+
 (deftest ^:perf rand-long-perf
   (println "# Bare Clojure rand-int")
   (quick-bench (rand-int 5))
