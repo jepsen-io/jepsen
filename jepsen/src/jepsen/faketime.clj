@@ -2,7 +2,8 @@
   "Libfaketime is useful for making clocks run at differing rates! This
   namespace provides utilities for stubbing out programs with faketime."
   (:require [clojure.tools.logging :refer :all]
-            [jepsen.control :as c]
+            [jepsen [control :as c]
+                    [random :as rand]]
             [jepsen.control.util :as cu]))
 
 (defn install-0.9.6-jepsen1!
@@ -62,4 +63,4 @@
   [factor]
   (let [max (/ 2 (+ 1 (/ factor)))
         min (/ max factor)]
-    (+ min (rand (- max min)))))
+    (+ min (rand/double (- max min)))))

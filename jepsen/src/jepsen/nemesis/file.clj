@@ -5,6 +5,7 @@
             [jepsen [control :as c]
                     [generator :as gen]
                     [nemesis :as nemesis]
+                    [random :as rand]
                     [util :as util]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -169,7 +170,7 @@
   (op [this test ctx]
     ; We immediately unfurl into a series of ops based on f-gen with values
     ; derived from our node choices.
-    (let [nodes (shuffle (:nodes test))
+    (let [nodes (rand/shuffle (:nodes test))
           value (mapv (fn per-node [i node]
                         (assoc default-opts
                                :node node
@@ -224,7 +225,7 @@
           _ (assert (integer? n)
                     (str "Expected (n test) to return an integer, but got "
                          (pr-str n)))
-          nodes (->> (:nodes test) shuffle (take n) vec)]
+          nodes (->> (:nodes test) rand/shuffle (take n) vec)]
       ; Unfurl into f-gen, with values rewritten to random subsets of those
       ; nodes.
       (gen/op
@@ -232,7 +233,7 @@
                    (let [value (mapv (fn per-node [node]
                                        (assoc default-opts
                                               :node node))
-                                     (util/random-nonempty-subset nodes))]
+                                     (rand/nonempty-subset nodes))]
                      (assoc op :value value)))
                  f-gen)
         test ctx)))

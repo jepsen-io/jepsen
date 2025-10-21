@@ -6,6 +6,7 @@
             [jepsen [client   :as client]
                     [control  :as c]
                     [net      :as net]
+                    [random   :as rand]
                     [util     :as util]]
             [jepsen.control [util :as cu]]
             [slingshot.slingshot :refer [try+ throw+]])
@@ -116,7 +117,7 @@
 (defn split-one
   "Split one node off from the rest"
   ([coll]
-   (split-one (rand-nth coll) coll))
+   (split-one (rand/nth coll) coll))
   ([loner coll]
     [[loner] (remove (fn [x] (= x loner)) coll)]))
 
@@ -195,7 +196,7 @@
 (defn partition-random-halves
   "Cuts the network into randomly chosen halves."
   []
-  (partitioner (comp complete-grudge bisect shuffle)))
+  (partitioner (comp complete-grudge bisect rand/shuffle)))
 
 (defn partition-random-node
   "Isolates a single node from the rest of the network."
@@ -209,7 +210,7 @@
         n (count nodes)
         m (util/majority n)]
     (->> nodes
-         shuffle                ; randomize
+         rand/shuffle                ; randomize
          cycle                  ; form a ring
          (partition m 1)        ; construct majorities
          (take n)               ; one per node
@@ -231,7 +232,7 @@
            by-degree (sorted-map 1 (set nodes))]
       (let [; Construct a shuffled, in-degree-order seq of [degree, node] pairs
             dns (mapcat (fn [[degree nodes]]
-                          (map vector (repeat degree) (shuffle nodes)))
+                          (map vector (repeat degree) (rand/shuffle nodes)))
                         by-degree)
             ; Pick a node `a` with minimal degree.
             [a-degree a] (first dns)]
@@ -488,7 +489,7 @@
       (assoc op :value
              (c/with-test-nodes test
                (set-time! (+ (/ (System/currentTimeMillis) 1000)
-                             (- (rand-int (* 2 dt)) dt))))))
+                             (- (rand/long (* 2 dt)) dt))))))
 
     (teardown! [this test]
       (c/with-test-nodes test
@@ -543,9 +544,9 @@
   "Responds to `{:f :start}` by pausing the given process name on a given node
   or nodes using SIGSTOP, and when `{:f :stop}` arrives, resumes it with
   SIGCONT.  Picks the node(s) to pause using `(targeter list-of-nodes)`, which
-  defaults to `rand-nth`. Targeter may return either a single node or a
+  defaults to `jepsen.rand/nth`. Targeter may return either a single node or a
   collection of nodes."
-  ([process] (hammer-time rand-nth process))
+  ([process] (hammer-time rand/nth process))
   ([targeter process]
    (node-start-stopper targeter
                        (fn start [t n]
@@ -579,7 +580,7 @@
                                  _ (assert (integer? drop))
                                  file (if (cu/file? file)
                                         file
-                                        (rand-nth (cu/ls-full file)))]
+                                        (rand/nth (cu/ls-full file)))]
                              (c/su
                               (c/exec :truncate :-c :-s (str "-" drop) file))
                              {:file file :drop drop})))
@@ -612,7 +613,7 @@
                                  (throw+ {:type ::no-file}))
                              file (if (cu/file? file)
                                     file
-                                    (rand-nth (cu/ls-full file)))
+                                    (rand/nth (cu/ls-full file)))
                              probability (or probability 0.01)
                              percent (* 100 probability)]
                          (c/su

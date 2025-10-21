@@ -20,10 +20,10 @@
                     [generator :as gen]
                     [nemesis :as n]
                     [net :as net]
+                    [random :as rand]
                     [util :as util :refer [majority
                                            minority-third
-                                           rand-distribution
-                                           random-nonempty-subset]]]
+                                           rand-distribution]]]
             [jepsen.nemesis.time :as nt]))
 
 (def default-interval
@@ -53,12 +53,12 @@
   [test db node-spec]
   (let [nodes (:nodes test)]
     (case node-spec
-      nil         (random-nonempty-subset nodes)
-      :one        (list (rand-nth nodes))
-      :minority   (take (dec (majority (count nodes))) (shuffle nodes))
-      :majority   (take      (majority (count nodes))  (shuffle nodes))
-      :minority-third (take (minority-third (count nodes)) (shuffle nodes))
-      :primaries  (random-nonempty-subset (db/primaries db test))
+      nil         (rand/nonempty-subset nodes)
+      :one        (list (rand/nth nodes))
+      :minority   (take (dec (majority (count nodes))) (rand/shuffle nodes))
+      :majority   (take      (majority (count nodes))  (rand/shuffle nodes))
+      :minority-third (take (minority-third (count nodes)) (rand/shuffle nodes))
+      :primaries  (rand/nonempty-subset (db/primaries db test))
       :all        nodes
       node-spec)))
 
@@ -116,13 +116,13 @@
         start  {:type :info, :f :start, :value :all}
         kill   (fn [_ _] {:type   :info
                           :f      :kill
-                          :value  (rand-nth kill-targets)})
+                          :value  (rand/nth kill-targets)})
 
         ; Pauses and resumes
         resume {:type :info, :f :resume, :value :all}
         pause  (fn [_ _] {:type   :info
                           :f      :pause
-                          :value  (rand-nth pause-targets)})
+                          :value  (rand/nth pause-targets)})
 
         ; Flip-flop generators
         kill-start (gen/flip-flop kill (gen/repeat start))
@@ -175,14 +175,14 @@
   (let [nodes (:nodes test)]
     (case part-spec
       :one              (n/complete-grudge (n/split-one nodes))
-      :majority         (n/complete-grudge (n/bisect (shuffle nodes)))
+      :majority         (n/complete-grudge (n/bisect (rand/shuffle nodes)))
       :majorities-ring  (n/majorities-ring nodes)
       :minority-third   (n/complete-grudge (split-at (util/minority-third
                                                        (count nodes))
-                                                     (shuffle nodes)))
+                                                     (rand/shuffle nodes)))
       :primaries        (let [primaries (db/primaries db test)]
                           (->> primaries
-                               random-nonempty-subset
+                               rand/nonempty-subset
                                (map list) ; Put each in its own singleton list
                                (cons (remove (set primaries) nodes)) ; others
                                n/complete-grudge)) ; And make it a grudge
@@ -235,7 +235,7 @@
         start (fn start [_ _]
                 {:type  :info
                  :f     :start-partition
-                 :value (rand-nth targets)})
+                 :value (rand/nth targets)})
         stop  {:type :info, :f :stop-partition, :value nil}
         gen   (->> (gen/flip-flop start (gen/repeat stop))
                    (gen/stagger (:interval opts default-interval)))]
@@ -315,7 +315,7 @@
         start     (fn start [_ _]
                     {:type  :info
                      :f     :start-packet
-                     :value [(rand-nth targets) (rand-nth behaviors)]})
+                     :value [(rand/nth targets) (rand/nth behaviors)]})
         stop      {:type  :info
                    :f     :stop-packet
                    :value nil}
@@ -342,7 +342,7 @@
         db (:db opts)
         target-specs (:targets (:clock opts) (node-specs db))
         targets (fn [test] (db-nodes test db
-                                     (some-> target-specs seq rand-nth)))
+                                     (some-> target-specs seq rand/nth)))
         clock-gen (gen/phases
                     {:type :info, :f :check-offsets}
                     (gen/mix [(nt/reset-gen-select  targets)
@@ -445,8 +445,8 @@
         targets     (:targets     file-corruption (node-specs db))
         corruptions (:corruptions file-corruption)
         gen (->> (fn gen [_test _context]
-                   (let [target (rand-nth targets)
-                         {:keys [type file probability drop]} (rand-nth corruptions)
+                   (let [target (rand/nth targets)
+                         {:keys [type file probability drop]} (rand/nth corruptions)
                          corruption
                          (case type
                            :bitflip

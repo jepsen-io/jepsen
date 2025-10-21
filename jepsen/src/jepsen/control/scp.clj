@@ -4,7 +4,8 @@
   implementation of a Remote which shells out to SCP."
   (:require [clojure.string :as str]
             [clojure.tools.logging :refer [info warn]]
-            [jepsen.util :as util]
+            [jepsen [random :as rand]
+                    [util :as util]]
             [jepsen.control.core :as core]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -42,7 +43,7 @@
 (defn tmp-file
   "Returns a randomly generated tmpfile for use during uploads/downloads"
   []
-  (str tmp-dir "/" (rand-int Integer/MAX_VALUE)))
+  (str tmp-dir "/" (rand/long Integer/MAX_VALUE)))
 
 (defmacro with-tmp-file
   "Evaluates body with tmp-file-sym bound to the remote path of a temporary

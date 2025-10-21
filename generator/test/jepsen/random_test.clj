@@ -163,19 +163,19 @@
 
 ; Choosing elements
 
-(deftest rand-nth-test
+(deftest nth-test
   (r/with-seed -6
-		(let [xs (s 1000 (r/rand-nth [:a :b :c]))]
+		(let [xs (s 1000 (r/nth [:a :b :c]))]
       (testing "example"
         (is (= [:b :c :c :c :c :b :c :c :b :a]
                (take 10 xs))))
       (testing "uniform"
   			(is (= {:a 343 :b 331 :c 326} (frequencies xs)))))))
 
-(deftest rand-nth-empty-test
-  (is (= nil (r/rand-nth-empty [])))
+(deftest nth-empty-test
+  (is (= nil (r/nth-empty [])))
   (r/with-seed 124523
-    (is (= :y (r/rand-nth-empty [:x :y])))))
+    (is (= :y (r/nth-empty [:x :y])))))
 
 (deftest double-weighted-index-test
   (is (= -1 (r/double-weighted-index  (double-array 0))))

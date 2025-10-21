@@ -32,9 +32,11 @@
 ; These are functions that used to live in util, but are now in their own
 ; namespaces.
 (import-vars [jepsen.random
-              :refer [zipf exp nonempty-subset rand-nth-empty]
+              :refer [zipf exp nonempty-subset nth-empty]
               :rename {exp              rand-exp
-                       nonempty-subset  random-nonempty-subset}])
+                       nonempty-subset  random-nonempty-subset
+                       nth              rand-nth
+                       nth-empty        rand-nth-empty}])
 
 
 (defn default
@@ -244,7 +246,7 @@
        :zipf      (if skew
                     (rand/zipf skew n)
                     (rand/zipf n))
-       :one-of    (rand/rand-nth values)
+       :one-of    (rand/nth values)
        :weighted  (rand/weighted weights)))))
 
 (defn fraction

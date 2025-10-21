@@ -1,8 +1,9 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
-  (:require [jepsen.control :refer :all]
+  (:require [jepsen [control :refer :all]
+                    [random :as rand]
+                    [util :as util :refer [meh name+ timeout]]]
             [jepsen.control.core :as core]
-            [jepsen.util :as util :refer [meh name+ timeout]]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
@@ -69,7 +70,7 @@
   ([]
    (tmp-file! ".tmp"))
   ([ext]
-   (let [file (str tmp-dir-base "/" (rand-int Integer/MAX_VALUE) ext)]
+   (let [file (str tmp-dir-base "/" (rand/long Integer/MAX_VALUE) ext)]
      (if (exists? file)
        (recur ext)
        (do
@@ -84,7 +85,7 @@
 (defn tmp-dir!
   "Creates a temporary directory under /tmp/jepsen and returns its path."
   []
-  (let [dir (str tmp-dir-base "/" (rand-int Integer/MAX_VALUE))]
+  (let [dir (str tmp-dir-base "/" (rand/long Integer/MAX_VALUE))]
     (if (exists? dir)
       (recur)
       (do

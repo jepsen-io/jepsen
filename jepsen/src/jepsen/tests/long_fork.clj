@@ -90,7 +90,8 @@
             [jepsen [generator :as gen]
                     [checker :as checker]
                     [history :as h]
-                    [util :refer [rand-nth-empty]]]
+                    [random :as rand]
+                    [util]]
             [jepsen.txn.micro-op :as mop]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -108,7 +109,7 @@
   group in shuffled order."
   [n k]
   (->> (group-for n k)
-       shuffle
+       rand/shuffle
        (mapv (fn [k] [:r k nil]))))
 
 ; n is the group size.
@@ -134,8 +135,8 @@
              ctx)
            (Generator. n next-key (assoc workers worker nil))]
           ; OK we didn't wite a key--let's try one of two random options.
-          (if-let [k (and (< (rand) 0.5)
-                          (rand-nth-empty (keep val workers)))]
+          (if-let [k (and (< (rand/double) 0.5)
+                          (rand/nth-empty (keep val workers)))]
             ; Read some other active group
             [(gen/fill-in-op
                {:process process, :f :read, :value (read-txn-for n k)}

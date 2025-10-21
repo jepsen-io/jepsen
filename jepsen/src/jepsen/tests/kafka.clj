@@ -194,6 +194,7 @@
                     [client :as client]
                     [generator :as gen]
                     [history :as h]
+                    [random :as rand]
                     [store :as store]
                     [util :as util :refer [map-vals
                                            meh
@@ -231,9 +232,9 @@
       (if (= :pending op)
         [:pending this]
         (let [this' (InterleaveSubscribes. sub-p gen')]
-          (if (< (rand) sub-p)
+          (if (< (rand/double) sub-p)
             ; At random, emit a subscribe/assign op instead.
-            (let [f  (rand-nth (vec (:sub-via test)))
+            (let [f  (rand/nth (vec (:sub-via test)))
                   op {:f f, :value (vec (:keys op))}]
               [(gen/fill-in-op op context) this])
             ; Or pass through the op directly
@@ -333,7 +334,7 @@
         (let [this' (PollUnseen. gen' sent polled)]
           ; About 1/3 of the time, merge our sent-but-unpolled keys into an
           ; assign/subscribe
-          (if (and (< (rand) 1/3)
+          (if (and (< (rand/double) 1/3)
                    (< 0 (count sent))
                    (or (= :assign    (:f op))
                        (= :subscribe (:f op))))

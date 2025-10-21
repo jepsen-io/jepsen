@@ -11,8 +11,9 @@
             [jepsen [checker :as checker]
              [generator :as gen]
              [history :as h]
-                    [store :as store]
-                    [util :as util]]
+             [random :as rand]
+             [store :as store]
+             [util :as util]]
             [jepsen.checker.perf :as perf]
             [gnuplot.core :as g]))
 
@@ -27,9 +28,9 @@
   [test _]
   {:type  :invoke
    :f     :transfer
-   :value {:from    (rand-nth (:accounts test))
-           :to      (rand-nth (:accounts test))
-           :amount  (+ 1 (rand-int (:max-transfer test)))}})
+   :value {:from    (rand/nth (:accounts test))
+           :to      (rand/nth (:accounts test))
+           :amount  (+ 1 (rand/long (:max-transfer test)))}})
 
 (def diff-transfer
   "Transfers only between different accounts."

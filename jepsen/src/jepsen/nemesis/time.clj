@@ -7,7 +7,8 @@
                     [client :as client]
                     [control :as c]
                     [generator :as gen]
-                    [nemesis :as nemesis]]
+                    [nemesis :as nemesis]
+                    [random :as rand]]
             [jepsen.control.util :as cu]
             [clojure.string :as str]
             [clojure.java.io :as io]
@@ -154,7 +155,7 @@
 (def reset-gen
   "Randomized reset generator. Performs resets on random subsets of the test's
   nodes."
-  (reset-gen-select (comp util/random-nonempty-subset :nodes)))
+  (reset-gen-select (comp rand/nonempty-subset :nodes)))
 
 (defn bump-gen-select
   "A function which returns a clock bump generator that bumps the clock from
@@ -167,12 +168,12 @@
      :value (zipmap (select test)
                     (repeatedly
                       (fn rand-offset []
-                        (long (* (rand-nth [-1 1])
-                                 (Math/pow 1.5 (+ 6 (rand 25))))))))}))
+                        (long (* (rand/nth [-1 1])
+                                 (Math/pow 1.5 (+ 6 (rand/double 25))))))))}))
 
 (def bump-gen
   "Randomized clock bump generator targeting a random subsets of nodes."
-  (bump-gen-select (comp util/random-nonempty-subset :nodes)))
+  (bump-gen-select (comp rand/nonempty-subset :nodes)))
 
 (defn strobe-gen-select
   "A function which returns a clock strobe generator that introduces clock
@@ -184,10 +185,11 @@
     {:type  :info
      :f     :strobe
      :value (zipmap (select test)
-                    (repeatedly (fn []
-                                  {:delta (long (Math/pow 2 (+ 2 (rand 16))))
-                                   :period (long (Math/pow 2 (rand 10)))
-                                   :duration (rand 32)})))}))
+                    (repeatedly
+                      (fn []
+                        {:delta (long (Math/pow 2 (+ 2 (rand/double 16))))
+                         :period (long (Math/pow 2 (rand/double 10)))
+                         :duration (rand/double 32)})))}))
 
 (def strobe-gen
   "Randomized clock strobe generator targeting a random subsets of the test's

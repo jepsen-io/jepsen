@@ -8,7 +8,8 @@
   automatically retried."
   (:require [clojure.tools.logging :refer [info warn]]
             [dom-top.core :as dt]
-            [jepsen [reconnect :as rc]]
+            [jepsen [random :as rand]
+                    [reconnect :as rc]]
             [jepsen.control [core :as core]]
             [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -28,7 +29,7 @@
        ~@body
        (catch [:type :jepsen.control/ssh-failed] e#
          (if (pos? tries#)
-           (do (Thread/sleep (+ (/ backoff-time 2) (rand-int backoff-time)))
+           (do (Thread/sleep (+ (/ backoff-time 2) (rand/long backoff-time)))
                (~'retry (dec tries#)))
            (throw+ e#))))))
 

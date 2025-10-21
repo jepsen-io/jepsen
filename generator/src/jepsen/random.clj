@@ -65,6 +65,26 @@
 
   ## Usage
 
+  Here are common Clojure functions and their equivalents in this namespace:
+
+    rand        rand/double
+    rand-int    rand/long
+    rand-nth    rand/nth
+    shuffle     rand/shuffle
+
+  You can also generate values from common distributions:
+
+    rand/exp        Exponential distribution
+    rand/geometric  Geometric distribution
+    rand/zipf       Zipfian distribution
+    rand/weighted   Discrete values with given weights
+
+  You can take random permutations and subsets (really, ordered prefixes of
+  permutations) of collections with:
+
+    rand/shuffle
+    rand/nonempty-subset
+
   To re-bind randomness to a specifically seeded RNG, use:
 
   (jepsen.random/with-seed 5
@@ -76,7 +96,7 @@
   but if those threads are spawned in a nondeterministic order, then their
   calls to jepsen.random will also be nondeterministic.
   "
-  (:refer-clojure :exclude [double long rand-nth shuffle])
+  (:refer-clojure :exclude [double long nth shuffle])
   (:require [clj-commons.primitive-math :as p]
             [clojure.core :as c]
             [clojure.data.generators :as dg]
@@ -283,18 +303,18 @@
 
 ; Choosing things from collections
 
-(defn rand-nth
+(defn nth
   "Like clojure's rand-nth, but uses our RNG."
   [coll]
   (let [c (count coll)]
     (when (= 0 c)
       (throw (IndexOutOfBoundsException.)))
-    (nth coll (long c))))
+    (c/nth coll (long c))))
 
-(defn rand-nth-empty
+(defn nth-empty
   "Like rand-nth, but returns `nil` for empty collections."
   [coll]
-  (try (rand-nth coll)
+  (try (nth coll)
        (catch IndexOutOfBoundsException e nil)))
 
 (defn double-weighted-index
