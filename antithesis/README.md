@@ -5,6 +5,8 @@ provides entropy, lifecycle hooks, and assertions.
 
 ## Installation
 
+[![Clojars Project](https://img.shields.io/clojars/v/io.jepsen/antithesis.svg)](https://clojars.org/io.jepsen/antithesis)
+
 From Clojars, as usual. Note that the Antithesis SDK pulls in an ancient
 version of Jackson, so in your `project.clj`, you'll likely want to prevent
 `io.jepsen/antithesis` from pulling that in:
