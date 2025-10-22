@@ -34,7 +34,10 @@ happened.
 Assertions begin with `assert-`, and take an expression, a message, and data
 to include if the assertion fails. For instance:
 
-(assert-always! (not (db-corrupted?)) \"DB corrupted\" {:db \"foo\"})"
+```clj
+(assert-always! (not (db-corrupted?))
+                "DB corrupted" {:db "foo"})
+```
 
 Ideally, you want to do these *during* the test run, so Antithesis can fail
 fast. Many checks can only be done with the full history, by the checker; for
