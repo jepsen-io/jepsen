@@ -224,12 +224,6 @@
   (^double [] (.nextDouble rng))
   (^double [^double upper] (.nextDouble rng upper))
   (^double [^double lower, ^double upper]
-           ; Fun fact: at least with L64X128MixRandom...
-           ; rng.nextDouble(Double/MIN_VALUE, 0) throws "bound must be greater than origin"
-           ; rng.nextDouble(Double/MIN_VALUE, 1.0) returns values in [0, 1)
-           ; rng.nextDouble(Double/MIN_VALUE, Double/MAX_VALUE) returns values
-           ; around 10^305 -- 10^308.
-           ; I don't know how to go about reporting or fixing this
            (.nextDouble rng lower upper)))
 
 ;; Nonuniform distributions
