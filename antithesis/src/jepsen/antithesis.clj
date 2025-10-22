@@ -10,8 +10,9 @@
 
   ## Lifecycle
 
-  Call `setup-complete!` once the test is ready to begin. Call `event!` to
-  signal interesting things have happened.
+  Call `setup-complete!` once the test is ready to begin--for instance, at the
+  end of Client/setup. Call `event!` to signal interesting things have
+  happened.
 
   ## Assertions
 

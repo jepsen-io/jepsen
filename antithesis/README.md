@@ -3,6 +3,20 @@
 This library supports running Jepsen tests inside Antithesis environments. It
 provides entropy, lifecycle hooks, and assertions.
 
+## Installation
+
+From Clojars, as usual. Note that the Antithesis SDK pulls in an ancient
+version of Jackson, so in your `project.clj`, you'll likely want to prevent
+`io.jepsen/antithesis` from pulling that in:
+
+```clj
+  :dependencies [...
+                 [io.jepsen/antithesis "0.1.0"
+                  :exclusions [com.fasterxml.jackson.core/jackson-databind]]
+```
+
+The main namespace is [`jepsen.antithesis`](src/jepsen/antithesis.clj).
+
 ## Randomness
 
 You should wrap your entire program in `(with-rng ...)`. This does nothing in
@@ -11,8 +25,9 @@ with one powered by Antithesis.
 
 ## Lifecycle
 
-Call `setup-complete!` once the test is ready to begin. Call `event!` to
-signal interesting things have happened.
+Call `setup-complete!` once the test is ready to begin--for instance, at the
+end of `Client/setup!`. Call `event!` to signal interesting things have
+happened.
 
 ## Assertions
 
@@ -20,6 +35,18 @@ Assertions begin with `assert-`, and take an expression, a message, and data
 to include if the assertion fails. For instance:
 
 (assert-always! (not (db-corrupted?)) \"DB corrupted\" {:db \"foo\"})"
+
+Ideally, you want to do these *during* the test run, so Antithesis can fail
+fast. Many checks can only be done with the full history, by the checker; for
+these, assert test validity in the checker itself:
+
+```clj
+(defrecord MyChecker []
+  (check [_ test history opts]
+    ...
+    (a/assert-always (true? valid?) "checker valid" a)
+    {:valid? valid? ...}))
+```
 
 ## License
 
