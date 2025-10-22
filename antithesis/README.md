@@ -1,14 +1,29 @@
-# antithesis
+# jepsen.antithesis
 
-A Clojure library designed to ... well, that part is up to you.
+This library supports running Jepsen tests inside Antithesis environments. It
+provides entropy, lifecycle hooks, and assertions.
 
-## Usage
+## Randomness
 
-FIXME
+You should wrap your entire program in `(with-rng ...)`. This does nothing in
+ordinary environments, but in Antithesis, it replaces the jepsen.random RNG
+with one powered by Antithesis.
+
+## Lifecycle
+
+Call `setup-complete!` once the test is ready to begin. Call `event!` to
+signal interesting things have happened.
+
+## Assertions
+
+Assertions begin with `assert-`, and take an expression, a message, and data
+to include if the assertion fails. For instance:
+
+(assert-always! (not (db-corrupted?)) \"DB corrupted\" {:db \"foo\"})"
 
 ## License
 
-Copyright © 2025 FIXME
+Copyright © Jepsen, LLC
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at
