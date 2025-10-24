@@ -440,10 +440,13 @@
       (do ; Note that we leave the cache unbound, so that both normal and AOT
           ; compiled contexts will see an unbound cache on first run.
           (eval `(def ~cache))
-          `(do (when (not (bound? (var ~cache)))
+          ; lmao you'd THINk you want (bound?) here, but that ONLY has a
+          ; varargs form, so even single-arg calls go through every? and seq
+          ; machinery.
+          `(do (when (not (.isBound (var ~cache)))
                  ; First run; initialize.
                  (locking ~cache
-                   (when (not (bound? (var ~cache)))
+                   (when (not (.isBound (var ~cache)))
                      (let [~weights (double-array ~n)]
                        ; We won the lock race; fill in weights.
                        ;(prn :init ~cache)
