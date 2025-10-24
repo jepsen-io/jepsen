@@ -311,6 +311,20 @@
   (try (nth coll)
        (catch IndexOutOfBoundsException e nil)))
 
+(defn all-zero-doubles?
+  "Takes a double array and returns true iff it contains only 0.0. We use this
+  as a sentinel value for weight arrays."
+  [^doubles xs]
+  (loop [i 0]
+    (cond (p/== i (alength xs))
+          true
+
+          (p/not== 0.0 (aget xs i))
+          false
+
+          true
+          (recur (p/inc i)))))
+
 (defn double-weighted-index
   "Takes a total weight and an array of double weights for a weighted discrete
   distribution. Generates a random long index into those weights, with
@@ -374,6 +388,61 @@
   time. This is slow; see weighted-choice-fn for a faster variant."
   [choices]
   ((weighted-fn choices)))
+
+(defmacro branch
+  "Like a random `cond`: takes several forms and evaluates one of them at
+  random. With zero arguments, returns nil."
+  [& forms]
+  (case (count forms)
+    0 nil
+    1 (first forms)
+    `(case (long ~(count forms))
+       ~@(->> forms
+              (map-indexed vector)
+              (mapcat identity)))))
+
+(defmacro weighted-branch
+  "Like `branch`, but where the probability of each branch is proportionate to
+  its weight. Like `weighted`, but since this is a macro, it only evaluates a
+  single branch, not all of them. For example, to print :x 30% of the time, and
+  :y 70%...
+
+    (weighted-branch
+      3 (prn :x)
+      7 (prn :y))
+
+  Weights must be run-time constant, but can be arbitrary expressions. Weights
+  are evaluated on the first invocation of the macro's code, and cached
+  thereafter. This makes `weighted-branch` significantly faster than
+  `weighted`."
+  [& branches]
+  (assert (even? (count branches)))
+  (let [pairs        (partition 2 branches)
+        n            (count pairs)
+        weight-forms (mapv first pairs)
+        branch-forms (mapv second pairs)
+        ; We keep an array of weights, which is initialized on first call
+        weights      (-> (gensym 'weighted-branch-weights)
+                         (vary-meta assoc :private true))]
+    (case n
+      0 nil
+      1 (first branch-forms)
+      (do (eval `(def ~weights (double-array ~n)))
+          `(do (when (all-zero-doubles? ~weights)
+                 ; First run; initialize.
+                 (locking ~weights
+                   (when (all-zero-doubles? ~weights)
+                     ; We won the lock race; fill in weights. Technically
+                     ; there's a race here because we might have another thread
+                     ; observe part but not all of the weights, but that's not
+                     ; going to be a huge bias over repeated invocations.
+                     ~@(map-indexed (fn [i weight-form]
+                                      `(aset-double ~weights ~i ~weight-form))
+                                    weight-forms))))
+               (case (double-weighted-index ~weights)
+                 ~@(->> branch-forms
+                        (map-indexed vector)
+                        (mapcat identity))))))))
 
 (defn shuffle
   "Like Clojure shuffle, but based on our RNG. We use a Fisher-Yates shuffle

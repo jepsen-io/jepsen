@@ -220,6 +220,59 @@
         (is (= {:b 644, :a 654, :c 649}
                (frequencies (mapcat identity xs))))))))
 
+(deftest branch-test
+  (testing "empty"
+    (is (nil? (r/branch))))
+
+  (testing "single"
+    (is (= :x (r/branch :x))))
+
+  (testing "uniform"
+    (r/with-seed 6
+      (is (= {:x 335, :y 329, :z 336}
+             (frequencies (s 1000 (r/branch :x :y :z)))))))
+
+  (testing "side effects"
+    (let [side (atom 0)]
+      (r/branch (swap! side inc)
+                (swap! side inc))
+      (is (= 1 @side)))))
+
+(deftest weighted-branch-test
+  (testing "empty"
+    (is (nil? (r/weighted-branch))))
+
+  (testing "single"
+    (is (= :x (r/weighted-branch 5 :x))))
+
+  (testing "weights"
+    (r/with-seed 0
+      (is (= 0.17604976911089176 (r/double)))
+      (is (= 0.07473821244042433 (r/double)))
+      (is (= 0.8354507823249513  (r/double))))
+    (r/with-seed 0
+      ; Note that weighted-branch can take non-constant expressions
+      ; for weights, which are evaluated once. If we used random weights
+      ; each time, we'd expect a uniform distribution of values. However,
+      ; here we get *exactly* the sequence of weights produced by
+      ; r/double called three times with seed 0, as checked above.
+      (is (= {:x 141, :y 74, :z 785}
+             (frequencies
+               (s 1000 (r/weighted-branch (r/double) :x
+                                          (r/double) :y
+                                          (r/double) :z)))))))
+
+  (testing "side effects"
+    (let [weight-side (atom [])
+          branch-side (atom 0)]
+      (r/weighted-branch (do (swap! weight-side conj 2) 2)
+                         (swap! branch-side inc)
+
+                         (do (swap! weight-side conj 3) 3)
+                         (swap! branch-side inc))
+      (is (= [2 3] @weight-side))
+      (is (= 1 @branch-side)))))
+
 ; Perf
 
 (deftest ^:perf weighted-perf
