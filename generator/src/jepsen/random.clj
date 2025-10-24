@@ -85,6 +85,11 @@
     rand/shuffle
     rand/nonempty-subset
 
+  There are two macros for randomly branching control flow:
+
+    rand/branch
+    rand/weighted-branch
+
   To re-bind randomness to a specifically seeded RNG, use:
 
   (jepsen.random/with-seed 5
@@ -401,22 +406,7 @@
               (map-indexed vector)
               (mapcat identity)))))
 
-(definterface IWeightedBranchCache
-  ; Returns total weight
-  (^double total_weight [])
-  ; Updates the total weight based on the weights.
-  (seal []))
-
-(deftype WeightedBranchCache
-  [^double  ^:volatile-mutable total-weight ; -1.0 means uninitialized
-   ^doubles weights]
-  IWeightedBranchCache
-  (total_weight [this] total-weight)
-
-  (seal [this]
-    (set! total-weight
-          (double (areduce weights i ret 0.0 (+ ret (aget weights i)))))
-    this))
+(defrecord WeightedBranchCache [^double total-weight, ^doubles weights])
 
 (defmacro weighted-branch
   "Like `branch`, but where the probability of each branch is proportionate to
@@ -424,9 +414,9 @@
   single branch, not all of them. For example, to print :x 30% of the time, and
   :y 70%...
 
-    (weighted-branch
-      3 (prn :x)
-      7 (prn :y))
+  (weighted-branch
+  3 (prn :x)
+  7 (prn :y))
 
   Weights must be run-time constant, but can be arbitrary expressions. Weights
   are evaluated on the first invocation of the macro's code, and cached
@@ -438,31 +428,41 @@
         n            (count pairs)
         weight-forms (mapv first pairs)
         branch-forms (mapv second pairs)
+        weights      (gensym 'weights)
         ; We def a cache for each use of this macro
-        cache        (-> (gensym 'weighted-branch-weights)
+        cache        (-> (gensym 'weighted-branch-cache)
                          (vary-meta assoc
                                     :private true
                                     :tag 'jepsen.random.WeightedBranchCache))]
     (case n
       0 nil
       1 (first branch-forms)
-      (do (eval `(def ~cache (WeightedBranchCache. -1.0 (double-array ~n))))
-          `(let []
-             (when (p/== -1.0 (.total-weight ~cache))
-               ; First run; initialize.
-               (locking ~cache
-                 (when (p/== -1.0 (.total-weight ~cache))
-                   ; We won the lock race; fill in weights.
-                   ~@(map-indexed (fn [i weight-form]
-                                    `(aset-double (.weights ~cache)
-                                                  ~i ~weight-form))
-                                  weight-forms)
-                   (.seal ~cache))))
-             (case (double-weighted-index (.total-weight ~cache)
-                                          (.weights ~cache))
-               ~@(->> branch-forms
-                      (map-indexed vector)
-                      (mapcat identity))))))))
+      (do ; Note that we leave the cache unbound, so that both normal and AOT
+          ; compiled contexts will see an unbound cache on first run.
+          (eval `(def ~cache))
+          `(do (when (not (bound? (var ~cache)))
+                 ; First run; initialize.
+                 (locking ~cache
+                   (when (not (bound? (var ~cache)))
+                     (let [~weights (double-array ~n)]
+                       ; We won the lock race; fill in weights.
+                       ;(prn :init ~cache)
+                       ~@(map-indexed (fn [i weight-form]
+                                        `(aset-double ~weights
+                                                      ~i ~weight-form))
+                                      weight-forms)
+                       (let [total# (c/double
+                                     (areduce ~weights i# ret# 0.0
+                                              (+ ret# (aget ~weights i#))))]
+
+                         (alter-var-root (var ~cache)
+                                         (constantly
+                                           (WeightedBranchCache. total# ~weights))))))))
+               (case (double-weighted-index (.total-weight ~cache)
+                                            (.weights ~cache))
+                 ~@(->> branch-forms
+                        (map-indexed vector)
+                        (mapcat identity))))))))
 
 (defn shuffle
   "Like Clojure shuffle, but based on our RNG. We use a Fisher-Yates shuffle

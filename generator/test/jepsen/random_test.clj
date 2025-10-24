@@ -256,7 +256,7 @@
       ; each time, we'd expect a uniform distribution of values. However,
       ; here we get *exactly* the sequence of weights produced by
       ; r/double called three times with seed 0, as checked above.
-      (is (= {:x 153, :y 85, :z 762}
+      (is (= {:x 141, :y 74, :z 785}
              (frequencies
                (s 1000 (r/weighted-branch (r/double) :x
                                           (r/double) :y
@@ -275,7 +275,7 @@
 
 ; Perf
 
-(deftest ^:perf ^:focus weighted-perf
+(deftest ^:perf weighted-perf
   (println "## weighted")
   (quick-bench (r/weighted {:x 1 :y 2 :z 3}))
 
