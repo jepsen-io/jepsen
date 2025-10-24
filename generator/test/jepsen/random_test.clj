@@ -256,7 +256,7 @@
       ; each time, we'd expect a uniform distribution of values. However,
       ; here we get *exactly* the sequence of weights produced by
       ; r/double called three times with seed 0, as checked above.
-      (is (= {:x 141, :y 74, :z 785}
+      (is (= {:x 153, :y 85, :z 762}
              (frequencies
                (s 1000 (r/weighted-branch (r/double) :x
                                           (r/double) :y
@@ -275,13 +275,17 @@
 
 ; Perf
 
-(deftest ^:perf weighted-perf
+(deftest ^:perf ^:focus weighted-perf
   (println "## weighted")
   (quick-bench (r/weighted {:x 1 :y 2 :z 3}))
 
-  (println "## weighted fn")
+  (println "## weighted-fn")
   (let [f (r/weighted-fn {:x 1 :y 2 :z 3})]
-    (quick-bench (f))))
+    (quick-bench (f)))
+
+  (println "## weighted-branch")
+  (quick-bench
+    (r/weighted-branch 1 :x 2 :y 3 :z)))
 
 (deftest ^:perf rand-long-perf
   (println "# Bare Clojure rand-int")

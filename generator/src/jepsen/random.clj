@@ -401,6 +401,23 @@
               (map-indexed vector)
               (mapcat identity)))))
 
+(definterface IWeightedBranchCache
+  ; Returns total weight
+  (^double total_weight [])
+  ; Updates the total weight based on the weights.
+  (seal []))
+
+(deftype WeightedBranchCache
+  [^double  ^:volatile-mutable total-weight ; -1.0 means uninitialized
+   ^doubles weights]
+  IWeightedBranchCache
+  (total_weight [this] total-weight)
+
+  (seal [this]
+    (set! total-weight
+          (double (areduce weights i ret 0.0 (+ ret (aget weights i)))))
+    this))
+
 (defmacro weighted-branch
   "Like `branch`, but where the probability of each branch is proportionate to
   its weight. Like `weighted`, but since this is a macro, it only evaluates a
@@ -421,28 +438,31 @@
         n            (count pairs)
         weight-forms (mapv first pairs)
         branch-forms (mapv second pairs)
-        ; We keep an array of weights, which is initialized on first call
-        weights      (-> (gensym 'weighted-branch-weights)
-                         (vary-meta assoc :private true))]
+        ; We def a cache for each use of this macro
+        cache        (-> (gensym 'weighted-branch-weights)
+                         (vary-meta assoc
+                                    :private true
+                                    :tag 'jepsen.random.WeightedBranchCache))]
     (case n
       0 nil
       1 (first branch-forms)
-      (do (eval `(def ~weights (double-array ~n)))
-          `(do (when (all-zero-doubles? ~weights)
-                 ; First run; initialize.
-                 (locking ~weights
-                   (when (all-zero-doubles? ~weights)
-                     ; We won the lock race; fill in weights. Technically
-                     ; there's a race here because we might have another thread
-                     ; observe part but not all of the weights, but that's not
-                     ; going to be a huge bias over repeated invocations.
-                     ~@(map-indexed (fn [i weight-form]
-                                      `(aset-double ~weights ~i ~weight-form))
-                                    weight-forms))))
-               (case (double-weighted-index ~weights)
-                 ~@(->> branch-forms
-                        (map-indexed vector)
-                        (mapcat identity))))))))
+      (do (eval `(def ~cache (WeightedBranchCache. -1.0 (double-array ~n))))
+          `(let []
+             (when (p/== -1.0 (.total-weight ~cache))
+               ; First run; initialize.
+               (locking ~cache
+                 (when (p/== -1.0 (.total-weight ~cache))
+                   ; We won the lock race; fill in weights.
+                   ~@(map-indexed (fn [i weight-form]
+                                    `(aset-double (.weights ~cache)
+                                                  ~i ~weight-form))
+                                  weight-forms)
+                   (.seal ~cache))))
+             (case (double-weighted-index (.total-weight ~cache)
+                                          (.weights ~cache))
+               ~@(->> branch-forms
+                      (map-indexed vector)
+                      (mapcat identity))))))))
 
 (defn shuffle
   "Like Clojure shuffle, but based on our RNG. We use a Fisher-Yates shuffle
