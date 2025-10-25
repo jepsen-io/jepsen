@@ -74,6 +74,7 @@
 
   You can also generate values from common distributions:
 
+    rand/bool       Returns true or false, optionally with a probability
     rand/exp        Exponential distribution
     rand/geometric  Geometric distribution
     rand/zipf       Zipfian distribution
@@ -230,6 +231,13 @@
   (^double [^double upper] (.nextDouble rng upper))
   (^double [^double lower, ^double upper]
            (.nextDouble rng lower upper)))
+
+(defn bool
+  "Generates a boolean. With no arguments, has a 50% chance of being true.
+  Optionally takes a probability (in [0,1]) of being true."
+  ([] (.nextBoolean rng))
+  ([^double p]
+   (p/< (double) p)))
 
 ;; Nonuniform distributions
 

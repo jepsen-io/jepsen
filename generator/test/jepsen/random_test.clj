@@ -144,6 +144,26 @@
 			(testing "mean"
   			(is (= 2.001 (mean xs)))))))
 
+(deftest bool-test
+  (testing "no args"
+    (r/with-seed 53453
+      (let [xs (s 1000 (r/bool))]
+        (testing "example"
+          (is (= [true true false false false false true true false true]
+                 (take 10 xs)))
+          (testing "uniform"
+            (is (= {true 503, false 497}
+                   (frequencies xs))))))))
+  (testing "with probability"
+    (r/with-seed 53453
+      (let [xs (s 1000 (r/bool 0.9))]
+        (testing "example"
+          (is (= [true false true true true true true true true false]
+                 (take 10 xs)))
+          (testing "uniform"
+            (is (= {true 903, false 97}
+                   (frequencies xs)))))))))
+
 (deftest zipf-test
   (r/with-seed 13
     (let [xs (s 100000 (r/zipf 5))]
