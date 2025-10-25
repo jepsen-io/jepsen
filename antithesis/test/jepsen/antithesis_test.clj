@@ -64,3 +64,34 @@
                 (dotimes [i 1000]
                   (is (<= -10 (rand/double -5 -2) -2))))))
           )))))
+
+(deftest choices-test
+  ; We redefine `jepsen.random`'s `long` and `double-weighted-index` so that they use the
+  ; Antithesis randomChoice (for small choices) instead of weighted entropy.
+  ; This should hopefully make Antithesis more efficient at exploring branches.
+  ; Of course we have no way to TEST this outside Antithesis, since it just
+  ; proxies back to j.u.Random, but we can at least make sure it's uniform
+  ; rather than weighted.
+  (let [weights (double-array [0.0 1.0])]
+    (testing "stock"
+      (dotimes [i 100]
+        (is (== 1.0 (rand/double-weighted-index weights)))))
+
+    (testing "antithesis"
+      (with-redefs [a/antithesis? (constantly true)]
+        (a/with-rng
+          (testing "double-weighted-index"
+            (let [freqs (->> #(rand/double-weighted-index weights)
+                             repeatedly
+                             (take 1000)
+                             frequencies)]
+              (is (= #{0 1} (set (keys freqs))))
+              (is (< (Math/abs (- (freqs 0 0) (freqs 1 0))) 100))))
+
+          (testing "long"
+            ; Long's behavior should be uniform random either way, but we can
+            ; at least check the range.
+            (doseq [i (range 1 100)]
+              (is (< (rand/long i) i))
+              ; Just adding some offset (41) to check long's lower/upper bounds
+              (is (< 40 (rand/long 41 (+ i 41)) (+ i 41))))))))))

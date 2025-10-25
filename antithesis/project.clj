@@ -7,4 +7,8 @@
                  [com.antithesis/sdk "1.4.4"]]
   :java-source-paths ["src"]
   :javac-options ["--release" "17"]
-  :repl-options {:init-ns jepsen.antithesis})
+  :repl-options {:init-ns jepsen.antithesis}
+  :test-selectors {:default (fn [m]
+                              (not (:perf m)))
+                   :focus :focus
+                   :perf :perf})

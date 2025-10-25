@@ -107,6 +107,33 @@
 
 ;; Randomness
 
+(defn replacement-double-weighted-index
+  "Antithesis replacement for jepsen.random/double-weighted-index. Takes a
+  double array, and picks a random index into it."
+  (^long [^doubles weights]
+         (replacement-double-weighted-index 0.0 weights))
+  (^long [^double total-weight ^doubles weights]
+         (.randomChoice ^Random rand/rng (range (alength weights)))))
+
+(def choice-cardinality
+  "When selecting long values, we consider something an Antithesis \"choice\"
+  if it asks for at most this many elements."
+  16)
+
+(defn replacement-long
+  "Antithesis replacement for `jepsen.random/long`. Mostly equivalent to the
+  original, but when there are less than `choice-cardinality` options, hints to
+  Antithesis that we're making a specific choice."
+  (^long [] (.nextLong rand/rng))
+  (^long [^long upper]
+         (if (< 0 upper choice-cardinality)
+           (.randomChoice ^Random rand/rng (range upper))
+           (.nextLong rand/rng upper)))
+  (^long [^long lower, ^long upper]
+         (if (< 0 (- upper lower) choice-cardinality)
+           (.randomChoice ^Random rand/rng (range lower upper))
+           (.nextLong rand/rng lower upper))))
+
 (defmacro with-rng
   "When running in an Antithesis environment, replaces Jepsen's random source
   with an Antithesis-controlled source. You should wrap your top-level program
@@ -115,7 +142,11 @@
   `(rand/with-rng (if (antithesis?)
                     (Random.)
                     rand/rng)
-     ~@body))
+     (with-redefs [jepsen.random/double-weighted-index
+                   replacement-double-weighted-index
+
+                   jepsen.random/long replacement-long]
+       ~@body)))
 
 ;; Lifecycle
 

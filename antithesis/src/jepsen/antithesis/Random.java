@@ -31,4 +31,8 @@ public class Random implements RandomGenerator {
   public boolean nextBoolean() {
     return r.randomChoice(booleans);
   }
+
+  public <T> T randomChoice(List<T> list) {
+    return r.randomChoice(list);
+  }
 }
