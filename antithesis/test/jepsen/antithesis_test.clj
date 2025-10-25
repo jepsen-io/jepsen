@@ -94,4 +94,18 @@
             (doseq [i (range 1 100)]
               (is (< (rand/long i) i))
               ; Just adding some offset (41) to check long's lower/upper bounds
-              (is (< 40 (rand/long 41 (+ i 41)) (+ i 41))))))))))
+              (is (< 40 (rand/long 41 (+ i 41)) (+ i 41)))))
+
+          (testing "bool"
+            ; Weighted booleans should stop being weighted when Antithesis takes over
+            (let [freqs (->> #(rand/bool 1/10)
+                             repeatedly
+                             (take 1000)
+                             frequencies)]
+              (is (< (Math/abs (- (freqs true 0) (freqs false 0))) 100)))
+            ; Unless their probability is extreme
+            (let [freqs (->> #(rand/bool 1/100)
+                             repeatedly
+                             (take 1000)
+                             frequencies)]
+              (is (< (freqs true 0) 50)))))))))

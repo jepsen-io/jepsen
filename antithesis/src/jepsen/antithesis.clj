@@ -134,6 +134,17 @@
            (.randomChoice ^Random rand/rng (range lower upper))
            (.nextLong rand/rng lower upper))))
 
+(defn replacement-bool
+  "Antithesis replacement for `jepsen.random/bool`. Uses Antithesis choices
+  when probabilities are closer to chance than choice-cardinality."
+  ([] (.nextBoolean ^Random rand/rng))
+  ([^double p]
+   (if (< (/ choice-cardinality)
+          p
+          (- 1 (/ choice-cardinality)))
+     (.nextBoolean ^Random rand/rng)
+     (< (rand/double) p))))
+
 (defmacro with-rng
   "When running in an Antithesis environment, replaces Jepsen's random source
   with an Antithesis-controlled source. You should wrap your top-level program
@@ -150,7 +161,12 @@
                    jepsen.random/long
                    (if (antithesis?)
                      replacement-long
-                     rand/long)]
+                     rand/long)
+
+                   jepsen.random/bool
+                   (if (antithesis?)
+                     replacement-bool
+                     rand/bool)]
        ~@body)))
 
 ;; Lifecycle
