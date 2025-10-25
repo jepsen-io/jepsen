@@ -143,9 +143,14 @@
                     (Random.)
                     rand/rng)
      (with-redefs [jepsen.random/double-weighted-index
-                   replacement-double-weighted-index
+                   (if (antithesis?)
+                     replacement-double-weighted-index
+                     rand/double-weighted-index)
 
-                   jepsen.random/long replacement-long]
+                   jepsen.random/long
+                   (if (antithesis?)
+                     replacement-long
+                     rand/long)]
        ~@body)))
 
 ;; Lifecycle
