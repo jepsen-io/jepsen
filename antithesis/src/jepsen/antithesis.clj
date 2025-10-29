@@ -352,5 +352,4 @@
   [test]
   (-> test
       (update :client client)
-      (update checker checker+)))
-
+      (update :checker checker+)))
