@@ -279,7 +279,9 @@
   and issues a pair of assertions for every operation--once on invocation, and
   once on completion."
   [client]
-  (Client. client))
+  (if (antithesis?)
+    (Client. client)
+    client))
 
 (defrecord Checker [^String name checker]
   checker/Checker
@@ -295,7 +297,9 @@
   ([checker-]
    (checker "checker" checker-))
   ([name checker]
-   (Checker. name checker)))
+   (if (antithesis?)
+     (Checker. name checker)
+     checker)))
 
 (defn checker+
   "Rewrites a Jepsen Checker, wrapping every Checker in its own Antithesis

@@ -116,89 +116,92 @@
 (deftest client-test
   ; Clients should inform us they started, and also make assertions about
   ; invocations.
-  (let [side (atom [])
-        client (reify client/Client
-                 (open! [this test node]
-                   (swap! side conj :open)
-                   this)
+  (with-redefs [a/antithesis? (constantly true)]
+    (let [side (atom [])
+          client (reify client/Client
+                   (open! [this test node]
+                     (swap! side conj :open)
+                     this)
 
-                 (setup! [this test]
-                   (swap! side conj :setup))
+                   (setup! [this test]
+                     (swap! side conj :setup))
 
-                 (invoke! [this test op]
-                   (swap! side conj :invoke)
-                   (assoc op :type :ok))
+                   (invoke! [this test op]
+                     (swap! side conj :invoke)
+                     (assoc op :type :ok))
 
-                 (teardown! [this test]
-                   (swap! side conj :teardown))
+                   (teardown! [this test]
+                     (swap! side conj :teardown))
 
-                 (close! [this test]
-                   (swap! side conj :close)))
-        client' (a/client client)]
-    ; Since assertions are macros, not sure how to test them.
-    (let [sc! a/setup-complete!]
-      (with-redefs [a/setup-complete! (fn
-                                        ([] (a/setup-complete! nil))
-                                        ([details] (swap! side conj :setup-complete) (sc! details)))]
-        (let [client (client/open! client' {} "n1")]
-          (is (= [:open] @side))
-          (client/setup! client' {})
-          (is (= [:open :setup :setup-complete] @side))
-          (is (= :ok (:type (client/invoke! client' {} {:type :invoke}))))
-          (client/teardown! client' {})
-          (client/close! client {})
-          (is (= [:open :setup :setup-complete :invoke :teardown :close]
-                 @side)))))))
+                   (close! [this test]
+                     (swap! side conj :close)))
+          client' (a/client client)]
+      ; Since assertions are macros, not sure how to test them.
+      (let [sc! a/setup-complete!]
+        (with-redefs [a/setup-complete! (fn
+                                          ([] (a/setup-complete! nil))
+                                          ([details] (swap! side conj :setup-complete) (sc! details)))]
+          (let [client (client/open! client' {} "n1")]
+            (is (= [:open] @side))
+            (client/setup! client' {})
+            (is (= [:open :setup :setup-complete] @side))
+            (is (= :ok (:type (client/invoke! client' {} {:type :invoke}))))
+            (client/teardown! client' {})
+            (client/close! client {})
+            (is (= [:open :setup :setup-complete :invoke :teardown :close]
+                   @side))))))))
 
 (deftest checker-test
   ; Checkers should assert validity. Again, I have no way to test this, since
   ; they're macros, but we can at least guarantee they proxy through.
-  (let [side (atom [])
-        checker (reify checker/Checker
-                  (check [this test history opts]
-                    (swap! side conj :check)
-                    {:valid? true}))
-        checker' (a/checker checker)]
-    (is (= {:valid? true} (checker/check checker' {} [] {})))
-    (is (= [:check] @side))))
+  (with-redefs [a/antithesis? (constantly true)]
+    (let [side (atom [])
+          checker (reify checker/Checker
+                    (check [this test history opts]
+                      (swap! side conj :check)
+                      {:valid? true}))
+          checker' (a/checker checker)]
+      (is (= {:valid? true} (checker/check checker' {} [] {})))
+      (is (= [:check] @side)))))
 
 (deftest checker+-test
   ; If we nest one checker in another via e.g. `compose`, each one should get a
   ; distinct wrapper.
-  (let [side (atom [])
-        cat (reify checker/Checker
-              (check [this test history opts]
-                (swap! side conj :cat)
-                {:type :cat, :valid? true}))
+  (with-redefs [a/antithesis? (constantly true)]
+    (let [side (atom [])
+          cat (reify checker/Checker
+                (check [this test history opts]
+                  (swap! side conj :cat)
+                  {:type :cat, :valid? true}))
 
-        dog (reify checker/Checker
-              (check [this test history opts]
-                (swap! side conj :dog)
-                {:type :dog, :valid? :unknown}))
+          dog (reify checker/Checker
+                (check [this test history opts]
+                  (swap! side conj :dog)
+                  {:type :dog, :valid? :unknown}))
 
-        checker (checker/compose {:cat cat, :dog dog})
-        checker' (a/checker+ checker)
-        ; We can ask for instance? a.Checker, but that breaks during hot code
-        ; reload
-        ac? (fn [x]
-              (is (= "jepsen.antithesis.Checker"
-                     (-> x class .getName))))]
-    ;(prn)
-    ;(println "-----")
-    ;(prn)
-    ;(pprint checker')
-    ; Obviously
-    (is (ac? checker'))
-    ; But also
-    (is (ac? (-> checker' :checker :checkers :cat)))
-    (is (ac? (-> checker' :checker :checkers :dog)))
+          checker (checker/compose {:cat cat, :dog dog})
+          checker' (a/checker+ checker)
+          ; We can ask for instance? a.Checker, but that breaks during hot code
+          ; reload
+          ac? (fn [x]
+                (is (= "jepsen.antithesis.Checker"
+                       (-> x class .getName))))]
+      ;(prn)
+      ;(println "-----")
+      ;(prn)
+      ;(pprint checker')
+      ; Obviously
+      (is (ac? checker'))
+      ; But also
+      (is (ac? (-> checker' :checker :checkers :cat)))
+      (is (ac? (-> checker' :checker :checkers :dog)))
 
-    ; Paths should be nice and clean
-    (is (= "checker :cat" (-> checker' :checker :checkers :cat :name)))
-    (is (= "checker :dog" (-> checker' :checker :checkers :dog :name)))
+      ; Paths should be nice and clean
+      (is (= "checker :cat" (-> checker' :checker :checkers :cat :name)))
+      (is (= "checker :dog" (-> checker' :checker :checkers :dog :name)))
 
-    ; This should still work like a checker
-    (is (= {:valid? :unknown
-            :cat {:type :cat, :valid? true}
-            :dog {:type :dog, :valid? :unknown}}
-            (checker/check checker' {} [] {})))))
+      ; This should still work like a checker
+      (is (= {:valid? :unknown
+              :cat {:type :cat, :valid? true}
+              :dog {:type :dog, :valid? :unknown}}
+             (checker/check checker' {} [] {}))))))
