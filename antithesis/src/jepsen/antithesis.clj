@@ -19,11 +19,22 @@
   Assertions begin with `assert-`, and take an expression, a message, and data
   to include if the assertion fails. For instance:
 
-    (assert-always! (not (db-corrupted?)) \"DB corrupted\" {:db \"foo\"})"
-  (:require [clojure [pprint :refer [pprint]]]
+    (assert-always! (not (db-corrupted?)) \"DB corrupted\" {:db \"foo\"})
+
+  ## Wrappers
+
+  Wrap your test map in `(a/test test-map)`. This wraps both the client and
+  checkers with Antithesis instrumentation. You can also do this selectively
+  using `checker` and `client`."
+  (:refer-clojure :exclude [test])
+  (:require [clojure [pprint :refer [pprint]]
+                     [string :as str]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info]]
-            [jepsen.random :as rand])
+            [jepsen [checker :as checker]
+                    [client :as client]
+                    [generator :as gen]
+                    [random :as rand]])
   (:import (com.antithesis.sdk Assert
                                Lifecycle)
            (com.fasterxml.jackson.databind ObjectMapper)
@@ -215,9 +226,131 @@
 (defmacro assert-unreachable
   "Asserts that this line of code is never reached."
   [message data]
-  `(Assert/unreachable ~message ~data))
+  `(Assert/unreachable ~message (->json-node ~data)))
 
 (defmacro assert-reachable
   "Asserts that this line of code is reached at least once."
   [message data]
-  `(Assert/reachable ~message ~data))
+  `(Assert/reachable ~message (->json-node ~data)))
+
+;; Client
+
+(defrecord Client [client]
+  client/Client
+  (open! [this test node]
+    (Client. (client/open! client test node)))
+
+  (setup! [this test]
+    (let [r (client/setup! client test)]
+      (setup-complete!)
+      r))
+
+  (invoke! [this test op]
+    ; Every Jepsen run should do at *least* one invocation. We emit one of
+    ; these for each kind of :f the client does. TODO: I'm not sure if we
+    ; should provide details or not.
+    ;
+    ; TODO: is it acceptable for us to runtime generate the name for this
+    ; assertion? My guess is that whatever magic instrumentation Antithesis'
+    ; SDK is doing might expect compile-time constants here, but the SDK docs
+    ; don't say.
+    (assert-reachable (str "invoke "  (pr-str (:f op))) {})
+    (let [op' (client/invoke! client test op)]
+      ; We'd like at least one invocation to succeed.
+      ;
+      ; TODO: is this OK? It feels like Antithesis could trivially generate a
+      ; counterexample by just making the system unavailable, and that's not
+      ; actually a bug. What SHOULD I be doing here?
+      (assert-sometimes (identical? :ok (:type op'))
+                        (str "ok " (pr-str (:f op)))
+                        ; We'll at least log the type it came back with?
+                        (select-keys op' [:type]))
+      op'))
+
+  (teardown! [this test]
+    (client/teardown! client test))
+
+  (close! [this test]
+    (client/close! client test)))
+
+(defn client
+  "Wraps a Jepsen Client in one which performs some simple Antithesis
+  instrumentation. Calls `setup-complete!` after the client's setup is done,
+  and issues a pair of assertions for every operation--once on invocation, and
+  once on completion."
+  [client]
+  (Client. client))
+
+(defrecord Checker [^String name checker]
+  checker/Checker
+  (check [this test history opts]
+    (let [r (checker/check checker test history opts)]
+      (assert-always (true? (:valid? r)) name r)
+      r)))
+
+(defn checker
+  "Wraps a Jepsen Checker in one which asserts the results of the underlying
+  checker are valid. Takes a string name, which defaults to \"checker\"; this
+  is used for the Antithesis assertion."
+  ([checker-]
+   (checker "checker" checker-))
+  ([name checker]
+   (Checker. name checker)))
+
+(defn checker+
+  "Rewrites a Jepsen Checker, wrapping every Checker in its own Antithesis
+  Checker, which asserts validity of that specific checker. Each checker gets a
+  name derived from the path into that data structure it took to get there."
+  ([c]
+   (checker+ ["checker"] c))
+  ([path c]
+   ; (prn :rewrite path c)
+   (let [; We often rewrite singleton maps; in these cases, don't bother
+         ; propagating paths. For example, a Compose has only a single key
+         ; :checkers, and we don't need to generate names like "checker
+         ; :checkers :cat"; we can just do "checker :cat".
+         branch? (and (coll? c) (< 1 (count c)))
+         ; Rewrite child forms
+         c' (cond ; For maps and records, rewrite each value, using the key as
+                  ; our path
+                  (map? c)
+                  (reduce (fn [c [k v]]
+                            (assoc c k (checker+
+                                         (if branch?
+                                           (conj path (pr-str k))
+                                           path)
+                                         v)))
+                          c
+                          c)
+
+                  ; For sets, rewrite without changing path
+                  (set? c)
+                  (reduce (fn [c v]
+                            (conj c (checker+ path v)))
+                          (empty c)
+                          c)
+
+                  ; For sequential collections, rewrite without changing path
+                  (sequential? c)
+                  (reduce (fn [c v]
+                            (conj c (checker+ path v)))
+                          (empty c)
+                          c)
+
+                  ; Everything else bottoms out in itself
+                  true
+                  c)]
+     ; Now, consider the rewritten thing. If it's a checker, wrap it, using
+     ; the current path as our name.
+     (if (satisfies? checker/Checker c')
+       (checker (str/join " " path) c')
+       c'))))
+
+(defn test
+  "Wraps a Jepsen test in Antithesis wrappers. Lifts the client and checker
+  both."
+  [test]
+  (-> test
+      (update :client client)
+      (update checker checker+)))
+

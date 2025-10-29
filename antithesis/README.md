@@ -21,9 +21,14 @@ The main namespace is [`jepsen.antithesis`](src/jepsen/antithesis.clj).
 
 ## Randomness
 
-You should wrap your entire program in `(with-rng ...)`. This does nothing in
-ordinary environments, but in Antithesis, it replaces the jepsen.random RNG
-with one powered by Antithesis.
+You should wrap your entire program in `(antithesis/with-rng ...)`. This does
+nothing in ordinary environments, but in Antithesis, it replaces the
+jepsen.random RNG with one powered by Antithesis.
+
+## Clients
+
+Wrap your client in `(antithesis/client your-client)`. This client informs
+Antithesis that the setup is complete, and makes assertions about each 
 
 ## Lifecycle
 
