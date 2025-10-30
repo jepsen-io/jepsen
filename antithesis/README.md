@@ -8,13 +8,17 @@ provides entropy, lifecycle hooks, and assertions.
 [![Clojars Project](https://img.shields.io/clojars/v/io.jepsen/antithesis.svg)](https://clojars.org/io.jepsen/antithesis)
 
 From Clojars, as usual. Note that the Antithesis SDK pulls in an ancient
-version of Jackson, so in your `project.clj`, you'll likely want to prevent
-`io.jepsen/antithesis` from pulling that in:
+version of Jackson and *needs it*, so in your `project.clj`, you'll likely want
+to prevent other dependencies from relying on Jackson:
 
 ```clj
   :dependencies [...
-                 [io.jepsen/antithesis "0.1.0"
-                  :exclusions [com.fasterxml.jackson.core/jackson-databind]]
+                 [io.jepsen/antithesis "0.1.0"]
+                 [jepsen "0.3.10"
+                  :exclusions [com.fasterxml.jackson.core/jackson-databind
+                               com.fasterxml.jackson.core/jackson-annotations
+                               com.fasterxml.jackson.core/jackson-core]]]
+
 ```
 
 The main namespace is [`jepsen.antithesis`](src/jepsen/antithesis.clj).
