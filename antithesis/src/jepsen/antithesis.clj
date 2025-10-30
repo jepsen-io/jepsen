@@ -33,7 +33,9 @@
             [clojure.tools.logging :refer [info]]
             [jepsen [checker :as checker]
                     [client :as client]
+                    [db :as db]
                     [generator :as gen]
+                    [os :as os]
                     [random :as rand]])
   (:import (com.antithesis.sdk Assert
                                Lifecycle)
@@ -352,8 +354,15 @@
 
 (defn test
   "Wraps a Jepsen test in Antithesis wrappers. Lifts the client and checker
-  both."
+  both. If (:antithesis? test) is truthy, also:
+
+  1. Replaces the OS with a no-op
+  2. Repaces the DB with a no-op
+  3. Replaces the SSH system with a stub."
   [test]
-  (-> test
-      (update :client client)
-      (update :checker checker+)))
+  (cond-> test
+      true (update :client client)
+      true (update :checker checker+)
+      (:antithesis? test) (assoc :os os/noop
+                                 :db db/noop
+                                 :ssh {:dummy? true})))
