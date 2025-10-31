@@ -3,7 +3,9 @@
   (:refer-clojure :exclude [partition])
   (:require [clojure.string :as str]
             [jepsen.control :as c]
-            [slingshot.slingshot :refer [throw+]]))
+            [slingshot.slingshot :refer [throw+]])
+  (:import (java.net InetAddress
+                     UnknownHostException)))
 
 (defn reachable?
   "Can the current node ping the given node?"
@@ -16,8 +18,15 @@
   []
   (first (str/split (c/exec :hostname :-I) #"\s+")))
 
-(defn ip*
-  "Look up an ip for a hostname. Unmemoized."
+(defn ip-by-local-dns
+  "Looks up the IP address for a hostname using the local system resolver."
+  [host]
+  (.. (InetAddress/getByName host) getHostAddress))
+
+(defn ip-by-remote-getent
+  "Looks up the IP address for a hostname using the currently bound remote
+  node's agetent. This is a useful fallback when the control node doesn't have
+  DNS/hosts entries, NS, but the DB nodes do."
   [host]
   ; getent output is of the form:
   ; 74.125.239.39   STREAM host.com
@@ -43,6 +52,13 @@
           ; Valid IP
           true
           ip)))
+
+(defn ip*
+  "Look up an ip for a hostname. Unmemoized."
+  [host]
+  (try (ip-by-local-dns host)
+       (catch UnknownHostException e
+         (ip-by-remote-getent host))))
 
 (def ip
   "Look up an ip for a hostname. Memoized."
