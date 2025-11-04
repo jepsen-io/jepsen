@@ -4,7 +4,10 @@
             [jepsen [antithesis :as a]
                     [checker :as checker]
                     [client :as client]
-                    [random :as rand]]))
+                    [generator :as gen]
+                    [random :as rand]]
+            [jepsen.generator [context :as gen.ctx]
+                              [test :as gen.test]]))
 
 (deftest antithesis?-test
   (is (false? (a/antithesis?))))
@@ -205,3 +208,20 @@
               :cat {:type :cat, :valid? true}
               :dog {:type :dog, :valid? :unknown}}
              (checker/check checker' {} [] {}))))))
+
+(deftest early-termination-generator-test
+  ; In Antithesis mode, generators terminate randomly.
+  (with-redefs [a/antithesis? (constantly true)]
+    (let [gen (->> (range)
+                   (map (fn [x] {:f :write, :value x}))
+                   (a/early-termination-generator {:interval 10 :probability 0.5})
+                   gen/clients)
+          trials (rand/with-seed 555
+                   (mapv (fn [i]
+                           (->> gen
+                                gen.test/perfect
+                                count))
+                         (range 100)))]
+      ; Frequency distribution of history lengths falls off exponentially
+      (is (= {10 79, 20 15, 30 5, 40 1}
+             (frequencies trials))))))

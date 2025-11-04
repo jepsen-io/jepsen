@@ -382,6 +382,45 @@
            true
            c'))))
 
+(defrecord EarlyTerminationGen [^long interval
+                                ^double probability
+                                ^long remaining
+                                gen]
+  gen/Generator
+  (op [this test ctx]
+    (if (and (= 0 remaining)
+             ; This might be a little awkward if EarlyTerm winds up nested
+             ; inside a branching structure; different calls to op would return
+             ; different results. Probably fine, but might be worth
+             ; stabilizing.
+             (rand/bool probability))
+        ; Done
+        nil
+        ; Keep going
+        (when-let [[op gen'] (gen/op gen test ctx)]
+          (if (identical? :pending op)
+            [:pending this]
+            [op (EarlyTerminationGen. interval
+                                      probability
+                                      (mod (dec remaining) interval)
+                                      gen')]))))
+
+  (update [this test ctx event]
+    (EarlyTerminationGen. interval probability remaining
+                          (gen/update gen test ctx event))))
+
+(defn early-termination-generator
+  "Wraps a Jepsen generator in one which, every so often, asks Jepsen's
+  random source whether it ought to terminate. This allows Antithesis to
+  perform a sort of weak 'online checking', as opposed to always running for
+  the full (e.g.) time limit. Options are a map of:
+
+    :interval    How many operations to emit before flipping a coin
+    :probability The probability of early termination at each interval"
+  [{:keys [interval probability]} gen]
+  (EarlyTerminationGen. (long interval) (double probability) (long interval)
+                        gen))
+
 (defn test
   "Wraps a Jepsen test in Antithesis wrappers. Lifts the client and checker
   both. If (:antithesis? test) is truthy, also:
