@@ -184,7 +184,7 @@
           ; We can ask for instance? a.Checker, but that breaks during hot code
           ; reload
           ac? (fn [x]
-                (is (= "jepsen.antithesis.Checker"
+                (is (= "jepsen.antithesis.AlwaysChecker"
                        (-> x class .getName))))]
       ;(prn)
       ;(println "-----")

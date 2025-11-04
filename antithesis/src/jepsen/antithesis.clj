@@ -285,7 +285,20 @@
     (Client. client)
     client))
 
-(defrecord Checker [^String name checker]
+; We build these as protocols so that they can be extended *both* over the
+; built-in checkers, and also by new checkers.
+(defprotocol Checker
+  "This protocol marks checker types which perform their own Antithesis
+  assertions. The `checker+` wrapper skips over any checkers which satisfy this
+  protocol, as well as their children.")
+
+(extend-protocol Checker
+  ; The Stats checker will fail on histories with no :ok operations of some
+  ; type, which Antithesis will sometimes generate.
+  jepsen.checker.Stats)
+
+(defrecord AlwaysChecker [^String name checker]
+  Checker
   checker/Checker
   (check [this test history opts]
     (let [r (checker/check checker test history opts)]
@@ -294,19 +307,23 @@
 
 (defn checker
   "Wraps a Jepsen Checker in one which asserts the results of the underlying
-  checker are valid. Takes a string name, which defaults to \"checker\"; this
-  is used for the Antithesis assertion."
+  checker are always valid. Takes a string name, which defaults to \"checker\";
+  this is used for the Antithesis assertion."
   ([checker-]
    (checker "checker" checker-))
   ([name checker]
    (if (antithesis?)
-     (Checker. name checker)
+     (AlwaysChecker. name checker)
      checker)))
 
 (defn checker+
   "Rewrites a Jepsen Checker, wrapping every Checker in its own Antithesis
   Checker, which asserts validity of that specific checker. Each checker gets a
-  name derived from the path into that data structure it took to get there."
+  name derived from the path into that data structure it took to get there.
+
+  Ignores any object which satisfies the Checker protocol. You can use this to
+  flag checkers you don't want to add assertions for, or which implement their
+  own assertions."
   ([c]
    (checker+ ["checker"] c))
   ([path c]
@@ -317,7 +334,12 @@
          ; :checkers :cat"; we can just do "checker :cat".
          branch? (and (coll? c) (< 1 (count c)))
          ; Rewrite child forms
-         c' (cond ; For maps and records, rewrite each value, using the key as
+         c' (cond ; Already aware of Antithesis checking; don't explore any
+                  ; deeper
+                  (satisfies? Checker c)
+                  c
+
+                  ; For maps and records, rewrite each value, using the key as
                   ; our path
                   (map? c)
                   (reduce (fn [c [k v]]
@@ -346,11 +368,19 @@
                   ; Everything else bottoms out in itself
                   true
                   c)]
-     ; Now, consider the rewritten thing. If it's a checker, wrap it, using
-     ; the current path as our name.
-     (if (satisfies? checker/Checker c')
-       (checker (str/join " " path) c')
-       c'))))
+     ; Now, consider the rewritten thing.
+     (cond ; Our Checkers handle their own assertions.
+           (satisfies? Checker c')
+           c'
+
+           ; If it's a Jepsen checker, wrap it, using the current path as our
+           ; name.
+           (satisfies? checker/Checker c')
+           (checker (str/join " " path) c')
+
+           ; Otherwise, return unchanged.
+           true
+           c'))))
 
 (defn test
   "Wraps a Jepsen test in Antithesis wrappers. Lifts the client and checker
