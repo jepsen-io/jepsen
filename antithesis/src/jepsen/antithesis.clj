@@ -422,16 +422,18 @@
                         gen))
 
 (defn test
-  "Wraps a Jepsen test in Antithesis wrappers. Lifts the client and checker
-  both. If (:antithesis? test) is truthy, also:
+  "Prepares a Jepsen test for running in Antithesis. When running inside
+  Antithesis, this:
 
   1. Replaces the OS with a no-op
   2. Repaces the DB with a no-op
-  3. Replaces the SSH system with a stub."
+  3. Replaces the SSH system with a stub.
+
+  You likely also want to wrap the client in `client`, parts of the checker in
+  `checker`, and possibly the generator in `early-termination-generator`."
   [test]
-  (cond-> test
-      true (update :client client)
-      true (update :checker checker+)
-      (:antithesis? test) (assoc :os os/noop
-                                 :db db/noop
-                                 :ssh {:dummy? true})))
+  (if (antithesis?)
+    (assoc :os os/noop
+           :db db/noop
+           :ssh {:dummy? true})
+    test))
