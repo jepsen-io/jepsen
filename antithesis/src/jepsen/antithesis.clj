@@ -433,7 +433,8 @@
   `checker`, and possibly the generator in `early-termination-generator`."
   [test]
   (if (antithesis?)
-    (assoc :os os/noop
+    (assoc test
+           :os os/noop
            :db db/noop
            :ssh {:dummy? true})
     test))
