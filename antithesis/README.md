@@ -21,24 +21,59 @@ to prevent other dependencies from relying on Jackson:
 
 ```
 
-The main namespace is [`jepsen.antithesis`](src/jepsen/antithesis.clj).
+## Usage
 
-## Randomness
+The main namespace is [`jepsen.antithesis`](src/jepsen/antithesis.clj). There
+are several things you can do to integrate your test into Antithesis.
 
-You should wrap your entire program in `(antithesis/with-rng ...)`. This does
+### Randomness
+
+First, wrap the entire program in `(antithesis/with-rng ...)`. This does
 nothing in ordinary environments, but in Antithesis, it replaces the
-jepsen.random RNG with one powered by Antithesis.
+jepsen.random RNG with the Antithesis SDK's entropy source.
+
+### Wrapping Tests
+
+Second, wrap the entire test map with `(antithesis/test test)`. In an
+Antithesis run, this disables the OS, DB, and SSH connections.
 
 ## Clients
 
 Wrap your client in `(antithesis/client your-client)`. This client informs
-Antithesis that the setup is complete, and makes assertions about each 
+Antithesis that the setup is complete, and makes assertions about each
+invocation and completion.
+
+## Checker
+
+You can either make assertions (see below) by hand inside your checkers, or you
+can wrap an existing checker in `(antithesis/checker "some name" checker)`.
+This asserts that the checker's results are always `:valid? true`. You can also
+use `antithesis/checker+` to traverse a tree of checkers, wrapping each one
+with assertions.
+
+## Generator
+
+Instead of a time limit, you can limit your generator with something like:
+
+```clj
+(if (antithesis/antithesis?)
+  (antithesis/early-termination-generator
+   {:interval 100
+    :probability 0.1}
+   my-gen)
+  (gen/time-limit ... my-gen))
+```
+
+This early-termination-generator flips a coin every 10 operations, deciding
+whether to continue. This allows Antithesis to perform some long runs and some
+short ones. I'm not totally sure whether this is a good idea yet, but it does
+seem to get us to much shorter reproducible histories.
 
 ## Lifecycle
 
-Call `setup-complete!` once the test is ready to begin--for instance, at the
-end of `Client/setup!`. Call `event!` to signal interesting things have
-happened.
+If you'd like to manage the lifecycle manually, you can Call `setup-complete!`
+once the test is ready to begin--for instance, at the end of `Client/setup!`.
+Call `event!` to signal interesting things have happened.
 
 ## Assertions
 
