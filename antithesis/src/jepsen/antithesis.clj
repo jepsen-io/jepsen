@@ -416,9 +416,13 @@
   the full (e.g.) time limit. Options are a map of:
 
     :interval    How many operations to emit before flipping a coin
-    :probability The probability of early termination at each interval"
+    :probability The probability of early termination at each interval. This is
+  only useful for extremely low/high probabilities; everything in the moderate
+  range (see choice-cardinality) winds up being a coin toss."
   [{:keys [interval probability]} gen]
-  (EarlyTerminationGen. (long interval) (double probability) (long interval)
+  (EarlyTerminationGen. (long interval)
+                        (double (or probability 0.5))
+                        (long interval)
                         gen))
 
 (defn test

@@ -58,13 +58,12 @@ Instead of a time limit, you can limit your generator with something like:
 ```clj
 (if (antithesis/antithesis?)
   (antithesis/early-termination-generator
-   {:interval 100
-    :probability 0.1}
+   {:interval 100}
    my-gen)
   (gen/time-limit ... my-gen))
 ```
 
-This early-termination-generator flips a coin every 10 operations, deciding
+This early-termination-generator flips a coin every 100 operations, deciding
 whether to continue. This allows Antithesis to perform some long runs and some
 short ones. I'm not totally sure whether this is a good idea yet, but it does
 seem to get us to much shorter reproducible histories.
