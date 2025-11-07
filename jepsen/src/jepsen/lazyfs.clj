@@ -25,7 +25,7 @@
 
 (def commit
   "What version should we check out and build?"
-  "0.2.0")
+  "0.3.0")
 
 (def dir
   "Where do we install lazyfs to on the remote node?"
