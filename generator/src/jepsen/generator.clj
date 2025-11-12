@@ -170,7 +170,7 @@
 
     {:f :read}
 
-  Perform a single random write:
+  Perform a series of random writes:
 
     (fn [] {:f :write, :value (rand-int 5))
 
