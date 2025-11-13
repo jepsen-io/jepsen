@@ -59,7 +59,10 @@
   ([] (ls "."))
   ([dir] (ls dir {}))
   ([dir opts]
-   (let [dir (name dir)
+   (let [^String dir (name dir)
+         ; Remove trailing slashes; we do this to simplify removing the dir
+         ; prefix later
+         dir (str/replace dir #"/+$" "")
          ; Construct -type arg
          types (when (:types opts)
                  ["-type"
@@ -85,7 +88,7 @@
          ; Strip off dir prefix
          paths (if (:full-path? opts)
                  paths
-                 (let [c (inc (.length ^String dir))]
+                 (let [c (inc (.length dir))]
                    (map (fn strip-dir [^String path]
                           (assert (.startsWith path dir))
                           (subs path c))
