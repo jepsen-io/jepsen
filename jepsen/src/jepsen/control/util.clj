@@ -47,22 +47,59 @@
        (catch RuntimeException _ false)))
 
 (defn ls
-  "A seq of directory entries (not including . and ..). TODO: escaping for
-  control chars in filenames (if you do this, WHO ARE YOU???)"
+  "A seq of directory entries (not including . and ..). Options:
+
+    {:recursive?  If set, lists entries recursively
+     :types       A collection like [:file :dir], filtering what kinds of
+                  entries are returned
+     :full-path?  Return the full path, rather than the path within dir}
+
+  TODO: escaping for control chars in filenames (if you do this, WHO ARE
+  YOU???)"
   ([] (ls "."))
-  ([dir]
-   (->> (str/split (exec :ls :-A dir) #"\n")
-        (remove str/blank?))))
+  ([dir] (ls dir {}))
+  ([dir opts]
+   (let [dir (name dir)
+         ; Construct -type arg
+         types (when (:types opts)
+                 ["-type"
+                  (->> (:types opts)
+                       (map (fn [t]
+                              (case t
+                                :block "b"
+                                :char "c"
+                                :dir  "d"
+                                :file "f"
+                                :pipe "p"
+                                :socket  "s"
+                                :symlink "l")))
+                       (str/join ","))])
+         ; Search for files
+         lines (exec :find dir
+                     types
+                     ["-mindepth" 1] ; Don't list the dir itself
+                     (when-not (:recursive? opts)
+                       ["-maxdepth" 1]))
+         ; Split lines
+         paths (str/split lines #"\n")
+         ; Strip off dir prefix
+         paths (if (:full-path? opts)
+                 paths
+                 (let [c (inc (.length ^String dir))]
+                   (map (fn strip-dir [^String path]
+                          (assert (.startsWith path dir))
+                          (subs path c))
+                        paths)))]
+     ; Find's traversal order is by inode structure, so we sort for stability
+     (sort paths))))
 
 (defn ls-full
-  "Like ls, but prepends dir to each entry."
-  [dir]
-  (let [dir (if (re-find #"/$" dir)
-              dir
-              (str dir "/"))]
-    (->> dir
-         ls
-         (map (partial str dir)))))
+  "Like ls, but prepends dir to each entry. TODO: deprecate this in favor of ls
+  {:full-path? true}."
+  ([] (ls-full "."))
+  ([dir] (ls-full dir {}))
+  ([dir opts]
+   (ls dir (assoc opts {:full-path? true}))))
 
 (defn tmp-file!
   "Creates a random, temporary file under tmp-dir-base, and returns its path.

@@ -113,3 +113,41 @@
             (c/exec :rm :-rf tarball))))
       (finally
         (c/exec :rm :-rf dir)))))
+
+(deftest ^:integration ls-test
+  (let [dir (util/tmp-dir!)]
+    (try
+      (c/exec :mkdir :-p (str dir "/foo/bar"))
+      (util/write-file! "baz" (str dir "/foo/bar/baz"))
+      (util/write-file! "blarg" (str dir "/foo/bar/blarg"))
+      (util/write-file! "xyzzy" (str dir "/xyzzy"))
+
+      (testing "simple"
+        (is (= ["foo"
+                "xyzzy"]
+               (util/ls dir))))
+
+      (testing "recursive"
+        (is (= ["foo"
+                "foo/bar"
+                "foo/bar/baz"
+                "foo/bar/blarg"
+                "xyzzy"]
+               (util/ls dir {:recursive? true}))))
+
+      (testing "full path"
+        (is (= [(str dir "/foo")
+                (str dir "/xyzzy")]
+               (util/ls dir {:full-path? true}))))
+
+      (testing "files"
+        (is (= ["foo/bar/baz"
+                "foo/bar/blarg"
+                "xyzzy"]
+               (util/ls dir {:recursive? true, :types [:file]}))))
+
+      (testing "dirs"
+        (is (= ["foo"]
+               (util/ls dir {:types [:dir]}))))
+      (finally
+        (c/exec :rm :-rf dir)))))
