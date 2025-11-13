@@ -253,7 +253,20 @@
 
   The package includes a :state field, which is an atom of the current cluster
   state. You can use this (for example) to have generators which inspect the
-  current cluster state and use it to target faults."
+  current cluster state and use it to target faults.
+
+  You may want to add to this package a :final-generator to rejoin all nodes,
+  and a :perf key to tell Jepsen's performance plots how to render your
+  nemeses.
+
+   (assoc pkg
+     :perf #{{:name \"membership\"
+              :start #{:leave}
+              :stop  #{:join}
+              :color \"#9AE48B\"}}
+     :final-generator (mapv (fn [node]
+                               {:type :info, :f :join, :value node})
+                             targetable-nodes))"
   [opts]
   (when (contains? (:faults opts) :membership)
     (let [mopts    (:membership opts)
