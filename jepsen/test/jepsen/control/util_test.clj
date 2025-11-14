@@ -151,7 +151,6 @@
                (util/ls dir {:types [:dir]}))))
 
       (testing "trailing /"
-        (prn dir)
         (is (= ["xyzzy"]
                (util/ls dir {:types [:file]})
                (util/ls (str dir "/") {:types [:file]}))))
