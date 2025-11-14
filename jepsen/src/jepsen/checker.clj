@@ -17,6 +17,7 @@
                     [store :as store]
                     [util :as util :refer [meh fraction map-kv]]]
             [jepsen.checker [perf :as perf]
+                            [plot :as plot]
                             [clock :as clock]]
             [jepsen.history.fold :as f]
             [multiset.core :as multiset]
@@ -908,9 +909,23 @@
     {:valid? true}))
 
 (defn clock-plot
-  "Plots clock offsets on all nodes. TODO: rename to clock-graph, for symmetry."
+  "Plots clock offsets on all nodes."
   []
   (ClockPlot.))
+
+(defrecord OpColorPlot [opts]
+  Checker
+  (check [_ test history checker-opts]
+    (plot/op-color-plot! test history (merge opts checker-opts))
+    {:valid? true}))
+
+(defn op-color-plot
+  "A checker which draws an operation color plot---see
+  `jepsen.checker.plot/op-color-plot!` for details. Takes an options map, which
+  is merged with checker-provided options and passed to `op-color-plot!`."
+  ([] (op-color-plot {}))
+  ([opts]
+   (OpColorPlot. opts)))
 
 (defrecord LogFilePattern [pattern filename]
   Checker
@@ -958,3 +973,4 @@
                ...]}}"
   [pattern filename]
   (LogFilePattern. pattern filename))
+

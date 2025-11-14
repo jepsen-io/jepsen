@@ -628,6 +628,21 @@
                                                                   "n2" -4.1}}])
          {}))
 
+(deftest ^:focus op-color-plot-test
+  (check (op-color-plot {})
+         {:name "op color plot test"
+          :start-time 0}
+         (history
+           [{:process 0, :type :invoke}
+            {:process 0, :type :ok}
+            {:process 0, :type :invoke}
+            {:process 0, :type :ok}
+            {:process 0, :type :invoke}
+            {:process 0, :type :fail}
+            {:process 0, :type :invoke}
+            {:process 0, :type :info}])
+         {}))
+
 (deftest set-full-test
   ; Helper fn to check a history
   (let [c (fn [h]
