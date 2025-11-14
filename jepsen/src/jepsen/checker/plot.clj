@@ -138,7 +138,6 @@
                   ; With few points, use bigger dots
                   :pointtype  (if (< (count points) 16384) 1 0)
                   :data       points})]
-  	(prn :ready)
     (-> {:preamble preamble, :series series}
         perf/with-range
         (perf/with-nemeses history nemeses)

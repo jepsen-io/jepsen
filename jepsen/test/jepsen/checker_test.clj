@@ -628,7 +628,7 @@
                                                                   "n2" -4.1}}])
          {}))
 
-(deftest ^:focus op-color-plot-test
+(deftest op-color-plot-test
   (check (op-color-plot {})
          {:name "op color plot test"
           :start-time 0}
