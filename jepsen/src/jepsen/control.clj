@@ -307,11 +307,19 @@
 
 (defmacro with-nodes
   "Given a test and collection of nodes, evaluates body in parallel on each
-  node, with that node's SSH connection bound."
+  node, with that node's SSH connection bound. Returns a map of nodes to
+  results from that node."
   [test nodes & body]
   `(with-nodes* ~test ~nodes
      (fn [node#]
        ~@body)))
+
+(defmacro with-all-nodes
+  "Given a test, evaluates body in parallel on all nodes, with that node's SSH
+  connection bound. Returns a map of nodes to results from that node."
+  [test & body]
+  `(let [test# ~test]
+    (with-nodes test# (:nodes test#) ~@body)))
 
 (defmacro on
   "Opens a session to the given host and evaluates body there; and closes
@@ -349,7 +357,7 @@
 
 (defmacro with-test-nodes
   "Given a test, evaluates body in parallel on each node, with that node's SSH
-  connection bound. TODO: deprecate in favor of `with-nodes`."
+  connection bound. TODO: deprecate in favor of `with-all-nodes`."
   [test & body]
   `(let [test# ~test]
     (with-nodes test# (:nodes test#) ~@body)))
