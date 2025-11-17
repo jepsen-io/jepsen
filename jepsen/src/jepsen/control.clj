@@ -273,31 +273,8 @@
              *session* ~session]
      ~@body))
 
-(defmacro on
-  "Opens a session to the given host and evaluates body there; and closes
-  session when body completes."
-  [host & body]
-  `(let [session# (session ~host)]
-     (try+
-       (with-session ~host session#
-         ~@body)
-       (finally
-         (disconnect session#)))))
-
-(defmacro on-many
-  "Takes a list of hosts, executes body on each host in parallel, and returns a
-  map of hosts to return values."
-  [hosts & body]
-  `(let [hosts# ~hosts]
-     (->> hosts#
-          (map #(future (on % ~@body)))
-          doall
-          (map deref)
-          (map vector hosts#)
-          (into {}))))
-
-(defmacro on-node
-  "Given a test and a node, evaluates body with that node's SSH connection
+(defmacro with-node
+  "Given a test and a node, evalutes body with that node's SSH connection
   bound."
   [test node & body]
   `(let [session# (get (:sessions ~test) ~node)]
@@ -305,12 +282,12 @@
      (with-session ~node session#
        ~@body)))
 
-(defn on-nodes
-  "Given a test, evaluates (f test node) in parallel on each node, with that
+(defn with-nodes*
+  "Given a test, evaluates (f node) in parallel on each node, with that
   node's SSH connection bound. If `nodes` is provided, evaluates only on those
   nodes in particular."
   ([test f]
-   (on-nodes test (:nodes test) f))
+   (with-nodes* test (:nodes test) f))
   ([test nodes f]
    (let [mapper (if (< 1 (count nodes))
                   real-pmap
@@ -325,13 +302,54 @@
           (mapper (bound-fn [[node session]]
                     (with-thread-name (str "jepsen node " (name node))
                       (with-session node session
-                        [node (f test node)]))))
-          (into {})))))
+                        [node (f node)]))))
+          (into (sorted-map))))))
+
+(defmacro with-nodes
+  "Given a test and collection of nodes, evaluates body in parallel on each
+  node, with that node's SSH connection bound."
+  [test nodes & body]
+  `(with-nodes* ~test ~nodes
+     (fn [node#]
+       ~@body)))
+
+(defmacro on
+  "Opens a session to the given host and evaluates body there; and closes
+  session when body completes. Prefer with-node when inside a test; it's
+  faster."
+  [host & body]
+  `(let [session# (session ~host)]
+     (try+
+       (with-session ~host session#
+         ~@body)
+       (finally
+         (disconnect session#)))))
+
+(defmacro on-many
+  "Takes a list of hosts, executes body on each host in parallel, and returns a
+  map of hosts to return values. Prefer with-nodes when inside a test; it's
+  faster."
+  [hosts & body]
+  `(let [hosts# ~hosts]
+     (->> hosts#
+          (map #(future (on % ~@body)))
+          doall
+          (map deref)
+          (map vector hosts#)
+          (into {}))))
+
+(defn on-nodes
+  "Given a test, evaluates (f test node) in parallel on each node, with that
+  node's SSH connection bound. If `nodes` is provided, evaluates only on those
+  nodes in particular. TODO: deprecate in favor of `with-nodes*``."
+  ([test f]
+   (on-nodes test (:nodes test) f))
+  ([test nodes f]
+   (with-nodes* test nodes (partial f test))))
 
 (defmacro with-test-nodes
   "Given a test, evaluates body in parallel on each node, with that node's SSH
-  connection bound."
+  connection bound. TODO: deprecate in favor of `with-nodes`."
   [test & body]
-  `(on-nodes ~test
-             (fn [test# node#]
-               ~@body)))
+  `(let [test# ~test]
+    (with-nodes test# (:nodes test#) ~@body)))
