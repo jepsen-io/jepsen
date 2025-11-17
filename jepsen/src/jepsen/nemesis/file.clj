@@ -62,7 +62,8 @@
     #{:bitflip-file-chunks
       :copy-file-chunks
       :restore-file-chunks
-      :snapshot-file-chunks})
+      :snapshot-file-chunks
+      :truncate-file})
 
   nemesis/Nemesis
   (setup! [this test]
