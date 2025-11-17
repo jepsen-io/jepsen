@@ -41,6 +41,28 @@
 
 (use-fixtures :once quiet-logging)
 
+(deftest ^:focus ^:integration truncate-file-test
+  (let [f1 "/tmp/truncate-demo1" ; For truncation to n bytes
+        f2 "/tmp/truncate-demo2" ; For -n bytes
+        node (first (:nodes tests/noop-test))
+        test (assoc tests/noop-test
+                    :name "truncate-file-test"
+                    :nemesis (nf/corrupt-file-nemesis)
+                    :generator
+                    (->> [{:type :info, :f :truncate-file, :value [{:node node, :file f1, :size 5}]}
+                          {:type :info, :f :truncate-file, :value [{:node node, :file f2, :size -5}]}]
+                         gen/nemesis))
+        ; Create files
+        _ (c/on node
+                (cu/write-file! "abcdefg" f1)
+                (cu/write-file! "abcdefg" f2))
+        ; Run test
+        test' (jepsen/run! test)]
+    ; Check file sizes
+    (c/on node
+      (is (= "abcde" (c/exec :cat f1)))
+      (is (= "ab"    (c/exec :cat f2))))))
+
 (deftest ^:integration copy-file-chunks-helix-test
   (let [file "/tmp/corrupt-demo"
         ; A file is a series of chunks made up of words.
@@ -299,6 +321,15 @@
                      ; We explicitly want to test over the 4 GB limit
                      :max (* 8 1024 1024 1024)}))
 
+(defn maybe-neg
+  "Generator that turns positive numbers into possibly negative ones."
+  [gen]
+  (g/let [x    gen
+          neg? g/boolean]
+    (if neg?
+      (- x)
+      x)))
+
 (def chunk-opts
   "Generator for chunk options."
   (g/let [i          smol-int
@@ -550,7 +581,7 @@
              ; file--it can generate far too small probabilties. We hardcode
              ; this to 1/8.
              ;p    (prob-gen opts)
-             ]
+            ]
             (bitflip-test- (assoc opts :probability 0.125))))
 
 (deftest ^:slow bitflip-large-test

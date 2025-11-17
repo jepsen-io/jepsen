@@ -296,6 +296,15 @@
           (map vector hosts#)
           (into {}))))
 
+(defmacro on-node
+  "Given a test and a node, evaluates body with that node's SSH connection
+  bound."
+  [test node & body]
+  `(let [session# (get (:sessions ~test) ~node)]
+     (assert session# (str "No session for node " (pr-str ~node)))
+     (with-session ~node session#
+       ~@body)))
+
 (defn on-nodes
   "Given a test, evaluates (f test node) in parallel on each node, with that
   node's SSH connection bound. If `nodes` is provided, evaluates only on those

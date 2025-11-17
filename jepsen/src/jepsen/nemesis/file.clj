@@ -1,6 +1,7 @@
 (ns jepsen.nemesis.file
   "Fault injection involving files on disk. This nemesis can copy chunks
-  randomly within a file, induce bitflips, or snapshot and restore chunks."
+  randomly within a file, induce bitflips, or snapshot and restore chunks. It
+  can also truncate files."
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen [control :as c]
                     [generator :as gen]
@@ -12,18 +13,27 @@
 (defn corrupt-file!
   "Calls corrupt-file on the currently bound remote node, taking a map of
   options."
-  [{:keys [mode file start end chunk-size mod i probability]}]
+  [{:keys [mode file start end chunk-size mod i probability] :as opts}]
   (assert (string? file))
   (c/su
-    (c/exec (str nemesis/bin-dir "/corrupt-file")
-            (when mode        [:--mode mode])
-            (when start       [:--start start])
-            (when end         [:--end end])
-            (when chunk-size  [:--chunk-size chunk-size])
-            (when mod         [:--modulus mod])
-            (when i           [:--index i])
-            (when probability [:--probability (double probability)])
-            file)))
+    (case mode
+      ; Truncate is special; we just use the standard `truncate` command.
+      "truncate"
+      (do (c/exec "truncate"
+                  :--no-create
+                  :--size (:size opts 0)
+                  file)
+          [:truncated file (:size opts 0)])
+      ; Everything else goes to our corrupt-file program
+      (c/exec (str nemesis/bin-dir "/corrupt-file")
+              (when mode        [:--mode mode])
+              (when start       [:--start start])
+              (when end         [:--end end])
+              (when chunk-size  [:--chunk-size chunk-size])
+              (when mod         [:--modulus mod])
+              (when i           [:--index i])
+              (when probability [:--probability (double probability)])
+              file))))
 
 (defn clear-snapshots!
   "Asks corrupt-file! to clear its snapshots directory on the currently bound
@@ -39,7 +49,8 @@
     :bitflip-file-chunks    "bitflip"
     :copy-file-chunks       "copy"
     :restore-file-chunks    "restore"
-    :snapshot-file-chunks   "snapshot"))
+    :snapshot-file-chunks   "snapshot"
+    :truncate-file          "truncate"))
 
 (defrecord CorruptFileNemesis
   ; A map of default options, e.g. {:chunk-size ..., :file, ...}, which are
@@ -66,7 +77,8 @@
       (:bitflip-file-chunks
        :copy-file-chunks
        :restore-file-chunks
-       :snapshot-file-chunks)
+       :snapshot-file-chunks
+       :truncate-file)
       (let [v (c/on-nodes
                 test
                 (distinct (map :node value))
@@ -87,7 +99,9 @@
                        (into []))))]
         (assoc op :value v))))
 
-  (teardown! [this test]))
+  (teardown! [this test]
+    (c/with-test-nodes test
+      (clear-snapshots!))))
 
 (defn corrupt-file-nemesis
   "This nemesis takes operations like
@@ -150,6 +164,15 @@
   recently snapshotted chunks back into the file itself. You can use this to
   force what looks like a rollback of parts of a file's state--for instance, to
   simulate a misdirected or lost write.
+
+    {:f :truncate-file
+     :value [{:node       \"n3\"
+              :file       \"/foo/bar\"
+              :size       -4}
+             ...]}
+
+  This truncates /foo/bar on node n3, trimming the last four bytes off the end.
+  Positive sizes truncate the file to at most that many bytes.
 
   All options are optional, except for :node and :file. See
   resources/corrupt-file.c for defaults.
@@ -244,10 +267,10 @@
 (defn nodes-gen
   "Takes a number of nodes `n`, a map of default file corruption options (see
   `corrupt-file-nemesis`), and a generator of operations like `{:type :info, :f
-  :snapshot-file-chunk}` with `nil` `:value`s. Returns a generator which fills
-  in values with file corruptions, restricted to at most `n` nodes over the
-  course of the test. This corrupts bytes [128, 256) on at most two nodes over
-  the course of the test.
+  :snapshot-file-chunk}` with `nil` `:value`s. Returns a generator where each
+  value is a vector of file corruptions, restricted to at most `n` nodes over
+  the course of the test. This corrupts bytes [128, 256) on at most two nodes
+  over the course of the test.
 
     (nodes-gen 2
               {:start 128, :end 256}
