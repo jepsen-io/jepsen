@@ -1,4 +1,4 @@
-(defproject jepsen "0.3.10-SNAPSHOT"
+(defproject jepsen "0.3.10"
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
@@ -13,11 +13,11 @@
                  [org.clojure/tools.cli "1.2.245"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
-                 [elle "0.2.5-SNAPSHOT"]
+                 [elle "0.2.5"]
                  [clj-time "0.15.2"]
-                 [io.jepsen/generator "0.1.0-SNAPSHOT"]
+                 [io.jepsen/generator "0.1.0"]
                  [jepsen.txn "0.1.2"]
-                 [knossos "0.3.13-SNAPSHOT"]
+                 [knossos "0.3.13"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.1"]
@@ -62,7 +62,7 @@
              :dev {; experimenting with faster startup
                    ;:aot [jepsen.core]
                    :dependencies [[criterium "0.4.6"]
-                                  [org.clojure/test.check "1.1.1"]
+                                  [org.clojure/test.check "1.1.2"]
                                   [com.gfredericks/test.chuck "0.2.15"]]
                    :jvm-opts ["-Xmx32g"
                               "-server"
