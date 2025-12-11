@@ -1,4 +1,4 @@
-(defproject jepsen "0.3.10"
+(defproject jepsen "0.3.11-SNAPSHOT"
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :license {:name "Eclipse Public License"
@@ -13,7 +13,7 @@
                  [org.clojure/tools.cli "1.2.245"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
-                 [elle "0.2.5"]
+                 [elle "0.2.6-SNAPSHOT"]
                  [clj-time "0.15.2"]
                  [io.jepsen/generator "0.1.0"]
                  [jepsen.txn "0.1.2"]
