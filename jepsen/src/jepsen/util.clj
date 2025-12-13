@@ -20,7 +20,7 @@
                     [random :as rand]]
             [jepsen.history.fold :refer [loopf]]
             [potemkin :refer [definterface+ import-vars]]
-            [slingshot.slingshot :refer [try+ throw+]]
+            [clj-commons.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (java.lang.reflect Method)
            (java.util.concurrent.locks LockSupport)

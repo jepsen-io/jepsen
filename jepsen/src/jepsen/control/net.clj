@@ -3,7 +3,7 @@
   (:refer-clojure :exclude [partition])
   (:require [clojure.string :as str]
             [jepsen.control :as c]
-            [slingshot.slingshot :refer [throw+]])
+            [clj-commons.slingshot :refer [throw+]])
   (:import (java.net InetAddress
                      UnknownHostException)))
 

@@ -12,7 +12,7 @@
                     [util :as util]]
             [jepsen.history.fold :as f]
             [multiset.core :as multiset]
-            [slingshot.slingshot :refer [try+ throw+]]
+            [clj-commons.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (jepsen.history Op)))
 

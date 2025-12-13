@@ -7,7 +7,7 @@
             [jepsen [random :as rand]
                     [util :as util]]
             [jepsen.control.core :as core]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (def tmp-dir
   "The remote directory we temporarily store files in while transferring up and

@@ -16,7 +16,7 @@
                     [nemesis :as nemesis]]
             [jepsen.control.util :as cu]
             [jepsen.os.debian :as debian]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
 (def repo-url

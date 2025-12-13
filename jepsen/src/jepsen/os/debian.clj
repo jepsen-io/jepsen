@@ -8,7 +8,7 @@
                     [os :as os]
                     [util :as util :refer [meh]]]
             [jepsen.control.util :as cu]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (def node-locks
   "Prevents running apt operations concurrently on the same node."

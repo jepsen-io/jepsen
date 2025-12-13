@@ -12,7 +12,7 @@
             [jepsen.control.util :as cu]
             [clojure.string :as str]
             [clojure.java.io :as io]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
 (defn install!

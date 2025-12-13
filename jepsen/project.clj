@@ -31,7 +31,7 @@
                  [org.bouncycastle/bcprov-jdk15on "1.70"]
                  [hiccup "2.0.0"]
                  [metametadata/multiset "0.1.1"]
-                 [slingshot "0.12.2"]
+                 [org.clj-commons/slingshot "0.13.0"]
                  [org.clojure/data.codec "0.2.0"]]
   :java-source-paths ["src"]
   :javac-options ["--release" "11"]

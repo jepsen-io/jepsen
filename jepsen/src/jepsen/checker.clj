@@ -29,7 +29,7 @@
                      [wgl :as wgl]
                      [history :as history]]
             [knossos.linear.report :as linear.report]
-            [slingshot.slingshot :refer [try+ throw+]]
+            [clj-commons.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (java.util.concurrent Semaphore)))
 

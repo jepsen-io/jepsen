@@ -26,7 +26,7 @@
                     [util :as util]]
             [jepsen.control.util :as cu]
             [jepsen.nemesis.file :as nf]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.nio ByteBuffer)
            (java.nio.channels FileChannel
                               FileChannel$MapMode)

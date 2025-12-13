@@ -12,7 +12,7 @@
                     [tests :refer [noop-test]]]
             [jepsen.control [util :as cu]]
             [jepsen.db.watchdog :as w]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (use-fixtures :once quiet-logging)
 

@@ -11,7 +11,7 @@
             [multiset.core :as multiset]
             [jepsen [history]
                     [util :as util]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io ByteArrayOutputStream
                     Closeable)
            (java.time Instant)

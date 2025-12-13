@@ -8,7 +8,7 @@
                     [nemesis :as nemesis]
                     [random :as rand]
                     [util :as util]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (defn corrupt-file!
   "Calls corrupt-file on the currently bound remote node, taking a map of

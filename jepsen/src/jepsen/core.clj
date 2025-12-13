@@ -36,7 +36,7 @@
             [jepsen.store.format :as store.format]
             [jepsen.control.util :as cu]
             [jepsen.generator [interpreter :as gen.interpreter]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
                                  CountDownLatch
                                  TimeUnit)))

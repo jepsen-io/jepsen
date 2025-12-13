@@ -9,7 +9,7 @@
                     [random   :as rand]
                     [util     :as util]]
             [jepsen.control [util :as cu]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
 (defprotocol Nemesis

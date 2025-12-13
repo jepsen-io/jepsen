@@ -28,7 +28,7 @@
                             [util :as cu]
                             [sshj :as sshj]]
             [jepsen.os.debian :as debian]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 ; (use-fixtures :once quiet-logging)
 

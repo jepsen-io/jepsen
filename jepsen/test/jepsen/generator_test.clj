@@ -7,7 +7,7 @@
                     [util :as util]]
             [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (io.lacuna.bifurcan IMap
                                Map
                                Set)))

@@ -9,7 +9,7 @@
             [jepsen.control [sshj    :as sshj]
                             [clj-ssh :as clj-ssh]
                             [util    :as cu]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io File)))
 
 (use-fixtures :once quiet-logging)

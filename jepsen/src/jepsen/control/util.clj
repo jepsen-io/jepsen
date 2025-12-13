@@ -8,7 +8,7 @@
             [clojure.java.io :refer [file]]
             [clojure.tools.logging :refer [info warn]]
             [clojure.string :as str]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
 

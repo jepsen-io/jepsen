@@ -4,7 +4,7 @@
   (:require [clojure [pprint :refer [pprint]]
                      [string :as str]]
             [clojure.tools.logging :refer [info warn]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (defprotocol Remote
   "Remotes allow jepsen.control to run shell commands, upload, and download

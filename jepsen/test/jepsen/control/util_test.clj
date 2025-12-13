@@ -7,7 +7,7 @@
                     [control :as c]]
             [jepsen.control [util :as util]
                             [sshj :as sshj]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (use-fixtures :once quiet-logging)
 (use-fixtures :once (fn with-ssh [t]

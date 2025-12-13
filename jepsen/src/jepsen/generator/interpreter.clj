@@ -13,7 +13,7 @@
                     [util           :as util :refer [exception-message]]]
             [jepsen.generator.context :as context]
             [jepsen.store.format :as store.format]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent ArrayBlockingQueue
                                  TimeUnit)
            (io.lacuna.bifurcan Set)))

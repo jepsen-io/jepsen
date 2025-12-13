@@ -4,7 +4,7 @@
             [clojure.reflect :refer [reflect]]
             [jepsen.util :as util]
             [dom-top.core :refer [with-retry]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (defprotocol Client
   ; TODO: this should be open, not open!

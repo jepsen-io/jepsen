@@ -13,7 +13,7 @@
                     [db :as db]
                     [nemesis :as n]]
             [jepsen.nemesis.combined :as nc]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
 (defn role

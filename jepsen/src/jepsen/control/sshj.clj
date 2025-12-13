@@ -8,7 +8,7 @@
             [jepsen.control [core :as core]
                             [retry :as retry]
                             [scp :as scp]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (com.jcraft.jsch.agentproxy AgentProxy
                                        AgentProxyException
                                        ConnectorFactory)

@@ -202,7 +202,7 @@
                                            pprint-str]]]
             [jepsen.checker.perf :as perf]
             [jepsen.tests.cycle.append :as append]
-            [slingshot.slingshot :refer [try+ throw+]]
+            [clj-commons.slingshot :refer [try+ throw+]]
             [tesser.core :as t]))
 
 ;; Generator

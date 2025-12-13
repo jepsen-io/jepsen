@@ -8,7 +8,7 @@
             [jepsen.store.format :refer :all]
             [jepsen [history :as h]
                     [store :as store]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (def file "/tmp/jepsen-format-test.jepsen")
 

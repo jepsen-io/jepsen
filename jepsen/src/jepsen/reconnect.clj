@@ -11,7 +11,7 @@
   the current connection at once."
   (:require [clojure.tools.logging :refer [info warn]]
             [jepsen.util :as util]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io InterruptedIOException)
            (java.util.concurrent.locks ReentrantReadWriteLock)))
 

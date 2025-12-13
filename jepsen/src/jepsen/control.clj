@@ -18,7 +18,7 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [warn info debug error]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import java.io.File
            (java.util.concurrent Semaphore)))
 

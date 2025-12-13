@@ -10,7 +10,7 @@
                     [nemesis :as n]]
             [jepsen.generator.test :as gt]
             [jepsen.nemesis.combined :as nc]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
 (def test

@@ -4,7 +4,7 @@
   (:require [jepsen [checker :as checker]
                     [store :as store]]
             [elle.core :as elle]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (defn checker
   "Takes a function which takes a history and returns a [graph, explainer]

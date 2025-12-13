@@ -7,7 +7,7 @@
                     [util :as util :refer [fcatch meh]]]
             [jepsen.control [util :as cu]
                             [net :as cn]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (defprotocol DB
   (setup!     [db test node] "Set up the database on this particular node.")

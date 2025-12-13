@@ -240,7 +240,7 @@
             [jepsen.store.fressian :as jsf]
             [potemkin :refer [def-map-type
                               definterface+]]
-            [slingshot.slingshot :refer [try+ throw+]])
+            [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io BufferedOutputStream
                     Closeable
                     EOFException

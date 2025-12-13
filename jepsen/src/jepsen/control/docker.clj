@@ -7,7 +7,7 @@
   Use at your own risk, this is an unsupported way of running Jepsen."
   (:require [clojure.string :as str]
             [clojure.java.shell :refer [sh]]
-            [slingshot.slingshot :refer [throw+]]
+            [clj-commons.slingshot :refer [throw+]]
             [jepsen.control.core :as core]
             [jepsen.control :as c]))
 

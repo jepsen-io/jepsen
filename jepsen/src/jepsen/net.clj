@@ -10,7 +10,7 @@
             [jepsen.control.net :as control.net]
             [jepsen.net.proto :as p :refer [Net PartitionAll]]
             [potemkin :refer [import-vars]]
-            [slingshot.slingshot :refer [throw+ try+]]))
+            [clj-commons.slingshot :refer [throw+ try+]]))
 
 ; These were extracted to jepsen.net.proto, but we retain them here for
 ; compatibility/API simplicity.

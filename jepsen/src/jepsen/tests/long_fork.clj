@@ -93,7 +93,7 @@
                     [random :as rand]
                     [util]]
             [jepsen.txn.micro-op :as mop]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (defn group-for
   "Takes a key and returns the collection of keys for its group.

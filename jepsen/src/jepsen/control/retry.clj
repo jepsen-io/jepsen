@@ -11,7 +11,7 @@
             [jepsen [random :as rand]
                     [reconnect :as rc]]
             [jepsen.control [core :as core]]
-            [slingshot.slingshot :refer [try+ throw+]]))
+            [clj-commons.slingshot :refer [try+ throw+]]))
 
 (def retries
   "How many times should we retry exceptions before giving up and throwing?"
