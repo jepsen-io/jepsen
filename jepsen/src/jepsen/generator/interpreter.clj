@@ -35,7 +35,8 @@
 
 (deftype ClientWorker [node
                        ^:unsynchronized-mutable process
-                       ^:unsynchronized-mutable client]
+                       ^:unsynchronized-mutable client
+                       ^:unsynchronized-mutable logged-errors]
   Worker
   (open [this test id]
     this)
@@ -53,8 +54,16 @@
                       (set! (.process this) (:process op))
                      nil
                      (catch Exception e
-                       (warn e (exception-message e "Error opening client"))
+                       (let [klass (class e)]
+                         (when-not (logged-errors klass)
+                           ; First time seeing this kind of error
+                           (do (warn e (exception-message
+                                       e "Error opening client"))
+                               (set! (.logged-errors this)
+                                     (conj logged-errors klass)))))
+                       ; Fresh client
                        (set! (.client this) nil)
+                       ; And a failed operation
                        (assoc op
                               :type :fail
                               :error [:no-client (.getMessage e)])))]
@@ -86,7 +95,7 @@
     ;(locking *out* (prn :spawn id))
     (if (integer? id)
       (let [nodes (:nodes test)]
-        (ClientWorker. (nth nodes (mod id (count nodes))) nil nil))
+        (ClientWorker. (nth nodes (mod id (count nodes))) nil nil #{}))
       (NemesisWorker.)))
 
   (invoke! [this test op])
