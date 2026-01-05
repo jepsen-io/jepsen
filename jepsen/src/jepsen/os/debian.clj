@@ -163,26 +163,27 @@
     (c/su
       ; Packages!
       (install [:apt-transport-https
+                :apt-utils
                 :build-essential
-                :libzip4
-                :wget
+                :bzip2
                 :curl
-                :vim
-                :man-db
+                :dirmngr
                 :faketime
+                :iproute2
+                :iptables
+                :iputils-ping
+                :libzip4
+                :logrotate
+                :man-db
                 :netcat-openbsd
                 :ntpdate
-                :unzip
-                :iptables
                 :psmisc
-                :tar
-                :bzip2
-                :iputils-ping
-                :iproute2
                 :rsyslog
-                :logrotate
-                :dirmngr
-                :tcpdump]))
+                :tar
+                :tcpdump
+                :unzip
+                :vim
+                :wget]))
 
     (meh (net/heal! (:net test) test)))
 

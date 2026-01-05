@@ -1,0 +1,15 @@
+#!/bin/bash
+
+set -e
+
+DIR="/tmp/jepsen/antithesis"
+mkdir -p "$DIR"
+
+FIFO="${DIR}/check"
+
+# Create a FIFO
+#echo "$FIFO"
+mkfifo "$FIFO"
+
+# And block on it
+cat "$FIFO"

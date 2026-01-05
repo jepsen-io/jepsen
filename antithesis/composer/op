@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -e
+
+DIR="/tmp/jepsen/antithesis"
+
+mkdir -p "$DIR"
+
+# Pick a hopefully unique ID for this op
+ID="$(date +%s.%N)-${$}"
+FIFO="${DIR}/op-${ID}"
+
+# Create a FIFO
+#echo "$FIFO"
+mkfifo "$FIFO"
+
+# And block on it
+cat "$FIFO"
