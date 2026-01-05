@@ -70,7 +70,6 @@
 (defrecord FifoOp [name ^Path path]
   IFifoOp
   (complete-fifo-op! [this status out]
-    (info "Completing" path)
     (spit (.toFile path) out)))
 
 (defn ^BlockingQueue fifo-queue
@@ -101,10 +100,8 @@
                 watch-key     (.register fifo-dir-path watch-service kinds)]
             (info "Waiting for FIFOs in" fifo-dir)
             (loop []
-              (info "Waiting on watch-service")
               (let [key (.take watch-service)]
                 (doseq [event (.pollEvents key)]
-                  (info :fifo-event event (.kind event))
                   (condp = (.kind event)
                     StandardWatchEventKinds/OVERFLOW
                     (do (fatal "Couldn't keep up with FIFOs!")
@@ -118,7 +115,6 @@
                                                     (dec (.getNameCount path))))
                           full-path  (.resolve fifo-dir-path path)
                           op (FifoOp. short-name full-path)]
-                      (info :fifo-enqueue op)
                       (.put queue op))))
                 (if (.reset key)
                   (recur)
@@ -257,7 +253,6 @@
                   ; The FifoOp to complete
                   fifo-op  (bm/get fifo-ops thread nil)
                   fifo-ops (bm/remove fifo-ops thread)]
-              (info :op' op' :fifo-op fifo-op)
               ; Log completion and move on
               (if (gi/goes-in-history? op')
                 (do (store.format/append-to-big-vector-block!
@@ -272,7 +267,6 @@
                   ctx         (assoc ctx :time time)
                   [op gen']   (gen/op gen test ctx)
                   fifo-op     (.peek fifo-queue)]
-              (when fifo-op (info :fifo-op fifo-op))
               (cond
                 ; As a special case, the fifo op "check" flips our phase.
                 (and fifo-op
@@ -280,7 +274,7 @@
                 ; Gosh this is a gross hack. We're just going to shove the fifo
                 ; op into the phase, so it can be completed when the checker is
                 ; done.
-                (do (info "Antithesis requested a check; main phase ending...")
+                (do (info "Antithesis requested check; main phase ending...")
                     (reset! phase fifo-op)
                     (.take fifo-queue)
                     (recur ctx gen op-index outstanding poll-timeout fifo-ops))
