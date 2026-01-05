@@ -22,6 +22,7 @@
   This namespace provides the Jepsen-side infrastructure for watching the FIFO
   directory, a test runner like `jepsen.core/run!`, and a CLI command called
   `antithesis` which works like `test`, but uses our runner instead."
+  (:refer-clojure :exclude [run!])
   (:require [bifurcan-clj [core :as b]
                           [map :as bm]]
             [clj-commons.slingshot :refer [try+ throw+]]
@@ -32,6 +33,7 @@
             [fipp.edn :refer [pprint]]
             [jepsen [core :as jepsen]
                     [checker :as checker]
+                    [cli :as cli]
                     [client :as client]
                     [generator :as gen]
                     [history :as h]
@@ -136,9 +138,12 @@
 (defrecord MainGen [gen]
   gen/Generator
   (op [this test ctx]
-    (when (identical? :main @(:antithesis-phase test))
-      (when-let [[op gen'] (gen/op gen test ctx)]
-        [op (MainGen. gen')])))
+    (if-let [phase (:antithesis-phase test)]
+      (when (identical? :main @phase)
+        (when-let [[op gen'] (gen/op gen test ctx)]
+          [op (MainGen. gen')]))
+      ; Not in a test-composer run.
+      (gen/op gen test ctx)))
 
   (update [this test ctx event]
     (MainGen. (gen/update gen test ctx event))))
@@ -153,8 +158,10 @@
   This generator is intended to be called by the test author, and wraps the
   main phase generator. It uses an atom, stored in the test: :antithesis-phase.
   This generator emits operations so long as the phase `:main`. Otherwise it
-  emits `nil`, which forces any composed generator to proceed to the final
-  phase. Once all final operations are done, the atom flips to `:done`."
+  emits `nil`, which forces any composed generator using this to proceed to the
+  next phase--presumably, the final generator before checking.
+
+  In non-antithesis environments, this wrapper has no effect."
   [gen]
   (MainGen. gen))
 
@@ -409,3 +416,33 @@
                       jepsen/analyze!
                       jepsen/log-results
                       (notify-test-checked! antithesis-phase)))))))))))
+
+(defn antithesis-cmd
+  "A command package for jepsen.cli. Provides a new command, `lein run
+  antithesis`, which works like `lein run test`, but uses the Antithesis test
+  composer to drive execution. Options:
+
+    {:opt-spec A vector of additional options for tools.cli. Merge into
+               `test-opt-spec`. Optional.
+     :opt-fn   A function which transforms parsed options. Composed after
+               `test-opt-fn`. Optional.
+     :opt-fn*  Replaces test-opt-fn, in case you want to override it
+               altogether.
+     :usage    Defaults to `jc/test-usage`. Optional.
+     :test-fn  A function that receives the option map and constructs a test.}"
+  [opts]
+  (let [opt-spec (cli/merge-opt-specs cli/test-opt-spec (:opt-spec opts))
+        opt-fn   (or (:opt-fn* opts) cli/test-opt-fn)
+        test-fn  (:test-fn opts)]
+    {"antithesis"
+     {:opt-spec opt-spec
+      :opt-fn   opt-fn
+      :usage    (:usage opts cli/test-usage)
+      :run      (fn [{:keys [options]}]
+                  (info "Test options:\n"
+                        (with-out-str (pprint options)))
+                  (let [test (run! (test-fn options))]
+                    (case (:valid? (:results test))
+                      false    (System/exit 1)
+                      :unknown (System/exit 2)
+                      nil)))}}))
