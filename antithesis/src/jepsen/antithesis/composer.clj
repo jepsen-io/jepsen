@@ -165,6 +165,13 @@
 ;; different control flow at the top level, because we're driven by the
 ;; *external* FIFO watcher, not by the generator directly.
 
+(def max-pending-interval
+  ; When the generator is :pending, this is how long we'll wait before looking
+  ; at the generator again. In Antithesis, spinning tightly on the generator
+  ; looks busy and can prevent Antithesis from doing actual operations, so we
+  ; wait a full millisecond here instead.
+  1000)
+
 (defn interpret!
   "Borrowed from jepsen.generator.interpreter, with adaptations for our FIFO
   queue. Notably, the test now contains a :fifo-queue, which delivers
@@ -225,7 +232,9 @@
                ; How long to poll on the completion queue, in micros.
                poll-timeout   0
                ; The FifoOp each thread is processing
-               fifo-ops    (b/linear bm/empty)]
+               fifo-ops    (b/linear bm/empty)
+               ; How long to poll on the fifo queue, in micros
+               fifo-timeout  max-pending-interval]
           ; First, can we complete an operation? We want to get to these first
           ; because they're latency sensitive--if we wait, we introduce false
           ; concurrency.
@@ -258,33 +267,25 @@
                 (do (store.format/append-to-big-vector-block!
                       history-writer op')
                     (when fifo-op (complete-fifo-op! fifo-op 0 (pr-str op')))
-                    (recur ctx gen (inc op-index) (dec outstanding) 0 fifo-ops))
+                    (recur ctx gen (inc op-index) (dec outstanding) 0 fifo-ops
+                           fifo-timeout))
                 (do (when fifo-op (complete-fifo-op! fifo-op 0 (pr-str op')))
-                    (recur ctx gen op-index (dec outstanding) 0 fifo-ops))))
+                    (recur ctx gen op-index (dec outstanding) 0 fifo-ops
+                           fifo-timeout))))
 
             ; There's nothing to complete; let's see what the generator's up to
             (let [time        (util/relative-time-nanos)
                   ctx         (assoc ctx :time time)
-                  [op gen']   (gen/op gen test ctx)
-                  fifo-op     (.peek fifo-queue)]
+                  [op gen']   (gen/op gen test ctx)]
+              ;(info :op op)
               (cond
-                ; As a special case, the fifo op "check" flips our phase.
-                (and fifo-op
-                     (= "check" (:name fifo-op)))
-                ; Gosh this is a gross hack. We're just going to shove the fifo
-                ; op into the phase, so it can be completed when the checker is
-                ; done.
-                (do (info "Antithesis requested check; main phase ending...")
-                    (reset! phase fifo-op)
-                    (.take fifo-queue)
-                    (recur ctx gen op-index outstanding poll-timeout fifo-ops))
-
                 ; We're exhausted, but workers might still be going.
                 (nil? op)
                 (if (pos? outstanding)
                   ; Still waiting on workers
                   (recur ctx gen op-index outstanding
-                         (long gi/max-pending-interval) fifo-ops)
+                         (long max-pending-interval) fifo-ops
+                         fifo-timeout)
                   ; Good, we're done. Tell workers to exit...
                   (do (doseq [[thread queue] invocations]
                         (.put ^ArrayBlockingQueue queue {:type :exit}))
@@ -307,45 +308,72 @@
                 ; Nothing we can do right now. Let's try to complete something.
                 (identical? :pending op)
                 (recur ctx gen op-index
-                       outstanding (long gi/max-pending-interval) fifo-ops)
+                       outstanding (long max-pending-interval) fifo-ops
+                       fifo-timeout)
 
-                ; Good, we've got an invocation. Do we need to wait to run it?
+                ; Good, the generator has an invocation for us.
+
+                ; But... it's in the future, so we have to wait.
+                (< time (:time op))
+                (recur ctx gen op-index outstanding
+                       ; Unless something changes, we don't need to ask
+                       ; the generator for another op until it's time.
+                       (long (/ (- (:time op) time) 1000))
+                       fifo-ops
+                       fifo-timeout)
+
+                ; We have an invocation and it's ready.
                 true
-                (if (or ; We can't run operations from the future
-                        (< time (:time op))
-                        ; In the main phase, we can't run until a fifo op
-                        ; arrives
-                        (and (identical? :main @phase)
-                             (nil? fifo-op)))
+                ; We need to wait for a FIFO op to release us.
+                (let [fifo-op (when (identical? :main @phase)
+                                ; Once we're done with the main phase, we don't
+                                ; care about FIFO ops any more.
+                                (.poll fifo-queue fifo-timeout
+                                       TimeUnit/MICROSECONDS))]
+                  (cond
+                    ; As a special case, the fifo op "check" ends the main
+                    ; phase.
+                    (= "check" (:name fifo-op))
+                    ; Gosh this is a gross hack. We're just going to shove the
+                    ; fifo op into the phase, so it can be completed when the
+                    ; checker is done.
+                    (do (info "Antithesis requested check; main phase ending...")
+                        (reset! phase fifo-op)
+                        (recur ctx gen op-index outstanding poll-timeout
+                               fifo-ops 0))
 
-                  ; Can't evaluate this op yet!
-                  (recur ctx gen op-index outstanding
-                         ; Unless something changes, we don't need to ask
-                         ; the generator for another op until it's time.
-                         (long (/ (- (:time op) time) 1000))
-                         fifo-ops)
+                    ; We're in the main phase and are still waiting on the
+                    ; FIFO. Let's switch gears and check for a completion op.
+                    (and (identical? :main @phase)
+                         (nil? fifo-op))
+                    (recur ctx gen op-index outstanding
+                           (long max-pending-interval)
+                           fifo-ops
+                           (long max-pending-interval))
 
-                  ; Good, we can run this.
-                  (let [thread (gen/process->thread ctx (:process op))
-                        op (assoc op :index op-index)
-                        ; Log the invocation
-                        goes-in-history? (gi/goes-in-history? op)
-                        _ (when goes-in-history?
-                            (store.format/append-to-big-vector-block!
-                              history-writer op))
-                        op-index' (if goes-in-history? (inc op-index) op-index)
-                        ; Dispatch it to a worker
-                        _ (.put ^ArrayBlockingQueue (get invocations thread) op)
-                        ; Update our context to reflect
-                        ctx (gc/busy-thread ctx
-                                            (:time op) ; Use time instead?
-                                            thread)
-                        ; Let the generator know about the invocation
-                        gen' (gen/update gen' test ctx op)
-                        ; Remember that this thread is servicing this fifo op
-                        _         (when fifo-op (.take fifo-queue))
-                        fifo-ops' (bm/put fifo-ops thread fifo-op)]
-                    (recur ctx gen' op-index' (inc outstanding) 0 fifo-ops')))))))
+                    ; We're either no longer in the main phase, or we are, and
+                    ; have a fifo op. Let's invoke!
+                    true
+                    (let [thread (gen/process->thread ctx (:process op))
+                          op (assoc op :index op-index)
+                          ; Log the invocation
+                          goes-in-history? (gi/goes-in-history? op)
+                          _ (when goes-in-history?
+                              (store.format/append-to-big-vector-block!
+                                history-writer op))
+                          op-index' (if goes-in-history? (inc op-index) op-index)
+                          ; Dispatch it to a worker
+                          _ (.put ^ArrayBlockingQueue (get invocations thread) op)
+                          ; Update our context to reflect
+                          ctx (gc/busy-thread ctx
+                                              (:time op) ; Use time instead?
+                                              thread)
+                          ; Let the generator know about the invocation
+                          gen' (gen/update gen' test ctx op)
+                          ; Remember that this thread is servicing this fifo op
+                          fifo-ops' (bm/put fifo-ops thread fifo-op)]
+                      (recur ctx gen' op-index' (inc outstanding) 0 fifo-ops'
+                             fifo-timeout))))))))
 
         (catch Throwable t
           ; We've thrown, but we still need to ensure the workers exit.
