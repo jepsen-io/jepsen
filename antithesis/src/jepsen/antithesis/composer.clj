@@ -46,7 +46,8 @@
                               [context :as gc]]
             [jepsen.store.format :as store.format]
             [potemkin :refer [definterface+]])
-  (:import (java.util.concurrent ArrayBlockingQueue
+  (:import (java.io IOException)
+           (java.util.concurrent ArrayBlockingQueue
                                  BlockingQueue
                                  TimeUnit)
            (io.lacuna.bifurcan ISet
@@ -70,7 +71,16 @@
 (defrecord FifoOp [name ^Path path]
   IFifoOp
   (complete-fifo-op! [this status out]
-    (spit (.toFile path) out)))
+    (try
+      (spit (.toFile path) out)
+      :completed
+      (catch IOException e
+        (condp re-find (.getMessage e)
+          ; Whoever invoked this op stopped waiting for a response!
+          #"Broken pipe"
+          :broken-pipe
+
+          (throw e))))))
 
 (defn ^BlockingQueue fifo-queue
   "Constructs a queue full of pending FIFO operations. The fifo watcher writes
