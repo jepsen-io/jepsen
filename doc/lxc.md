@@ -1,6 +1,6 @@
 # How to set up nodes via LXC
 
-#### [Mint 21.2 Victoria](#mint-212-victoria-1)
+#### [Mint 22.3 Zena](#mint-22.3-zena-1)
 #### [Debian Bookworm - LXD](#debian-bookworm---lxd-1)
 #### [Debian Bookworm - LXC](#debian-bookworm---lxc-1)
 
@@ -8,27 +8,27 @@ For further information, [LXD - Debian Wiki](https://wiki.debian.org/LXD).
 
 ----
 
-## Mint 21.2 Victoria
+## Mint 22.3 Zena
 
-Install LXC
+Install LXC and DNSMasq:
 
 ```sh
-sudo apt install lxc lxc-templates libvirt-clients
+sudo apt install lxc lxc-templates libvirt-clients dnsmasq
 ```
 
 Update the old GPG keys for debian releases
 
 ```sh
 cd /tmp
-wget "https://ftp-master.debian.org/keys/release-^C.asc"
-sudo gpg --no-default-keyring --keyring=/var/cache/lxc/debian/archive-key.gpg --import release-12.asc
+wget "https://ftp-master.debian.org/keys/archive-key-13.asc"
+sudo gpg --no-default-keyring --keyring=/etc/apt/trusted.gpg.d/debian-archive-trixie-stable.gpg --import archive-key-13.asc
 ```
 
 Set up a ZFS filesystem for containers. These are throwaway so I don't bother
 with sync or atime.
 
 ```sh
-sudo zfs create -o atime=off -o sync=disabled -o mountpoint=/var/lib/lxc rpool/lxc
+sudo zfs create -o acltype=posix -o atime=off -o sync=disabled -o mountpoint=/var/lib/lxc rpool/lxc
 ```
 
 If you've got Docker installed, it creates a whole bunch of firewall gunk that
@@ -80,27 +80,71 @@ Create containers.
 
 ```sh
 # To destroy: for i in {1..10}; do sudo lxc-destroy --force -n n$i; done
-for i in {1..10}; do sudo lxc-create -n n$i -t debian -- --release bookworm; done
+for i in {1..10}; do sudo lxc-create -n n$i -t debian -- --release trixie; done
 ```
 
-Uncomment LXC_DOMAIN in /etc/default/lxc-net
+Uncomment this line in `/etc/default/lxc-net` to allow DHCP address reservations:
 
 ```sh
-sudo vim /etc/default/lxc-net
+LXC_DHCP_CONFILE=/etc/dnsmasq.conf
+```
+
+Uncomment `bind-interfaces` in `/etc/dnsmasq.conf`, because otherwise
+systemd-resolved will fight it. Also uncomment `conf-dir`:
+
+```
+bind-interfaces
+conf-dir=/etc/dnsmasq.d
+```
+
+But disable the actual dnsmasq service, because lxc-net will run it.
+
+```
+sudo systemctl stop dnsmasq
+sudo systemctl disable dnsmasq
+```
+
+Disable the systemd-resolved stub listener in `/etc/systemd/resolved.conf`, and search the .lxc domain:
+
+```
+...
+DNSStubListener=no
+DOMAINS=lxc,...
+```
+
+Add DHCP reservations for the nodes. The 10.0.3.xxx here should line up with
+the network address on `lxcbr0`; check `ifconfig lxcbr0`.
+
+```
+for i in {1..10}; do sudo bash -c "echo 'dhcp-host=n$i,10.0.3.1$(printf "%02d" $i)' >> /etc/dnsmasq.d/jepsen.conf"; done
+```
+
+Restart the resolver and LXC networking
+
+```
+sudo systemctl restart systemd-resolved
+sudo systemctl restart lxc-net
+```
+
+Start up a container and confirm that it's assigned the right address:
+
+```
+sudo lxc-start n1
+sudo lxc-ls --fancy
+sudo lxc-stop n1
 ```
 
 And add the local dnsmasq to networkmanager
 
 ```sh
 sudo bash -c "cat >/etc/NetworkManager/dnsmasq.d/lxc.conf <<EOF
-server=/lxc/10.0.1.1
+server=/lxc/10.0.3.1
 EOF"
 ```
 
 Restart networking so that takes effect
 
 ```sh
-sudo systemctl restart lxc-net
 sudo systemctl restart NetworkManager
 ```
 
@@ -115,7 +159,7 @@ After=lxc-net.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/resolvectl dns lxcbr0 10.0.1.1
+ExecStart=/usr/bin/resolvectl dns lxcbr0 10.0.3.1
 ExecStart=/usr/bin/resolvectl domain lxcbr0 '~lxc'
 ExecStopPost=/usr/bin/resolvectl revert lxcbr0
 RemainAfterExit=yes
@@ -128,14 +172,6 @@ sudo systemctl enable lxc-dns-lxcbr0.service
 sudo systemctl start lxc-dns-lxcbr0.service
 ```
 
-Add the .lxc domain to resolved's search:
-
-```sh
-sudo vim /etc/systemd/resolved.conf
-...
-DOMAINS=lxc,...
-```
-
 Start nodes
 
 ```sh
@@ -143,6 +179,10 @@ for i in {1..10}; do
   sudo lxc-start -d -n n$i
 done
 ```
+
+[This](https://thelinuxcode.com/how-to-configure-dns-on-linux-2026-systemd-resolved-networkmanager-resolvconf-and-bind/)
+is a helpful guide to fixing resolv.conf/resolved/dnsmasq/NetworkManager
+issues. You may need to fully restart too.
 
 Copy your SSH key to nodes and set their passwords to something trivial
 
@@ -177,6 +217,8 @@ for n in {1..10}; do
   ssh-keyscan -t ed25519 n$n
 done >> ~/.ssh/known_hosts
 ```
+
+At this point you should be able to `ssh n1` without a password.
 
 ----
 
