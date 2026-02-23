@@ -5,7 +5,7 @@
             [unilog.config :as unilog]))
 
 (defn quiet-logging
-  "Quiets down logging"
+  "A fixture to quiet down logging, call f, then restore it."
   [f]
   (unilog/start-logging!
     {:level     "info"

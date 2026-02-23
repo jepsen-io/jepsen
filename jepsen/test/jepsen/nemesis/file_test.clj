@@ -17,15 +17,17 @@
              :refer [checking for-all]]
             [dom-top.core :refer [loopr]]
             [jepsen [client :as client]
-                    [core :as jepsen]
                     [common-test :refer [quiet-logging]]
                     [control :as c]
+                    [core :as jepsen]
                     [generator :as gen]
                     [history :as h]
+                    [os :as os]
                     [tests :as tests]
                     [util :as util]]
             [jepsen.control.util :as cu]
             [jepsen.nemesis.file :as nf]
+            [jepsen.os.debian :as debian]
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.nio ByteBuffer)
            (java.nio.channels FileChannel
@@ -39,9 +41,54 @@
   "Number of trials for generative tests"
   100)
 
-(use-fixtures :once quiet-logging)
+;; Fixtures
 
-(deftest ^:focus ^:integration truncate-file-test
+(defn setup-os!
+  "Fixture for tests. Sets up the OS on each remote node."
+  [f]
+  ; Also suppress logging
+  (let [test (assoc tests/noop-test :os debian/os)]
+    (jepsen/with-sessions [test test]
+      (c/with-all-nodes test
+        (os/setup! (:os test) test c/*host*)
+        (debian/install ["xxd"])))
+    (f)))
+
+(defn sh
+  "Runs shell command, throws on nonzero exit"
+  [& args]
+  (let [res (apply shell/sh args)]
+    (when (not= 0 (:exit res))
+      (throw+ (assoc res
+                     :cmd args)))
+    res))
+
+(def src
+  "Source file."
+  "resources/corrupt-file.c")
+
+(def dir
+  "Temp dir for binaries, data files, etc."
+  "/tmp/jepsen/nemesis/file")
+
+(def bin
+  "Binary file"
+  (str dir "/corrupt-file"))
+
+(defn build-local!
+  "Fixture for tests. Compiles the corrupt-file binary locally, stashing it in
+  /tmp/jepsen/bin/corrupt-file. Wipes the directory when done."
+  [f]
+  (sh "mkdir" "-p" dir)
+  (sh "gcc" src "-o" bin "-lm" "-Wall" "-Wextra")
+  (f)
+  #_(sh "rm" "-rf" dir))
+
+(use-fixtures :once quiet-logging setup-os! build-local! setup-os!)
+
+;; Tests
+
+(deftest ^:integration truncate-file-test
   (let [f1 "/tmp/truncate-demo1" ; For truncation to n bytes
         f2 "/tmp/truncate-demo2" ; For -n bytes
         node (first (:nodes tests/noop-test))
@@ -260,13 +307,6 @@
 
 ;; Local generative tests
 
-(def src
-  "Source file."
-  "resources/corrupt-file.c")
-
-(def dir
-  "Temp dir for binaries, data files, etc."
-  "/tmp/jepsen/nemesis/file")
 
 (def data-file
   "Our original data file."
@@ -279,30 +319,6 @@
 (def data-file''
   "Sometimes you need three steps, you know?"
   (str dir "/data3"))
-
-(def bin
-  "Binary file"
-  (str dir "/corrupt-file"))
-
-(defn sh
-  "Runs shell command, throws on nonzero exit"
-  [& args]
-  (let [res (apply shell/sh args)]
-    (when (not= 0 (:exit res))
-      (throw+ (assoc res
-                     :cmd args)))
-    res))
-
-(defn build-local!
-  "Fixture for tests. Compiles the corrupt-file binary locally, stashing it in
-  /tmp/jepsen/bin/corrupt-file. Wipes the directory when done."
-  [f]
-  (sh "mkdir" "-p" dir)
-  (sh "gcc" src "-o" bin "-lm" "-Wall" "-Wextra")
-  (f)
-  #_(sh "rm" "-rf" dir))
-
-(use-fixtures :once build-local!)
 
 (def smol-int
   "Very small positive integers, like mod and index."

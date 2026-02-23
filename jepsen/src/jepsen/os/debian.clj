@@ -172,11 +172,10 @@
                 :iproute2
                 :iptables
                 :iputils-ping
-                :libzip4
                 :logrotate
                 :man-db
                 :netcat-openbsd
-                :ntpdate
+                :ntpsec-ntpdate
                 :psmisc
                 :rsyslog
                 :tar
