@@ -71,7 +71,7 @@ log_all_operations=false
   (info "Installing lazyfs" commit)
   (c/su
     ; Dependencies
-    (debian/install [:g++ :cmake :libfuse3-dev :libfuse3-3 :fuse3 :git])
+    (debian/install [:g++ :cmake :libfuse3-dev :libfuse3-4 :fuse3 :git])
     ; LXC containers like to delete /dev/fuse on reboot for some reason
     (when-not (cu/exists? fuse-dev)
       ; We're going to create a fuse device that's writable by everyone. This
