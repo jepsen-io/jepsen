@@ -1,5 +1,5 @@
 (ns jepsen.os.debian
-  "Common tasks for Debian boxes."
+  "Common tasks for Debian Trixie."
   (:require [clojure [set :as set]
                      [string :as str]]
             [clojure.tools.logging :refer [info]]
