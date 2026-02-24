@@ -104,12 +104,16 @@ sudo systemctl stop dnsmasq
 sudo systemctl disable dnsmasq
 ```
 
-Disable the systemd-resolved stub listener in `/etc/systemd/resolved.conf`, and search the .lxc domain:
+Disable the systemd-resolved stub listener in `/etc/systemd/resolved.conf`, and
+search the .lxc domain. Ignore resolv.conf, and instead hardcode your preferred
+upstream DNS resolver (mine is 10.0.0.1).
 
 ```
 ...
 DNSStubListener=no
 DOMAINS=lxc,...
+no-resolv
+server=10.0.0.1
 ```
 
 Add DHCP reservations for the nodes. The 10.0.3.xxx here should line up with
@@ -142,14 +146,28 @@ server=/lxc/10.0.3.1
 EOF"
 ```
 
-Restart networking so that takes effect
+Insist that NetworkManager use dnsmasq, *not* the public DNS. Get the long UUID
+here from `nmcli con`.
+
+```sh
+sudo nmcli con mod d41034c4-48d0-3867-922c-73480603ff2e ipv4.ignore-auto-dns yes
+sudo nmcli con mod d41034c4-48d0-3867-922c-73480603ff2e ipv4.dns "10.0.3.1"
+```
+
+Restart networking so that takes effect, and/or bounce the interface
 
 ```sh
 sudo systemctl restart NetworkManager
+sudo nmcli con down d41034c4-48d0-3867-922c-73480603ff2e
+sudo nmcli con up d41034c4-48d0-3867-922c-73480603ff2e
 ```
 
+At this juncture `cat /etc/resolv.conf` should show only 10.0.3.1, the local
+dnsmasq. Dig `google.com` should still resolve using your upstream resolver.
+
 Set up resolved to reference the nodes. Check your interface name and address
-in `ip addr`; they may vary.
+in `ip addr`; they may vary. This miiiight be optional with the above nmcli
+settings.
 
 ```sh
 sudo bash -c "cat >/etc/systemd/system/lxc-dns-lxcbr0.service <<EOF
