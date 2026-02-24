@@ -114,6 +114,7 @@ typedef struct {
 /* Constructs a default options map */
 opts_t default_opts() {
   opts_t opts;
+  opts.file = NULL;
   opts.mode = MODE_NONE;
   opts.start = 0;
   opts.end = OFF_MAX;
@@ -763,6 +764,5 @@ int main (int argc, char **argv) {
   int result = corrupt(opts);
 
   free(opts.file);
-
   return result;
 }
