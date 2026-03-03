@@ -464,7 +464,21 @@
                            :pidfile pidfile})
             (meh (exec :killall :-9 :-w cmd)))
    (when pidfile
-     (meh (exec :rm :-rf pidfile)))))
+     (meh (exec :rm :-rf pidfile))))
+
+  ([cmd pidfile signal]
+   (if (nil? cmd)
+     (do (info "Stopping" pidfile "using signal" signal)
+         (let [pid (Long/parseLong (exec :cat pidfile))]
+           (meh (exec :kill signal pid))
+           (meh (exec :rm :-rf pidfile))))
+     (do (info "Stopping" cmd "using singal" signal)
+         (timeout 30000 (throw+ {:type    ::kill-timed-out
+                                 :cmd     cmd
+                                 :pidfile pidfile})
+                  (meh (exec :killall signal :-w cmd)))
+         (when pidfile
+           (meh (exec :rm :-rf pidfile)))))))
 
 (defn daemon-running?
   "Given a pidfile, returns true if the pidfile is present and the process it

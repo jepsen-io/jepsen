@@ -61,6 +61,25 @@
         (testing "process exited"
           (is (is (try+ (c/exec :kill :-0 pid)
                         false
+                        (catch [:exit 1] _ true))))))
+
+      (testing "shutdown with pid"
+        (util/stop-daemon! nil pidfile :-TERM)
+        (testing "pidfile cleaned up"
+          (is (not (util/exists? pidfile))))
+        (testing "process exited"
+          (is (is (try+ (c/exec :kill :-0 pid)
+                        false
+                        (catch [:exit 1] _ true))))))
+
+
+      (testing "sigterm shutdown with command name"
+        (util/stop-daemon! "/usr/bin/perl" pidfile :-TERM)
+        (testing "pidfile cleaned up"
+          (is (not (util/exists? pidfile))))
+        (testing "process exited"
+          (is (is (try+ (c/exec :kill :-0 pid)
+                        false
                         (catch [:exit 1] _ true)))))))))
 
 (deftest ^:integration install-archive-test
