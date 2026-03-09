@@ -6,11 +6,11 @@
   :dependencies [[org.clj-commons/byte-streams "0.3.4"
                   :exclusions [potemkin
                                org.clj-commons/primitive-math]]
-                 [org.clojure/clojure "1.12.3"]
-                 [org.clojure/data.fressian "1.1.0"]
-                 [org.clojure/data.generators "1.1.0"]
-                 [org.clojure/tools.logging "1.3.0"]
-                 [org.clojure/tools.cli "1.2.245"]
+                 [org.clojure/clojure "1.12.4"]
+                 [org.clojure/data.fressian "1.1.1"]
+                 [org.clojure/data.generators "1.1.1"]
+                 [org.clojure/tools.logging "1.3.1"]
+                 [org.clojure/tools.cli "1.3.250"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
                  [elle "0.2.6-SNAPSHOT"]
@@ -32,7 +32,7 @@
                  [hiccup "2.0.0"]
                  [metametadata/multiset "0.1.1"]
                  [org.clj-commons/slingshot "0.13.0"]
-                 [org.clojure/data.codec "0.2.0"]]
+                 [org.clojure/data.codec "0.2.1"]]
   :java-source-paths ["src"]
   :javac-options ["--release" "11"]
   :main jepsen.cli
@@ -62,7 +62,7 @@
              :dev {; experimenting with faster startup
                    ;:aot [jepsen.core]
                    :dependencies [[criterium "0.4.6"]
-                                  [org.clojure/test.check "1.1.2"]
+                                  [org.clojure/test.check "1.1.3"]
                                   [com.gfredericks/test.chuck "0.2.15"]]
                    :jvm-opts ["-Xmx32g"
                               "-server"
