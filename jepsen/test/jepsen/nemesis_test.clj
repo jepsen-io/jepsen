@@ -3,7 +3,7 @@
                      [set :as set]
                      [test :refer :all]]
             [jepsen [client :as client]
-                    [common-test :refer [quiet-logging]]
+                    [common-test :refer [quiet-logging setup-os!]]
                     [control :as c]
                     [core :as jepsen]
                     [generator :as gen]
@@ -11,6 +11,8 @@
                     [tests :as tests]
                     [util :refer [meh]]]
             [jepsen.control.net :as net]))
+
+(use-fixtures :once setup-os!)
 
 (defn edges
   "A map of nodes to the set of nodes they can ping"

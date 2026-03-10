@@ -1,7 +1,12 @@
 (ns jepsen.common-test
   "Support functions for writing tests."
   (:require [clojure.tools.logging :refer :all]
-            [jepsen.store :as store]
+            [jepsen [control :as c]
+                    [core :as jepsen]
+                    [os :as os]
+                    [store :as store]
+                    [tests :as tests]]
+            [jepsen.os.debian :as debian]
             [unilog.config :as unilog]))
 
 (defn quiet-logging
@@ -27,3 +32,18 @@
                         })})
   (f)
   (store/stop-logging!))
+
+(defonce setup-os-run?
+  (atom false))
+
+(defn setup-os!
+  "Fixture for tests. Sets up the OS on each remote node. Runs only once, to
+  save time."
+  [f]
+  (when-not @setup-os-run?
+    (let [test (assoc tests/noop-test :os debian/os)]
+      (jepsen/with-sessions [test test]
+        (c/with-all-nodes test
+          (os/setup! (:os test) test c/*host*))))
+    (reset! setup-os-run? true))
+  (f))

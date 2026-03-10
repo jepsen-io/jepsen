@@ -17,7 +17,8 @@
              :refer [checking for-all]]
             [dom-top.core :refer [loopr]]
             [jepsen [client :as client]
-                    [common-test :refer [quiet-logging]]
+                    [common-test :refer [quiet-logging
+                                         setup-os!]]
                     [control :as c]
                     [core :as jepsen]
                     [generator :as gen]
@@ -43,14 +44,13 @@
 
 ;; Fixtures
 
-(defn setup-os!
-  "Fixture for tests. Sets up the OS on each remote node."
+(defn install-xxd!
+  "Fixture for tests. Installs xxd on each remote node."
   [f]
   ; Also suppress logging
   (let [test (assoc tests/noop-test :os debian/os)]
     (jepsen/with-sessions [test test]
       (c/with-all-nodes test
-        (os/setup! (:os test) test c/*host*)
         (debian/install ["xxd"])))
     (f)))
 
@@ -84,7 +84,7 @@
   (f)
   #_(sh "rm" "-rf" dir))
 
-(use-fixtures :once quiet-logging setup-os! build-local! setup-os!)
+(use-fixtures :once quiet-logging setup-os! install-xxd! build-local! setup-os!)
 
 ;; Tests
 
