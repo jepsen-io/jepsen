@@ -4,8 +4,9 @@
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clj-commons/byte-streams "0.3.4"
-                  :exclusions [potemkin
-                               org.clj-commons/primitive-math]]
+                  :exclusions [org.clj-commons/primitive-math
+                               potemkin
+                               riddley]]
                  [org.clojure/clojure "1.12.4"]
                  [org.clojure/data.fressian "1.1.1"]
                  [org.clojure/data.generators "1.1.1"]
