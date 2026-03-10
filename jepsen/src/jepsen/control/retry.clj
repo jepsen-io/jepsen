@@ -29,7 +29,8 @@
        ~@body
        (catch [:type :jepsen.control/ssh-failed] e#
          (if (pos? tries#)
-           (do (Thread/sleep (+ (/ backoff-time 2) (rand/long backoff-time)))
+           (do (Thread/sleep (long (+ (/ backoff-time 2)
+                                      (rand/long backoff-time))))
                (~'retry (dec tries#)))
            (throw+ e#))))))
 

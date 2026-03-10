@@ -1,7 +1,8 @@
 (ns jepsen.checker.plot
   "Draws plots as a part of the checker. This namespace should
   eventually subsume jepsen.checker.perf."
-  (:require [clojure.stacktrace :as trace]
+  (:require [clj-commons.primitive-math :as prim]
+            [clojure.stacktrace :as trace]
             [fipp.edn :refer [pprint]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
@@ -18,6 +19,24 @@
             [clj-commons.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
   (:import (jepsen.history Op)))
+
+(defn op-color-plot-points-unfurl-inner
+  "This is the inner loop used for op-color-plot-points unfurling of windows.
+  There's some sort of bug that prevents the compiler from realizing `i` is a
+  primitive long when it's written inline, so I've pulled it out into a second
+  function for now."
+  [max-window-hz max-window-count series window]
+  (loopr [i      0
+          series series]
+         [[group times] window
+          t            times]
+         (let [y (float (* max-window-hz (/ i max-window-count)))]
+           ; Pretty sure we're getting auto-boxed by the volatiles `loopr`
+           ; generates here. Should go back to dom-top and teach it how to use
+           ; the new primitive-aware reducers instead.
+           (recur (prim/inc (long i))
+                  (update series group conj [t y])))
+         series))
 
 (defn op-color-plot-points
   "Helps `op-color-plot!` by constructing a map of group names to vectors of [x
@@ -74,15 +93,8 @@
            [window windows]
            ; With this window, give each point an increasing counter, carrying
            ; that counter i across all groups.
-           (recur
-             (loopr [i      0
-                     series series]
-                    [[group times] window
-                     t            times]
-                    (let [y (float (* max-window-hz (/ i max-window-count)))]
-                      (recur (inc i)
-                             (update series group conj [t y])))
-                    series)))))
+           (recur (op-color-plot-points-unfurl-inner
+                    max-window-hz max-window-count series window)))))
 
 (defn op-color-plot!
   "Renders a timeseries plot of each operation in a history, where operations
@@ -119,7 +131,7 @@
                                :fail {:color "#FF1E90"}})
         group-fn     (:group-fn opts
                                 (fn group-fn [invoke]
-                                  (.type (h/completion history invoke))))
+                                  (.type ^Op (h/completion history invoke))))
         title        (:title opts (str (:name test) " ops"))
         filename     (:filename opts "op-color-plot.png")
         window-count (:window-count opts 512)

@@ -115,7 +115,7 @@
   [checkers]
   (Compose. checkers))
 
-(defrecord ConcurrencyLimit [sem checker]
+(defrecord ConcurrencyLimit [^Semaphore sem checker]
   Checker
   (check [this test history opts]
     (try (.acquire sem)
@@ -797,43 +797,48 @@
             reads              []] ; Completed [lower val upper]s
            ; If this is slow, maybe try :via :reduce?
            [{:keys [process type f process value] :as op} history]
-           (case [type f]
-             [:invoke :read]
-             ; What value will this read?
-             (if-let [completion (h/completion history op)]
-               (do (if (h/ok? completion)
-                     ; We're going to read something
-                     (recur lower upper
-                            (assoc pending-reads process
-                                   [lower (:value completion)])
-                            reads)
-                     ; Won't read anything
-                     (recur lower upper pending-reads reads)))
-               ; Doesn't finish at all
-               (recur lower upper pending-reads reads))
-
-             [:ok :read]
-             (let [r (get pending-reads process)]
-               (recur lower upper
-                      (dissoc pending-reads process)
-                      (conj reads (conj r upper))))
-
-             [:invoke :add]
-             (do (assert (not (neg? value)))
-                 ; Look forward to find out if we'll succeed
+           (do ; Working with longs lets us do primitive recur here
+               (assert (or (nil? value)
+                           (instance? Long value)))
+               (case [type f]
+                 [:invoke :read]
+                 ; What value will this read?
                  (if-let [completion (h/completion history op)]
-                   (if (h/fail? completion)
-                     ; Won't complete
-                     (recur lower upper pending-reads reads)
-                     ; Will complete
-                     (recur lower (+ upper value) pending-reads reads))
-                   ; Not sure
-                   (recur lower (+ upper value) pending-reads reads)))
+                   (do (if (h/ok? completion)
+                         ; We're going to read something
+                         (recur lower upper
+                                (assoc pending-reads process
+                                       [lower (:value completion)])
+                                reads)
+                         ; Won't read anything
+                         (recur lower upper pending-reads reads)))
+                   ; Doesn't finish at all
+                   (recur lower upper pending-reads reads))
 
-             [:ok :add]
-             (recur (+ lower value) upper pending-reads reads)
+                 [:ok :read]
+                 (let [r (get pending-reads process)]
+                   (recur lower upper
+                          (dissoc pending-reads process)
+                          (conj reads (conj r upper))))
 
-             (recur lower upper pending-reads reads))
+                 [:invoke :add]
+                 (do (assert (not (neg? value)))
+                     ; Look forward to find out if we'll succeed
+                     (if-let [completion (h/completion history op)]
+                       (if (h/fail? completion)
+                         ; Won't complete
+                         (recur lower upper pending-reads reads)
+                         ; Will complete
+                         (recur lower (+ upper (long value))
+                                pending-reads reads))
+                       ; Not sure
+                       (recur lower (+ upper (long value))
+                              pending-reads reads)))
+
+                 [:ok :add]
+                 (recur (+ lower (long value)) upper pending-reads reads)
+
+                 (recur lower upper pending-reads reads)))
            (let [errors (remove (partial apply <=) reads)]
              {:valid?             (empty? errors)
               :reads              reads
