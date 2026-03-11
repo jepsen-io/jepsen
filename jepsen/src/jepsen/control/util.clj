@@ -440,11 +440,11 @@
           :>> (:logfile opts))
     (try+
       ;(info "start-stop-daemon" (escape ssd-args))
-     (exec env :start-stop-daemon ssd-args)
-     :started
-     (catch [:type   :jepsen.control/nonzero-exit
-             :exit   1] e
-       :already-running))))
+      (exec env :start-stop-daemon ssd-args)
+      :started
+      (catch [:type   :jepsen.control/nonzero-exit
+              :exit   1] e
+        :already-running))))
 
 (defn stop-daemon!
   "Kills a daemon process, and cleans up its pidfile.
