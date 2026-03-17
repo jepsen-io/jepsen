@@ -1,8 +1,7 @@
 # How to set up nodes via LXC
 
 #### [Mint 22.3 Zena](#mint-22.3-zena-1)
-#### [Debian Bookworm - LXD](#debian-bookworm---lxd-1)
-#### [Debian Bookworm - LXC](#debian-bookworm---lxc-1)
+#### [Debian 13/trixie - Incus](#debian-13trixie---incus-1)
 
 For further information, [LXD - Debian Wiki](https://wiki.debian.org/LXD).
 
@@ -240,135 +239,121 @@ At this point you should be able to `ssh n1` without a password.
 
 ----
 
-## Debian Bookworm - LXD
+## Debian 13/trixie - Incus
 
+Due to Canonical's re-licensing and imposing of a CLA, the last version of Debian to include LXD will be trixie. Users are encouraged to migrate to Incus after upgrading from bookworm to trixie.
 
-#### Install host packages:
+### Install Host Packages
+
 ```bash
-sudo apt install lxd lxd-tools dnsmasq-base btrfs-progs
+sudo apt update && sudo apt install incus systemd-resolved
 ```
 
-#### Initialize LXD:
+### Initialize Incus
+
 ```bash
-# defaults are good
-sudo lxd init
+# add yourself to the incus-admin group to avoid having to be root or sudo
+# you will need to logout/login for new group to be active
+sudo adduser $USER incus-admin
 
-# add yourself to the LXD group
-sudo usermod -aG lxd <username>
-
-# will need to logout/login for new group to be active
+# initialize Incus with default config, defaults are usually OK
+incus admin init --minimal
 
 # try creating a sample container if you want
-lxc launch images:debian/12 scratch
-lxc list
-lxc shell scratch
-lxc stop scratch
-lxc delete scratch
+incus launch images:debian/13 scratch
+incus list
+incus shell scratch
+incus stop scratch
+incus delete scratch
 ```
 
-#### Create and start Jepsen's node containers:
-
-```bash
-for i in {1..10}; do lxc launch images:debian/12 n${i}; done
-```
-
-#### Configure LXD bridge network:
-
-`lxd` automatically creates the bridge network, and `lxc launch` automatically configures the containers for it: 
-```bash
-lxc network list
-+--------+----------+---------+----------------+---+-------------+---------+---------+
-|  NAME  |   TYPE   | MANAGED |      IPV4      |...| DESCRIPTION | USED BY |  STATE  |
-+--------+----------+---------+----------------+---+-------------+---------+---------+
-| lxdbr0 | bridge   | YES     | 10.82.244.1/24 |...|             | 11      | CREATED |
-+--------+----------+---------+----------------+---+-------------+---------+---------+
-```
-
-Assuming you are using `systemd-resolved`:
-
-```bash
-# confirm your settings
-lxc network get lxdbr0 ipv4.address
-lxc network get lxdbr0 ipv6.address
-lxc network get lxdbr0 dns.domain    # will be blank if default lxd is used 
-
-# create a systemd unit file
-sudo nano /etc/systemd/system/lxd-dns-lxdbr0.service
-# with the contents:
-[Unit]
-Description=LXD per-link DNS configuration for lxdbr0
-BindsTo=sys-subsystem-net-devices-lxdbr0.device
-After=sys-subsystem-net-devices-lxdbr0.device
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/resolvectl dns lxdbr0 10.82.244.1
-ExecStart=/usr/bin/resolvectl domain lxdbr0 ~lxd
-ExecStopPost=/usr/bin/resolvectl revert lxdbr0
-RemainAfterExit=yes
-
-[Install]
-WantedBy=sys-subsystem-net-devices-lxdbr0.device
-
-# bring up and confirm status
-sudo systemctl daemon-reload
-sudo systemctl enable --now lxd-dns-lxdbr0
-sudo systemctl status lxd-dns-lxdbr0.service
-sudo resolvectl status lxdbr0
-
-ping n1
-PING n1 (10.82.244.166) 56(84) bytes of data.
-64 bytes from n1.lxd (10.82.244.166): icmp_seq=1 ttl=64 time=0.598 ms
-```
-
-#### Add required packages to node containers:
+### Create and Start Jepsen's Node Containers
 
 ```bash
 for i in {1..10}; do
-  lxc exec n${i} -- sh -c "apt-get -qy update && apt-get -qy install openssh-server sudo";
+  incus launch images:debian/13 n${i};
 done
 ```
 
-#### Configure SSH:
+### Confirm Incus' Bridge Network
 
-Slip your preferred SSH key into each node's `.ssh/.authorized-keys`:
+`incus init` automatically created the bridge network, and `incus launch` automatically configured the containers for it:
+
+```bash
+incus network list
++----------+----------+---------+----------------+---+-------------+---------+---------+
+|  NAME    |   TYPE   | MANAGED |      IPV4      |...| DESCRIPTION | USED BY |  STATE  |
++----------+----------+---------+----------------+---+-------------+---------+---------+
+| incusbr0 | bridge   | YES     | 10.242.68.1/24 |...|             | 11      | CREATED |
++----------+----------+---------+----------------+---+-------------+---------+---------+
+
+# confirm your settings
+incus network get incusbr0 ipv4.address
+incus network get incusbr0 ipv6.address
+incus network get incusbr0 dns.domain    # will be blank if default incus config is used 
+
+# confirm containers are reachable
+ping n1
+PING n1 (10.242.68.40) 56(84) bytes of data.
+64 bytes from n1 (10.242.68.40): icmp_seq=1 ttl=64 time=0.030 ms
+...
+```
+
+If you want to install and run Docker, it may mess up your networking and firewall.  If your Incus containers are not reachable from the host, see the Incus documentation:
+
+- [Prevent connectivity issues with Incus and Docker](https://linuxcontainers.org/incus/docs/main/howto/network_bridge_firewalld/#prevent-connectivity-issues-with-incus-and-docker)
+
+#### Add Required Packages to Node Containers
+
 ```bash
 for i in {1..10}; do
-  lxc exec n${i} -- sh -c "mkdir -p /root/.ssh && chmod 700 /root/.ssh/";
-  lxc file push ~/.ssh/id_rsa.pub n${i}/root/.ssh/authorized_keys --uid 0 --gid 0 --mode 644;
+  incus exec n${i} -- sh -c "apt-get -qy update && apt-get -qy install openssh-server sudo";
+done
+```
+
+#### Configure SSH
+
+Slip your preferred SSH key into each node's `.ssh/.authorized-keys`:
+
+```bash
+for i in {1..10}; do
+  incus exec n${i} -- sh -c "mkdir -p /root/.ssh && chmod 700 /root/.ssh/";
+  incus file push ~/.ssh/id_rsa.pub n${i}/root/.ssh/authorized_keys --uid 0 --gid 0 --mode 644;
 done
 ```
 
 Reset the root password to root, and allow root logins with passwords on each container.
 If you've got an SSH agent set up, Jepsen can use that instead.
+
 ```bash
 for i in {1..10}; do
-  lxc exec n${i} -- bash -c 'echo -e "root\nroot\n" | passwd root';
-  lxc exec n${i} -- sed -i 's,^#\?PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config;
-  lxc exec n${i} -- systemctl restart sshd;
+  incus exec n${i} -- bash -c 'echo -e "root\nroot\n" | passwd root';
+  incus exec n${i} -- sed -i 's,^#\?PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config;
+  incus exec n${i} -- systemctl restart sshd;
 done
 ```
 
 Store the node keys unencrypted so that jsch can use them.
 If you already have the node keys, they may be unreadable to Jepsen -- remove them from `~/.ssh/known_hosts` and rescan:
+
 ```bash
 for n in {1..10}; do
   ssh-keyscan -t rsa n${n} >> ~/.ssh/known_hosts;
 done
 ```
 
-#### Confirm that your host can ssh in:
+#### Confirm You Can `ssh` Into Nodes
 
 ```bash
 ssh root@n1
 ```
 
-#### Stopping and deleting containers:
+#### Stopping and Deleting Containers
 
 ```bash
 for i in {1..10}; do
-  lxc stop n${i};
-  lxc delete n${i};
+  incus stop n${i} --force;
+  incus delete n${i} --force;
 done
 ```
 
@@ -377,111 +362,17 @@ done
 #### Real VMs w/Real Clocks
 
 ```bash
-sudo apt install qemu-system
+# VM's use QEMU
+sudo apt update && sudo apt install qemu-system
 
-lxc launch images:debian/12 n1 --vm
+# note --vm flag
+incus launch images:debian/13 n1 --vm
 ```
 
-Allows the clock nemesis to bump, skew, and scramble time in the Jepsen node as it's a real vm with a real clock.
+Allows the clock nemesis to bump, skew, and scramble time in a Jepsen node as it's a real vm with a real clock.
 
 ----
 
 #### Misc
 
-The `lxc` command's \<Tab\> completion works well, even autocompletes container names.
-
-#### LXD/LXC and Docker
-
-There are issues with running LXD and Docker simultaneously, Docker grabs port forwarding.
-Running Docker in an LXC container resolves the issue:
- [Prevent connectivity issues with LXD and Docker](https://documentation.ubuntu.com/lxd/en/latest/howto/network_bridge_firewalld/#prevent-connectivity-issues-with-lxd-and-docker).
-
-----
-
-## Debian Bookworm - LXC
-
-```sh
-# Deps
-sudo apt install -y lxc lxc-templates distro-info debootstrap bridge-utils libvirt-clients libvirt-daemon-system iptables ebtables dnsmasq-base libxml2-utils iproute2 bzip2 libnss-myhostname &&
-
-# Create VMs
-for i in {1..10}; do sudo lxc-create -n c$i -t debian -- --release bookworm; done &&
-
-# Add network cards
-for i in {1..10}; do
-sudo bash -c "cat >>/var/lib/lxc/c${i}/config <<EOF
-
-# Network config
-lxc.net.0.type = veth
-lxc.net.0.flags = up
-lxc.net.0.link = virbr0
-lxc.net.0.hwaddr = 00:1E:62:AA:AA:$(printf "%02x" $i)
-EOF"
-done &&
-
-## Point the resolver at the local libvirt DNSmasq server. This used to go in
-#/etc/dhcp/dhclient.conf and now systemd has done something horrible and
-#dhclient still exists but doesn't seem to be used
-sudo bash -c "cat >/etc/systemd/network/1-lxc-dns.network <<EOF
-[Match]
-Name=en*
-
-[Network]
-DHCP=yes
-DNS=192.168.122.1
-EOF" &&
-sudo service systemd-networkd restart &&
-
-# For some horrible inexplicable reason this results in dig/nslookup working
-# fine but the system resolver still queries systemd-resolved which does NOT
-# understand (why??? jfc) that we have this dnsmasq server--luckily we can
-# bypass systemd's resolver at the nsswitch level altogether, jfc I hate
-# systemd
-sudo sed -i 's,resolve \[\!UNAVAIL=return\] ,,' /etc/nsswitch.conf &&
-
-# Start nodes
-sudo virsh net-autostart default &&
-sudo virsh net-start default &&
-for i in {1..10}; do
-  sudo lxc-start -d -n c$i
-done &&
-
-## Create SSH key
-ssh-keygen -b 2048 -t rsa -f ~/.ssh/lxc -q -N "" &&
-
-## SSH setup
-for i in {1..10}; do
-  sudo mkdir -p /var/lib/lxc/c${i}/rootfs/root/.ssh &&
-  sudo chmod 700 /var/lib/lxc/c${i}/rootfs/root/.ssh/ &&
-  sudo cp /home/admin/.ssh/lxc.pub /var/lib/lxc/c${i}/rootfs/root/.ssh/authorized_keys &&
-  sudo chmod 644 /var/lib/lxc/c${i}/rootfs/root/.ssh/authorized_keys &&
-
-  ## Set root password
-  sudo lxc-attach -n c${i} -- bash -c 'echo -e "root\nroot\n" | passwd root';
-  sudo lxc-attach -n c${i} -- sed -i 's,^#\?PermitRootLogin .*,PermitRootLogin yes,g' /etc/ssh/sshd_config;
-  sudo lxc-attach -n c${i} -- systemctl restart sshd;
-done &&
-
-## Install sudo
-for i in {1..10}; do
-  sudo lxc-attach -n c${i} -- apt install -y sudo
-done &&
-
-## Keyscan
-for n in {1..10}; do ssh-keyscan -t rsa c$n; done >> ~/.ssh/known_hosts &&
-
-## And SSH client config
-{
-cat >>~/.ssh/config <<EOF
-# LXC DB nodes
-Host c*
-User root
-IdentityFile ~/.ssh/lxc
-EOF
-} &&
-
-## Create nodes file
-for i in {1..10}; do
-  echo "c$i" >> ~/lxc-nodes
-done &&
-```
+The `incus` command's \<Tab\> completion works well, even autocompletes container names.

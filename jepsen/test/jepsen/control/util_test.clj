@@ -25,22 +25,35 @@
   [url]
   (assert-file-exists util/wget-cache-dir (util/encode url)))
 
+(defn start-test-daemon!
+  "Starts a Perl daemon for testing. Returns the PID string."
+  [logfile pidfile]
+  (c/exec :rm :-f logfile pidfile)
+  (util/start-daemon! {:env {:DOG "bark"
+                             :CAT "meow mix"}
+                       :chdir "/tmp"
+                       :logfile logfile
+                       :pidfile pidfile}
+                      "/usr/bin/perl"
+                      :-e
+                      "$|++; print \"$ENV{'CAT'}\\n\"; sleep 10;")
+  (Thread/sleep 100)
+  (str/trim (c/exec :cat pidfile)))
+
+(defn assert-daemon-stopped!
+  "Asserts that the pidfile is cleaned up and the process is no longer running."
+  [pidfile pid]
+  (testing "pidfile cleaned up"
+    (is (not (util/exists? pidfile))))
+  (testing "process exited"
+    (is (try+ (c/exec :kill :-0 pid)
+              false
+              (catch [:exit 1] _ true)))))
+
 (deftest ^:integration daemon-test
   (let [logfile "/tmp/jepsen-daemon-test.log"
         pidfile "/tmp/jepsen-daemon-test.pid"]
-    (c/exec :rm :-f logfile pidfile)
-    (util/start-daemon! {:env {:DOG "bark"
-                               :CAT "meow mix"}
-                         :chdir "/tmp"
-                         :logfile logfile
-                         :pidfile pidfile}
-                        "/usr/bin/perl"
-                        :-e
-                        "$|++; print \"$ENV{'CAT'}\\n\"; sleep 10;")
-    (Thread/sleep 100)
-    (let [pid   (str/trim (c/exec :cat pidfile))
-          log   (c/exec :cat logfile)
-          lines (str/split log #"\n")]
+    (let [pid (start-test-daemon! logfile pidfile)]
       (testing "pidfile exists"
         (is (re-find #"\d+" pid)))
       (testing "daemon running"
@@ -48,20 +61,27 @@
                   true
                   (catch [:exit 1] _ false))))
 
-      (testing "log starts with Jepsen debug line"
-        (is (re-find #"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} Jepsen starting DOG=bark CAT=\"meow mix\" /usr/bin/perl -e \""
-                     (first lines))))
-      (testing "env vars threaded through to daemon"
-        (is (= "meow mix" (nth lines 1))))
+      (let [log   (c/exec :cat logfile)
+            lines (str/split log #"\n")]
+        (testing "log starts with Jepsen debug line"
+          (is (re-find #"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} Jepsen starting DOG=bark CAT=\"meow mix\" /usr/bin/perl -e \""
+                       (first lines))))
+        (testing "env vars threaded through to daemon"
+          (is (= "meow mix" (nth lines 1)))))
 
       (testing "shutdown"
         (util/stop-daemon! "/usr/bin/perl" pidfile)
-        (testing "pidfile cleaned up"
-          (is (not (util/exists? pidfile))))
-        (testing "process exited"
-          (is (is (try+ (c/exec :kill :-0 pid)
-                        false
-                        (catch [:exit 1] _ true)))))))))
+        (assert-daemon-stopped! pidfile pid)))
+
+    (testing "shutdown with pid"
+      (let [pid (start-test-daemon! logfile pidfile)]
+        (util/stop-daemon! nil pidfile :-TERM)
+        (assert-daemon-stopped! pidfile pid)))
+
+    (testing "sigterm shutdown with command name"
+      (let [pid (start-test-daemon! logfile pidfile)]
+        (util/stop-daemon! "/usr/bin/perl" pidfile :-TERM)
+        (assert-daemon-stopped! pidfile pid)))))
 
 (deftest ^:integration install-archive-test
   (testing "without auth credentials"

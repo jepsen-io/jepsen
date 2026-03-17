@@ -447,9 +447,17 @@
         :already-running))))
 
 (defn stop-daemon!
-  "Kills a daemon process by pidfile, or, if given a command name, kills all
-  processes with that command name, and cleans up pidfile. Pidfile may be nil
-  in the two-argument case, in which case it is ignored."
+  "Kills a daemon process, and cleans up its pidfile.
+
+  With one argument (a pidfile), reads the PID from the pidfile and kills that
+  process with SIGKILL.
+
+  With two arguments (a command name and a pidfile), kills all processes with
+  that command name using SIGKILL. Pidfile may be nil, in which case it is
+  ignored.
+
+  With three arguments (a command name, a pidfile, and a signal), behaves like
+  the two-argument form but sends the given signal instead of SIGKILL."
   ([pidfile]
    (when (exists? pidfile)
      (info "Stopping" pidfile)
@@ -458,11 +466,14 @@
        (meh (exec :rm :-rf pidfile)))))
 
   ([cmd pidfile]
-   (info "Stopping" cmd)
+   (stop-daemon! cmd pidfile :-9))
+
+  ([cmd pidfile signal]
+   (info "Stopping" cmd "with signal" signal)
    (timeout 30000 (throw+ {:type    ::kill-timed-out
                            :cmd     cmd
                            :pidfile pidfile})
-            (meh (exec :killall :-9 :-w cmd)))
+            (meh (exec :killall signal :-w cmd)))
    (when pidfile
      (meh (exec :rm :-rf pidfile)))))
 

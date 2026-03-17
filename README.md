@@ -112,7 +112,7 @@ software you'll need to run most Jepsen tests. If you build your own control
 node (or if you're using your local machine as a control node), you'll need a
 few things:
 
-- A [JVM](https://openjdk.java.net/install/)---version 1.8 or higher.
+- A [JVM](https://openjdk.java.net/install/)---version 21 or higher.
 - JNA, so the JVM can talk to your SSH.
 - [Leiningen](https://leiningen.org/): a Clojure build tool.
 - [Gnuplot](http://www.gnuplot.info/): how Jepsen renders performance plots.
@@ -121,7 +121,7 @@ few things:
 On Debian, try:
 
 ```
-sudo apt install openjdk-17-jdk libjna-java gnuplot graphviz
+sudo apt install default-jdk libjna-java gnuplot graphviz
 ```
 
 ... to get the basic requirements in place. Debian's Leiningen packages are
