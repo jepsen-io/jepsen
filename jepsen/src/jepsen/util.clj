@@ -4,7 +4,7 @@
   (:require [clj-time.core :as time]
             [clj-time.local :as time.local]
             [clojure [string :as str]
-                     [pprint :as pprint :refer [pprint]]
+                     [pprint :as pprint]
                      [walk :as walk]]
             [clojure.core.reducers :as r]
             [clojure.data.generators :as dg]
