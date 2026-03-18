@@ -11,10 +11,10 @@
             [clj-time.local :as time.local]
             [clj-time.coerce :as time.coerce]
             [clj-time.format :as time.format]
-            [fipp.edn :refer [pprint]]
             [unilog.config :as unilog]
             [multiset.core :as multiset]
             [jepsen [fs-cache :refer [write-atomic!]]
+                    [print :refer [pprint]]
                     [util :as util]]
             [jepsen.store [fressian :as jsf]
                           [format :as store.format]])
