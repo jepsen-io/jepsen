@@ -9,11 +9,12 @@
                             [sshj :as sshj]]
             [clj-commons.slingshot :refer [try+ throw+]]))
 
-(use-fixtures :once quiet-logging)
-(use-fixtures :once (fn with-ssh [t]
-                      (c/with-ssh {}
-                        (c/on "n1"
-                          (t)))))
+(use-fixtures :once
+              quiet-logging
+              (fn with-ssh [t]
+                (c/with-ssh {}
+                  (c/on "n1"
+                        (t)))))
 
 (defn assert-file-exists
   "Asserts that a file exists at a given destination"
