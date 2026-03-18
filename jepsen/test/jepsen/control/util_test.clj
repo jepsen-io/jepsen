@@ -57,7 +57,7 @@
       (testing "pidfile exists"
         (is (re-find #"\d+" pid)))
       (testing "daemon running"
-        (is (try+ (c/exec :kill :-0 pid)
+        (is (try+ (c/exec :kill "-0" pid)
                   true
                   (catch [:exit 1] _ false))))
 
@@ -75,12 +75,12 @@
 
     (testing "shutdown with pid"
       (let [pid (start-test-daemon! logfile pidfile)]
-        (util/stop-daemon! nil pidfile :-TERM)
+        (util/stop-daemon! nil pidfile :TERM)
         (assert-daemon-stopped! pidfile pid)))
 
     (testing "sigterm shutdown with command name"
       (let [pid (start-test-daemon! logfile pidfile)]
-        (util/stop-daemon! "/usr/bin/perl" pidfile :-TERM)
+        (util/stop-daemon! "/usr/bin/perl" pidfile :TERM)
         (assert-daemon-stopped! pidfile pid)))))
 
 (deftest ^:integration install-archive-test

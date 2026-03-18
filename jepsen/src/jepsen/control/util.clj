@@ -447,35 +447,40 @@
         :already-running))))
 
 (defn stop-daemon!
-  "Kills a daemon process, and cleans up its pidfile.
+  "Kills a daemon process, and cleans up its pidfile. Takes a pidfile, an
+  optional commmand string, and an optional signal. Kills process and cleans up
+  pidfile.
 
-  With one argument (a pidfile), reads the PID from the pidfile and kills that
-  process with SIGKILL.
+  Pidfiles can be unreliable; it is easy to get into a situation with daemons
+  running without a corresponding pidfile, which will break future runs of the
+  test. For this reason we prefer killing all instances of `cmd`, and only kill
+  the contents of the pidfile if no command is given.
 
-  With two arguments (a command name and a pidfile), kills all processes with
-  that command name using SIGKILL. Pidfile may be nil, in which case it is
-  ignored.
-
-  With three arguments (a command name, a pidfile, and a signal), behaves like
-  the two-argument form but sends the given signal instead of SIGKILL."
+  Signals can be numbers or strings; they're used in `kill -SIGNAL_NAME ...`"
   ([pidfile]
-   (when (exists? pidfile)
-     (info "Stopping" pidfile)
-     (let [pid (Long/parseLong (exec :cat pidfile))]
-       (meh (exec :kill :-9 pid))
-       (meh (exec :rm :-rf pidfile)))))
-
+   (stop-daemon! nil pidfile))
   ([cmd pidfile]
-   (stop-daemon! cmd pidfile :-9))
-
+   (stop-daemon! cmd pidfile 9))
   ([cmd pidfile signal]
-   (info "Stopping" cmd "with signal" signal)
-   (timeout 30000 (throw+ {:type    ::kill-timed-out
-                           :cmd     cmd
-                           :pidfile pidfile})
-            (meh (exec :killall signal :-w cmd)))
-   (when pidfile
-     (meh (exec :rm :-rf pidfile)))))
+   (assert (or cmd pidfile) "Must provide at least a command or a pidfile")
+   (let [signal (str "-" (name+ signal))]
+     (if cmd
+       ; Kill by command
+       (do (info "Stopping" cmd "with signal" signal)
+           (timeout 30000 (throw+ {:type    ::kill-timed-out
+                                   :cmd     cmd
+                                   :pidfile pidfile})
+                    (meh (exec :killall signal :-w cmd))))
+
+       ; No command; go by pidfile
+       (when (exists? pidfile)
+         (info "Stopping" pidfile "with signal" signal)
+         (let [pid (Long/parseLong (exec :cat pidfile))]
+           (meh (exec :kill signal pid)))))
+
+     ; Clean up pidfile either way
+     (when pidfile
+       (meh (exec :rm :-rf pidfile))))))
 
 (defn daemon-running?
   "Given a pidfile, returns true if the pidfile is present and the process it

@@ -6,7 +6,7 @@
 
 ; We don't want to print out jepsen.history.op everywhere; it's much harder to
 ; read
-(deftest ^:focus op-pprint-test
+(deftest op-pprint-test
   (let [op (h/op {:index 0
                   :time 1
                   :process 2
