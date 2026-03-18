@@ -7,9 +7,9 @@
             [clojure.tools.logging :refer [info warn]]
             [clj-time.local :as time.local]
             [clj-time.format :as time.format]
-            [fipp.edn :refer [pprint]]
             [multiset.core :as multiset]
             [jepsen [history]
+                    [print :refer [pprint]]
                     [util :as util]]
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io ByteArrayOutputStream

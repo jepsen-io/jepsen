@@ -12,11 +12,10 @@
                           [shell :as shell]]
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [loopr bounded-future]]
-            [fipp [edn :as fipp]
-                  [ednize]
-                  [engine :as fipp.engine]]
+            [fipp.ednize]
             [jepsen [generator :as gen]
                     [history :as h]
+                    [print :as print :refer [pprint]]
                     [random :as rand]]
             [jepsen.history.fold :refer [loopf]]
             [potemkin :refer [definterface+ import-vars]]
@@ -279,169 +278,74 @@
      (->> (range 0 c n)
           (map #(subvec v % (min c (+ % n))))))))
 
-(def buf-size 1048576)
-
 (defn concat-files!
-  "Appends contents of all fs, writing to out. Returns fs."
+  "Moved to jepsen.print/concat-files!"
   [out fs]
-  (with-open [oc (.getChannel (RandomAccessFile. (io/file out) "rw"))]
-    (doseq [f fs]
-      (with-open [fc (.getChannel (RandomAccessFile. (io/file f) "r"))]
-        (let [size (.size fc)]
-          (loop [position 0]
-            (when (< position size)
-              (recur (+ position (.transferTo fc
-                                              position
-                                              (min (- size position)
-                                                   buf-size)
-                                              oc)))))))))
-  fs)
+  (print/concat-files! out fs))
 
 (defn op->str
-  "Format an operation as a string."
+  "Moved to jepsen.print/op->str"
   [op]
-  (str (:process op)         \tab
-       (:type op)            \tab
-       (pr-str (:f op))      \tab
-       (pr-str (:value op))
-       (when-let [err (:error op)]
-         (str \tab err))))
+  (print/op->str op))
 
 (defn prn-op
-  "Prints an operation to the console."
+  "Moved to jepsen.print/prn-op"
   [op]
-  (pr (:process op)) (print \tab)
-  (pr (:type op))    (print \tab)
-  (pr (:f op))       (print \tab)
-  (pr (:value op))
-  (when-let [err (:error op)]
-    (print \tab) (print err))
-  (print \newline))
+  (print/prn-op op))
 
 (defn print-history
-  "Prints a history to the console."
+  "Moved to jepsen.print/print-history"
   ([history]
-    (print-history prn-op history))
+   (print/print-history history))
   ([printer history]
-   (doseq [op history]
-     (printer op))))
+   (print/print-history printer history)))
 
 (defn write-history!
-  "Writes a history to a file."
+  "Moved to jepsen.print/write-history!"
   ([f history]
-   (write-history! f prn-op history))
+   (print/write-history! f history))
   ([f printer history]
-   (with-open [w (io/writer f)]
-     (binding [*out* w]
-       (print-history printer history)))))
+   (print/write-history! f printer history)))
 
 (defn pwrite-history!
-  "Writes history, taking advantage of more cores."
+  "Moved to jepsen.print/pwrite-history!"
   ([f history]
-    (pwrite-history! f prn-op history))
+    (print/pwrite-history! f history))
   ([f printer history]
-   (h/fold history
-           (loopf {:name [:pwrite-history (str printer)]}
-                  ; Reduce
-                  ([file   (File/createTempFile "jepsen-history" ".part")
-                    writer (io/writer file)]
-                   [op]
-                   (do (binding [*out*              writer
-                                 *flush-on-newline* false]
-                         (printer op))
-                       (recur file writer))
-                   (do (.flush ^java.io.Writer writer)
-                       (.close ^java.io.Writer writer)
-                       file))
-                  ; Combine
-                  ([files []]
-                   [file]
-                   (recur (conj files file))
-                   (try (concat-files! f files)
-                        f
-                        (finally
-                          (doseq [^File f files] (.delete f)))))))))
+   (print/pwrite-history! f printer history)))
 
 (defn log-op
-  "Logs an operation and returns it."
+  "Moved to jepsen.print/log-op"
   [op]
-  (info (op->str op))
-  op)
+  (print/log-op op))
 
-(def logger (agent nil))
+(def log-print
+  "Moved to jepsen.print/log-print"
+  print/log-print)
 
-(defn log-print
-      [_ & things]
-      (apply println things))
-
-(defn log
-      [& things]
-      (apply send-off logger log-print things))
+(def log
+  "Moved to jepsen.print/log"
+  print/log)
 
 (defn test->str
-  "Pretty-prints a test to a string. This binds *print-length* to avoid printing
-  infinite sequences for generators."
+  "Moved to jepsen.print/test->str"
   [test]
-  ; What we're doing here is basically recreating normal map pretty-printing at
-  ; the top level, but overriding generators so that they only print 8 or so
-  ; elements.
-  (with-out-str
-    (fipp.engine/pprint-document
-      [:group "{"
-       [:nest 1
-        (->> test
-             (map (fn [[k v]]
-                    [:group
-                     (fipp/pretty k)
-                     :line
-                     (if (= k :generator)
-                       (binding [*print-length* 8]
-                         (fipp/pretty v))
-                       (fipp/pretty v))]))
-             (interpose [:line ", " ""]))]
-        "}"]
-      {:width 80})))
+  (print/test->str test))
 
-;(defn all-loggers []
-;  (->> (org.apache.log4j.LogManager/getCurrentLoggers)
-;       (java.util.Collections/list)
-;       (cons (org.apache.log4j.LogManager/getRootLogger))))
+(defn all-jdk-loggers
+  "Moved to jepsen.print/all-jdk-loggers"
+  []
+  (print/all-jdk-loggers))
 
-(defn all-jdk-loggers []
-  (let [manager (java.util.logging.LogManager/getLogManager)]
-    (->> manager
-         .getLoggerNames
-         java.util.Collections/list
-         (map #(.getLogger manager %)))))
+(defmacro mute-jdk
+  "Moved to jepsen.print/mute-jdk"
+  [& body]
+  `(print/mute-jdk ~@body))
 
-(defmacro mute-jdk [& body]
-  `(let [loggers# (all-jdk-loggers)
-         levels#  (map #(.getLevel %) loggers#)]
-     (try
-       (doseq [l# loggers#]
-         (.setLevel l# java.util.logging.Level/OFF))
-       ~@body
-       (finally
-         (dorun (map (fn [logger# level#] (.setLevel logger# level#))
-                     loggers#
-                     levels#))))))
-
-;(defmacro mute-log4j [& body]
-;  `(let [loggers# (all-loggers)
-;         levels#  (map #(.getLevel %) loggers#)]
-;     (try
-;       (doseq [l# loggers#]
-;         (.setLevel l# org.apache.log4j.Level/OFF))
-;       ~@body
-;       (finally
-;         (dorun (map (fn [logger# level#] (.setLevel logger# level#))
-;                     loggers#
-;                     levels#))))))
-
-(defmacro mute [& body]
-  `(mute-jdk
-;     (mute-log4j
-       ~@body));)
+(defmacro mute
+  "Moved to jepsen.print/mute"
+  [& body]
+  `(print/mute ~@body))
 
 (defn ms->nanos [ms] (* ms 1000000))
 
@@ -486,12 +390,15 @@
     ~@body
      (nanos->ms (- (System/nanoTime) t0#))))
 
-(defn pprint-str [x]
-  (with-out-str (fipp/pprint x {:width 78})))
+(defn pprint-str
+  "Moved to print/pprint-str"
+  [x]
+  (print/pprint-str x))
 
-(defn spy [x]
-  (info (pprint-str x))
-  x)
+(defn spy
+  "Moved to print/spy"
+  [x]
+  (print/spy x))
 
 (defmacro timeout
   "Times out body after n millis, returning timeout-val."

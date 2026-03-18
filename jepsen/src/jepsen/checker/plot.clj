@@ -3,7 +3,6 @@
   eventually subsume jepsen.checker.perf."
   (:require [clj-commons.primitive-math :as prim]
             [clojure.stacktrace :as trace]
-            [fipp.edn :refer [pprint]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
@@ -11,6 +10,7 @@
 						[dom-top.core :refer [loopr]]
             [gnuplot.core :as g]
             [jepsen [history :as h]
+                    [print :refer [pprint]]
                     [store :as store]
                     [util :as util :refer [nanos->secs]]]
             [jepsen.history.fold :as f]

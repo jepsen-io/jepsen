@@ -47,8 +47,8 @@
                      [string :as str]]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
-            [fipp.edn :refer [pprint]]
             [jepsen [control :as c]
+                    [print :refer [pprint]]
                     [util :as util]])
   (:import (java.io File)
            (java.nio.file AtomicMoveNotSupportedException

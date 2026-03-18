@@ -1,13 +1,13 @@
 (ns jepsen.checker.perf
   "Supporting functions for performance analysis."
   (:require [clojure.stacktrace :as trace]
-            [fipp.edn :refer [pprint]]
             [clojure.core.reducers :as r]
             [clojure.set :as set]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
             [gnuplot.core :as g]
             [jepsen [history :as h]
+                    [print :refer [pprint]]
                     [store :as store]
                     [util :as util]]
             [jepsen.history.fold :as f]
