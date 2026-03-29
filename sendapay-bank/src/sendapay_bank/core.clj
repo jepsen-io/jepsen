@@ -327,6 +327,9 @@
   [label script]
   (run-local-command! label "bash" "-lc" script))
 
+(def ^:private ssh-known-host-warning-pattern
+  #"(?m)^Warning: Permanently added '.*' \([^)]+\) to the list of known hosts\.\r?\n?")
+
 (defn- strip-jepsen-control-banner
   [text]
   (let [lines (str/split-lines (or text ""))]
@@ -336,9 +339,19 @@
                        (str/blank? %))
                   lines))))
 
+(defn- strip-ssh-known-host-warnings
+  [text]
+  (str/replace (or text "") ssh-known-host-warning-pattern ""))
+
+(defn- strip-terminal-noise
+  [text]
+  (-> text
+      strip-jepsen-control-banner
+      strip-ssh-known-host-warnings))
+
 (defn- sanitized-tabular-output
   [text]
-  (let [cleaned (str/trim (strip-jepsen-control-banner text))]
+  (let [cleaned (str/trim (strip-terminal-noise text))]
     (when-not (str/blank? cleaned)
       (str cleaned "\n"))))
 
@@ -362,7 +375,8 @@
 
 (defn- remote-bash!
   [opts node script]
-  (let [ssh-script (str "ssh -o StrictHostKeyChecking=no "
+  (let [ssh-script (str "ssh -o LogLevel=ERROR "
+                        "-o StrictHostKeyChecking=no "
                         "-o UserKnownHostsFile=/dev/null "
                         (shell-quote (ssh-target opts node))
                         " "
@@ -1054,7 +1068,7 @@
                             ["set -euo pipefail"
                              "count=$(pgrep -fc sendapay_bank_ops.py || true)"
                              "printf '%s\n' \"$count\""]))]
-      (parse-long-safe (str/trim (or (strip-jepsen-control-banner out) "")) 0))
+      (parse-long-safe (str/trim (or (strip-terminal-noise out) "")) 0))
     (catch clojure.lang.ExceptionInfo _
       -1)))
 
@@ -1076,6 +1090,35 @@
    :transfer_confirmed_count
    :transfer_intent_created_count
    :helper_process_count])
+
+(def ^:private db-socket-summary-columns
+  [:status
+   :capture_label
+   :node
+   :total_connection_count
+   :established_count
+   :syn_sent_count
+   :syn_recv_count
+   :time_wait_count
+   :close_wait_count
+   :fin_wait_1_count
+   :fin_wait_2_count
+   :last_ack_count
+   :closing_count
+   :listen_count
+   :other_count])
+
+(def ^:private db-socket-state-key
+  {"ESTAB" :established_count
+   "SYN-SENT" :syn_sent_count
+   "SYN-RECV" :syn_recv_count
+   "TIME-WAIT" :time_wait_count
+   "CLOSE-WAIT" :close_wait_count
+   "FIN-WAIT-1" :fin_wait_1_count
+   "FIN-WAIT-2" :fin_wait_2_count
+   "LAST-ACK" :last_ack_count
+   "CLOSING" :closing_count
+   "LISTEN" :listen_count})
 
 (defn- helper-summary-metrics
   [capture-label node lines helper-process-count]
@@ -1105,6 +1148,131 @@
          (str/join "\t" (map #(tsv-safe (get metrics %)) helper-summary-columns))
          "\n")))
 
+(defn- app-db-sockets-script
+  []
+  (str/join
+    "\n"
+    ["set -euo pipefail"
+     "ss -tanH | grep ':5432' || true"]))
+
+(defn- app-processes-script
+  []
+  (str/join
+    "\n"
+    ["set -euo pipefail"
+     "ps -eo pid,ppid,stat,etime,command | egrep 'sendapay_bank_ops.py|python' | egrep -v egrep || true"]))
+
+(defn- remote-command-output
+  [opts node script]
+  (try
+    (let [{:keys [out]} (remote-bash! opts node script)]
+      {:status :ok
+       :out (or (sanitized-tabular-output out) "")})
+    (catch clojure.lang.ExceptionInfo e
+      (let [{:keys [stderr exit stdout]} (ex-data e)]
+        {:status :error
+         :exit exit
+         :stdout (or (sanitized-tabular-output stdout) "")
+         :stderr (or (sanitized-tabular-output stderr) "")
+         :error (.getMessage e)}))))
+
+(defn- render-remote-command-error-log
+  [capture-label node source-label exit stdout stderr]
+  (str "capture_label: " capture-label "\n"
+       "node: " node "\n"
+       "source: " source-label "\n"
+       "exit: " exit "\n"
+       (when-not (str/blank? stdout)
+         (str "stdout:\n" stdout
+              (when-not (str/ends-with? stdout "\n")
+                "\n")))
+       (when-not (str/blank? stderr)
+         (str "stderr:\n" stderr
+              (when-not (str/ends-with? stderr "\n")
+                "\n")))))
+
+(defn- db-socket-summary-metrics
+  [capture-label node lines]
+  (let [lines (vec (remove str/blank? lines))
+        metrics (merge {:status "ok"
+                        :capture_label capture-label
+                        :node node
+                        :total_connection_count (count lines)
+                        :other_count 0}
+                       (into {}
+                             (map (fn [column] [column 0])
+                                  (distinct (vals db-socket-state-key)))))]
+    (reduce (fn [acc line]
+              (let [state (some-> line
+                                  str/trim
+                                  (str/split #"\s+" 2)
+                                  first
+                                  str/upper-case)
+                    key (get db-socket-state-key state :other_count)]
+                (update acc key (fnil inc 0))))
+            metrics
+            lines)))
+
+(defn- render-db-socket-summary-tsv
+  [capture-label node lines]
+  (let [metrics (db-socket-summary-metrics capture-label node lines)]
+    (str (str/join "\t" (map name db-socket-summary-columns))
+         "\n"
+         (str/join "\t" (map #(tsv-safe (get metrics %)) db-socket-summary-columns))
+         "\n")))
+
+(defn- capture-app-db-socket-snapshot!
+  [opts node capture-label summary-path raw-path]
+  (let [{:keys [status out exit stdout stderr]} (remote-command-output opts
+                                                                       node
+                                                                       (app-db-sockets-script))]
+    (ensure-parent! (.getPath summary-path))
+    (ensure-parent! (.getPath raw-path))
+    (if (= :ok status)
+      (let [lines (->> (str/split-lines out)
+                       (remove str/blank?)
+                       vec)]
+        (spit summary-path
+              (render-db-socket-summary-tsv capture-label node lines))
+        (spit raw-path
+              (if (seq lines)
+                (str (str/join "\n" lines) "\n")
+                "")))
+      (do
+        (spit summary-path
+              (render-snapshot-error-tsv capture-label
+                                         node
+                                         "app_db_sockets"
+                                         exit
+                                         stdout
+                                         stderr))
+        (spit raw-path
+              (render-remote-command-error-log capture-label
+                                               node
+                                               "app_db_sockets"
+                                               exit
+                                               stdout
+                                               stderr))))))
+
+(defn- capture-app-process-snapshot!
+  [opts node capture-label path]
+  (let [{:keys [status out exit stdout stderr]} (remote-command-output opts
+                                                                       node
+                                                                       (app-processes-script))]
+    (ensure-parent! (.getPath path))
+    (if (= :ok status)
+      (spit path
+            (if (str/blank? out)
+              "no matching python/sendapay processes\n"
+              out))
+      (spit path
+            (render-remote-command-error-log capture-label
+                                             node
+                                             "app_processes"
+                                             exit
+                                             stdout
+                                             stderr)))))
+
 (defn- capture-nemesis-app-snapshots!
   [opts label]
   (let [prefix (str (System/currentTimeMillis)
@@ -1115,6 +1283,9 @@
             source-path (helper-log-path opts node)
             summary-path (io/file snapshot-root (str prefix "-helper-summary.tsv"))
             tail-path (io/file snapshot-root (str prefix "-helper-tail.log"))
+            db-socket-summary-path (io/file snapshot-root (str prefix "-db-sockets.tsv"))
+            db-socket-log-path (io/file snapshot-root (str prefix "-db-sockets.log"))
+            processes-path (io/file snapshot-root (str prefix "-processes.log"))
             lines (read-last-lines source-path helper-summary-line-limit)
             tail-lines (take-last helper-tail-line-limit lines)
             process-count (helper-process-count opts node)]
@@ -1124,7 +1295,9 @@
         (spit tail-path
               (if (seq tail-lines)
                 (str (str/join "\n" tail-lines) "\n")
-                (str "missing helper log: " source-path "\n")))))))
+                (str "missing helper log: " source-path "\n")))
+        (capture-app-db-socket-snapshot! opts node label db-socket-summary-path db-socket-log-path)
+        (capture-app-process-snapshot! opts node label processes-path)))))
 
 (defn- capture-nemesis-postgres-snapshots!
   [opts db-node label]
@@ -1156,8 +1329,11 @@
 (def ^:private snapshot-kind-suffixes
   [[:pg-stat-activity "-pg-stat-activity.tsv"]
    [:pg-locks "-pg-locks.tsv"]
+   [:db-sockets "-db-sockets.tsv"]
+   [:db-sockets-log "-db-sockets.log"]
    [:helper-summary "-helper-summary.tsv"]
-   [:helper-tail "-helper-tail.log"]])
+   [:helper-tail "-helper-tail.log"]
+   [:processes "-processes.log"]])
 
 (def ^:private helper-summary-numeric-keys
   #{:recent_line_count
@@ -1174,6 +1350,20 @@
     :transfer_confirmed_count
     :transfer_intent_created_count
     :helper_process_count})
+
+(def ^:private db-socket-summary-numeric-keys
+  #{:total_connection_count
+    :established_count
+    :syn_sent_count
+    :syn_recv_count
+    :time_wait_count
+    :close_wait_count
+    :fin_wait_1_count
+    :fin_wait_2_count
+    :last_ack_count
+    :closing_count
+    :listen_count
+    :other_count})
 
 (defn- snapshot-kind
   [file-name]
@@ -1228,6 +1418,26 @@
             :exit (parse-long-safe (get row "exit") -1)
             :message (get row "message")})))
 
+(defn- parse-summary-snapshot
+  [metadata path numeric-keys]
+  (let [{:keys [header rows]} (parse-tsv-file path)]
+    (if (= header snapshot-error-header)
+      (parse-error-snapshot metadata path)
+      (let [row (or (first rows) {})
+            parsed-row (reduce-kv
+                         (fn [acc raw-key raw-value]
+                           (let [key (keyword raw-key)]
+                             (assoc acc
+                                    key
+                                    (if (numeric-keys key)
+                                      (parse-long-safe raw-value 0)
+                                      raw-value))))
+                         {}
+                         row)]
+        (merge metadata
+               {:capture-status (keyword (or (:status parsed-row) "missing"))}
+               parsed-row)))))
+
 (defn- parse-pg-stat-activity-snapshot
   [metadata path]
   (let [{:keys [header rows]} (parse-tsv-file path)]
@@ -1260,21 +1470,11 @@
 
 (defn- parse-helper-summary-snapshot
   [metadata path]
-  (let [{:keys [rows]} (parse-tsv-file path)
-        row (first rows)
-        parsed-row (reduce-kv
-                     (fn [acc raw-key raw-value]
-                       (let [key (keyword raw-key)]
-                         (assoc acc
-                                key
-                                (if (helper-summary-numeric-keys key)
-                                  (parse-long-safe raw-value 0)
-                                  raw-value))))
-                     {}
-                     row)]
-    (merge metadata
-           {:capture-status (keyword (or (:status parsed-row) "missing"))}
-           parsed-row)))
+  (parse-summary-snapshot metadata path helper-summary-numeric-keys))
+
+(defn- parse-db-socket-snapshot
+  [metadata path]
+  (parse-summary-snapshot metadata path db-socket-summary-numeric-keys))
 
 (defn- analyze-nemesis-snapshot
   [opts source-path]
@@ -1282,8 +1482,11 @@
     (case (:kind metadata)
       :pg-stat-activity (parse-pg-stat-activity-snapshot metadata source-path)
       :pg-locks (parse-pg-locks-snapshot metadata source-path)
+      :db-sockets (parse-db-socket-snapshot metadata source-path)
       :helper-summary (parse-helper-summary-snapshot metadata source-path)
+      :db-sockets-log nil
       :helper-tail nil
+      :processes nil
       (assoc metadata :capture-status :unknown))))
 
 (defn- summarize-pg-stat-activity
@@ -1327,6 +1530,35 @@
                                                          0)
                                                     entries))})
 
+(defn- summarize-db-socket-snapshots
+  [entries]
+  {:count (count entries)
+   :error-count (count (filter #(= :error (:capture-status %)) entries))
+   :max-total-connection-count (apply max 0 (map #(or (:total_connection_count %)
+                                                      (:total-connection-count %)
+                                                      0)
+                                                 entries))
+   :max-established-count (apply max 0 (map #(or (:established_count %)
+                                                 (:established-count %)
+                                                 0)
+                                            entries))
+   :max-syn-sent-count (apply max 0 (map #(or (:syn_sent_count %)
+                                              (:syn-sent-count %)
+                                              0)
+                                         entries))
+   :max-close-wait-count (apply max 0 (map #(or (:close_wait_count %)
+                                                (:close-wait-count %)
+                                                0)
+                                           entries))
+   :max-time-wait-count (apply max 0 (map #(or (:time_wait_count %)
+                                               (:time-wait-count %)
+                                               0)
+                                          entries))
+   :max-other-count (apply max 0 (map #(or (:other_count %)
+                                           (:other-count %)
+                                           0)
+                                      entries))})
+
 (defrecord NemesisSnapshotSummaryChecker [opts]
   checker/Checker
   (check [_ _test _history _checker-opts]
@@ -1344,7 +1576,9 @@
                       :pg-locks (summarize-pg-locks
                                   (filter #(= :pg-locks (:kind %)) db-entries))}
        :app-snapshots {:helper-summary (summarize-helper-snapshots
-                                          (filter #(= :helper-summary (:kind %)) app-entries))}
+                                          (filter #(= :helper-summary (:kind %)) app-entries))
+                       :db-sockets (summarize-db-socket-snapshots
+                                     (filter #(= :db-sockets (:kind %)) app-entries))}
        :transitions (vec (map #(dissoc % :source) entries))})))
 
 (defrecord ArtifactCollectionChecker [opts]
