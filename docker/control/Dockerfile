@@ -11,6 +11,7 @@ ENV container=docker
 STOPSIGNAL SIGRTMIN+3
 
 ENV LEIN_ROOT true
+ARG TARGETARCH
 
 #
 # Jepsen dependencies
@@ -18,7 +19,12 @@ ENV LEIN_ROOT true
 RUN apt-get -qy update && \
     apt-get -qy install \
     curl dos2unix emacs git gnuplot graphviz htop iputils-ping libjna-java pssh screen vim wget && \
-    curl -L https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8%2B9/OpenJDK21U-jdk_x64_linux_hotspot_21.0.8_9.tar.gz | tar -xz --strip-components=1 -C /usr/local/
+    case "${TARGETARCH}" in \
+      amd64) temurin_arch=x64 ;; \
+      arm64) temurin_arch=aarch64 ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.8%2B9/OpenJDK21U-jdk_${temurin_arch}_linux_hotspot_21.0.8_9.tar.gz" | tar -xz --strip-components=1 -C /usr/local/
 
 RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && \
     mv lein /usr/bin && \

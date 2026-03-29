@@ -2,3 +2,4 @@ services:
   control:
     volumes:
       - ${JEPSEN_ROOT}:/jepsen # Mounts $JEPSEN_ROOT on host to /jepsen control container
+      - ${SENDAPAY_ROOT:-/Users/mac/Desktop/repos/sendapay-backend}:/workspace/sendapay-backend:ro # Mounts the Sendapay backend repo for Docker-topology harness deploys
