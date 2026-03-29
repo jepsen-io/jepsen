@@ -54,12 +54,16 @@ Artifacts land in `store/sendapay-bank-classic/...` or `store/sendapay-bank-appe
 For Docker runs, each test directory now also captures:
 
 - `artifacts/app/<node>/helper.log` for each Sendapay app/helper node
+- `artifacts/app/<node>/nemesis/*.tsv` for transition-time helper summaries, including recent command counts, HTTP status counts, queue-unavailable events, connection/OperationalError counts, and helper process counts
+- `artifacts/app/<node>/nemesis/*.log` for the recent helper-log tail captured at each transition
 - `artifacts/db/<db-node>/postgresql.log` from the Postgres node
 - `artifacts/db/<db-node>/postgresql-journal.log` from `journalctl -u postgresql`
 - `artifacts/db/<db-node>/pg-stat-activity.tsv` for a tab-separated `pg_stat_activity` snapshot
 - `artifacts/db/<db-node>/pg-locks.tsv` for a tab-separated `pg_locks` snapshot
-- `artifacts/db/<db-node>/nemesis/*.tsv` for transition-time snapshots captured when the nemesis starts or heals a fault
+- `artifacts/db/<db-node>/nemesis/*.tsv` for banner-free transition-time snapshots captured when the nemesis starts or heals a fault, including machine-parsable error rows if PostgreSQL is unavailable during capture
 - `artifacts/state/sendapay-bank-state.json` so the tracked wallet metadata used by the run is preserved with the checker outputs
+
+`results.edn` now also includes a `:nemesis-summary` checker section. It summarizes the parsed transition snapshots with max blocked/waiting session counts, max lock counts, and the helper-side error/HTTP/process counters, so you can inspect fault evidence without preprocessing the raw `.tsv` artifacts.
 
 ## Docker Topology
 

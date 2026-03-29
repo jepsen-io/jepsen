@@ -153,6 +153,21 @@
   [opts node]
   (str (remote-log-root opts) "/" node "-helper.log"))
 
+(def ^:private jepsen-control-banner-lines
+  #{"Welcome to Jepsen on Docker"
+    "==========================="
+    "This container runs the Jepsen tests in sub-containers."
+    "You are currently in the base dir of the git repo for Jepsen."
+    "If you modify the core jepsen library make sure you \"lein install\" it so other tests can access."
+    "To run a test:"
+    "   cd etcd && lein run test --concurrency 10"})
+
+(def ^:private helper-summary-line-limit
+  120)
+
+(def ^:private helper-tail-line-limit
+  40)
+
 (defn- nemesis-snapshot-root
   [opts]
   (str (:remote-helper-root opts) "/nemesis-snapshots"))
@@ -171,21 +186,28 @@
   [opts]
   (let [root (io/file (nemesis-snapshot-root opts))]
     (.mkdirs root)
-    (doseq [child (or (.listFiles root) [])]
-      (when (.isFile child)
-        (when-not (.delete child)
-          (throw (ex-info "failed to clear nemesis snapshot file"
-                          {:path (.getPath child)})))))))
+    (doseq [child (reverse (sort-by #(count (.getPath %))
+                                    (rest (file-seq root))))]
+      (when-not (.delete child)
+        (throw (ex-info "failed to clear nemesis snapshot path"
+                        {:path (.getPath child)}))))))
 
 (defn- local-nemesis-snapshot-files
   [opts]
   (let [root (io/file (nemesis-snapshot-root opts))]
     (if (.exists root)
-      (->> (or (.listFiles root) [])
+      (->> (rest (file-seq root))
            (filter #(.isFile %))
            (sort-by #(.getName %))
            (map #(.getCanonicalPath %)))
       [])))
+
+(defn- nemesis-snapshot-relative-parts
+  [opts source-path]
+  (let [root-path (.toPath (io/file (nemesis-snapshot-root opts)))
+        source (.toPath (io/file source-path))
+        relative (.relativize root-path source)]
+    (vec (map str (iterator-seq (.iterator relative))))))
 
 (defn- artifact-path!
   [test checker-opts & parts]
@@ -304,6 +326,35 @@
 (defn- run-bash!
   [label script]
   (run-local-command! label "bash" "-lc" script))
+
+(defn- strip-jepsen-control-banner
+  [text]
+  (let [lines (str/split-lines (or text ""))]
+    (str/join
+      "\n"
+      (drop-while #(or (contains? jepsen-control-banner-lines %)
+                       (str/blank? %))
+                  lines))))
+
+(defn- sanitized-tabular-output
+  [text]
+  (let [cleaned (str/trim (strip-jepsen-control-banner text))]
+    (when-not (str/blank? cleaned)
+      (str cleaned "\n"))))
+
+(defn- tsv-safe
+  [value]
+  (-> (str (or value ""))
+      (str/replace #"\r\n?|\n" " | ")
+      (str/replace #"\t" " ")
+      (str/trim)))
+
+(defn- parse-long-safe
+  [value default]
+  (try
+    (Long/parseLong (str/trim (str value)))
+    (catch Exception _
+      default)))
 
 (defn- ssh-target
   [opts node]
@@ -571,6 +622,7 @@
                             [(:db-node test)]]))
 
 (declare capture-nemesis-postgres-snapshots!)
+(declare capture-nemesis-app-snapshots!)
 
 (defrecord AppDbPartitionNemesis [opts inner extra-sessions]
   nemesis/Reflection
@@ -606,6 +658,9 @@
         (capture-nemesis-postgres-snapshots!
           opts
           (:db-node test)
+          (str "after-" (name (:f op))))
+        (capture-nemesis-app-snapshots!
+          opts
           (str "after-" (name (:f op)))))
       (assoc response :f (:f op))))
 
@@ -670,12 +725,14 @@
         (do
           (stop-postgres! opts db-node)
           (capture-nemesis-postgres-snapshots! opts db-node "after-stop-db")
+          (capture-nemesis-app-snapshots! opts "after-stop-db")
           (assoc op :type :info :value {db-node :stopped}))
 
         :start-db
         (do
           (start-postgres! opts db-node)
           (capture-nemesis-postgres-snapshots! opts db-node "after-start-db")
+          (capture-nemesis-app-snapshots! opts "after-start-db")
           (assoc op :type :info :value {db-node :started}))
 
         (assoc op :type :info :error (str "unknown nemesis op " (:f op))))))
@@ -883,16 +940,57 @@
      sql
      "SQL"]))
 
+(defn- render-snapshot-error-tsv
+  [capture-label node source-label exit stdout stderr]
+  (let [clean-stdout (tsv-safe (sanitized-tabular-output stdout))
+        clean-stderr (tsv-safe (sanitized-tabular-output stderr))
+        message (or (not-empty clean-stderr)
+                    (not-empty clean-stdout)
+                    "snapshot capture failed")]
+    (str "status\tcapture_label\tnode\tsource\texit\tmessage\n"
+         (str/join "\t" ["error"
+                         (tsv-safe capture-label)
+                         (tsv-safe node)
+                         (tsv-safe source-label)
+                         (tsv-safe exit)
+                         message])
+         "\n")))
+
+(defn- capture-postgres-query-to-path!
+  [opts node destination capture-label source-label sql]
+  (ensure-parent! (.getPath destination))
+  (try
+    (let [{:keys [out]} (remote-bash! opts node (postgres-query-script sql))]
+      (spit destination (or (sanitized-tabular-output out) ""))
+      {:status :ok
+       :node node
+       :source source-label
+       :artifact (.getPath destination)})
+    (catch clojure.lang.ExceptionInfo e
+      (let [{:keys [stderr exit stdout]} (ex-data e)]
+        (spit destination
+              (render-snapshot-error-tsv capture-label
+                                         node
+                                         source-label
+                                         exit
+                                         stdout
+                                         stderr))
+        {:status :error
+         :node node
+         :source source-label
+         :artifact (.getPath destination)
+         :error (.getMessage e)}))))
+
 (defn- capture-remote-postgres-query-artifact!
   [opts test checker-opts node source-label sql & artifact-parts]
-  (apply capture-remote-command-artifact!
-         opts
-         test
-         checker-opts
-         node
-         (postgres-query-script sql)
-         source-label
-         artifact-parts))
+  (let [destination (apply artifact-path! test checker-opts artifact-parts)]
+    (capture-postgres-query-to-path!
+      opts
+      node
+      destination
+      "end-of-run"
+      source-label
+      sql)))
 
 (def ^:private pg-stat-activity-query
   (str/join
@@ -936,31 +1034,114 @@
      "WHERE d.datname = current_database() OR d.datname IS NULL"
      "ORDER BY l.granted, l.pid, l.locktype, l.mode;"]))
 
+(defn- read-last-lines
+  [path limit]
+  (let [source (io/file path)]
+    (if (.exists source)
+      (->> (str/split-lines (slurp source))
+           (take-last limit)
+           vec)
+      [])))
+
+(defn- helper-process-count
+  [opts node]
+  (try
+    (let [{:keys [out]} (remote-bash!
+                          opts
+                          node
+                          (str/join
+                            "\n"
+                            ["set -euo pipefail"
+                             "count=$(pgrep -fc sendapay_bank_ops.py || true)"
+                             "printf '%s\n' \"$count\""]))]
+      (parse-long-safe (str/trim (or (strip-jepsen-control-banner out) "")) 0))
+    (catch clojure.lang.ExceptionInfo _
+      -1)))
+
+(def ^:private helper-summary-columns
+  [:status
+   :capture_label
+   :node
+   :recent_line_count
+   :command_count
+   :json_ok_count
+   :json_fail_count
+   :json_other_count
+   :http_status_200_count
+   :http_status_non_200_count
+   :rq_queue_unavailable_count
+   :operational_error_count
+   :connection_error_count
+   :security_warning_count
+   :transfer_confirmed_count
+   :transfer_intent_created_count
+   :helper_process_count])
+
+(defn- helper-summary-metrics
+  [capture-label node lines helper-process-count]
+  {:status (if (seq lines) "ok" "missing")
+   :capture_label capture-label
+   :node node
+   :recent_line_count (count lines)
+   :command_count (count (filter #(str/starts-with? % "=== ") lines))
+   :json_ok_count (count (filter #(re-find #"\"result\"\s*:\s*\"ok\"" %) lines))
+   :json_fail_count (count (filter #(re-find #"\"result\"\s*:\s*\"fail\"" %) lines))
+   :json_other_count (count (filter #(re-find #"\"result\"\s*:\s*\"(?!ok|fail)[^\"]+\"" %) lines))
+   :http_status_200_count (count (filter #(re-find #"\"status\"\s*:\s*200\b" %) lines))
+   :http_status_non_200_count (count (filter #(re-find #"\"status\"\s*:\s*(?!200\b)\d+" %) lines))
+   :rq_queue_unavailable_count (count (filter #(re-find #"\"reason\"\s*:\s*\"rq_queue_unavailable\"" %) lines))
+   :operational_error_count (count (filter #(re-find #"OperationalError" %) lines))
+   :connection_error_count (count (filter #(re-find #"connection (?:failed|timeout expired)|database system is shutting down" %) lines))
+   :security_warning_count (count (filter #(str/includes? % "SECURITY_MODE=MOCKS_ENABLED") lines))
+   :transfer_confirmed_count (count (filter #(re-find #"\"event\"\s*:\s*\"transfer_confirmed\"" %) lines))
+   :transfer_intent_created_count (count (filter #(re-find #"\"event\"\s*:\s*\"transfer_intent_created\"" %) lines))
+   :helper_process_count helper-process-count})
+
+(defn- render-helper-summary-tsv
+  [capture-label node lines helper-process-count]
+  (let [metrics (helper-summary-metrics capture-label node lines helper-process-count)]
+    (str (str/join "\t" (map name helper-summary-columns))
+         "\n"
+         (str/join "\t" (map #(tsv-safe (get metrics %)) helper-summary-columns))
+         "\n")))
+
+(defn- capture-nemesis-app-snapshots!
+  [opts label]
+  (let [prefix (str (System/currentTimeMillis)
+                    "-"
+                    (normalize-artifact-label label))]
+    (doseq [node (:app-nodes opts)]
+      (let [snapshot-root (io/file (nemesis-snapshot-root opts) "app" node)
+            source-path (helper-log-path opts node)
+            summary-path (io/file snapshot-root (str prefix "-helper-summary.tsv"))
+            tail-path (io/file snapshot-root (str prefix "-helper-tail.log"))
+            lines (read-last-lines source-path helper-summary-line-limit)
+            tail-lines (take-last helper-tail-line-limit lines)
+            process-count (helper-process-count opts node)]
+        (.mkdirs snapshot-root)
+        (spit summary-path
+              (render-helper-summary-tsv label node lines process-count))
+        (spit tail-path
+              (if (seq tail-lines)
+                (str (str/join "\n" tail-lines) "\n")
+                (str "missing helper log: " source-path "\n")))))))
+
 (defn- capture-nemesis-postgres-snapshots!
   [opts db-node label]
-  (let [snapshot-root (io/file (nemesis-snapshot-root opts))
+  (let [snapshot-root (io/file (nemesis-snapshot-root opts) "db" db-node)
         prefix (str (System/currentTimeMillis)
                     "-"
                     (normalize-artifact-label label))
         capture-query! (fn [suffix source-label sql]
                          (let [destination (io/file snapshot-root
                                                     (str prefix "-" suffix))]
-                           (try
-                             (let [{:keys [out]} (remote-bash!
-                                                   opts
-                                                   db-node
-                                                   (postgres-query-script sql))]
-                               (spit destination out))
-                             (catch clojure.lang.ExceptionInfo e
-                               (let [{:keys [stderr exit stdout]} (ex-data e)]
-                                 (spit destination
-                                       (str "nemesis-time snapshot failed\n"
-                                            "label: " label "\n"
-                                            "query: " source-label "\n"
-                                            "node: " db-node "\n"
-                                            "exit: " exit "\n"
-                                            "stdout:\n" stdout "\n"
-                                            "stderr:\n" stderr "\n")))))))]
+                           (capture-postgres-query-to-path!
+                             opts
+                             db-node
+                             destination
+                             label
+                             source-label
+                             sql)))]
     (.mkdirs snapshot-root)
     (capture-query! "pg-stat-activity.tsv"
                     "pg_stat_activity"
@@ -968,6 +1149,203 @@
     (capture-query! "pg-locks.tsv"
                     "pg_locks"
                     pg-locks-query)))
+
+(def ^:private snapshot-error-header
+  ["status" "capture_label" "node" "source" "exit" "message"])
+
+(def ^:private snapshot-kind-suffixes
+  [[:pg-stat-activity "-pg-stat-activity.tsv"]
+   [:pg-locks "-pg-locks.tsv"]
+   [:helper-summary "-helper-summary.tsv"]
+   [:helper-tail "-helper-tail.log"]])
+
+(def ^:private helper-summary-numeric-keys
+  #{:recent_line_count
+    :command_count
+    :json_ok_count
+    :json_fail_count
+    :json_other_count
+    :http_status_200_count
+    :http_status_non_200_count
+    :rq_queue_unavailable_count
+    :operational_error_count
+    :connection_error_count
+    :security_warning_count
+    :transfer_confirmed_count
+    :transfer_intent_created_count
+    :helper_process_count})
+
+(defn- snapshot-kind
+  [file-name]
+  (some (fn [[kind suffix]]
+          (when (str/ends-with? file-name suffix)
+            kind))
+        snapshot-kind-suffixes))
+
+(defn- snapshot-suffix
+  [kind]
+  (some (fn [[candidate suffix]]
+          (when (= kind candidate)
+            suffix))
+        snapshot-kind-suffixes))
+
+(defn- parse-tsv-file
+  [path]
+  (let [lines (->> (str/split-lines (slurp path))
+                   (remove str/blank?)
+                   vec)]
+    (if (seq lines)
+      (let [header (vec (str/split (first lines) #"\t" -1))]
+        {:header header
+         :rows (mapv #(zipmap header (str/split % #"\t" -1)) (rest lines))})
+      {:header []
+       :rows []})))
+
+(defn- snapshot-file-metadata
+  [opts source-path]
+  (let [[category node file-name] (nemesis-snapshot-relative-parts opts source-path)
+        kind (snapshot-kind file-name)
+        suffix (snapshot-suffix kind)
+        base (if suffix
+               (subs file-name 0 (- (count file-name) (count suffix)))
+               file-name)
+        [_ timestamp-ms capture-label] (re-matches #"(\d+)-(.*)" base)]
+    {:source source-path
+     :category category
+     :node node
+     :file-name file-name
+     :kind kind
+     :capture-id base
+     :capture-label (or capture-label base)
+     :timestamp-ms (parse-long-safe timestamp-ms -1)}))
+
+(defn- parse-error-snapshot
+  [metadata path]
+  (let [{:keys [rows]} (parse-tsv-file path)
+        row (first rows)]
+    (merge metadata
+           {:capture-status :error
+            :exit (parse-long-safe (get row "exit") -1)
+            :message (get row "message")})))
+
+(defn- parse-pg-stat-activity-snapshot
+  [metadata path]
+  (let [{:keys [header rows]} (parse-tsv-file path)]
+    (if (= header snapshot-error-header)
+      (parse-error-snapshot metadata path)
+      (let [blocked-rows (filter #(= "Lock" (get % "wait_event_type")) rows)
+            waiting-rows (filter #(let [wait-type (get % "wait_event_type")]
+                                    (and (not (str/blank? wait-type))
+                                         (not (#{"Client" "Activity"} wait-type))))
+                                 rows)]
+        (merge metadata
+               {:capture-status :ok
+                :session-count (count rows)
+                :active-session-count (count (filter #(= "active" (get % "state")) rows))
+                :waiting-session-count (count waiting-rows)
+                :blocked-session-count (count blocked-rows)})))))
+
+(defn- parse-pg-locks-snapshot
+  [metadata path]
+  (let [{:keys [header rows]} (parse-tsv-file path)]
+    (if (= header snapshot-error-header)
+      (parse-error-snapshot metadata path)
+      (let [ungranted (filter #(not (#{"t" "true" "1"} (str/lower-case (get % "granted" "")))) rows)]
+        (merge metadata
+               {:capture-status :ok
+                :total-lock-count (count rows)
+                :granted-lock-count (- (count rows) (count ungranted))
+                :ungranted-lock-count (count ungranted)
+                :blocked-session-count (count (set (map #(get % "pid") ungranted)))})))))
+
+(defn- parse-helper-summary-snapshot
+  [metadata path]
+  (let [{:keys [rows]} (parse-tsv-file path)
+        row (first rows)
+        parsed-row (reduce-kv
+                     (fn [acc raw-key raw-value]
+                       (let [key (keyword raw-key)]
+                         (assoc acc
+                                key
+                                (if (helper-summary-numeric-keys key)
+                                  (parse-long-safe raw-value 0)
+                                  raw-value))))
+                     {}
+                     row)]
+    (merge metadata
+           {:capture-status (keyword (or (:status parsed-row) "missing"))}
+           parsed-row)))
+
+(defn- analyze-nemesis-snapshot
+  [opts source-path]
+  (let [metadata (snapshot-file-metadata opts source-path)]
+    (case (:kind metadata)
+      :pg-stat-activity (parse-pg-stat-activity-snapshot metadata source-path)
+      :pg-locks (parse-pg-locks-snapshot metadata source-path)
+      :helper-summary (parse-helper-summary-snapshot metadata source-path)
+      :helper-tail nil
+      (assoc metadata :capture-status :unknown))))
+
+(defn- summarize-pg-stat-activity
+  [entries]
+  {:count (count entries)
+   :error-count (count (filter #(= :error (:capture-status %)) entries))
+   :max-blocked-session-count (apply max 0 (map #(or (:blocked-session-count %) 0) entries))
+   :max-waiting-session-count (apply max 0 (map #(or (:waiting-session-count %) 0) entries))
+   :max-active-session-count (apply max 0 (map #(or (:active-session-count %) 0) entries))})
+
+(defn- summarize-pg-locks
+  [entries]
+  {:count (count entries)
+   :error-count (count (filter #(= :error (:capture-status %)) entries))
+   :max-total-lock-count (apply max 0 (map #(or (:total-lock-count %) 0) entries))
+   :max-ungranted-lock-count (apply max 0 (map #(or (:ungranted-lock-count %) 0) entries))
+   :max-blocked-session-count (apply max 0 (map #(or (:blocked-session-count %) 0) entries))})
+
+(defn- summarize-helper-snapshots
+  [entries]
+  {:count (count entries)
+   :missing-count (count (filter #(= :missing (:capture-status %)) entries))
+   :max-helper-process-count (apply max -1 (map #(or (:helper_process_count %)
+                                                     (:helper-process-count %)
+                                                     -1)
+                                                entries))
+   :max-rq-queue-unavailable-count (apply max 0 (map #(or (:rq_queue_unavailable_count %)
+                                                          (:rq-queue-unavailable-count %)
+                                                          0)
+                                                     entries))
+   :max-operational-error-count (apply max 0 (map #(or (:operational_error_count %)
+                                                       (:operational-error-count %)
+                                                       0)
+                                                  entries))
+   :max-connection-error-count (apply max 0 (map #(or (:connection_error_count %)
+                                                      (:connection-error-count %)
+                                                      0)
+                                                 entries))
+   :max-http-status-non-200-count (apply max 0 (map #(or (:http_status_non_200_count %)
+                                                         (:http-status-non-200-count %)
+                                                         0)
+                                                    entries))})
+
+(defrecord NemesisSnapshotSummaryChecker [opts]
+  checker/Checker
+  (check [_ _test _history _checker-opts]
+    (let [entries (->> (local-nemesis-snapshot-files opts)
+                       (map #(analyze-nemesis-snapshot opts %))
+                       (remove nil?)
+                       (sort-by (juxt :timestamp-ms :category :node :file-name))
+                       vec)
+          db-entries (filter #(= "db" (:category %)) entries)
+          app-entries (filter #(= "app" (:category %)) entries)]
+      {:valid? true
+       :snapshot-count (count entries)
+       :db-snapshots {:pg-stat-activity (summarize-pg-stat-activity
+                                          (filter #(= :pg-stat-activity (:kind %)) db-entries))
+                      :pg-locks (summarize-pg-locks
+                                  (filter #(= :pg-locks (:kind %)) db-entries))}
+       :app-snapshots {:helper-summary (summarize-helper-snapshots
+                                          (filter #(= :helper-summary (:kind %)) app-entries))}
+       :transitions (vec (map #(dissoc % :source) entries))})))
 
 (defrecord ArtifactCollectionChecker [opts]
   checker/Checker
@@ -1036,17 +1414,18 @@
                               (:db-node opts)
                               "pg-locks.tsv")
           nemesis-snapshot-artifacts (for [source (local-nemesis-snapshot-files opts)
-                                           :let [file-name (.getName (io/file source))
-                                                 artifact-path (copy-local-file-artifact!
-                                                                 test
-                                                                 checker-opts
-                                                                 source
-                                                                 "db"
-                                                                 (:db-node opts)
-                                                                 "nemesis"
-                                                                 file-name)]]
+                                           :let [parts (nemesis-snapshot-relative-parts opts source)
+                                                 artifact-parts (into [(first parts)
+                                                                       (second parts)
+                                                                       "nemesis"]
+                                                                      (drop 2 parts))
+                                                 artifact-path (apply copy-local-file-artifact!
+                                                                      test
+                                                                      checker-opts
+                                                                      source
+                                                                      artifact-parts)]]
                                        {:status :ok
-                                        :node (:db-node opts)
+                                        :node (second parts)
                                         :source source
                                         :artifact artifact-path})]
       {:valid? true
@@ -1091,6 +1470,7 @@
             :generator (workload-generator opts package)
             :checker (checker/compose {:bank (bank/checker {:negative-balances? true})
                                        :plot (bank/plotter)
+                                       :nemesis-summary (->NemesisSnapshotSummaryChecker opts)
                                        :artifacts (->ArtifactCollectionChecker opts)})
             :client (->SendapayClient opts nil)
             :nemesis (:nemesis package)
