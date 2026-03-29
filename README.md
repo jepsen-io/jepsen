@@ -96,18 +96,11 @@ See the specific test code for more details.
 
 ### Docker (Unsupported)
 
-There is a [Docker Compose setup](/docker) for running a Jepsen cluster on a
-single machine. Sadly the Docker platform has been something of a moving
-target; this environment tends to break in new and exciting ways on various
-platforms every few months. If you're a Docker whiz and can get this going
-reliably on Debian & OS X that's great--pull requests would be a big help.
-
-Like other containers Docker containers don't have real clocks--that means you
-generally can't use them to test clock skew.
+Although unsupported by Jepsen, there is a community maintained [Jepsen in Docker, Community Edition](https://github.com/nurturenature/jepsen-docker).
 
 ### Setting Up Control Nodes
 
-For AWS and Docker installs, your control node comes preconfigured with all the
+For AWS, your control node comes preconfigured with all the
 software you'll need to run most Jepsen tests. If you build your own control
 node (or if you're using your local machine as a control node), you'll need a
 few things:
