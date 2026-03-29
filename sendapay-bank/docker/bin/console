@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+CONTROL_CONTAINER=${CONTROL_CONTAINER:-jepsen-control}
+docker exec -it "${CONTROL_CONTAINER}" bash

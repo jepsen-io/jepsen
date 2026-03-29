@@ -1,5 +1,9 @@
 CONTROL_CONTAINER ?= jepsen-control
 CONTROL_SENDAPAY_ROOT ?= /workspace/sendapay-backend
+JEPSEN_ROOT ?= $(abspath ..)
+SENDAPAY_BACKEND_ROOT ?= /Users/mac/Desktop/repos/sendapay-backend
+RUNNER_ROOT ?= $(CURDIR)/docker
+NODE_COUNT ?= 5
 APP_NODES ?= n1,n3
 DB_NODE ?= n2
 ACCOUNT_COUNT ?= 3
@@ -12,6 +16,7 @@ NEMESIS ?= none
 NEMESIS_INTERVAL_S ?= 8
 APPEND_ONLY ?= 0
 EXTRA_ARGS ?=
+SUMMARY_MODE ?= classic
 FAULT_STRESS_ACCOUNT_COUNT ?= 24
 FAULT_STRESS_INITIAL_BALANCE_CENTS ?= 100000
 FAULT_STRESS_MAX_TRANSFER_CENTS ?= 2500
@@ -46,7 +51,25 @@ FAULT_STRESS_ARGS = \
 	TIME_LIMIT=$(FAULT_STRESS_TIME_LIMIT) \
 	STAGGER_MS=$(FAULT_STRESS_STAGGER_MS)
 
-.PHONY: docker-run docker-smoke docker-smoke-append-only docker-partition-smoke docker-partition-smoke-append-only docker-restart-smoke docker-restart-smoke-append-only docker-stress docker-stress-append-only docker-partition-stress docker-partition-stress-append-only docker-restart-stress docker-restart-stress-append-only docker-fault-stress docker-fault-stress-append-only
+.PHONY: docker-up docker-console docker-web docker-install-jepsen latest-nemesis-summary latest-nemesis-summary-append-only docker-run docker-smoke docker-smoke-append-only docker-partition-smoke docker-partition-smoke-append-only docker-restart-smoke docker-restart-smoke-append-only docker-stress docker-stress-append-only docker-partition-stress docker-partition-stress-append-only docker-restart-stress docker-restart-stress-append-only docker-fault-stress docker-fault-stress-append-only
+
+docker-up:
+	JEPSEN_ROOT=$(JEPSEN_ROOT) SENDAPAY_ROOT=$(SENDAPAY_BACKEND_ROOT) $(RUNNER_ROOT)/bin/up --dev --daemon --node-count $(NODE_COUNT)
+
+docker-console:
+	CONTROL_CONTAINER=$(CONTROL_CONTAINER) $(RUNNER_ROOT)/bin/console
+
+docker-web:
+	CONTROL_CONTAINER=$(CONTROL_CONTAINER) $(RUNNER_ROOT)/bin/web
+
+docker-install-jepsen:
+	docker exec $(CONTROL_CONTAINER) bash -lc 'cd /jepsen/jepsen && lein install'
+
+latest-nemesis-summary:
+	lein run -m sendapay-bank.summary --latest --mode $(SUMMARY_MODE)
+
+latest-nemesis-summary-append-only:
+	$(MAKE) latest-nemesis-summary SUMMARY_MODE=append-only
 
 docker-run:
 	docker exec $(CONTROL_CONTAINER) bash -lc 'cd /jepsen/sendapay-bank && lein run -- $(RUN_ARGS) $(APPEND_ONLY_FLAG)'

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+CONTROL_CONTAINER=${CONTROL_CONTAINER:-jepsen-control}
+PORT=$(docker port "${CONTROL_CONTAINER}" 8080 | cut -d : -f 2)
+URL="http://localhost:${PORT}"
+
+if command -v open >/dev/null 2>&1; then
+  open "${URL}"
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "${URL}"
+else
+  echo "${URL}"
+fi

@@ -8,30 +8,15 @@
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent Semaphore)))
 
-(def ^:private clj-ssh-agent
+(def clj-ssh-agent
   "Acquiring an SSH agent is expensive and involves a global lock; we save the
-  system-agent-enabled instance and re-use it when the platform supports it."
+  agent and re-use it to speed things up."
   (delay (ssh/ssh-agent {})))
-
-(def ^:private clj-ssh-direct-agent
-  "Fallback agent that skips SSH_AUTH_SOCK and relies on explicit identities or
-  passwords only."
-  (delay (ssh/ssh-agent {:use-system-ssh-agent false})))
-
-(defn- agent-for-conn-spec
-  [conn-spec]
-  (if-let [_key-path (:private-key-path conn-spec)]
-    @clj-ssh-direct-agent
-    (try
-      @clj-ssh-agent
-      (catch UnsatisfiedLinkError e
-        (warn e "clj-ssh system-agent integration is unavailable; falling back to direct JSch auth")
-        @clj-ssh-direct-agent))))
 
 (defn clj-ssh-session
   "Opens a raw session to the given connection spec"
   [conn-spec]
-  (let [agent (agent-for-conn-spec conn-spec)
+  (let [agent @clj-ssh-agent
         _     (when-let [key-path (:private-key-path conn-spec)]
                 (ssh/add-identity agent {:private-key-path key-path}))]
     (doto (ssh/session agent

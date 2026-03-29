@@ -1057,17 +1057,24 @@
            vec)
       [])))
 
+(def ^:private helper-python-process-filter
+  "$5 ~ /^python([0-9.]*)?$/ && index($0, \"sendapay_bank_ops.py\") > 0")
+
+(defn- helper-process-count-script
+  []
+  (str/join
+    "\n"
+    ["set -euo pipefail"
+     (str "count=$(ps -eo pid=,ppid=,stat=,etime=,comm=,args= "
+          "| awk '" helper-python-process-filter " { count++ } END { print count + 0 }')")
+     "printf '%s\n' \"$count\""]))
+
 (defn- helper-process-count
   [opts node]
   (try
-    (let [{:keys [out]} (remote-bash!
-                          opts
-                          node
-                          (str/join
-                            "\n"
-                            ["set -euo pipefail"
-                             "count=$(pgrep -fc sendapay_bank_ops.py || true)"
-                             "printf '%s\n' \"$count\""]))]
+    (let [{:keys [out]} (remote-bash! opts
+                                      node
+                                      (helper-process-count-script))]
       (parse-long-safe (str/trim (or (strip-terminal-noise out) "")) 0))
     (catch clojure.lang.ExceptionInfo _
       -1)))
@@ -1160,7 +1167,8 @@
   (str/join
     "\n"
     ["set -euo pipefail"
-     "ps -eo pid,ppid,stat,etime,command | egrep 'sendapay_bank_ops.py|python' | egrep -v egrep || true"]))
+     (str "ps -eo pid=,ppid=,stat=,etime=,comm=,args= "
+          "| awk '" helper-python-process-filter " { print }'")]))
 
 (defn- remote-command-output
   [opts node script]
@@ -1263,7 +1271,7 @@
     (if (= :ok status)
       (spit path
             (if (str/blank? out)
-              "no matching python/sendapay processes\n"
+              "no running sendapay helper python processes\n"
               out))
       (spit path
             (render-remote-command-error-log capture-label

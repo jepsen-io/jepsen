@@ -47,7 +47,7 @@ services:
     hostname: setup
     volumes:
       - "jepsen-shared:/var/jepsen/shared"
-    entrypoint: [ 'rm', '-rf', '/var/jepsen/shared/nodes' ] 
+    entrypoint: [ 'sh', '-lc', 'mkdir -p /var/jepsen/shared && if [ -d /var/jepsen/shared/nodes ]; then find /var/jepsen/shared/nodes -mindepth 1 -delete && rmdir /var/jepsen/shared/nodes; fi && : > /var/jepsen/shared/nodes' ]
   control:
     container_name: jepsen-control
     hostname: control

@@ -58,7 +58,7 @@ For Docker runs, each test directory now also captures:
 - `artifacts/app/<node>/nemesis/*-db-sockets.tsv` for transition-time app-node socket summaries to PostgreSQL
 - `artifacts/app/<node>/nemesis/*-db-sockets.log` for the raw app-node socket snapshot behind each DB-socket summary
 - `artifacts/app/<node>/nemesis/*.log` for the recent helper-log tail captured at each transition
-- `artifacts/app/<node>/nemesis/*-processes.log` for the python/sendapay process snapshot on each app node at each transition
+- `artifacts/app/<node>/nemesis/*-processes.log` for the Sendapay helper python-process snapshot on each app node at each transition
 - `artifacts/db/<db-node>/postgresql.log` from the Postgres node
 - `artifacts/db/<db-node>/postgresql-journal.log` from `journalctl -u postgresql`
 - `artifacts/db/<db-node>/pg-stat-activity.tsv` for a tab-separated `pg_stat_activity` snapshot
@@ -68,9 +68,15 @@ For Docker runs, each test directory now also captures:
 
 `results.edn` now also includes a `:nemesis-summary` checker section. It summarizes the parsed transition snapshots with max blocked/waiting session counts, max lock counts, helper-side error/HTTP/process counters, and app-node DB-socket counts, so you can inspect fault evidence without preprocessing the raw `.tsv` artifacts.
 
-These app nodes run the Sendapay helper directly; they do not run Gunicorn or Traefik in this Docker topology. App-side fault evidence is therefore captured as helper summaries plus DB-socket and process snapshots.
+These app nodes run the Sendapay helper directly; they do not run Gunicorn or Traefik in this Docker topology. App-side fault evidence is therefore captured as helper summaries plus DB-socket and helper-process snapshots.
+
+The process snapshot is intentionally limited to the real `sendapay_bank_ops.py` python workers, not transient shell wrappers. That keeps long fault runs readable without hiding whether helper workers stayed up during a fault.
 
 ## Docker Topology
+
+The Docker/control workflow now lives under `sendapay-bank/docker/`, not Jepsen's removed top-level `docker/` subtree. That runner is intentionally external to upstream Jepsen core, so the harness can be rebased without restoring the deleted in-tree Docker stack.
+
+It keeps the existing Docker Compose project name `jepsen-sendapay`, so the external runner can adopt earlier local stacks without container-name churn.
 
 Topology choice:
 
@@ -79,23 +85,22 @@ Topology choice:
 - `n2`: PostgreSQL node
 - `n4`, `n5`: spare nodes for future fanout or broader nemesis work
 
-The control container needs the Sendapay backend repo mounted. `docker/docker-compose.dev.yml` now mounts `${SENDAPAY_ROOT:-/Users/mac/Desktop/repos/sendapay-backend}` at `/workspace/sendapay-backend`.
+The control container needs the Sendapay backend repo mounted. [docker-compose.dev.yml](/Users/mac/Desktop/repos/jepsen/sendapay-bank/docker/docker-compose.dev.yml) mounts `${SENDAPAY_ROOT:-/Users/mac/Desktop/repos/sendapay-backend}` at `/workspace/sendapay-backend`.
 
-`docker/bin/up` now generates an RSA PEM key for the control lane, and `docker/control/init.sh` also derives `/root/.ssh/id_rsa.pem` on startup so SSHJ can authenticate directly on arm64 without falling into the old agentproxy `jnidispatch` crash.
-
-Bring the cluster up or recreate control after changing the mount:
+Bring the cluster up from `sendapay-bank`:
 
 ```bash
-export JEPSEN_ROOT=/Users/mac/Desktop/repos/jepsen
-export SENDAPAY_ROOT=/Users/mac/Desktop/repos/sendapay-backend
-cd /Users/mac/Desktop/repos/jepsen/docker
-docker compose --compatibility -p jepsen-sendapay -f docker-compose.yml -f docker-compose.dev.yml up -d --build --force-recreate control
+cd /Users/mac/Desktop/repos/jepsen/sendapay-bank
+make docker-up
 ```
+
+`make docker-up` wraps [bin/up](/Users/mac/Desktop/repos/jepsen/sendapay-bank/docker/bin/up), which stages or mounts the Jepsen checkout into the control container, generates the SSH material for the app/db nodes, and builds the external control/node runner under `sendapay-bank/docker/`.
 
 If you change `/Users/mac/Desktop/repos/jepsen/jepsen` while using the dev mount, reinstall the local Jepsen library inside the control container before rerunning the harness:
 
 ```bash
-docker exec jepsen-control bash -lc 'cd /jepsen/jepsen && lein install'
+cd /Users/mac/Desktop/repos/jepsen/sendapay-bank
+make docker-install-jepsen
 ```
 
 Run the harness inside `jepsen-control`:
@@ -104,6 +109,13 @@ Run the harness inside `jepsen-control`:
 cd /Users/mac/Desktop/repos/jepsen/sendapay-bank
 make docker-smoke
 ```
+
+Useful control-node helpers:
+
+- `make docker-console` opens a shell in `jepsen-control`
+- `make docker-web` opens the Jepsen web UI if a run is serving it
+- `make latest-nemesis-summary` pretty-prints the latest classic `:nemesis-summary`
+- `make latest-nemesis-summary-append-only` pretty-prints the latest append-only `:nemesis-summary`
 
 Useful variants:
 
