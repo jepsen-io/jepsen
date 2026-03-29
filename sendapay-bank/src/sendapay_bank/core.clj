@@ -153,6 +153,40 @@
   [opts node]
   (str (remote-log-root opts) "/" node "-helper.log"))
 
+(defn- nemesis-snapshot-root
+  [opts]
+  (str (:remote-helper-root opts) "/nemesis-snapshots"))
+
+(defn- normalize-artifact-label
+  [s]
+  (let [normalized (-> (str s)
+                       str/lower-case
+                       (str/replace #"[^a-z0-9]+" "-")
+                       (str/replace #"(^-|-$)" ""))]
+    (if (str/blank? normalized)
+      "snapshot"
+      normalized)))
+
+(defn- reset-local-nemesis-snapshots!
+  [opts]
+  (let [root (io/file (nemesis-snapshot-root opts))]
+    (.mkdirs root)
+    (doseq [child (or (.listFiles root) [])]
+      (when (.isFile child)
+        (when-not (.delete child)
+          (throw (ex-info "failed to clear nemesis snapshot file"
+                          {:path (.getPath child)})))))))
+
+(defn- local-nemesis-snapshot-files
+  [opts]
+  (let [root (io/file (nemesis-snapshot-root opts))]
+    (if (.exists root)
+      (->> (or (.listFiles root) [])
+           (filter #(.isFile %))
+           (sort-by #(.getName %))
+           (map #(.getCanonicalPath %)))
+      [])))
+
 (defn- artifact-path!
   [test checker-opts & parts]
   (apply store/path! test (:subdirectory checker-opts) "artifacts" parts))
@@ -412,6 +446,7 @@
 (defn- reset-docker-logs!
   [opts]
   (let [remote-log-root (:remote-log-root opts)]
+    (reset-local-nemesis-snapshots! opts)
     (doseq [app-node (:app-nodes opts)]
       (remote-bash!
         opts
@@ -535,7 +570,9 @@
   (nemesis/complete-grudge [(:app-nodes test)
                             [(:db-node test)]]))
 
-(defrecord AppDbPartitionNemesis [inner extra-sessions]
+(declare capture-nemesis-postgres-snapshots!)
+
+(defrecord AppDbPartitionNemesis [opts inner extra-sessions]
   nemesis/Reflection
   (fs [_]
     #{:start-partition :stop-partition})
@@ -544,6 +581,7 @@
   (setup! [_ test]
     (let [extra-sessions (extra-cluster-sessions test)]
       (->AppDbPartitionNemesis
+        opts
         (nemesis/setup! (nemesis/partitioner)
                         (cluster-test test extra-sessions))
         extra-sessions)))
@@ -564,6 +602,11 @@
                                                 :value nil))
 
                      (assoc op :type :info :error (str "unknown nemesis op " (:f op))))]
+      (when (#{:start-partition :stop-partition} (:f op))
+        (capture-nemesis-postgres-snapshots!
+          opts
+          (:db-node test)
+          (str "after-" (name (:f op)))))
       (assoc response :f (:f op))))
 
   (teardown! [_ test]
@@ -626,11 +669,13 @@
         :stop-db
         (do
           (stop-postgres! opts db-node)
+          (capture-nemesis-postgres-snapshots! opts db-node "after-stop-db")
           (assoc op :type :info :value {db-node :stopped}))
 
         :start-db
         (do
           (start-postgres! opts db-node)
+          (capture-nemesis-postgres-snapshots! opts db-node "after-start-db")
           (assoc op :type :info :value {db-node :started}))
 
         (assoc op :type :info :error (str "unknown nemesis op " (:f op))))))
@@ -668,7 +713,7 @@
                                             {:type :info :f :start-partition :value nil}
                                             {:type :info :f :stop-partition :value nil})
      :final-generator {:type :info :f :stop-partition :value nil}
-     :nemesis (->AppDbPartitionNemesis nil {})
+     :nemesis (->AppDbPartitionNemesis opts nil {})
      :perf #{{:name "partition"
               :start #{:start-partition}
               :stop #{:stop-partition}
@@ -828,6 +873,16 @@
            :artifact (.getPath destination)
            :error (.getMessage e)})))))
 
+(defn- postgres-query-script
+  [sql]
+  (str/join
+    "\n"
+    ["set -euo pipefail"
+     "export PGPASSWORD=sendapay"
+     "psql --no-psqlrc -X -A -F $'\\t' -P pager=off -h 127.0.0.1 -p 5432 -U sendapay -d sendapay_jepsen_bank -v ON_ERROR_STOP=1 <<'SQL'"
+     sql
+     "SQL"]))
+
 (defn- capture-remote-postgres-query-artifact!
   [opts test checker-opts node source-label sql & artifact-parts]
   (apply capture-remote-command-artifact!
@@ -835,13 +890,7 @@
          test
          checker-opts
          node
-         (str/join
-           "\n"
-           ["set -euo pipefail"
-            "export PGPASSWORD=sendapay"
-            "psql --no-psqlrc -X -A -F $'\\t' -P pager=off -h 127.0.0.1 -p 5432 -U sendapay -d sendapay_jepsen_bank -v ON_ERROR_STOP=1 <<'SQL'"
-            sql
-            "SQL"])
+         (postgres-query-script sql)
          source-label
          artifact-parts))
 
@@ -887,6 +936,39 @@
      "WHERE d.datname = current_database() OR d.datname IS NULL"
      "ORDER BY l.granted, l.pid, l.locktype, l.mode;"]))
 
+(defn- capture-nemesis-postgres-snapshots!
+  [opts db-node label]
+  (let [snapshot-root (io/file (nemesis-snapshot-root opts))
+        prefix (str (System/currentTimeMillis)
+                    "-"
+                    (normalize-artifact-label label))
+        capture-query! (fn [suffix source-label sql]
+                         (let [destination (io/file snapshot-root
+                                                    (str prefix "-" suffix))]
+                           (try
+                             (let [{:keys [out]} (remote-bash!
+                                                   opts
+                                                   db-node
+                                                   (postgres-query-script sql))]
+                               (spit destination out))
+                             (catch clojure.lang.ExceptionInfo e
+                               (let [{:keys [stderr exit stdout]} (ex-data e)]
+                                 (spit destination
+                                       (str "nemesis-time snapshot failed\n"
+                                            "label: " label "\n"
+                                            "query: " source-label "\n"
+                                            "node: " db-node "\n"
+                                            "exit: " exit "\n"
+                                            "stdout:\n" stdout "\n"
+                                            "stderr:\n" stderr "\n")))))))]
+    (.mkdirs snapshot-root)
+    (capture-query! "pg-stat-activity.tsv"
+                    "pg_stat_activity"
+                    pg-stat-activity-query)
+    (capture-query! "pg-locks.tsv"
+                    "pg_locks"
+                    pg-locks-query)))
+
 (defrecord ArtifactCollectionChecker [opts]
   checker/Checker
   (check [_ test _history checker-opts]
@@ -928,7 +1010,7 @@
                                 (str/join
                                   "\n"
                                   ["set -euo pipefail"
-                                "journalctl -u postgresql --no-pager -n 500"])
+                                   "journalctl -u postgresql --no-pager -n 500"])
                                 "journalctl -u postgresql --no-pager -n 500"
                                 "db"
                                 (:db-node opts)
@@ -952,14 +1034,29 @@
                               pg-locks-query
                               "db"
                               (:db-node opts)
-                              "pg-locks.tsv")]
+                              "pg-locks.tsv")
+          nemesis-snapshot-artifacts (for [source (local-nemesis-snapshot-files opts)
+                                           :let [file-name (.getName (io/file source))
+                                                 artifact-path (copy-local-file-artifact!
+                                                                 test
+                                                                 checker-opts
+                                                                 source
+                                                                 "db"
+                                                                 (:db-node opts)
+                                                                 "nemesis"
+                                                                 file-name)]]
+                                       {:status :ok
+                                        :node (:db-node opts)
+                                        :source source
+                                        :artifact artifact-path})]
       {:valid? true
        :artifacts (vec (concat helper-artifacts
                                [state-artifact
                                 db-artifact
                                 db-journal-artifact
                                 db-stat-activity-artifact
-                                db-locks-artifact]))})))
+                                db-locks-artifact]
+                               nemesis-snapshot-artifacts))})))
 
 (defn- sendapay-test
   [opts]

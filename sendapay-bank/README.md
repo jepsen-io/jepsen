@@ -58,6 +58,7 @@ For Docker runs, each test directory now also captures:
 - `artifacts/db/<db-node>/postgresql-journal.log` from `journalctl -u postgresql`
 - `artifacts/db/<db-node>/pg-stat-activity.tsv` for a tab-separated `pg_stat_activity` snapshot
 - `artifacts/db/<db-node>/pg-locks.tsv` for a tab-separated `pg_locks` snapshot
+- `artifacts/db/<db-node>/nemesis/*.tsv` for transition-time snapshots captured when the nemesis starts or heals a fault
 - `artifacts/state/sendapay-bank-state.json` so the tracked wallet metadata used by the run is preserved with the checker outputs
 
 ## Docker Topology
