@@ -299,9 +299,17 @@ PING n1 (10.242.68.40) 56(84) bytes of data.
 ...
 ```
 
-If you want to install and run Docker, it may mess up your networking and firewall.  If your Incus containers are not reachable from the host, see the Incus documentation:
+If you want to install and run Docker, it will mess up your networking and firewall.  If your Incus containers are not reachable from the host, or the outside world is not reachable from within a container, see the Incus documentation:
 
 - [Prevent connectivity issues with Incus and Docker](https://linuxcontainers.org/incus/docs/main/howto/network_bridge_firewalld/#prevent-connectivity-issues-with-incus-and-docker)
+
+The simplest way to resolve most of Docker's impact is to create /`etc/docker/daemon.json`:
+
+```json
+{
+  "ip-forward-no-drop": true
+}
+```
 
 #### Add Required Packages to Node Containers
 
