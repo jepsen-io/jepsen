@@ -828,6 +828,65 @@
            :artifact (.getPath destination)
            :error (.getMessage e)})))))
 
+(defn- capture-remote-postgres-query-artifact!
+  [opts test checker-opts node source-label sql & artifact-parts]
+  (apply capture-remote-command-artifact!
+         opts
+         test
+         checker-opts
+         node
+         (str/join
+           "\n"
+           ["set -euo pipefail"
+            "export PGPASSWORD=sendapay"
+            "psql --no-psqlrc -X -A -F $'\\t' -P pager=off -h 127.0.0.1 -p 5432 -U sendapay -d sendapay_jepsen_bank -v ON_ERROR_STOP=1 <<'SQL'"
+            sql
+            "SQL"])
+         source-label
+         artifact-parts))
+
+(def ^:private pg-stat-activity-query
+  (str/join
+    "\n"
+    ["SELECT pid,"
+     "       usename,"
+     "       application_name,"
+     "       backend_type,"
+     "       client_addr,"
+     "       state,"
+     "       wait_event_type,"
+     "       wait_event,"
+     "       xact_start,"
+     "       query_start,"
+     "       state_change,"
+     "       left(replace(replace(replace(coalesce(query, ''), E'\\n', ' '), E'\\r', ' '), E'\\t', ' '), 300) AS query"
+     "FROM pg_stat_activity"
+     "WHERE datname = current_database() OR pid = pg_backend_pid()"
+     "ORDER BY state, xact_start NULLS LAST, query_start NULLS LAST, pid;"]))
+
+(def ^:private pg-locks-query
+  (str/join
+    "\n"
+    ["SELECT l.pid,"
+     "       coalesce(a.usename, '') AS usename,"
+     "       coalesce(a.application_name, '') AS application_name,"
+     "       l.locktype,"
+     "       l.mode,"
+     "       l.granted,"
+     "       coalesce(l.relation::regclass::text, '') AS relation,"
+     "       coalesce(l.page::text, '') AS page,"
+     "       coalesce(l.tuple::text, '') AS tuple,"
+     "       coalesce(l.virtualxid, '') AS virtualxid,"
+     "       coalesce(l.transactionid::text, '') AS transactionid,"
+     "       coalesce(a.state, '') AS state,"
+     "       coalesce(a.wait_event_type, '') AS wait_event_type,"
+     "       coalesce(a.wait_event, '') AS wait_event"
+     "FROM pg_locks l"
+     "LEFT JOIN pg_stat_activity a ON a.pid = l.pid"
+     "LEFT JOIN pg_database d ON d.oid = l.database"
+     "WHERE d.datname = current_database() OR d.datname IS NULL"
+     "ORDER BY l.granted, l.pid, l.locktype, l.mode;"]))
+
 (defrecord ArtifactCollectionChecker [opts]
   checker/Checker
   (check [_ test _history checker-opts]
@@ -869,13 +928,38 @@
                                 (str/join
                                   "\n"
                                   ["set -euo pipefail"
-                                   "journalctl -u postgresql --no-pager -n 500"])
+                                "journalctl -u postgresql --no-pager -n 500"])
                                 "journalctl -u postgresql --no-pager -n 500"
                                 "db"
                                 (:db-node opts)
-                                "postgresql-journal.log")]
+                                "postgresql-journal.log")
+          db-stat-activity-artifact (capture-remote-postgres-query-artifact!
+                                      opts
+                                      test
+                                      checker-opts
+                                      (:db-node opts)
+                                      "psql pg_stat_activity snapshot"
+                                      pg-stat-activity-query
+                                      "db"
+                                      (:db-node opts)
+                                      "pg-stat-activity.tsv")
+          db-locks-artifact (capture-remote-postgres-query-artifact!
+                              opts
+                              test
+                              checker-opts
+                              (:db-node opts)
+                              "psql pg_locks snapshot"
+                              pg-locks-query
+                              "db"
+                              (:db-node opts)
+                              "pg-locks.tsv")]
       {:valid? true
-       :artifacts (vec (concat helper-artifacts [state-artifact db-artifact db-journal-artifact]))})))
+       :artifacts (vec (concat helper-artifacts
+                               [state-artifact
+                                db-artifact
+                                db-journal-artifact
+                                db-stat-activity-artifact
+                                db-locks-artifact]))})))
 
 (defn- sendapay-test
   [opts]

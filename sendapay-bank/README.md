@@ -56,6 +56,8 @@ For Docker runs, each test directory now also captures:
 - `artifacts/app/<node>/helper.log` for each Sendapay app/helper node
 - `artifacts/db/<db-node>/postgresql.log` from the Postgres node
 - `artifacts/db/<db-node>/postgresql-journal.log` from `journalctl -u postgresql`
+- `artifacts/db/<db-node>/pg-stat-activity.tsv` for a tab-separated `pg_stat_activity` snapshot
+- `artifacts/db/<db-node>/pg-locks.tsv` for a tab-separated `pg_locks` snapshot
 - `artifacts/state/sendapay-bank-state.json` so the tracked wallet metadata used by the run is preserved with the checker outputs
 
 ## Docker Topology
@@ -106,6 +108,8 @@ Useful variants:
 - `make docker-partition-stress-append-only`
 - `make docker-restart-stress`
 - `make docker-restart-stress-append-only`
+- `make docker-fault-stress`
+- `make docker-fault-stress-append-only`
 
 The underlying `make docker-run` target accepts overrides, for example:
 
@@ -115,6 +119,17 @@ make docker-run \
   CONCURRENCY=12 \
   TIME_LIMIT=90 \
   NEMESIS=partition-app-db
+```
+
+For quicker wrapper verification, `docker-fault-stress` also accepts the shared fault-envelope knobs:
+
+```bash
+make docker-fault-stress-append-only \
+  FAULT_STRESS_ACCOUNT_COUNT=3 \
+  FAULT_STRESS_INITIAL_BALANCE_CENTS=10000 \
+  FAULT_STRESS_MAX_TRANSFER_CENTS=200 \
+  FAULT_STRESS_CONCURRENCY=4 \
+  FAULT_STRESS_TIME_LIMIT=20
 ```
 
 Docker mode stages the backend repo and helper into `/var/jepsen/shared`, provisions Postgres on `n2`, prepares the Python/runtime dependencies on `n1` and `n3`, and spreads Jepsen client workers across those app nodes. The helper state file lives on the shared volume, so both app nodes operate on the same tracked-account metadata.

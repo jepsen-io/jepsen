@@ -12,6 +12,12 @@ NEMESIS ?= none
 NEMESIS_INTERVAL_S ?= 8
 APPEND_ONLY ?= 0
 EXTRA_ARGS ?=
+FAULT_STRESS_ACCOUNT_COUNT ?= 24
+FAULT_STRESS_INITIAL_BALANCE_CENTS ?= 100000
+FAULT_STRESS_MAX_TRANSFER_CENTS ?= 2500
+FAULT_STRESS_CONCURRENCY ?= 12
+FAULT_STRESS_TIME_LIMIT ?= 90
+FAULT_STRESS_STAGGER_MS ?= 0
 
 RUN_ARGS = \
 	--topology docker \
@@ -32,7 +38,15 @@ ifeq ($(APPEND_ONLY),1)
 APPEND_ONLY_FLAG = --append-only
 endif
 
-.PHONY: docker-run docker-smoke docker-smoke-append-only docker-partition-smoke docker-partition-smoke-append-only docker-restart-smoke docker-restart-smoke-append-only docker-stress docker-stress-append-only docker-partition-stress docker-partition-stress-append-only docker-restart-stress docker-restart-stress-append-only
+FAULT_STRESS_ARGS = \
+	ACCOUNT_COUNT=$(FAULT_STRESS_ACCOUNT_COUNT) \
+	INITIAL_BALANCE_CENTS=$(FAULT_STRESS_INITIAL_BALANCE_CENTS) \
+	MAX_TRANSFER_CENTS=$(FAULT_STRESS_MAX_TRANSFER_CENTS) \
+	CONCURRENCY=$(FAULT_STRESS_CONCURRENCY) \
+	TIME_LIMIT=$(FAULT_STRESS_TIME_LIMIT) \
+	STAGGER_MS=$(FAULT_STRESS_STAGGER_MS)
+
+.PHONY: docker-run docker-smoke docker-smoke-append-only docker-partition-smoke docker-partition-smoke-append-only docker-restart-smoke docker-restart-smoke-append-only docker-stress docker-stress-append-only docker-partition-stress docker-partition-stress-append-only docker-restart-stress docker-restart-stress-append-only docker-fault-stress docker-fault-stress-append-only
 
 docker-run:
 	docker exec $(CONTROL_CONTAINER) bash -lc 'cd /jepsen/sendapay-bank && lein run -- $(RUN_ARGS) $(APPEND_ONLY_FLAG)'
@@ -89,12 +103,7 @@ docker-stress-append-only:
 
 docker-partition-stress:
 	$(MAKE) docker-run \
-		ACCOUNT_COUNT=24 \
-		INITIAL_BALANCE_CENTS=100000 \
-		MAX_TRANSFER_CENTS=2500 \
-		CONCURRENCY=12 \
-		TIME_LIMIT=90 \
-		STAGGER_MS=0 \
+		$(FAULT_STRESS_ARGS) \
 		NEMESIS=partition-app-db
 
 docker-partition-stress-append-only:
@@ -102,13 +111,21 @@ docker-partition-stress-append-only:
 
 docker-restart-stress:
 	$(MAKE) docker-run \
-		ACCOUNT_COUNT=24 \
-		INITIAL_BALANCE_CENTS=100000 \
-		MAX_TRANSFER_CENTS=2500 \
-		CONCURRENCY=12 \
-		TIME_LIMIT=90 \
-		STAGGER_MS=0 \
+		$(FAULT_STRESS_ARGS) \
 		NEMESIS=restart-db
 
 docker-restart-stress-append-only:
 	$(MAKE) docker-restart-stress APPEND_ONLY=1
+
+docker-fault-stress:
+	@status=0; \
+	$(MAKE) docker-partition-stress APPEND_ONLY=$(APPEND_ONLY); \
+	rc=$$?; \
+	if [ $$rc -ne 0 ]; then status=$$rc; fi; \
+	$(MAKE) docker-restart-stress APPEND_ONLY=$(APPEND_ONLY); \
+	rc=$$?; \
+	if [ $$rc -ne 0 ] && [ $$status -eq 0 ]; then status=$$rc; fi; \
+	exit $$status
+
+docker-fault-stress-append-only:
+	$(MAKE) docker-fault-stress APPEND_ONLY=1
