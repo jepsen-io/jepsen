@@ -93,7 +93,7 @@
 
 ; A copy of [[jepsen.lazyfs/nemesis]].
 ; If fsync?, will `(locking fsync-lock)` to not interleave with Client's write and fsync commands."
-(defrecord LazyfsNemesis [lazyfs fsync?]
+(defrecord CoordinatedLazyfsNemesis [lazyfs fsync?]
   nemesis/Nemesis
   (setup! [this _test]
     this)
@@ -211,10 +211,10 @@
   (let [lazyfs (lazyfs/lazyfs dir)
         [generator lazyfs-nemesis]
         (case [type fsync?]
-          [:interleaved false] [(interleaved-gen false) (LazyfsNemesis. lazyfs false)]
-          [:interleaved true]  [(interleaved-gen true)  (LazyfsNemesis. lazyfs true)]
-          [:phased      false] [(phased-gen      false) (LazyfsNemesis. lazyfs false)]
-          [:phased      true]  [(phased-gen      true)  (LazyfsNemesis. lazyfs false)])]
+          [:interleaved false] [(interleaved-gen false) (lazyfs/nemesis lazyfs)]
+          [:interleaved true]  [(interleaved-gen true)  (CoordinatedLazyfsNemesis. lazyfs true)]
+          [:phased      false] [(phased-gen      false) (lazyfs/nemesis lazyfs)]
+          [:phased      true]  [(phased-gen      true)  (lazyfs/nemesis lazyfs)])]
     (assoc tests/noop-test
            :name      "lazyfs file set"
            :os        debian/os
