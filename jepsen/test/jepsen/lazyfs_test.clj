@@ -22,10 +22,11 @@
    (c/exec :sync file)
    ```
 
-   When using a interleaved Client+Nemesis generator with synced writes,
-   the [[FileSetClient]] and [[LazyfsNemesis]] need to coordinate to avoid the
+   When using an interleaved Client+Nemesis generator with synced writes,
+   the [[FileSetClient]] and [[jepsen.lazyfs/nemesis]] need to coordinate to avoid the
    Nemesis' [[jepsen.lazyfs/lose-unfsynced-writes!]] occurring between the Client's
-   write and fsync. This is done with `(locking fsync-lock)`.
+   write and fsync. This is done by wrapping the native Nemesis with
+   one that selectively `(locking fsync-lock)`s when `invoke!`ing.
    
    There is no `locking` with unfsynced writes or phased generators."
   (:require
@@ -91,28 +92,36 @@
   "Object to coordinate Client's write/fsync and Nemesis' `lose-unfsynced-writes`."
   (Object.))
 
-; A copy of [[jepsen.lazyfs/nemesis]].
-; If fsync?, will `(locking fsync-lock)` to not interleave with Client's write and fsync commands."
-(defrecord CoordinatedLazyfsNemesis [lazyfs fsync?]
+;; Wraps a [[jepsen.lazyfs/nemesis]].
+;; If `fsync?`, will `(locking fsync-lock)` to
+;; not interleave between Client's write and fsync commands."
+(defrecord WrappedNemesis [nemesis fsync?]
   nemesis/Nemesis
-  (setup! [this _test]
+  (setup!
+    [this _test]
+    ; use this, so no wrapped-nemesis/setup!
     this)
 
-  (invoke! [_this test {:keys [f] :as op}]
+  (invoke!
+    [_this test {:keys [f] :as op}]
     (case f
       :lose-unfsynced-writes
       (let [v (c/on-nodes test (:value op)
-                          (fn [_test _node]
+                          (fn [test _node]
                             (if-not fsync?
-                              (lazyfs/lose-unfsynced-writes! lazyfs)
+                              (nemesis/invoke! nemesis test op)
                               (locking fsync-lock
-                                (lazyfs/lose-unfsynced-writes! lazyfs)))))]
+                                (nemesis/invoke! nemesis test op)))))]
         (assoc op :value v))))
 
-  (teardown! [_this _test])
+  (teardown!
+    [_this _test]
+    ; this did its own setup!, so no wrapped-nemesis/teardown!
+    nil)
 
   nemesis/Reflection
-  (fs [_this]
+  (fs
+    [_this]
     #{:lose-unfsynced-writes}))
 
 ; The `FileSetClient` will fsync writes if the `op` contains `{:fsync? true}`.
@@ -208,19 +217,19 @@
    using `type` of generator and optionally fsyncing writes."
   [type fsync?]
   (assert (#{:interleaved :phased} type))
-  (let [lazyfs (lazyfs/lazyfs dir)
-        [generator lazyfs-nemesis]
-        (case [type fsync?]
-          [:interleaved false] [(interleaved-gen false) (lazyfs/nemesis lazyfs)]
-          [:interleaved true]  [(interleaved-gen true)  (CoordinatedLazyfsNemesis. lazyfs true)]
-          [:phased      false] [(phased-gen      false) (lazyfs/nemesis lazyfs)]
-          [:phased      true]  [(phased-gen      true)  (lazyfs/nemesis lazyfs)])]
+  (let [lazyfs-map      (lazyfs/lazyfs dir)
+        wrapped-nemesis (-> lazyfs-map
+                            lazyfs/nemesis
+                            (WrappedNemesis. fsync?))
+        generator       (case type
+                          :interleaved (interleaved-gen fsync?)
+                          :phased      (phased-gen      fsync?))]
     (assoc tests/noop-test
            :name      "lazyfs file set"
            :os        debian/os
-           :db        (lazyfs/db lazyfs)
+           :db        (lazyfs/db lazyfs-map)
            :client    (FileSetClient.)
-           :nemesis   lazyfs-nemesis
+           :nemesis   wrapped-nemesis
            :generator generator
            :checker   (checker/set)
            :nodes     [node])))
