@@ -103,16 +103,11 @@
     this)
 
   (invoke!
-    [_this test {:keys [f] :as op}]
-    (case f
-      :lose-unfsynced-writes
-      (let [v (c/on-nodes test (:value op)
-                          (fn [test _node]
-                            (if-not fsync?
-                              (nemesis/invoke! nemesis test op)
-                              (locking fsync-lock
-                                (nemesis/invoke! nemesis test op)))))]
-        (assoc op :value v))))
+    [_this test op]
+    (if-not fsync?
+      (nemesis/invoke! nemesis test op)
+      (locking fsync-lock
+        (nemesis/invoke! nemesis test op))))
 
   (teardown!
     [_this _test]
