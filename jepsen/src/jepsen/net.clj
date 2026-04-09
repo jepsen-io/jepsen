@@ -120,7 +120,7 @@
 (defn- net-shape!
   "Shared convenience call for iptables/ipfilter. Shape the network with tc
   qdisc, netem, and filter(s) so target nodes have given behavior."
-  [_net test targets behavior]
+  [_net test targets behavior dev]
   (let [results (on-nodes test
                           (fn [test node]
                             (let [nodes   (set (:nodes test))
@@ -128,7 +128,7 @@
                                   targets (if (contains? targets node)
                                             (disj nodes node)
                                             targets)
-                                  dev     (net-dev)]
+                                  ]
                               ; start with no qdisc
                               (qdisc-del dev)
                               (if (and (seq targets)
@@ -172,8 +172,9 @@
     (fast!  [net test])
     (shape! [net test nodes behavior])))
 
-(def iptables
-  "Default iptables (assumes we control everything)."
+(defn iptables-with-dev
+  "Default iptables (assumes we control everything). Take network device as parameter."
+  [dev]
   (reify Net
     (drop! [net test src dest]
       (on-nodes test [dest]
@@ -185,11 +186,12 @@
       (with-test-nodes test
         (su
           (exec :iptables :-F :-w)
-          (exec :iptables :-X :-w))))
+          ; (exec :iptables :-X :-w)
+          )))
 
     (slow! [net test]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
+        (su (exec tc :qdisc :add :dev dev :root :netem :delay :50ms
                   :10ms :distribution :normal))))
 
     (slow! [net test {:keys [mean variance distribution]
@@ -197,20 +199,20 @@
                              variance     10
                              distribution :normal}}]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev :eth0 :root :netem :delay
+        (su (exec tc :qdisc :add :dev dev :root :netem :delay
                   (str mean "ms")
                   (str variance "ms")
                   :distribution distribution))))
 
     (flaky! [net test]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
+        (su (exec tc :qdisc :add :dev dev :root :netem :loss "20%"
                   "75%"))))
 
     (fast! [net test]
       (with-test-nodes test
         (try
-          (su (exec tc :qdisc :del :dev :eth0 :root))
+          (su (exec tc :qdisc :del :dev dev :root))
           (catch RuntimeException e
             (if (re-find #"Error: Cannot delete qdisc with handle of zero."
                          (.getMessage e))
@@ -218,7 +220,7 @@
               (throw e))))))
 
     (shape! [net test nodes behavior]
-      (net-shape! net test nodes behavior))
+      (net-shape! net test nodes behavior dev))
 
     PartitionAll
     (drop-all! [net test grudge]
@@ -232,8 +234,13 @@
                                    (str/join ","))
                               :-j :DROP :-w))))))))
 
-(def ipfilter
+(def iptables
+  "Default iptables. Use eth0 as network device."
+  (iptables-with-dev :eth0))
+
+(defn ipfilter-with-dev
   "IPFilter rules"
+  [dev]
   (reify Net
     (drop! [net test src dest]
       (on dest (su (exec :echo :block :in :from src :to :any | :ipf :-f :-))))
@@ -244,7 +251,7 @@
 
     (slow! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :delay :50ms
+        (su (exec :tc :qdisc :add :dev dev :root :netem :delay :50ms
                   :10ms :distribution :normal))))
 
     (slow! [net test {:keys [mean variance distribution]
@@ -252,19 +259,21 @@
                              variance     10
                              distribution :normal}}]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev :eth0 :root :netem :delay
+        (su (exec tc :qdisc :add :dev dev :root :netem :delay
                   (str mean "ms")
                   (str variance "ms")
                   :distribution distribution))))
 
     (flaky! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :add :dev :eth0 :root :netem :loss "20%"
+        (su (exec :tc :qdisc :add :dev dev :root :netem :loss "20%"
                   "75%"))))
 
     (fast! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :del :dev :eth0 :root))))
+        (su (exec :tc :qdisc :del :dev dev :root))))
 
     (shape! [net test nodes behavior]
-      (net-shape! net test nodes behavior))))
+      (net-shape! net test nodes behavior dev))))
+
+(def ipfilter (ipfilter-with-dev :eth0))
