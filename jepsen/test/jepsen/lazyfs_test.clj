@@ -37,11 +37,11 @@
     [client :as client]
     [control :as c]
     [core :as jepsen]
+    [db :as db]
     [generator :as gen]
     [lazyfs :as lazyfs]
     [nemesis :as nemesis]
-    [tests :as tests]
-    [util :as u]]
+    [tests :as tests]]
    [jepsen.os.debian :as debian]))
 
 (def dir
@@ -92,6 +92,26 @@
   "Object to coordinate Client's write/fsync and Nemesis' `lose-unfsynced-writes`."
   (Object.))
 
+;; wraps a [[jepsen.lazyfs/DB]].
+;; our DB needs to cleanup, rm, [[dir]] on `teardown!`,
+;; not just `unmount!` it.
+(defrecord WrappedDB [db]
+  db/DB
+  (setup! [this test node]
+    ; will create `dir` if necessary
+    (db/setup! db test node)
+    this)
+
+  (teardown! [_this test node]
+    (db/teardown! db test node)
+    ; `dir` is now free of any mounts
+    (c/su
+     (c/exec :rm :-rf dir)))
+
+  db/LogFiles
+  (log-files [_this test node]
+    (db/log-files db test node)))
+
 ;; Wraps a [[jepsen.lazyfs/nemesis]].
 ;; If `fsync?`, will `(locking fsync-lock)` to
 ;; not interleave between Client's write and fsync commands."
@@ -124,13 +144,9 @@
   client/Client
   (open! [this _test _node]
     (assoc this
-           :file (str dir "/" (u/rand-distribution) ".set")))
+           :file (str dir "/lazyfs-test.set")))
 
-  (setup! [{:keys [file] :as _this} test]
-    ; insure file doesn't exist, i.e. don't reuse
-    (c/with-node test node
-      (c/su
-       (c/exec :rm :-rf file))))
+  (setup! [_this _test])
 
   (invoke! [{:keys [file] :as _this} test {:keys [f fsync? value] :as op}]
     (c/with-node test node
@@ -153,7 +169,8 @@
                  (c/exec :sync file)
                  (assoc op :type :ok)))))
 
-  (teardown! [_this _test])
+  (teardown!
+    [_this _test])
 
   (close! [_this _test]))
 
@@ -213,6 +230,9 @@
   [type fsync?]
   (assert (#{:interleaved :phased} type))
   (let [lazyfs-map      (lazyfs/lazyfs dir)
+        wrapped-db      (-> lazyfs-map
+                            lazyfs/db
+                            WrappedDB.)
         wrapped-nemesis (-> lazyfs-map
                             lazyfs/nemesis
                             (WrappedNemesis. fsync?))
@@ -222,7 +242,7 @@
     (assoc tests/noop-test
            :name      "lazyfs file set"
            :os        debian/os
-           :db        (lazyfs/db lazyfs-map)
+           :db        wrapped-db
            :client    (FileSetClient.)
            :nemesis   wrapped-nemesis
            :generator generator
