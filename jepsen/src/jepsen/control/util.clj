@@ -96,13 +96,13 @@
      ; Find's traversal order is by inode structure, so we sort for stability
      (sort paths))))
 
-(defn ls-full
-  "Like ls, but prepends dir to each entry. TODO: deprecate this in favor of ls
-  {:full-path? true}."
+(defn ^:deprecated ls-full
+  "Deprecated, use `(ls dir {:full-path? true})`."
   ([] (ls-full "."))
   ([dir] (ls-full dir {}))
   ([dir opts]
-   (ls dir (assoc opts {:full-path? true}))))
+   (let [opts (assoc opts :full-path? true)]
+     (ls dir opts))))
 
 (defn tmp-file!
   "Creates a random, temporary file under tmp-dir-base, and returns its path.
