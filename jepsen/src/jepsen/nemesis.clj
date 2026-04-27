@@ -580,7 +580,7 @@
                                  _ (assert (integer? drop))
                                  file (if (cu/file? file)
                                         file
-                                        (rand/nth (cu/ls-full file)))]
+                                        (rand/nth (cu/ls file {:recursive? true :types [:file] :full-path? true})))]
                              (c/su
                               (c/exec :truncate :-c :-s (str "-" drop) file))
                              {:file file :drop drop})))
@@ -613,7 +613,7 @@
                                  (throw+ {:type ::no-file}))
                              file (if (cu/file? file)
                                     file
-                                    (rand/nth (cu/ls-full file)))
+                                    (rand/nth (cu/ls file {:recursive? true :types [:file] :full-path? true})))
                              probability (or probability 0.01)
                              percent (* 100 probability)]
                          (c/su
