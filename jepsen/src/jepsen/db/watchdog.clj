@@ -148,8 +148,8 @@
 
   (teardown! [this test node]
     (when-let [w (get @watchdogs node)]
-      (kill! w)
-      (db/teardown! db test node)))
+      (kill! w))
+    (db/teardown! db test node))
 
   db/Kill
   (kill! [_ test node]
