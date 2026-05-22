@@ -192,28 +192,43 @@
          nemesis# (nemesis/validate (:nemesis ~test))]
     ; Setup
     (let [nf# (future (nemesis/setup! nemesis# ~test))
-               clients# (real-pmap (fn [node#]
-                                     (with-thread-name
-                                       (str "jepsen node " node#)
-                                       (let [c# (client/open! client# ~test node#)]
-                                         (client/setup! c# ~test)
-                                         c#)))
-                                   (:nodes ~test))
-               nemesis# @nf#
-               ~test-sym (assoc ~test :nemesis nemesis#)]
+          ; Open clients and tear down, then set up.
+          barrier# (CyclicBarrier. (count (:nodes ~test)))
+          _# (->> (:nodes ~test)
+                  (real-pmap (fn ~'setup-client [node#]
+                               (with-thread-name
+                                 (str "jepsen node " node#)
+                                 (let [c# (client/open! client# ~test node#)]
+                                   (client/teardown! c# ~test)
+                                   (.await barrier#)
+                                   (client/setup! c# ~test)
+                                   (client/close! c# ~test)))))
+                  dorun)
+        ; Bring the nemesis into the test
+        nemesis# @nf#
+        ~test-sym (assoc ~test :nemesis nemesis#)]
       (try
-        (dorun clients#)
+        ; Run test
         ~@body
         (finally
-          ; Teardown (and close clients)
+          ; Teardown nemesis and clients
           (let [nf# (future (nemesis/teardown! nemesis# ~test))]
-            (dorun (real-pmap (fn [[c# node#]]
-                                (with-thread-name
-                                  (str "jepsen node " node#))
+            (when-not (:leave-db-running ~test)
+              (->> (:nodes ~test)
+                   (real-pmap
+                     (fn ~'teardown-client [node#]
+                       (with-thread-name
+                         (str "jepsen node " node#)
+                         (try (let [c# (client/open! client# ~test node#)]
                                 (try (client/teardown! c# ~test)
+                                     (catch Exception e#
+                                       (warn e# "Could not tear down client!"))
                                      (finally
                                        (client/close! c# ~test))))
-                              (map vector clients# (:nodes ~test))))
+                              (catch Exception e#
+                                (warn e# "Could not open client for final teardown"))))))
+                   dorun))
+            ; Finish nemesis teardown
             @nf#))))))
 
 (defn run-case!
