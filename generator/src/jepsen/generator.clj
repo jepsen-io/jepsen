@@ -7,7 +7,7 @@
   object, and yields:
 
   - nil if the generator is exhausted
-  - :pending if the generator doesn't know what to do yet
+  - [:pending gen] if the generator doesn't know what to do yet
   - [op, gen'], where op' is the next operation this generator would like to
   execute, and `gen'` is the state of the generator that would result if `op`
   were evaluated. Ops must be a jepsen.history.Op.
