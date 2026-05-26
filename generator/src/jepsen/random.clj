@@ -204,6 +204,17 @@
         ...)"
   (thread-local-random))
 
+(defn set-rng!
+  "Overrides the RNG with a new one. Not thread-safe; takes effect globally."
+  [rng']
+  (def rng rng'))
+
+(defn set-seed!
+  "Sets the RNG to one initialized with the given seed. Not thread-safe, takes
+  effect globally."
+  [seed]
+  (set-rng! (thread-local-random seed)))
+
 (defmacro with-rng
   "Evaluates body with the given random number generator. Not thread-safe;
   takes effect globally."
