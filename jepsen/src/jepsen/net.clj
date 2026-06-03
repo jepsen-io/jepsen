@@ -42,27 +42,25 @@
 
 (def tc "/sbin/tc")
 
+(def net-dev-cache
+  "A local cache to speed up repeated calls to net-dev."
+  (atom {}))
+
 (defn net-dev
   "Returns the network interface of the current host."
   []
-  (let [choices (su (exec :ip :-o :link :show))
-        iface (->> choices
-                   (str/split-lines)
-                   (map (fn [ln] (let [[_match iface] (re-find #"\d+: ([^:@]+).+" ln)] iface)))
-                   (remove #(= "lo" %))
-                   (first))]
-    (assert iface
-            (str "Couldn't determine network interface!\n" choices))
-    iface))
-
-(defn qdisc-del
-  "Deletes root qdisc for given dev on current node."
-  [dev]
-  (try+
-   (su (exec tc :qdisc :del :dev dev :root))
-   (catch [:exit 2] _
-     ; no qdisc to del
-     nil)))
+  (let [node *host*]
+    (or (get @net-dev-cache node)
+        (let [choices (su (exec :ip :-o :link :show))
+              iface (->> choices
+                         (str/split-lines)
+                         (map (fn [ln] (let [[_match iface] (re-find #"\d+: ([^:@]+).+" ln)] iface)))
+                         (remove #(= "lo" %))
+                         (first))]
+          (assert iface
+                  (str "Couldn't determine network interface!\n" choices))
+          (swap! net-dev-cache assoc node iface)
+          iface))))
 
 (def all-packet-behaviors
   "All of the available network packet behaviors, and their default option
@@ -117,6 +115,15 @@
                (concat args [:rate rate])))
            [])))
 
+(defn qdisc-del
+  "Deletes root qdisc for given dev on current node."
+  [dev]
+  (try+
+   (su (exec tc :qdisc :del :dev dev :root))
+   (catch [:exit 2] _
+     ; no qdisc to del
+     nil)))
+
 (defn- net-shape!
   "Shared convenience call for iptables/ipfilter. Shape the network with tc
   qdisc, netem, and filter(s) so target nodes have given behavior."
@@ -130,7 +137,7 @@
                                             targets)
                                   ]
                               ; start with no qdisc
-                              (qdisc-del dev)
+                              (qdisc-del (or dev (net-dev)))
                               (if (and (seq targets)
                                        (seq behavior))
                                 ; node will need a prio qdisc, netem qdisc, and a filter per target
@@ -138,18 +145,18 @@
                                   (su
                                    ; root prio qdisc, bands 1:1-3 are system default prio
                                    (exec tc
-                                         :qdisc :add :dev dev
+                                         :qdisc :add :dev (or dev (net-dev))
                                          :root :handle "1:"
                                          :prio :bands 4 :priomap 1 2 2 2 1 2 0 0 1 1 1 1 1 1 1 1)
                                    ; band 1:4 is a netem qdisc for the behavior
                                    (exec tc
-                                         :qdisc :add :dev dev
+                                         :qdisc :add :dev (or dev (net-dev))
                                          :parent "1:4" :handle "40:"
                                          :netem (behaviors->netem behavior))
                                    ; filter dst ip's to netem qdisc with behavior
                                    (doseq [target targets]
                                      (exec tc
-                                           :filter :add :dev dev
+                                           :filter :add :dev (or dev (net-dev))
                                            :parent "1:0"
                                            :protocol :ip :prio :3 :u32 :match :ip :dst (control.net/ip target)
                                            :flowid "1:4")))
@@ -173,7 +180,8 @@
     (shape! [net test nodes behavior])))
 
 (defn iptables-with-dev
-  "Default iptables (assumes we control everything). Take network device as parameter."
+  "Default iptables (assumes we control everything). Take network device as
+  parameter."
   [dev]
   (reify Net
     (drop! [net test src dest]
@@ -191,7 +199,8 @@
 
     (slow! [net test]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev dev :root :netem :delay :50ms
+        (su (exec tc :qdisc :add :dev (or dev net-dev)
+                  :root :netem :delay :50ms
                   :10ms :distribution :normal))))
 
     (slow! [net test {:keys [mean variance distribution]
@@ -199,20 +208,21 @@
                              variance     10
                              distribution :normal}}]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev dev :root :netem :delay
+        (su (exec tc :qdisc :add :dev (or dev (net-dev))
+                  :root :netem :delay
                   (str mean "ms")
                   (str variance "ms")
                   :distribution distribution))))
 
     (flaky! [net test]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev dev :root :netem :loss "20%"
-                  "75%"))))
+        (su (exec tc :qdisc :add :dev (or dev (net-dev))
+                  :root :netem :loss "20%" "75%"))))
 
     (fast! [net test]
       (with-test-nodes test
         (try
-          (su (exec tc :qdisc :del :dev dev :root))
+          (su (exec tc :qdisc :del :dev (or dev (net-dev)) :root))
           (catch RuntimeException e
             (if (re-find #"Error: Cannot delete qdisc with handle of zero."
                          (.getMessage e))
@@ -235,8 +245,8 @@
                               :-j :DROP :-w))))))))
 
 (def iptables
-  "Default iptables. Use eth0 as network device."
-  (iptables-with-dev :eth0))
+  "Default iptables. If no device set, guesses from each node's interface list."
+  (iptables-with-dev nil))
 
 (defn ipfilter-with-dev
   "IPFilter rules"
@@ -251,7 +261,8 @@
 
     (slow! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :add :dev dev :root :netem :delay :50ms
+        (su (exec :tc :qdisc :add :dev (or dev (net-dev))
+                  :root :netem :delay :50ms
                   :10ms :distribution :normal))))
 
     (slow! [net test {:keys [mean variance distribution]
@@ -259,21 +270,27 @@
                              variance     10
                              distribution :normal}}]
       (with-test-nodes test
-        (su (exec tc :qdisc :add :dev dev :root :netem :delay
+        (su (exec tc :qdisc :add :dev (or dev (net-dev))
+                  :root :netem :delay
                   (str mean "ms")
                   (str variance "ms")
                   :distribution distribution))))
 
     (flaky! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :add :dev dev :root :netem :loss "20%"
+        (su (exec :tc :qdisc :add :dev (or dev (net-dev))
+                  :root :netem :loss "20%"
                   "75%"))))
 
     (fast! [net test]
       (with-test-nodes test
-        (su (exec :tc :qdisc :del :dev dev :root))))
+        (su (exec :tc :qdisc :del :dev (or dev (net-dev))
+                  dev :root))))
 
     (shape! [net test nodes behavior]
       (net-shape! net test nodes behavior dev))))
 
-(def ipfilter (ipfilter-with-dev :eth0))
+(def ipfilter
+  "Default ipfilter network. If device is nil, guesses from each node's
+  interface list."
+  (ipfilter-with-dev nil))
