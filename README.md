@@ -52,16 +52,61 @@ start learning how to write tests. You've got several options:
 
 ### AWS
 
-If you have an AWS account, you can launch a full Jepsen cluster---control and
-DB nodes---from the [AWS
-Marketplace](https://aws.amazon.com/marketplace/pp/Jepsen-LLC-Jepsen/B01LZ7Y7U0).
-Click "Continue to Subscribe", "Continue to Configuration", and choose
-"CloudFormation Template". You can choose the number of nodes you'd like to
-deploy, adjust the instance types and disk sizes, and so on. These are full
-VMs, which means they can test clock skew.
+One easy way to get a Jepsen cluster is using Jepsen's [AWS Marketplace
+listing](https://aws.amazon.com/marketplace/pp/Jepsen-LLC-Jepsen/B01LZ7Y7U0).
+You can either run a single EC2 VM with serveral DB nodes in containers, or a
+cluster of separate EC2 VMs---this is a little more expensive, but
+significantly faster, and lets you test clock skew. The Marketplace VMs come
+with an hourly fee (generally $1/hour/node), which helps fund Jepsen
+development.
 
-The AWS marketplace clusters come with an hourly fee (generally $1/hr/node),
-which helps fund Jepsen development.
+Once you've subscribed to the AWS Marketplace listing, go to your [AWS
+Marketplace Subscriptions
+list](https://us-east-1.console.aws.amazon.com/marketplace/subscriptions/),
+click Jepsen, then "Launch new instance".
+
+**For a real cluster of EC2 VMs**, pick "AWS Cloudformation" and click "Launch
+with Cloudformation". At the "Create Stack" page, click "Next".
+
+On the "Specify Stack Details" page, give the stack a name like `jepsen-test`.
+Pick the SSH key you'd like to use to log in. Enter the CIDR IP range you'd
+like to give access to the control node; you can use your own (public) IP 
+address, or `0.0.0.0/0` if you'd like access from anywhere. Click "Next".
+
+On the "Configure stack options" page, click the checkbox at the bottom to
+acknowledge that the cluster will create some IAM resources (a tiny S3 bucket,
+a few security groups, and the cluster of EC2 VMs, all torn down automatically
+on termination). Click "Next".
+
+On the "Review and create" page, click "Submit".
+
+On the Cloudformation stack page, a timeline will appear as CloudFormation sets
+up the cluster---this will take about four minutes. Click the "Outputs" tab to
+get the control node's public DNS address---something like
+`ec2-12-3-45-67.compute-1.amazonaws.com`.
+
+SSH to the control node using `ssh -i <your-ec2-ssh-key.pem>
+admin@ec2-<whatever>.compute-1.amazonaws.com`. Your DB nodes are named `n1`, `n2`, and you can usually run a test like so:
+
+```sh
+lein run test --username admin --nodes-file ~/nodes ...
+```
+
+**For a single VM with DB containers**, pick "Amazon EC2", and "Launch from EC2
+Console". Choose version 0.3.11 and click "Launch from EC2".
+
+Pick your favorite instance type (an m8i.xlarge should work fine), set the root
+volume storage to something reasonable--say 32 GB, and click "Launch Instance". Click the instance ID in the green notification that pops up, and copy the
+"Public DNS" address of the instance---something like `ec2-12-3-45-67.compute-1.amazonaws.com`.
+
+SSH to the control node using `ssh -i <your-ec2-ssh-key.pem>
+admin@ec2-<whatever>.compute-1.amazonaws.com`. Launch the DB containers by
+running `jepsen-containers-start`. Your DB nodes are named `c1`, `c2`, ..., and
+are listed in `~/container-nodes`. You can usually run a test like so:
+
+```sh
+lein run test --nodes-file ~/container-nodes ...
+```
 
 ### LXC
 

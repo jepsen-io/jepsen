@@ -181,8 +181,8 @@
             run       (->> @meta-log (drop n4) (drop-last n3))
             teardown  (take-last n3 @meta-log)]
         (is (= {:open n,  :teardown n, :setup n, :close n} (frequencies setup)))
-        (is (= {:open n2  :close n2}                       (frequencies run)))
-        (is (= {:open n, :teardown n, :close n}           (frequencies teardown)))))
+        (is (= {:open n2, :close n2}                       (frequencies run)))
+        (is (= {:open n,  :teardown n, :close n}           (frequencies teardown)))))
 
     (testing "nemesis setup/teardown"
       (let [ops (filter (comp #{:nemesis} :process) h)
