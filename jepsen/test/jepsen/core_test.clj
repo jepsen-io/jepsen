@@ -142,7 +142,7 @@
                        :db        db
                        :client    (tst/atom-client state meta-log)
                        :nemesis   nemesis
-                       :concurrency 10
+                       :concurrency (* 2 (count (:nodes tst/noop-test)))
                        :pure-generators true
                        :generator
                        (->> (gen/phases
@@ -174,13 +174,15 @@
 
     (testing "client setup/teardown"
       (let [n         (count (:nodes test))
-            n2        (* 2 n)
-            setup     (take n2 @meta-log)
-            run       (->> @meta-log (drop n2) (drop-last n2))
-            teardown  (take-last n2 @meta-log)]
-        (is (= {:open     n   :setup n}   (frequencies setup)))
-        (is (= {:open     n2  :close n2}  (frequencies run)))
-        (is (= {:teardown n   :close n}   (frequencies teardown)))))
+            n2        (* 2 n) ; 2 clients per node, each opened and closing
+            n4        (* 4 n) ; During setup each node goes through open, teardown, setup, close
+            n3        (* 3 n) ; On teardown each client goes through open, teardown, close
+            setup     (take n4 @meta-log)
+            run       (->> @meta-log (drop n4) (drop-last n3))
+            teardown  (take-last n3 @meta-log)]
+        (is (= {:open n,  :teardown n, :setup n, :close n} (frequencies setup)))
+        (is (= {:open n2  :close n2}                       (frequencies run)))
+        (is (= {:open n, :teardown n, :close n}           (frequencies teardown)))))
 
     (testing "nemesis setup/teardown"
       (let [ops (filter (comp #{:nemesis} :process) h)
