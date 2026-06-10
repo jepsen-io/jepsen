@@ -341,6 +341,27 @@
           :b {:valid? true}
           :valid? true})))
 
+(deftest flatten-test
+  (testing "flatten all"
+    (is (= (compose {:a 1
+                     :b 2
+                     :c 3
+                     :d 4
+                     :e 5})
+           (flatten (compose {:a 1
+                              :x (compose {:b 2 :c 3})
+                              :y (compose {:d 4 :e 5})})))))
+  (testing "flatten one"
+    (is (= (compose {:a 1
+                     :x (compose {:b 2, :c 3})
+                     :d 4
+                     :e 5})
+           (flatten (compose {:a 1
+                              :x (compose {:b 2 :c 3})
+                              :y (compose {:d 4 :e 5})})
+                    :y)))))
+
+
 (deftest broaden-range-test
   (are [a b, a' b'] (= [a' b'] (cp/broaden-range [a b]))
        ; Broadening identical points

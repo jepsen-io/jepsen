@@ -1,6 +1,6 @@
 (ns jepsen.checker
   "Validates that a history is correct with respect to some model."
-  (:refer-clojure :exclude [set])
+  (:refer-clojure :exclude [set flatten])
   (:require [clojure [core :as c]
                      [datafy :refer [datafy]]
                      [pprint :refer [pprint]]
@@ -114,6 +114,41 @@
   valid."
   [checkers]
   (Compose. checkers))
+
+(defn flatten-merge
+  "Like merge, but throws on duplicate keys."
+  [m1 m2]
+  (let [m (merge m1 m2)]
+    (when (not= (count m) (+ (count m1) (count m2)))
+      (throw+ {:type :duplicate-key
+               :m1   m1
+               :m2   m2
+               :key  (first (set/intersection (c/set (keys m1))
+                                              (c/set (keys m2))))}))
+    m))
+
+(defn flatten
+  "Takes a composed checker containing other composed checkers and pulls those
+  nested checkers up by one level. Optionally takes a key, in which case just
+  that key is pulled up. Throws if the flattening would cause a name
+  collision."
+  ([checker]
+   (assert (instance? Compose checker))
+   (compose
+     (reduce (fn [checkers [k subchecker]]
+               (if (instance? Compose subchecker)
+                 (flatten-merge checkers (:checkers subchecker))
+                 (assoc checkers k subchecker)))
+             {}
+             (:checkers checker))))
+  ([checker k]
+   (assert (instance? Compose checker))
+   (let [checkers   (:checkers checker)
+         subchecker (get checkers k)]
+     (assert (instance? Compose subchecker))
+     (compose
+       (flatten-merge (dissoc checkers k)
+                      (:checkers subchecker))))))
 
 (defrecord ConcurrencyLimit [^Semaphore sem checker]
   Checker
