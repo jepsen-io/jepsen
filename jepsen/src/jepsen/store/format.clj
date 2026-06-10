@@ -916,7 +916,13 @@
              {"block-ref" (reify WriteHandler
                             (write [_ w block-ref]
                               (.writeTag w "block-ref" 1)
-                              (.writeObject w (:id block-ref))))})
+                              (.writeObject w (:id block-ref))))}
+             java.lang.Byte
+             {"byte" (reify WriteHandler
+                       (write [_ w b]
+                         ; Terrible, but whatever
+                         (.writeTag w "byte" 1)
+                         (.writeInt w (short b))))})
       fress/associative-lookup
       fress/inheritance-lookup))
 
@@ -925,7 +931,11 @@
   (-> jsf/read-handlers*
       (assoc "block-ref" (reify ReadHandler
                            (read [_ rdr tag component-count]
-                             (block-ref (int (.readObject rdr))))))
+                             (block-ref (int (.readObject rdr)))))
+
+             "byte" (reify ReadHandler
+                      (read [_ rdr tag component-count]
+                        (byte (.readInt rdr)))))
       fress/associative-lookup))
 
 (defn write-fressian-to-file!

@@ -30,11 +30,18 @@
                                       [1 1 2 3 5 8])
                       :nil      nil
                       :boolean  false
+                      :byte     (byte 3)
+                      :short    (short 5)
+                      :int      (int -7)
                       :long     1
+                      :float    (float -5.25)
                       :double   1.5
                       :rational 5/7
-                      :bignum   123M
+                      :bigdec   123.45M
+                      :bigint   123N
                       :string   "foo"
+                      :symbol   'foo/bar
+                      :keyword  :foo/bar
                       :atom     ["blah"]
                       :vec      [1 2 3]
                       :seq      (map inc [1 2 3])
