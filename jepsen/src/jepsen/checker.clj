@@ -131,7 +131,8 @@
   "Takes a composed checker containing other composed checkers and pulls those
   nested checkers up by one level. Optionally takes a key, in which case just
   that key is pulled up. Throws if the flattening would cause a name
-  collision."
+  collision. Attempting to flatten a non-composed checker leaves the checker in
+  place."
   ([checker]
    (assert (instance? Compose checker))
    (compose
@@ -145,10 +146,12 @@
    (assert (instance? Compose checker))
    (let [checkers   (:checkers checker)
          subchecker (get checkers k)]
-     (assert (instance? Compose subchecker))
-     (compose
-       (flatten-merge (dissoc checkers k)
-                      (:checkers subchecker))))))
+     (if (instance? Compose subchecker)
+       (compose
+         (flatten-merge (dissoc checkers k)
+                        (:checkers subchecker)))
+       ; Can't flatten this
+       checker))))
 
 (defrecord ConcurrencyLimit [^Semaphore sem checker]
   Checker
