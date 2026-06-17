@@ -202,7 +202,9 @@ log_all_operations=false
     (try+
       ; I think it flushes on umount which can take *forever*, so we drop the
       ; page cache here to try and speed that up.
+      (info "here")
       (meh (lose-unfsynced-writes! lazyfs))
+      (info "and here")
       (info "Unmounting lazyfs" dir)
       (c/exec :fusermount :-uz dir)
       (info "Unmounted lazyfs" dir)
@@ -242,6 +244,16 @@ log_all_operations=false
   lazyfs and mounts the given lazyfs dir."
   [dir-or-lazyfs]
   (DB. (lazyfs dir-or-lazyfs)))
+
+(defn mounted?
+  "Is the given DB or LazyFS map mounted presently?"
+  [db-or-lazyfs-map]
+  (if (instance? DB db-or-lazyfs-map)
+    (recur (:lazyfs db-or-lazyfs-map))
+    (try+ (c/exec "mountpoint" "-q" (:dir db-or-lazyfs-map))
+          true
+          (catch [:exit 1] _ false)
+          (catch [:exit 32] _ false))))
 
 (defn lose-unfsynced-writes!
   "Takes a lazyfs map or a lazyfs DB. Asks the local node to lose any writes to
