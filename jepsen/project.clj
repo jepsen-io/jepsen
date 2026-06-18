@@ -33,7 +33,7 @@
                   :exclusions [net.schmizz/sshj]]
                  [org.bouncycastle/bcprov-jdk15on "1.70"]
                  [hiccup "2.0.0"]
-                 [metametadata/multiset "0.1.1"]
+                 [org.clojars.achim/multiset "0.1.0"]
                  [org.clj-commons/slingshot "0.13.0"]
                  [org.clojure/data.codec "0.2.1"]]
   :java-source-paths ["src"]
