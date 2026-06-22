@@ -362,6 +362,19 @@
            (throw e))))
   username)
 
+(defn kill-bin!
+  "Kills a specific binary, given the fully-qualified path to it. Signals may
+  be either numbers or names, e.g. :KILL. wait? controls whether the killall
+  command waits for the process to exit."
+  ([bin]
+   (kill-bin! 9 bin))
+  ([signal bin]
+   (kill-bin! signal true bin))
+  ([signal wait? bin]
+   (assert (re-find #"^/" bin) "bin should be an absolute path")
+   (try+ (exec :killall "-q" "-s" (name+ signal) (when wait? "-w") bin)
+         (catch [:exit 1] _ :no-process))))
+
 (defn grepkill!
   "Kills processes by grepping for the given string. If a signal is given,
   sends that signal instead. Signals may be either numbers or names, e.g.
