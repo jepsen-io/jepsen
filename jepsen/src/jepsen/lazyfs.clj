@@ -202,9 +202,7 @@ log_all_operations=false
     (try+
       ; I think it flushes on umount which can take *forever*, so we drop the
       ; page cache here to try and speed that up.
-      (info "here")
       (meh (lose-unfsynced-writes! lazyfs))
-      (info "and here")
       (info "Unmounting lazyfs" dir)
       (c/exec :fusermount :-uz dir)
       (info "Unmounted lazyfs" dir)
