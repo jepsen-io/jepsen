@@ -236,7 +236,8 @@
   generator. Returns test with no :generator and a completed :history."
   [test]
   (with-client+nemesis-setup-teardown [test test]
-    (gen.interpreter/run! test)))
+    (store/with-history! [test test]
+      (gen.interpreter/run! test))))
 
 (defn analyze!
   "After running the test and obtaining a history, we perform some

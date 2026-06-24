@@ -14,6 +14,7 @@
             [unilog.config :as unilog]
             [multiset.core :as multiset]
             [jepsen [fs-cache :refer [write-atomic!]]
+                    [history :as h]
                     [print :refer [pprint]]
                     [util :as util]]
             [jepsen.store [fressian :as jsf]
@@ -464,6 +465,39 @@
     (update-symlinks! test)
     ; Return the Jepsen writer's results; it's got metadata.
     (vary-meta test merge (meta @jepsen))))
+
+(defmacro with-history!
+  "Takes a `[test-sym test-expr]` binding vector. Opens a writer for the test's
+  history using `(:handle (:store test))`; this writer can be used to write
+  operations to the test's history. Stores that writer in `(:history-writer
+  (:store test)`, and evaluates body with `test-sym` bound to that version of
+  the test. Body should return a new version of the test. On completion, closes
+  the history writer and returns the new test, but without :history-writer, and
+  with a :history key which points to the jepsen.history.IHistory now written
+  on disk."
+  [[test-sym test-expr] & body]
+  `(let [~test-sym ~test-expr
+         handle# (:handle (:store ~test-sym))
+         ~'_     (assert handle#)
+         writer# (store.format/test-history-writer! handle# ~test-sym)
+         ~test-sym (with-open [writer# writer#]
+                     (let [~test-sym (update ~test-sym :store
+                                             assoc :history-writer writer#)]
+                       ~@body))
+         ; Get the history
+         history# (-> handle#
+                      (store.format/read-block-by-id (:block-id writer#))
+                      :data
+                      (h/history {:dense-indices? true
+                                  :have-indices? true
+                                  :already-ops? true}))
+         ; And update the test
+         ~test-sym (-> ~test-sym
+                       (update :store dissoc :history-writer)
+                       (assoc :history history#))]
+     ~test-sym))
+
+;; Logging
 
 (def console-appender
   {:appender :console
