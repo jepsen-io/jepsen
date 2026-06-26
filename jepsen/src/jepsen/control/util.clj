@@ -13,7 +13,7 @@
 (def tmp-dir-base "Where should we put temporary files?" "/tmp/jepsen")
 
 (defn await-tcp-port
-  "Blocks until a local TCP port is bound. Options:
+  "Blocks until a TCP port is bound. Options:
 
   :retry-interval   How long between retries, in ms. Default 1s.
   :log-interval     How long between logging that we're still waiting, in ms.
@@ -23,11 +23,13 @@
   ([port]
    (await-tcp-port port {}))
   ([port opts]
+   (await-tcp-port "localhost" port opts))
+  ([host port opts]
    (util/await-fn
      (fn check-port []
-       (exec :nc :-z :localhost port)
+       (exec :nc :-z host port)
        nil)
-     (merge {:log-message (str "Waiting for port " port " ...")}
+     (merge {:log-message (str "Waiting for TCP port " host ":" port " ...")}
             opts))))
 
 (defn file?
