@@ -63,7 +63,10 @@
     (->> (:roles test)
          (map (fn make-barrier [[role nodes]]
                 (let [n (count nodes)]
-                  (assert (pos? n))
+                  (when-not (pos? n)
+                    (throw (IllegalArgumentException.
+                             (str "No nodes for role " (pr-str role)
+                                  " (roles are " (pr-str (:roles test)) ")"))))
                   [role (CyclicBarrier. n)])))
          (into {})
          (compare-and-set! barriers nil))))
@@ -83,6 +86,15 @@
          ~'test (restrict-test ~'barriers ~'role ~'test)]
      ~@body))
 
+(defn await-db-setup
+  "Takes a role DB and a role, and blocks until that role has completed all its
+  calls to setup!"
+  [db role]
+  (let [^CountDownLatch latch (get @(:latches db) role)]
+    ; TODO: add parameterizable timeouts; I'm sure we'll get stuck here
+    ; some time.
+    (.await latch)))
+
 (defrecord DB
   [dbs       ; A map of roles to {:db DB, :deps [...]} maps
    barriers  ; An atom of roles to CyclicBarriers for each role. This is lazily
@@ -92,7 +104,7 @@
              ; test.
 
   db/DB
-  (setup! [_ test node]
+  (setup! [this test node]
     ; Init latches
     (when-not @latches
       (->> (:roles test)
@@ -107,11 +119,8 @@
       (db-helper*
         ; Wait for any dependencies
         (doseq [dep-role (:deps db-map)]
-          (when-let [^CountDownLatch latch (get latches dep-role)]
-            (info (pr-str role) "waiting for setup of" (pr-str dep-role))
-            ; TODO: add parameterizable timeouts; I'm sure we'll get stuck here
-            ; some time.
-            (.await latch)))
+          (info (pr-str role) "waiting for setup of" (pr-str dep-role))
+          (await-db-setup this dep-role))
         ; Set up DB
         (db/setup! db test node)
         ; And notify our latch
