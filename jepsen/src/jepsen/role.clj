@@ -8,13 +8,15 @@
 
      {:mongod [\"n1\" \"n2\"]
       :mongos [\"n3\"]}"
-  (:require [dom-top.core :refer [loopr]]
+  (:require [clojure.tools.logging :refer [info warn]]
+            [dom-top.core :refer [loopr]]
             [jepsen [client :as client]
                     [db :as db]
                     [nemesis :as n]]
             [jepsen.nemesis.combined :as nc]
             [clj-commons.slingshot :refer [try+ throw+]])
-  (:import (java.util.concurrent CyclicBarrier)))
+  (:import (java.util.concurrent CountDownLatch
+                                 CyclicBarrier)))
 
 (defn role
   "Takes a test and node. Returns the role for that particular node. Throws if
@@ -57,17 +59,44 @@
   below."
   [& body]
   `(let [~'role (role ~'test ~'node)
-         ~'db   (or (get ~'dbs ~'role)
-                    (throw+ {:type ::no-db-for-role
-                             :role ~'role
-                             :dbs  ~'dbs}))
+         ~'db-map (or (get ~'dbs ~'role)
+                      (throw+ {:type ::no-db-for-role
+                               :role ~'role
+                               :dbs  ~'dbs}))
+         ~'db (:db ~'db-map)
          ~'test (restrict-test ~'role ~'test)]
      ~@body))
 
 (defrecord DB
-  [dbs]
+  [dbs       ; A map of roles to {:db DB, :deps [...]} maps
+   latches]  ; An atom of roles to CountDownLatch for each role's setup
+             ; phase. This is lazily initialized the first time we see the
+             ; test.
+
   db/DB
-  (setup! [_ test node] (db-helper* (db/setup! db test node)))
+  (setup! [_ test node]
+    ; Init latches
+    (when-not @latches
+      (->> (:roles test)
+           (map (fn make-latch [[role nodes]]
+                  (assert (vector? nodes))
+                  [role (CountDownLatch. (count nodes))]))
+           (into {})
+           (compare-and-set! latches nil)))
+    (let [latches @latches]
+      (db-helper*
+        ; Wait for any dependencies
+        (doseq [dep-role (:deps db-map)]
+          (when-let [^CountDownLatch latch (get latches dep-role)]
+            (info (pr-str role) "waiting for setup of" (pr-str dep-role))
+            ; TODO: add parameterizable timeouts; I'm sure we'll get stuck here
+            ; some time.
+            (.await latch)))
+        ; Set up DB
+        (db/setup! db test node)
+        ; And notify our latch
+        (.countDown ^CountDownLatch (get latches role)))))
+
   (teardown! [_ test node] (db-helper* (db/teardown! db test node)))
 
   db/Kill
@@ -84,7 +113,7 @@
     (->> (:roles test)
          keys
          (mapcat (fn [role]
-                   (let [db   (get dbs role)
+                   (let [db   (:db (get dbs role))
                          test (restrict-test role test)]
                      (when (satisfies? db/Primary db)
                        (db/primaries db test)))))
@@ -96,7 +125,7 @@
     (->> (:roles test)
          keys
          (mapv (fn [role]
-                 (let [db   (get dbs role)
+                 (let [db   (:db (get dbs role))
                        test (restrict-test role test)]
                    (when (satisfies? db/Primary db)
                      (db/setup-primary! db test (first (:nodes test)))))))))
@@ -110,9 +139,29 @@
   "Takes a map of role -> DB and creates a composite DB which implements the
   full suite of DB protocols. Setup! on this DB calls the setup! for that
   particular role's DB for that node, with a restricted test, and so
-  on."
+  on.
+
+  DBs can also be maps of the following form:
+
+      {:db    A jepsen.db.DB
+       :deps  [:role1, ...], a collection of roles this DB depends on.}
+
+  `setup!` proceeds concurrently on as many nodes as possible, but only when
+  every dependency's setup! has completed on every node."
   [dbs]
-  (DB. dbs))
+  (DB. (->> dbs
+            (map (fn expand-dbs [[role db]]
+                   (cond (satisfies? db/DB db)
+                         [role {:db db}]
+
+                         (and (map? db) (satisfies? db/DB (:db db)))
+                         [role db]
+
+                         true
+                         (throw (IllegalArgumentException.
+                                  (str "Role " (pr-str role) " should have been a DB or a map like {:db (DB.), :deps [:role1 ...]}, but we received " (pr-str db)))))))
+            (into {}))
+       (atom nil))) ; Setup latches
 
 (defrecord RestrictedClient [role client]
   client/Client

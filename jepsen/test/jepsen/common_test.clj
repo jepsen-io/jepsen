@@ -26,6 +26,7 @@
                         "jepsen.lazyfs"       :error
                         "jepsen.os.debian"    :error
                         "jepsen.print"        :error
+                        "jepsen.role"         :error
                         "jepsen.store"        :error
                         "jepsen.tests.kafka"  :error
                         "jepsen.util"         :error

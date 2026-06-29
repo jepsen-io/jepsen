@@ -3,6 +3,7 @@
   (:require [clojure [pprint :refer [pprint]]
                      [test :refer :all]]
             [jepsen [client :as client]
+                    [common-test :refer [quiet-logging]]
                     [db :as db]
                     [db-test :refer [log-db]]
                     [generator :as gen]
@@ -12,6 +13,8 @@
             [jepsen.nemesis.combined :as nc]
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
+
+(use-fixtures :once quiet-logging)
 
 (def test
   "A basic test map."
@@ -61,7 +64,8 @@
   ; and check to see what it proxied to.
   (let [log (atom [])
         db  (r/db {:coord   (log-db log :coord)
-                   :txn     (log-db log :txn)
+                   :txn     {:db (log-db log :txn)
+                             :deps [:storage :coord]}
                    :storage (log-db log :storage)})
         coord-test   (r/restrict-test :coord test)
         txn-test     (r/restrict-test :txn test)
@@ -83,11 +87,43 @@
                   (every? true? (map ll= as bs))))]
 
     (testing "setup"
-      (db/setup! db test "a")
-      (db/setup! db test "b")
-      (is (l= [[:coord :setup! coord-test "a"]
-               [:txn   :setup! txn-test   "b"]]
-              (drain-log!))))
+      ; Get a fresh DB; setup is stateful
+      (let [db (r/db {:coord   (log-db log :coord)
+                      :txn     {:db (log-db log :txn)
+                                :deps [:storage :coord]}
+                      :storage (log-db log :storage)})]
+        ; Have to start coord and storage first
+        (db/setup! db test "a")
+        (db/setup! db test "d")
+        (db/setup! db test "e")
+        ; Then we can do txn
+        (db/setup! db test "b")
+        (is (l= [[:coord    :setup! coord-test    "a"]
+                 [:storage  :setup! storage-test  "d"]
+                 [:storage  :setup! storage-test  "e"]
+                 [:txn      :setup! txn-test      "b"]]
+                (drain-log!)))))
+
+    (testing "dependency order during setup"
+      (let [db (r/db {:coord   (log-db log :coord)
+                      :txn     {:db (log-db log :txn)
+                                :deps [:storage :coord]}
+                      :storage (log-db log :storage)})
+            txn     (future (db/setup! db test "b"))
+            coord   (future (Thread/sleep 50)
+                            (db/setup! db test "a"))
+            storage1 (future (Thread/sleep 50)
+                             (db/setup! db test "d"))
+            storage2 (future (Thread/sleep 50)
+                             (db/setup! db test "e"))]
+        @txn
+        @coord
+        @storage1
+        @storage2
+        (let [log (drain-log!)]
+          (is (= 4 (count log)))
+          ; The txn setup on b must have waited for its deps to complete.
+          (is (ll= [:txn :setup! txn-test "b"] (peek log))))))
 
     (testing "teardown"
       (db/teardown! db test "c")
