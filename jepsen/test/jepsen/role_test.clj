@@ -47,7 +47,7 @@
   (is (= nil (r/nodes test :cat))))
 
 (deftest restrict-test-test
-  (let [t (r/restrict-test :txn test)]
+  (let [t (r/restrict-test (atom {:txn (CyclicBarrier. 2)}) :txn test)]
     (testing "nodes"
       (is (= ["b" "c"] (:nodes t))))
     (testing "roles"
@@ -67,9 +67,12 @@
                    :txn     {:db (log-db log :txn)
                              :deps [:storage :coord]}
                    :storage (log-db log :storage)})
-        coord-test   (r/restrict-test :coord test)
-        txn-test     (r/restrict-test :txn test)
-        storage-test (r/restrict-test :storage test)
+        barriers     (atom {:coord   (CyclicBarrier. 1)
+                            :storage (CyclicBarrier. 2)
+                            :txn     (CyclicBarrier. 2)})
+        coord-test   (r/restrict-test barriers :coord test)
+        txn-test     (r/restrict-test barriers :txn test)
+        storage-test (r/restrict-test barriers :storage test)
         drain-log! (fn drain-log! []
                      (let [l @log]
                        (reset! log [])
@@ -188,7 +191,8 @@
 
 (deftest restrict-nemesis-test
   (let [n (r/restrict-nemesis :storage (Nemesis.))
-        rt (r/restrict-test :storage test)]
+        rt (r/restrict-test (atom {:storage (CyclicBarrier. 2)})
+                            :storage test)]
     (is (test= rt (:setup-test (:nemesis (n/setup! n test)))))
     (let [[test' op'] (n/invoke! n test :foo)]
       (is (test= rt test'))

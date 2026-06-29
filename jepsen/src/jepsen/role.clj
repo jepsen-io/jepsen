@@ -40,17 +40,33 @@
   (get (:roles test) role))
 
 (defn restrict-test
-  "Takes a test map and a role. Returns a version of the test map where the
-  :nodes are only those for this specific role, and the :barrier is replaced by
-  a fresh CyclicBarrier for the appropriate number of nodes."
-  [role test]
-  (let [nodes (nodes test role)
-        n     (count nodes)]
-    (assoc test
-           :nodes       nodes
-           :barrier     (if (pos? n)
-                          (CyclicBarrier. n)
-                          :jepsen.core/no-barrier))))
+  "Takes a barriers atom (a map of node to CyclicBarrier), a test map and a
+  role. Returns a version of the test map where the :nodes are only those for
+  this specific role, and the :barrier is replaced by a fresh CyclicBarrier for
+  the appropriate number of nodes."
+  ([barriers-atom role test]
+   (let [nodes (nodes test role)
+         barrier (get @barriers-atom role)]
+     (when-not (instance? CyclicBarrier barrier)
+       (throw (IllegalStateException.
+                (str "Missing a barrier for role " (pr-str role)
+                     " (barriers are " (pr-str @barriers-atom) ")"))))
+     (assoc test
+            :nodes       nodes
+            :barrier     barrier))))
+
+(defn init-barriers!
+  "Lazily initializes a barriers atom with a test. This atom is a map of roles
+  to CyclicBarriers for that role."
+  [test barriers]
+  (when-not @barriers
+    (->> (:roles test)
+         (map (fn make-barrier [[role nodes]]
+                (let [n (count nodes)]
+                  (assert (pos? n))
+                  [role (CyclicBarrier. n)])))
+         (into {})
+         (compare-and-set! barriers nil))))
 
 (defmacro db-helper*
   "We have to figure out the role, db, and restricted test for every single fn.
@@ -64,11 +80,13 @@
                                :role ~'role
                                :dbs  ~'dbs}))
          ~'db (:db ~'db-map)
-         ~'test (restrict-test ~'role ~'test)]
+         ~'test (restrict-test ~'barriers ~'role ~'test)]
      ~@body))
 
 (defrecord DB
   [dbs       ; A map of roles to {:db DB, :deps [...]} maps
+   barriers  ; An atom of roles to CyclicBarriers for each role. This is lazily
+             ; initialized the first time we see the test.
    latches]  ; An atom of roles to CountDownLatch for each role's setup
              ; phase. This is lazily initialized the first time we see the
              ; test.
@@ -79,10 +97,12 @@
     (when-not @latches
       (->> (:roles test)
            (map (fn make-latch [[role nodes]]
-                  (assert (vector? nodes))
-                  [role (CountDownLatch. (count nodes))]))
+                  (let [n (count nodes)]
+                    (assert (pos? n))
+                    [role (CountDownLatch. (count nodes))])))
            (into {})
            (compare-and-set! latches nil)))
+    (init-barriers! test barriers)
     (let [latches @latches]
       (db-helper*
         ; Wait for any dependencies
@@ -97,7 +117,9 @@
         ; And notify our latch
         (.countDown ^CountDownLatch (get latches role)))))
 
-  (teardown! [_ test node] (db-helper* (db/teardown! db test node)))
+  (teardown! [_ test node]
+    (init-barriers! test barriers)
+    (db-helper* (db/teardown! db test node)))
 
   db/Kill
   (kill! [_ test node] (db-helper* (db/kill! db test node)))
@@ -114,7 +136,7 @@
          keys
          (mapcat (fn [role]
                    (let [db   (:db (get dbs role))
-                         test (restrict-test role test)]
+                         test (restrict-test barriers role test)]
                      (when (satisfies? db/Primary db)
                        (db/primaries db test)))))
          (into [])))
@@ -126,7 +148,7 @@
          keys
          (mapv (fn [role]
                  (let [db   (:db (get dbs role))
-                       test (restrict-test role test)]
+                       test (restrict-test barriers role test)]
                    (when (satisfies? db/Primary db)
                      (db/setup-primary! db test (first (:nodes test)))))))))
 
@@ -161,6 +183,7 @@
                          (throw (IllegalArgumentException.
                                   (str "Role " (pr-str role) " should have been a DB or a map like {:db (DB.), :deps [:role1 ...]}, but we received " (pr-str db)))))))
             (into {}))
+       (atom nil)   ; Barriers
        (atom nil))) ; Setup latches
 
 (defrecord RestrictedClient [role client]
@@ -189,25 +212,30 @@
   [role client]
   (RestrictedClient. role client))
 
-(defrecord RestrictedNemesis [role nemesis]
+(defrecord RestrictedNemesis [role     ; e.g. :storage
+                              barriers ; Atom of role -> CyclicBarrier
+                              nemesis] ; Inner nemesis
   n/Reflection
   (fs [_] (n/fs nemesis))
 
   n/Nemesis
   (setup! [this test]
-    (RestrictedNemesis. role (n/setup! nemesis (restrict-test role test))))
+    (init-barriers! test barriers)
+    (RestrictedNemesis. role barriers
+                        (n/setup! nemesis (restrict-test barriers role test))))
 
   (invoke! [this test op]
-    (n/invoke! nemesis (restrict-test role test) op))
+    (n/invoke! nemesis (restrict-test barriers role test) op))
 
   (teardown! [this test]
-    (n/teardown! nemesis (restrict-test role test))))
+    (init-barriers! test barriers)
+    (n/teardown! nemesis (restrict-test barriers role test))))
 
 (defn restrict-nemesis
   "Wraps a Nemesis in a new one restricted to a specific role. Calls to the
   underlying nemesis receive a restricted test map."
   [role nemesis]
-  (RestrictedNemesis. role nemesis))
+  (RestrictedNemesis. role (atom nil) nemesis))
 
 (defn restrict-nemesis-package
   "Restricts a jepsen.nemesis.combined package to act purely on a single role.
