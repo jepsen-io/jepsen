@@ -744,8 +744,9 @@
   "Takes a history--a sequence of operations--and returns a new history where
   operations have two new keys:
 
-  :latency    the time in nanoseconds it took for the operation to complete.
-  :completion the next event for that process"
+      :latency    the time in nanoseconds it took for the operation to complete
+                  (if a completion exists)
+      :completion the next event for that process"
   [history]
   (h/ensure-pair-index history)
   (h/map (fn add-latency [^Op op]

@@ -151,10 +151,11 @@
 
 (defn latency-point
   "Given an operation, returns a [time, latency] pair: times in seconds,
-  latencies in ms."
+  latencies in ms. If no :latency is available, returns nil."
   [op]
-  (list (double (util/nanos->secs (:time op)))
-        (double (util/nanos->ms   (:latency op)))))
+  (when-let [latency (:latency op)]
+    [(double (util/nanos->secs (:time op)))
+     (double (util/nanos->ms   latency))]))
 
 (defn fs->points
   "Given a sequence of :f's, yields a map of f -> gnuplot-point-type, so we can
@@ -518,7 +519,7 @@
                               :with      'points
                               :linetype  (type->color t)
                               :pointtype (fs->points- f)
-                              :data      (map latency-point data)}))
+                              :data      (keep latency-point data)}))
                          (remove nil?))]
     (-> {:preamble           preamble
          :draw-fewer-on-top? true
@@ -542,7 +543,7 @@
                          (util/map-kv
                           (fn [[f ops]]
                             (->> ops
-                                 (map latency-point)
+                                 (keep latency-point)
                                  (latencies->quantiles dt qs)
                                  (vector f)))))
         fs          (util/polysort (keys datasets))
