@@ -21,7 +21,10 @@
             [potemkin :refer [definterface+ import-vars]]
             [clj-commons.slingshot :refer [try+ throw+]]
             [tesser.core :as t])
-  (:import (java.lang.reflect Method)
+  (:import (clojure.lang IDeref)
+           (java.lang Thread
+                      Thread$UncaughtExceptionHandler)
+           (java.lang.reflect Method)
            (java.util.concurrent.locks LockSupport)
            (java.util.concurrent ExecutionException)
            (java.io File
@@ -412,6 +415,50 @@
        (do (future-cancel worker#)
            ~timeout-val)
        retval#)))
+
+; A box for a computation that might return a result, or throw an error.
+(deftype Maybe [res, ^Throwable err]
+  IDeref
+  (deref [_]
+    (if res
+      res
+      (throw err))))
+
+(defn murder-thread!
+  "Interrupts a thread until it exits. We keep getting deadlocked despite
+  calling future-cancel, which *should* interrupt its threads."
+  [^Thread t]
+  (loop [next-log-time (+ (System/nanoTime) 1000000000)]
+    (if (not= Thread$State/TERMINATED (.getState t))
+      (if (< next-log-time (System/nanoTime))
+        (do (prn "Trying to murder thread" (.getName t) (.getState t))
+            (warn "Trying to murder thread" (.getName t))
+            (.interrupt t)
+            (Thread/sleep 10)
+            (recur (+ next-log-time 1000000000)))
+        (do (.interrupt t)
+            (Thread/sleep 10)
+            (recur next-log-time))))))
+
+(defmacro timeout-virt
+  "An alternative timeout implementation which uses a virtual thread. Hopefully
+  more robust?"
+  [millis timeout-val & body]
+  `(let [res#    (promise)
+         f#      (bound-fn ~'f [] (deliver res# (Maybe. (do ~@body) nil)))
+         thread# (.. (Thread/ofVirtual)
+                     (name (str (.getName (Thread/currentThread))
+                                " timeout"))
+                     (uncaughtExceptionHandler
+                       (reify Thread$UncaughtExceptionHandler
+                         (uncaughtException [~'_, ~'_, err#]
+                           (deliver res# (Maybe. nil err#)))))
+                   (start f#))
+        maybe# (deref res# ~millis ::timeout)]
+     (if (identical? maybe# ::timeout)
+       (do (murder-thread! thread#)
+           ~timeout-val)
+       @maybe#)))
 
 (defn await-fn
   "Invokes a function (f) repeatedly. Blocks until (f) returns, rather than

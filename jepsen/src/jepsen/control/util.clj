@@ -2,7 +2,7 @@
   "Utility functions for scripting installations."
   (:require [jepsen [control :refer :all]
                     [random :as rand]
-                    [util :as util :refer [meh name+ timeout]]]
+                    [util :as util :refer [meh name+ timeout timeout-virt]]]
             [jepsen.control.core :as core]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
@@ -374,8 +374,11 @@
    (kill-bin! signal true bin))
   ([signal wait? bin]
    (assert (re-find #"^/" bin) "bin should be an absolute path")
-   (try+ (exec :killall "-q" "-s" (name+ signal) (when wait? "-w") bin)
-         (catch [:exit 1] _ :no-process))))
+   (timeout-virt 30000 (throw+ {:type    ::kill-timed-out
+                                :bin     bin})
+                 (try+ (exec :killall "-q" "-s" (name+ signal)
+                             (when wait? "-w") bin)
+                       (catch [:exit 1] _ :no-process)))))
 
 (defn grepkill!
   "Kills processes by grepping for the given string. If a signal is given,
@@ -388,19 +391,23 @@
    ; bash wrapper (`bash -c "pkill ..."`), we'd end up matching the bash wrapper
    ; and killing that as WELL, so... grep and awk it is! The grep -v makes sure
    ; we don't kill the grep process OR the bash process executing it.
-   (try+ (exec ;:ps :aux
-               ;| :grep pattern
-               ;| :grep :-v "grep"
-               ;| :awk "{print $2}"
-               :pgrep :-f :--ignore-ancestors pattern
-               | :xargs :--no-run-if-empty :kill (str "-" (name+ signal)))
-         (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
-           nil)
-         (catch [:type :jepsen.control/nonzero-exit, :exit 123] e
-           (if (re-find #"No such process" (:err e))
-             ; Ah, process already exited
-             nil
-             (throw+ e))))))
+   (timeout-virt
+     30000 (throw+ {:type    ::kill-timed-out
+                    :signal signal
+                    :pattern pattern}
+     (try+ (exec ;:ps :aux
+                 ;| :grep pattern
+                 ;| :grep :-v "grep"
+                 ;| :awk "{print $2}"
+                 :pgrep :-f :--ignore-ancestors pattern
+                 | :xargs :--no-run-if-empty :kill (str "-" (name+ signal)))
+           (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
+             nil)
+           (catch [:type :jepsen.control/nonzero-exit, :exit 123] e
+             (if (re-find #"No such process" (:err e))
+               ; Ah, process already exited
+               nil
+               (throw+ e))))))))
 
 (defn start-daemon!
   "Starts a daemon process, logging stdout and stderr to the given file.
@@ -482,10 +489,10 @@
      (if cmd
        ; Kill by command
        (do (info "Stopping" cmd "with signal" signal)
-           (timeout 30000 (throw+ {:type    ::kill-timed-out
-                                   :cmd     cmd
-                                   :pidfile pidfile})
-                    (meh (exec :killall signal :-w cmd))))
+           (timeout-virt 30000 (throw+ {:type    ::kill-timed-out
+                                        :cmd     cmd
+                                        :pidfile pidfile})
+                         (meh (exec :killall signal :-w cmd))))
 
        ; No command; go by pidfile
        (when (exists? pidfile)

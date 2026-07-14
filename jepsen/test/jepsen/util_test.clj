@@ -146,6 +146,32 @@
     (is (= ::timed-out ret))
     (is (= ::exception (deref p 10 ::timed-out)))))
 
+(deftest timeout-virt-test
+  (testing "fast"
+    (is (= ::success (timeout-virt 1000 ::timed-out ::success)))
+    (is (thrown? ArithmeticException
+                 (timeout-virt 1000 ::timed-out (/ 1 0)))))
+
+  (testing "slow"
+    (is (= ::timed-out (timeout-virt 1 ::timed-out (Thread/sleep 10)))))
+
+  (testing "persistent"
+    (let [counter (atom 0)]
+      (is (= ::timed-out
+             (timeout-virt
+               1 ::timed-out
+               (loop [interrupt-budget 3]
+                 (when (pos? interrupt-budget)
+                   (recur (try (swap! counter inc)
+                               (Thread/sleep 1)
+                               interrupt-budget
+                               (catch InterruptedException e
+                                 (dec interrupt-budget)))))))))
+      (let [c1 @counter
+            _ (Thread/sleep 5)
+            c2 @counter]
+        (is (= c1 c2))))))
+
 (deftest lazy-atom-test
   (testing "reads"
     (let [calls (atom 0)
