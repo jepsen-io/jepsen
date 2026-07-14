@@ -420,7 +420,7 @@
 (deftype Maybe [res, ^Throwable err]
   IDeref
   (deref [_]
-    (if res
+    (if (nil? err)
       res
       (throw err))))
 
