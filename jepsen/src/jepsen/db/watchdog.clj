@@ -12,10 +12,10 @@
   (:refer-clojure :exclude [run! locking])
   (:require [clojure [core :as clj]]
             [clojure.tools.logging :refer [debug info warn]]
+            [dom-top.core :refer [with-retry timeout]]
             [jepsen [control :as c]
                     [db :as db]
-                    [util :as util :refer [timeout]]]
-            [dom-top.core :refer [with-retry]]
+                    [util :as util]]
             [potemkin :refer [definterface+]]))
 
 (definterface+ IWatchdog

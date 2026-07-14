@@ -2,6 +2,7 @@
   (:require [clojure.set :as set]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [info warn]]
+            [dom-top.core :as dt]
             [fipp.ednize :as fipp.ednize]
             [jepsen [client   :as client]
                     [control  :as c]
@@ -103,8 +104,8 @@
       (timeout timeout-ms (setup! nemesis test)))
 
     (invoke! [this test op]
-      (util/timeout timeout-ms (assoc op :value :timeout)
-                    (invoke! nemesis test op)))
+      (dt/timeout timeout-ms (assoc op :value :timeout)
+                  (invoke! nemesis test op)))
 
     (teardown! [this test]
       (teardown! nemesis test))))

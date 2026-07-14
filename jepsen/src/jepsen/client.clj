@@ -3,7 +3,7 @@
   (:require [clojure.tools.logging :refer :all]
             [clojure.reflect :refer [reflect]]
             [jepsen.util :as util]
-            [dom-top.core :refer [with-retry]]
+            [dom-top.core :as dt :refer [with-retry]]
             [clj-commons.slingshot :refer [try+ throw+]]))
 
 (defprotocol Client
@@ -127,8 +127,8 @@
 
   (invoke! [this test op]
     (let [ms (timeout-fn op)]
-      (util/timeout ms (assoc op :type :info, :error ::timeout)
-                    (invoke! client test op))))
+      (dt/timeout ms (assoc op :type :info, :error ::timeout)
+                  (invoke! client test op))))
 
   (teardown! [this test]
     (teardown! client test))

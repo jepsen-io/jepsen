@@ -1,8 +1,9 @@
 (ns jepsen.control.util
   "Utility functions for scripting installations."
-  (:require [jepsen [control :refer :all]
+  (:require [dom-top.core :as dt]
+            [jepsen [control :refer :all]
                     [random :as rand]
-                    [util :as util :refer [meh name+ timeout timeout-virt]]]
+                    [util :as util :refer [meh name+ timeout]]]
             [jepsen.control.core :as core]
             [clojure.data.codec.base64 :as b64]
             [clojure.java.io :refer [file]]
@@ -374,11 +375,11 @@
    (kill-bin! signal true bin))
   ([signal wait? bin]
    (assert (re-find #"^/" bin) "bin should be an absolute path")
-   (timeout-virt 30000 (throw+ {:type    ::kill-timed-out
-                                :bin     bin})
-                 (try+ (exec :killall "-q" "-s" (name+ signal)
-                             (when wait? "-w") bin)
-                       (catch [:exit 1] _ :no-process)))))
+   (dt/timeout 30000 (throw+ {:type    ::kill-timed-out
+                              :bin     bin})
+               (try+ (exec :killall "-q" "-s" (name+ signal)
+                           (when wait? "-w") bin)
+                     (catch [:exit 1] _ :no-process)))))
 
 (defn grepkill!
   "Kills processes by grepping for the given string. If a signal is given,
@@ -391,7 +392,7 @@
    ; bash wrapper (`bash -c "pkill ..."`), we'd end up matching the bash wrapper
    ; and killing that as WELL, so... grep and awk it is! The grep -v makes sure
    ; we don't kill the grep process OR the bash process executing it.
-   (timeout-virt
+   (dt/timeout
      30000 (throw+ {:type    ::kill-timed-out
                     :signal signal
                     :pattern pattern}
@@ -489,10 +490,10 @@
      (if cmd
        ; Kill by command
        (do (info "Stopping" cmd "with signal" signal)
-           (timeout-virt 30000 (throw+ {:type    ::kill-timed-out
-                                        :cmd     cmd
-                                        :pidfile pidfile})
-                         (meh (exec :killall signal :-w cmd))))
+           (dt/timeout 30000 (throw+ {:type    ::kill-timed-out
+                                      :cmd     cmd
+                                      :pidfile pidfile})
+                       (meh (exec :killall signal :-w cmd))))
 
        ; No command; go by pidfile
        (when (exists? pidfile)
