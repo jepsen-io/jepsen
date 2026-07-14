@@ -3,7 +3,7 @@
   (:require [clojure [datafy :refer [datafy]]
                      [pprint :refer [pprint]]
                      [test :refer :all]]
-            [jepsen [checker :refer :all]
+            [jepsen [checker :as c]
                     [history :as h]
                     [store :as store]
                     [tests :as tests]

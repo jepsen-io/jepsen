@@ -1,5 +1,5 @@
 (ns jepsen.checker-test
-  (:refer-clojure :exclude [set])
+  (:refer-clojure :exclude [set flatten])
   (:use clojure.test)
   (:require [clojure [datafy :refer [datafy]]
                      [pprint :refer [pprint]]]
