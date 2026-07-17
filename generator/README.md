@@ -1,10 +1,15 @@
 # jepsen.generator
 
 This library provides the compositional generator system at the heart of
-[Jepsen](https://jepsen.io). Generators produce a series of operations Jepsen
-would like to perform against a system, like "Set key `x` to 3". They also
-react to operations as they happen. For example, if the write fails, the
-generator could decide to retry it.
+[Jepsen](https://jepsen.io).
+
+[![clojars badge](https://img.shields.io/clojars/v/io.jepsen/generator.svg)](https://clojars.org/io.jepsen/generator)
+[![cljdoc badge](https://cljdoc.org/badge/io.jepsen/generator)](https://cljdoc.org/d/io.jepsen/generator)
+
+Generators produce a series of operations Jepsen would like to perform against
+a system, like "Set key `x` to 3". They also react to operations as they
+happen. For example, if the write fails, the generator could decide to retry
+it.
 
 In addition to the generators themselves, this library provides:
 
