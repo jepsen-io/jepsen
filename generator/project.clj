@@ -1,4 +1,4 @@
-(defproject io.jepsen/generator "0.1.2"
+(defproject io.jepsen/generator "0.1.3-SNAPSHOT"
   :description "Pure functional generators for Jepsen tests"
   :url "https://github.com/jepsen-io/jepsen"
   :scm {:dir ".."}
