@@ -17,15 +17,15 @@
                  [org.clojure/tools.cli "1.4.256"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
-                 [elle "0.2.7-SNAPSHOT"]
+                 [elle "0.2.7"]
                  [clj-time "0.15.2"]
-                 [io.jepsen/generator "0.1.2-SNAPSHOT"]
+                 [io.jepsen/generator "0.1.2"]
                  [jepsen.txn "0.1.3"]
-                 [knossos "0.3.15"]
+                 [knossos "0.3.16"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.1"]
-                 [ring "1.15.4"]
+                 [ring "1.15.5"]
                  [com.hierynomus/sshj "0.40.0"
                   :exclusions [org.slf4j/slf4j-api
                                org.bouncycastle/bcutil-jdk18on]]
@@ -34,7 +34,6 @@
                   :exclusions [net.schmizz/sshj]]
                  [org.bouncycastle/bcprov-jdk15on "1.70"]
                  [hiccup "2.0.0"]
-                 [org.clojars.achim/multiset "0.1.0"]
                  [org.clj-commons/slingshot "0.13.0"]
                  [org.clojure/data.codec "0.2.1"]]
   :java-source-paths ["src"]
