@@ -2,7 +2,8 @@
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :scm     {:name "git"
-            :url "https://github.com/jepsen-io/jepsen/"}
+            :url "https://github.com/jepsen-io/jepsen/"
+            :dir ".."}
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clj-commons/byte-streams "0.3.4"
