@@ -1,4 +1,4 @@
-(defproject jepsen "0.3.12"
+(defproject jepsen "0.3.13-SNAPSHOT"
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :scm     {:name "git"
