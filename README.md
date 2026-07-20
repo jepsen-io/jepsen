@@ -13,7 +13,7 @@ how a system responds to different faults. See
 you can carry out with Jepsen.
 
 [![Clojars Project](https://img.shields.io/clojars/v/jepsen.svg)](https://clojars.org/jepsen)
-[![Build Status](https://travis-ci.com/jepsen-io/jepsen.svg?branch=main)](https://travis-ci.com/jepsen-io/jepsen)
+[![cljdoc badge](https://cljdoc.org/badge/jepsen/jepsen)](https://cljdoc.org/d/jepsen/jepsen)
 
 ## Design Overview
 
