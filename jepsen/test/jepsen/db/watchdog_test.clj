@@ -72,6 +72,8 @@
 ; No way around this being slow, we actually have to run stuff on real nodes
 ; and wait for it to die.
 (deftest ^:slow ^:integration watchdog-test
+  ; TODO: this test is broken or fragile and I can't figure out why; under time
+  ; pressure, just gonna let it slide for now.
   (let [; We poll every second to see if things are running
         gen (->> (gen/repeat {:f :running})
                  (gen/delay 1)
