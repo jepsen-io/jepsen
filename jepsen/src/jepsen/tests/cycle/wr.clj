@@ -5,12 +5,8 @@
   (:require [elle [rw-register :as r]]
             [jepsen [checker :as checker]
                     [generator :as gen]
-                    [store :as store]]))
-
-(defn gen
-  "Wrapper around elle.rw-register/gen."
-  [opts]
-  (r/gen opts))
+                    [store :as store]]
+            [jepsen.tests.cycle.core :refer [final-gen max-key-tracker]]))
 
 (defn checker
   "Full checker for write-read registers. See elle.rw-register for options."
@@ -25,7 +21,9 @@
                 history)))))
 
 (defn test
-  "A partial test, including a generator and a checker. You'll need to provide a client which can understand operations of the form:
+  "A partial test, including a generator, final generator, a function to wrap
+  the composed generator, and a checker. You'll need to provide a client which
+  can understand operations of the form:
 
     {:type :invoke, :f :txn, :value [[:r 3 nil] [:w 3 6]}
 
@@ -39,5 +37,7 @@
   Options are passed directly to elle.rw-register/check and
   elle.rw-register/gen; see their docs for full options."
   [opts]
-  {:generator (gen opts)
-   :checker   (checker opts)})
+  {:generator       (r/gen opts)
+   :final-generator (final-gen)
+   :wrap-generator  max-key-tracker
+   :checker         (checker opts)})

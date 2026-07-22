@@ -6,7 +6,8 @@
   (:require [elle.list-append :as la]
             [jepsen [checker :as checker]
                     [generator :as gen]
-                    [store :as store]]))
+                    [store :as store]]
+            [jepsen.tests.cycle.core :refer [final-gen max-key-tracker]]))
 
 (defn checker
   "Full checker for append and read histories. See elle.list-append for
@@ -21,14 +22,10 @@
                           (store/path! test (:subdirectory checker-opts) "elle")))
                  history)))))
 
-(defn gen
-  "Wrapper for elle.list-append/gen; as a Jepsen generator."
-  [opts]
-  (la/gen opts))
-
 (defn test
-  "A partial test, including a generator and checker. You'll need to provide a
-  client which can understand operations of the form:
+  "A partial test, including a generator, final generator, a function to wrap
+  the composed generator, and a checker. You'll need to provide a client which
+  can understand operations of the form:
 
       {:type :invoke, :f :txn, :value [[:r 3 nil] [:append 3 2] [:r 3]]}
 
@@ -42,5 +39,7 @@
   Options are passed directly to elle.list-append/check and
   elle.list-append/gen; see their docs for full options."
   [opts]
-  {:generator (gen opts)
-   :checker   (checker opts)})
+  {:generator       (la/gen opts)
+   :final-generator (final-gen)
+   :wrap-generator  max-key-tracker
+   :checker         (checker opts)})

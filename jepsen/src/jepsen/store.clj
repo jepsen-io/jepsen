@@ -93,7 +93,7 @@
 (def default-nonserializable-keys
   "What keys in a test can't be serialized to disk, by default?"
   #{:barrier :db :os :net :client :checker :nemesis :generator :model :remote
-    :store})
+    :store :wrap-generator})
 
 (defn nonserializable-keys
   "What keys in a test can't be serialized to disk? The union of default
