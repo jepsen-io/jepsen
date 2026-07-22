@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/sendfile.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
@@ -294,6 +295,32 @@ int mkdir_p(const char *path) {
   return 0;
 }
 
+/* A wrapper for copy_file_range that works across filesystems. */
+ssize_t my_copy_file_range(int fd_in, off_t *off_in, int fd_out, off_t *off_out, size_t size) {
+  // Try copy_file_range
+  ssize_t copied = -1;
+  copied = copy_file_range(fd_in, off_in, fd_out, off_out, size, 0);
+  if (copied != -1) {
+    // TODO: should handle partial copies probably, but we ARE trying to
+    // corrupt files here
+    return copied;
+  }
+  errno = EXDEV;
+  if (errno != EXDEV) {
+    return -1;
+  }
+  // For EXDEV, we fall back to sendfile
+  if (off_out != NULL) {
+    if (lseek(fd_out, *off_out, SEEK_SET) == -1) {
+      // Some kind of seek error
+      return -1;
+    }
+  }
+  copied = sendfile(fd_out, fd_in, off_in, size);
+  return copied;
+}
+
+
 /* Working with chunks */
 
 /* Returns the offset of a given chunk. */
@@ -386,7 +413,7 @@ int corrupt_snapshot(opts_t opts, int fd, off_t file_size, off_t
     }
 
     // Snapshot region
-    copied = copy_file_range(fd, &start, dest_fd, NULL, end - start, 0);
+    copied = my_copy_file_range(fd, &start, dest_fd, NULL, end - start);
     if (copied == -1) {
       fprintf(stderr, "copy error: %s\n", strerror(errno));
       close(fd);
@@ -457,7 +484,7 @@ int corrupt_restore(opts_t opts, int fd, off_t file_size, off_t
     }
 
     // Restore chunk
-    copied = copy_file_range(source_fd, 0, fd, &start, end - start, 0);
+    copied = my_copy_file_range(source_fd, 0, fd, &start, end - start);
     if (copied == -1) {
       fprintf(stderr, "copy error: %s\n", strerror(errno));
       close(source_fd);
