@@ -1815,3 +1815,87 @@
           period          (reduce + intervals)
           cutoffs         (vec (reductions + intervals))]
       (CycleTimes. period nil intervals cutoffs gens))))
+
+(defrecord Cache [; The generator we wrap
+                  gen
+                  ; How long our cache is valid for, in nanos
+                  ^long period
+                  ; A number which changes every time we emit an op
+                  ^long serial
+                  ; An atom to our cached state, which is
+                  ; :serial   The serial number this cache is valid for
+                  ; :time     The time the cache is valid until
+                  ; :op       The cached op
+                  ; :gen'     The wrapped generator state resulting from this
+                  ; op.
+                  cache]
+  Generator
+  (op [this test ctx]
+    (let [cached @cache]
+      (if (and cached
+               (= serial (:serial cached))
+               (<= (:time ctx) (:time cached)))
+        ; We have a valid cached op. Replace its time and process, since both
+        ; time and free processes may likely changed.
+        (if (identical? (:op cached) :pending)
+          [:pending this]
+          [(-> (:op cached)
+               (dissoc :process)
+               (c/update :time max (:time ctx))
+               (fill-in-op ctx))
+           (assoc this
+                  :gen     (:gen' cached)
+                  :serial  (inc (:serial cached)))])
+        ; No cached op
+        (if-not (some-free-process ctx)
+          ; The validator is smart enough to know that it's Weird (TM) if
+          ; there are free processes and we emit :pending, so we specifically
+          ; return :pending *now*, rather than letting the inner generator do
+          ; it, caching their :pending, and then doing something weird when a
+          ; process frees up.
+          [:pending this]
+          ; Generate an operation
+          (let [[op gen'] (op gen test ctx)]
+            (when-not (nil? op)
+              ; Cache this op
+              (reset! cache {:serial  serial
+                             :time    (+ (:time ctx) period)
+                             :op      op
+                             :gen'    gen'})
+              ; If the interpreter consumes this operation, our serial will
+              ; advance, invalidating the cache. If it doesn't use our op, the
+              ; serial will match next time.
+              [op (assoc this
+                         :gen gen'
+                         :serial (inc serial))]))))))
+
+  ; Updates propagate to *both* our immutable wrapped generator and the cached
+  ; one, so that no matter which branch we pick, they both know what's
+  ; happened.
+  (update [this test ctx event]
+    (swap! cache (fn [cache]
+                   (when (and cache
+                              (= serial (:serial cache))
+                              (<= (:time ctx) (:time cache)))
+                     ; We have a valid cache. Update its generator.
+                     (assoc cache :gen'
+                            (update (:gen cache) test ctx event)))))
+    (assoc this :gen (update gen test ctx event))))
+
+(defn cache
+  "Sometimes generators do expensive computation or IO, only to have the
+  operation they offered be ignored because a surrounding generator picked a
+  different operation. `(cache 2 gen)` wraps `gen` with a cache that is valid
+  for two seconds, so that operations which are requested via `(op cached ...)`
+  and then discarded only result in a single call to `(op  gen ...)` every two
+  seconds.
+
+  The operations emitted by this generator have at *least* the current context
+  :time and a free :process, which may be different than the :time and :process
+  of the operation `gen` emitted.
+
+  When `gen` emits :pending, that pending state is also cached.
+
+  Updates are propagated to `gen`."
+  [period gen]
+  (Cache. gen (secs->nanos period) 0 (atom nil)))
