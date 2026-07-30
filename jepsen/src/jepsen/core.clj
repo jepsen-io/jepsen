@@ -39,7 +39,8 @@
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier
                                  CountDownLatch
-                                 TimeUnit)))
+                                 TimeUnit)
+           (jepsen.util IForgettable)))
 
 (defn synchronize
   "A synchronization primitive for tests. When invoked, blocks until all nodes
@@ -331,10 +332,10 @@
   :concurrency, and :barrier field. Wraps its generator in a forgettable
   reference, to prevent us from inadvertently retaining the head.
 
-  This operation always succeeds, and is necessary for accessing a test's store
-  directory, which depends on :start-time. You may call this yourself before
-  calling run!, if you need access to the store directory outside the run!
-  context."
+  This operation always succeeds, is idempotent, and is necessary for accessing
+  a test's store directory, which depends on :start-time. You may call this
+  yourself before calling run!, if you need access to the store directory
+  outside the run! context."
   [test]
   (cond-> test
     (not (:start-time test)) (assoc :start-time (util/local-time))
@@ -344,7 +345,8 @@
                                    (if (pos? c)
                                      (CyclicBarrier. (count (:nodes test)))
                                      ::no-barrier)))
-    true (update :generator util/forgettable)))
+    (not (instance? IForgettable (:generator test)))
+    (update :generator util/forgettable)))
 
 (defn run!
   "Runs a test. Tests are maps containing
