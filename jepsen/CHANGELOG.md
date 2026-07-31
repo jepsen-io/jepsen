@@ -2,7 +2,7 @@
 
 ## 0.3.13
 
-This is a small release. It makes expensive generators more efficent with a
+This is a small release. It makes expensive generators more efficient with a
 cache, allows rw and append tests a final chance to detect data loss at the end
 of tests, and lets file snapshot nemeses run when `/tmp` is on a different
 kind of filesystem.
@@ -18,7 +18,8 @@ kind of filesystem.
 
 ### Minor Changes
 
-`core/prepare-test`: Don't double-wrap generators in `Forgettable` when run as a part of `test-all`. This didn't break anything, but it was unnecesary.
+- `core/prepare-test`: Don't double-wrap generators in `Forgettable` when run as
+a part of `test-all`. This didn't break anything, but it was unnecesary.
 
 
 
