@@ -1,5 +1,27 @@
 # Change Log
 
+## 0.3.13
+
+This is a small release. It makes expensive generators more efficent with a
+cache, allows rw and append tests a final chance to detect data loss at the end
+of tests, and lets file snapshot nemeses run when `/tmp` is on a different
+kind of filesystem.
+
+### New Features
+
+- `generator/cache`: caches operations from an expensive generator to reduce
+  (e.g.) IO costs.
+- `tests.cycle.rw` and `append` now come with `:final-generator` and
+  `:wrap-generator` which, during the final phase of a test, can issue final
+   reads of all keys.
+- `snapshot-file-chunks` now works across filesystem types.
+
+### Minor Changes
+
+`core/prepare-test`: Don't double-wrap generators in `Forgettable` when run as a part of `test-all`. This didn't break anything, but it was unnecesary.
+
+
+
 ## 0.3.12
 
 A big release! This fixes several deadlocks and a safety error in Elle's inference of version orders for rw workloads which caused tests to incorrectly report that version orders were cyclic. It also adds new features: more sophisticated transaction generation and checking for Elle, more robust, useful client setup/teardown, and better support for multi-role tests with dependencies between components. There are a slew of quality-of-life improvements: compact printing of operations, automatically inferring network devices, the ability to serialize byte arrays, initialize Jepsen's random seeds, flattening deeply nested checkers, and so on.
