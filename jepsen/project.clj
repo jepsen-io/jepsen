@@ -19,7 +19,7 @@
                   :exclusions [org.slf4j/slf4j-api]]
                  [elle "0.2.7"]
                  [clj-time "0.15.2"]
-                 [io.jepsen/generator "0.1.3-SNAPSHOT"]
+                 [io.jepsen/generator "0.1.3"]
                  [jepsen.txn "0.1.3"]
                  [knossos "0.3.16"]
                  [clj-ssh "0.5.14"]
