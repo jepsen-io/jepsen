@@ -834,7 +834,8 @@
             pending-reads      {}  ; Process ID -> [lower read-val]
             reads              []] ; Completed [lower val upper]s
            ; If this is slow, maybe try :via :reduce?
-           [{:keys [process type f process value] :as op} history]
+           [{:keys [process type f process value] :as op}
+            (h/client-ops history)]
            (do ; Working with longs lets us do primitive recur here
                (assert (or (nil? value)
                            (instance? Long value)))
