@@ -183,14 +183,15 @@ Options:\n")
     (update parsed :errors conj "No tarball URL provided")))
 
 (defn parse-concurrency
-  "Takes a parsed map. Parses :concurrency; if it is a string ending with n,
-  e.g 3n, sets it to 3 * the number of :nodes. Otherwise, parses as a plain
-  integer. With an optional keyword k, parses that key in the parsed map--by
-  default, the key is :concurrency."
+  "Takes a parsed map. Parses :concurrency; if it is `nil`, leaves it
+  unchanged,  and if it is a string ending with n, e.g 3n, sets it to 3 * the
+  number of :nodes. Otherwise, parses as a plain integer. With an optional
+  keyword k, parses that key in the parsed map--by default, the key is
+  :concurrency."
   ([parsed]
    (parse-concurrency parsed :concurrency))
   ([parsed k]
-   (let [c (get (:options parsed) k)]
+   (if-let [c (get (:options parsed) k)]
      (let [[match integer unit] (re-find #"(\d+)(n?)" c)]
        (when-not match
          (throw (IllegalArgumentException.
@@ -200,7 +201,9 @@ Options:\n")
                     (count (:nodes (:options parsed)))
                     1)]
          (assoc-in parsed [:options k]
-                   (* unit (Long/parseLong integer))))))))
+                   (* unit (Long/parseLong integer)))))
+     ; No :concurrency
+     parsed)))
 
 (defn parse-nodes
   "Takes a parsed map and merges all the various node specifications together.
