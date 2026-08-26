@@ -24,8 +24,9 @@
                     [control :as control]
                     [db :as db]
                     [generator :as generator]
-                    [nemesis :as nemesis]
                     [print :refer [pprint]]
+                    [nemesis :as nemesis]
+                    [random :as rand]
                     [store :as store]
                     [os :as os]
                     [util :as util :refer [with-thread-name
@@ -372,6 +373,9 @@
     :checker    Verifies that the history is valid
     :log-files  A list of paths to logfiles/dirs which should be captured at
                 the end of the test.
+    :seed       A long random seed which is used to initialize jepsen.random.
+                This will not provide determinism if you call run! in more than
+                one thread at once.
     :nonserializable-keys   A collection of top-level keys in the test which
                             shouldn't be serialized to disk.
     :leave-db-running? Whether to leave the DB running at the end of the test.
@@ -417,26 +421,27 @@
     - This generates the final report"
   [test]
   (with-thread-name "jepsen test runner"
-    (let [test (prepare-test test)]
-      (with-logging test
-        (store/with-handle [test test]
-          (let [test (if (:name test)
-                       (store/save-0! test)
-                       test)
-                test (with-sessions [test test]
-                       ; Launch OS, DBs, evaluate test
-                       (let [test (with-os test
-                                    (with-db test
-                                      (util/with-relative-time
-                                        ; Run a single case
-                                        (let [test (-> (run-case! test)
-                                                       ; Remove state
-                                                       (dissoc :barrier
-                                                               :sessions))
-                                              _ (info "Run complete, writing")
-                                              test (if (:name test)
-                                                     (store/save-1! test)
-                                                     test)]
-                                          test))))]
-                         (analyze! test)))]
-            (log-results test)))))))
+    (rand/with-seed (:seed test (System/currentTimeMillis))
+      (let [test (prepare-test test)]
+        (with-logging test
+          (store/with-handle [test test]
+            (let [test (if (:name test)
+                         (store/save-0! test)
+                         test)
+                  test (with-sessions [test test]
+                         ; Launch OS, DBs, evaluate test
+                         (let [test (with-os test
+                                      (with-db test
+                                        (util/with-relative-time
+                                          ; Run a single case
+                                          (let [test (-> (run-case! test)
+                                                         ; Remove state
+                                                         (dissoc :barrier
+                                                                 :sessions))
+                                                _ (info "Run complete, writing")
+                                                test (if (:name test)
+                                                       (store/save-1! test)
+                                                       test)]
+                                            test))))]
+                           (analyze! test)))]
+              (log-results test))))))))

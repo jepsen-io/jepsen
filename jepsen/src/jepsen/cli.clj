@@ -11,6 +11,7 @@
             [clojure.java.io :as io]
             [dom-top.core :refer [assert+]]
             [jepsen [core :as jepsen]
+                    [random :as rand]
                     [store :as store]
                     [util :as util :refer [exception-message map-vals]]
                     [web :as web]]))
@@ -49,12 +50,22 @@
                     (assoc m k [v])
                     (update m k conj v))))]))
 
+(defn opt-spec-long-name
+  "Takes an option spec like [\"-r\" \"--rate HZ\" ...] and returns \"rate\"."
+  [[_ long-form :as opt-spec]]
+  (if-let [[m name] (re-find #"--([^\s]+)" long-form)]
+    name
+    (throw (IllegalArgumentException.
+             (str "Unexpected long name for option specification "
+                  (pr-str opt-spec))))))
+
+
 (defn merge-opt-specs
   "Takes two option specifications and merges them together. Where both offer
   the same option name, prefers the latter."
   [a b]
-  (->> (merge (group-by second a)
-              (group-by second b))
+  (->> (merge (group-by opt-spec-long-name a)
+              (group-by opt-spec-long-name b))
        vals
        (map first)))
 
@@ -114,6 +125,9 @@
    [nil "--password PASS" "Password for sudo access"
     :default "root"]
 
+   [nil "--seed LONG" "Seed to initialize Jepsen's PRNG. This does not guarantee determinism in general, since the test's behavior depends on the timing and responses to each request, but it may allow specific workloads to be more reproducible."
+    :parse-fn parse-long]
+
    [nil "--strict-host-key-checking" "Whether to check host keys"
     :default false]
 
@@ -136,13 +150,13 @@
    [nil "--test-count NUMBER"
     "How many times should we repeat a test?"
     :default  1
-    :parse-fn #(Long/parseLong %)
+    :parse-fn parse-long
     :validate [pos? "Must be positive"]]
 
    [nil "--time-limit SECONDS"
     "Excluding setup and teardown, how long should a test run for, in seconds?"
     :default  60
-    :parse-fn #(Long/parseLong %)
+    :parse-fn parse-long
     :validate [pos? "Must be positive"]]])
 
 (defn package-opt
@@ -201,7 +215,7 @@ Options:\n")
                     (count (:nodes (:options parsed)))
                     1)]
          (assoc-in parsed [:options k]
-                   (* unit (Long/parseLong integer)))))
+                   (* unit (parse-long integer)))))
      ; No :concurrency
      parsed)))
 
@@ -380,7 +394,7 @@ Options:\n")
                         :default "0.0.0.0"]
                        ["-p" "--port NUMBER" "Port number to bind to"
                         :default 8080
-                        :parse-fn #(Long/parseLong %)
+                        :parse-fn parse-long
                         :validate [pos? "Must be positive"]]]
             :opt-fn #(update % :options rename-keys {:host :ip})
             :run (fn [{:keys [options]}]
@@ -443,7 +457,7 @@ Options:\n")
                 :default  -1
                 :parse-fn (fn [s]
                             (if (re-find #"^-?\d+$" s)
-                              (Long/parseLong s)
+                              (parse-long s)
                               s))]]
     :opt-fn   identity
     :usage    (:usage opts test-usage)
@@ -481,12 +495,15 @@ Options:\n")
 
 (defn test-all-run-tests!
   "Runs a sequence of tests and returns a map of outcomes (e.g. true, :unknown,
-  :crashed, false) to collections of test folders with that outcome."
+  :crashed, false) to collections of test folders with that outcome. Each test
+  is assigned a new random :seed."
   [tests]
   (->> tests
        (map-indexed
          (fn [i test]
-           (let [test' (jepsen/prepare-test test)]
+           (let [test' (-> test
+                           (assoc :seed (rand/long))
+                           jepsen/prepare-test)]
              (try
                (let [test' (jepsen/run! test')]
                  [(:valid? (:results test'))
@@ -561,11 +578,13 @@ Options:\n")
       :usage    "Runs all tests"
       :run      (fn run [{:keys [options]}]
                   (info "CLI options:\n" (with-out-str (pprint options)))
-                  (->> options
-                       ((:tests-fn opts))
-                       test-all-run-tests!
-                       test-all-print-summary!
-                       test-all-exit!))}}))
+                  (rand/with-seed (or (:seed options)
+                                      (System/currentTimeMillis))
+                    (->> options
+                         ((:tests-fn opts))
+                         test-all-run-tests!
+                         test-all-print-summary!
+                         test-all-exit!)))}}))
 
 (defn -main
   [& args]
