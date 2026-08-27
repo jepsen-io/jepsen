@@ -63,6 +63,10 @@
   "How many test rows per page?"
   128)
 
+(def local-offset
+  "The local offset we use for presenting times"
+  (memoize (fn [] (.getOffset ^java.time.OffsetTime (time/offset-time)))))
+
 (defn parse-time
   "Parses a time from a string"
   [t]
@@ -138,14 +142,13 @@
   (url-encode-path-components
     (str "/files/" (->> f io/file .toPath (relative-path store/base-dir)))))
 
-
 (defn test-row
   "Turns a test map into a table row."
   [t]
   (let [r    (:results t)
-        time (->> t
-                  :start-time
-                  (time/format "YYYY-MM-dd HH:mm:ss"))]
+        time (as-> (:start-time t) t
+               (time/with-offset-same-instant t (local-offset))
+               (time/format "YYYY-MM-dd HH:mm:ss" t))]
     [:tr
      [:td [:a {:href (url t "")} (:name t)]]
      [:td [:a {:href (url t "")} time]]
