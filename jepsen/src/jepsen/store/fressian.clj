@@ -5,12 +5,11 @@
             [clojure [datafy :refer [datafy]]
                      [walk :as walk]]
             [clojure.tools.logging :refer [info warn]]
-            [clj-time.local :as time.local]
-            [clj-time.format :as time.format]
-            [multiset.core :as multiset]
+            [java-time.api :as time]
             [jepsen [history]
                     [print :refer [pprint]]
                     [util :as util]]
+            [multiset.core :as multiset]
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.io ByteArrayOutputStream
                     Closeable)
@@ -31,13 +30,6 @@
                  (write [_ w a]
                    (.writeTag    w "atom" 1)
                    (.writeObject w @a)))}
-
-       org.joda.time.DateTime
-       {"date-time" (reify WriteHandler
-                      (write [_ w t]
-                        (.writeTag    w "date-time" 1)
-                        (.writeObject w (time.local/format-local-time
-                                          t :basic-date-time))))}
 
        clojure.lang.PersistentHashSet
        {"persistent-hash-set" (reify WriteHandler
@@ -78,6 +70,13 @@
                      (.writeTag w "instant" 1)
                      (.writeObject w (.toString instant))))}
 
+      java.time.OffsetDateTime
+      {"offset-date-time" (reify WriteHandler
+                            (write [_ w t]
+                              (.writeTag    w "offset-date-time" 1)
+                              (.writeObject w (time/format
+                                                :iso-offset-date-time t))))}
+
        jepsen.history.Op
        {"jepsen.history.Op" (reify WriteHandler
                               (write [_ w op]
@@ -106,9 +105,7 @@
 
        "date-time" (reify ReadHandler
                      (read [_ rdr tag component-count]
-                       (time.format/parse
-                         (:basic-date-time time.local/*local-formatters*)
-                         (.readObject rdr))))
+                       (time/offset-date-time (.readObject rdr))))
 
        "persistent-hash-set" (reify ReadHandler
                                (read [_ rdr tag component-count]
@@ -149,7 +146,12 @@
 
        "vec" (reify ReadHandler
                (read [_ rdr tag component-count]
-                 (vec (.readObject rdr))))}
+                 (vec (.readObject rdr))))
+
+       "offset-date-time" (reify ReadHandler
+                           (read [_ rdr tag component-count]
+                             (time/offset-date-time (.readObject rdr))))
+       }
 
       (merge fress/clojure-read-handlers)))
 

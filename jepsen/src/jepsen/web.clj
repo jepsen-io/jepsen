@@ -7,10 +7,7 @@
             [clojure.tools.logging :refer :all]
             [clojure.pprint :refer [pprint]]
             [clj-commons.byte-streams :as bs]
-            [clj-time [coerce :as time.coerce]
-                      [core :as time]
-                      [local :as time.local]
-                      [format :as timef]]
+            [java-time.api :as time]
             [hiccup.core :as h]
             [ring.util.response :as response]
             [org.httpkit.server :as server])
@@ -66,13 +63,10 @@
   "How many test rows per page?"
   128)
 
-(def basic-date-time (timef/formatters :basic-date-time))
-
 (defn parse-time
   "Parses a time from a string"
   [t]
-  (-> (timef/parse-local basic-date-time t)
-      time.coerce/to-date-time))
+  (time/offset-date-time t))
 
 (defn fast-tests
   "Abbreviated set of tests: just name, start-time, results. Memoizes
@@ -151,7 +145,7 @@
   (let [r    (:results t)
         time (->> t
                   :start-time
-                  (timef/unparse (timef/formatters :date-hour-minute-second)))]
+                  (time/format "YYYY-MM-dd HH:mm:ss"))]
     [:tr
      [:td [:a {:href (url t "")} (:name t)]]
      [:td [:a {:href (url t "")} time]]
@@ -180,7 +174,7 @@
         after (if-let [a (:after params)]
                 (parse-time a)
                 ; In the year three thousaaaaaand
-                (parse-time "30000101T000000.000Z"))
+                (parse-time "3000-01-01T00:00:00Z"))
         tests (->> (fast-tests)
                    (drop-while (fn [t]
                                  (->> (:start-time t)
@@ -200,8 +194,7 @@
                [:p [:a {:href (str "/?after="
                                    (->> (last tests)
                                         :start-time
-                                        time.coerce/to-date-time
-                                        (timef/unparse basic-date-time)))}
+                                        (time/format :iso-offset-date-time)))}
                     "Older tests..."]]))}))
 
 (defn dir-cell

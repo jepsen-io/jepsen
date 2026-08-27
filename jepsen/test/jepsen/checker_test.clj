@@ -3,6 +3,7 @@
   (:use clojure.test)
   (:require [clojure [datafy :refer [datafy]]
                      [pprint :refer [pprint]]]
+            [java-time.api :as time]
             [jepsen [checker :refer :all]
                     [db :as db]
                     [history :as h]
@@ -12,6 +13,10 @@
             [jepsen.checker.perf :as cp]
             [knossos [model :as model]]
             [multiset.core :as multiset]))
+
+(def t0
+  "A single time so we get a consistent output directory."
+  (time/offset-date-time "2000-01-01T00:00:00+00"))
 
 ; Helpers for making ops
 (defn invoke-op
@@ -438,7 +443,7 @@
     (testing "can render latency-graph"
       (is (= (check (latency-graph)
                     {:name "latency graph"
-                     :start-time 0}
+                     :start-time t0}
                     history
                     {})
              {:valid? true})))
@@ -446,7 +451,7 @@
     (testing "can render rate-graph"
       (is (= (check (rate-graph)
                     {:name "rate graph"
-                     :start-time 0}
+                     :start-time t0}
                     history
                     {})
              {:valid? true})))
@@ -454,7 +459,7 @@
     (testing "can render combined perf graph"
       (is (= (check (perf)
                     {:name "perf graph"
-                     :start-time 0}
+                     :start-time t0}
                     history
                     {})
              {:latency-graph {:valid? true},
@@ -464,7 +469,7 @@
     (testing "can render a :start :stop nemesis region without opts"
       (let [checker (perf)
             test    {:name "nemesis compatibility perf test"
-                     :start-time 0}
+                     :start-time t0}
             nemesis-ops [{:type :info
                           :process :nemesis
                           :f :start
@@ -496,7 +501,7 @@
     (testing "can render single nemesis events as bars"
       (let [checker (perf {:nemeses #{{:name "solo nemeses"}}})
             test    {:name "nemeses solo event"
-                     :start-time 0}
+                     :start-time t0}
             nemesis-ops [{:type :info
                           :process :nemesis
                           :f :nemesize
@@ -518,7 +523,7 @@
     (testing "unfinished starts"
       (let [checker (perf)
             test    {:name "nemeses unfinished start"
-                     :start-time 0}
+                     :start-time t0}
             nemesis-ops [{:type     :info,
                           :process  :nemesis
                           :f        :start
@@ -542,7 +547,7 @@
                                        :line-color "#6DB6FE"
                                        :line-width 2}}})
             test    {:name "nemeses styling perf test"
-                     :start-time 0}
+                     :start-time t0}
             nemesis-ops [{:type :info
                           :process :nemesis
                           :f :start
@@ -583,7 +588,7 @@
                                        :fill-color "#87A96B"
                                        :transparency 0.2}}})
             test    {:name "nemeses multiregions perf test"
-                     :start-time 0}
+                     :start-time t0}
 
             ;; Hnnnnnnnnnng we should simplify this... ugly brute force
             nemesis-ops [{:type :info
@@ -638,7 +643,7 @@
 (deftest clock-plot-test
   (check (clock-plot)
          {:name       "clock plot test"
-          :start-time 0}
+          :start-time t0}
          (history
            [{:process :nemesis, :time 500000000,  :clock-offsets {"n1" 2.1}}
             {:process :nemesis, :time 1000000000, :clock-offsets {"n1" 0
@@ -652,7 +657,7 @@
 (deftest op-color-plot-test
   (check (op-color-plot {})
          {:name "op color plot test"
-          :start-time 0}
+          :start-time t0}
          (history
            [{:process 0, :type :invoke}
             {:process 0, :type :ok}
@@ -835,7 +840,7 @@
 (deftest log-file-pattern-test
   (let [test (assoc tests/noop-test
                     :name       "checker-log-file-pattern"
-                    :start-time 0
+                    :start-time t0
                     :nodes      ["n1" "n2" "n3"])]
     ; Create fake logfiles
     (spit (store/path! test "n1" "db.log") "foo\nevil1\nevil2 more text\nbar")

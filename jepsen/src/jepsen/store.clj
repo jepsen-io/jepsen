@@ -7,10 +7,6 @@
             [clojure [string :as str]
                      [walk :as walk]]
             [clojure.tools.logging :refer :all]
-            [clj-time.core :as time]
-            [clj-time.local :as time.local]
-            [clj-time.coerce :as time.coerce]
-            [clj-time.format :as time.format]
             [unilog.config :as unilog]
             [multiset.core :as multiset]
             [jepsen [fs-cache :refer [write-atomic!]]
@@ -18,7 +14,8 @@
                     [print :refer [pprint]]
                     [util :as util]]
             [jepsen.store [fressian :as jsf]
-                          [format :as store.format]])
+                          [format :as store.format]]
+            [java-time.api :as time])
   (:import (java.util AbstractList)
            (java.io Closeable
                     File)
@@ -54,7 +51,7 @@
             (let [t (:start-time test)]
               (if (string? t)
                 t
-                (time.local/format-local-time t :basic-date-time)))))
+                (time/format :iso-offset-date-time t)))))
   ([test & args]
    (->> args
         flatten

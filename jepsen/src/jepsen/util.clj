@@ -1,9 +1,7 @@
 (ns jepsen.util
   "Kitchen sink"
   (:refer-clojure :exclude [parse-long]) ; Clojure added this in 1.11.1
-  (:require [clj-time.core :as time]
-            [clj-time.local :as time.local]
-            [clojure [string :as str]
+  (:require [clojure [string :as str]
                      [pprint :as pprint]
                      [walk :as walk]]
             [clojure.core.reducers :as r]
@@ -13,6 +11,7 @@
             [clojure.tools.logging :refer [debug info warn]]
             [dom-top.core :as dt :refer [loopr bounded-future]]
             [fipp.ednize]
+            [java-time.api :as time]
             [jepsen [generator :as gen]
                     [history :as h]
                     [print :as print :refer [pprint]]
@@ -268,7 +267,7 @@
 (defn local-time
   "Local time."
   []
-  (time.local/local-now))
+  (time/offset-date-time))
 
 (defn chunk-vec
   "Partitions a vector into reducibles of size n (somewhat like partition-all)
