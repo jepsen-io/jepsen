@@ -2,8 +2,8 @@
   "Renders an HTML timeline of a history."
   (:require [clojure.core.reducers :as r]
             [clojure.string :as str]
-            [clj-time.coerce :as t-coerce]
             [hiccup.core :as hiccup]
+            [java-time.api :as time]
             [jepsen [checker :as checker]
                     [history :as h]
                     [store :as store]
@@ -90,10 +90,9 @@
     (str "Dur: " dur " ms")))
 
 (defn render-wall-time [test op]
-  (let [start (-> test :start-time t-coerce/to-long)
-        op    (-> op :time util/nanos->ms long)
-        w     (t-coerce/from-long (+ start op))]
-    (str "Wall-clock Time: " w)))
+  (let [w (time/+ (:start-time test)
+                  (time/nanos (:time op)))]
+    (str "Wall-clock Time: " (time/format :iso-offset-time w))))
 
 (defn title [test op start stop]
   (str (when (nemesis? op) (render-msg start))
