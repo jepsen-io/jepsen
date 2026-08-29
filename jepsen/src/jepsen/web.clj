@@ -315,30 +315,35 @@
   (-> (str/escape s {\" "\\\""
                      \\ "\\\\"})))
 
+(defn file-breadcrumbs
+  "A hiccup structure for the breadcrumbs to a File."
+  [^File file]
+  (->> file
+       (.toPath)
+       (iterate #(.getParent ^Path %))
+       (take-while #(-> store/base-dir
+                        io/file
+                        .getCanonicalFile
+                        .toPath
+                        (not= (.toAbsolutePath ^Path %))))
+       (drop 1)
+       reverse
+       (map (fn [^Path component]
+              [:a {:style "margin: 0 0.3em"
+                   :href (file-url component)}
+               (.getFileName component)]))
+       (cons [:a {:style "margin-right: 0.3em"
+                  :href  "/"}
+              "jepsen"])
+       (interpose "/")))
+
 (defn dir
   "Serves a directory."
   [^File dir]
   {:status 200
    :headers {"Content-Type" "text/html"}
    ; Breadcrumbs
-   :body (h/html (->> dir
-                      (.toPath)
-                      (iterate #(.getParent ^Path %))
-                      (take-while #(-> store/base-dir
-                                       io/file
-                                       .getCanonicalFile
-                                       .toPath
-                                       (not= (.toAbsolutePath ^Path %))))
-                      (drop 1)
-                      reverse
-                      (map (fn [^Path component]
-                             [:a {:style "margin: 0 0.3em"
-                                  :href (file-url component)}
-                              (.getFileName component)]))
-                      (cons [:a {:style "margin-right: 0.3em"
-                                 :href  "/"}
-                             "jepsen"])
-                      (interpose "/"))
+   :body (h/html (file-breadcrumbs dir)
                  ; Title
                  (let [path (js-escape
                               (str \" (clj-escape (.getCanonicalPath dir)) \"))]
@@ -465,28 +470,6 @@
    "json" "text/plain" ; Ditto
    "html" "text/html"
    "svg"  "image/svg+xml"})
-
-(defn file-breadcrumbs
-  "A hiccup structure for the breadcrumbs to a File."
-  [^File file]
-  (->> file
-       (.toPath)
-       (iterate #(.getParent ^Path %))
-       (take-while #(-> store/base-dir
-                        io/file
-                        .getCanonicalFile
-                        .toPath
-                        (not= (.toAbsolutePath ^Path %))))
-       (drop 1)
-       reverse
-       (map (fn [^Path component]
-              [:a {:style "margin: 0 0.3em"
-                   :href (file-url component)}
-               (.getFileName component)]))
-       (cons [:a {:style "margin-right: 0.3em"
-                  :href  "/"}
-              "jepsen"])
-       (interpose "/")))
 
 (defn jepsen-file
   "Serves a request for a /test.jepsen file. We render a nice page for these."
