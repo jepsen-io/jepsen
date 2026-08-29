@@ -5,8 +5,8 @@
             [clojure.edn :as edn]
             [clojure.java [io :as io]]
             [clojure.tools.logging :refer :all]
-            [clojure.pprint :refer [pprint]]
             [clj-commons.byte-streams :as bs]
+            [fipp.edn :refer [pprint]]
             [java-time.api :as time]
             [hiccup.core :as h]
             [ring.util.response :as response]
@@ -71,6 +71,31 @@
   "Parses a time from a string"
   [t]
   (time/offset-date-time t))
+
+(defn cap-str
+  "Caps a string to length n."
+  [n ^String s]
+  (let [l (.length s)]
+    (if (< n l)
+      (subs s 0 n)
+      s)))
+
+(defn cache-test!
+  "Updates the test cache with a partial map. Returns test."
+  [test]
+  (swap! test-cache assoc (test-cache-key test)
+         {:name       (:name test)
+          :start-time (:start-time test)
+          :results    {:valid? (:valid? (:results test))}})
+  test)
+
+(defn load-jepsen-file!
+  "Loads a test file into memory, returning the test map. As a side effect,
+  also updates the test cache."
+  [file]
+  (-> file
+      store/load-jepsen-file
+      cache-test!))
 
 (defn fast-tests
   "Abbreviated set of tests: just name, start-time, results. Memoizes
@@ -239,6 +264,14 @@
          :style "text-decoration: none;
                  color: #555;"}
      (cond
+       (re-find #"\.jepsen$" (.getName f))
+       [:pre
+        (->> (dissoc (load-jepsen-file! f) :results :history)
+          (into (sorted-map))
+          pprint
+          with-out-str
+          (cap-str 4096))]
+
        (re-find #"\.(png|jpg|jpeg|gif)$" (.getName f))
        [:img {:src (file-url f)
               :title (.getName f)
@@ -433,6 +466,60 @@
    "html" "text/html"
    "svg"  "image/svg+xml"})
 
+(defn file-breadcrumbs
+  "A hiccup structure for the breadcrumbs to a File."
+  [^File file]
+  (->> file
+       (.toPath)
+       (iterate #(.getParent ^Path %))
+       (take-while #(-> store/base-dir
+                        io/file
+                        .getCanonicalFile
+                        .toPath
+                        (not= (.toAbsolutePath ^Path %))))
+       (drop 1)
+       reverse
+       (map (fn [^Path component]
+              [:a {:style "margin: 0 0.3em"
+                   :href (file-url component)}
+               (.getFileName component)]))
+       (cons [:a {:style "margin-right: 0.3em"
+                  :href  "/"}
+              "jepsen"])
+       (interpose "/")))
+
+(defn jepsen-file
+  "Serves a request for a /test.jepsen file. We render a nice page for these."
+  [^File file]
+  (let [test (load-jepsen-file! file)
+        res {:status 200
+             :headers {"Content-Type" "text/html"}
+             ; Breadcrumbs
+             :body
+             (h/html
+               (file-breadcrumbs file)
+               ; Title
+               (let [path (js-escape
+                            (str \" (clj-escape (.getCanonicalPath file)) \"))]
+                 ; You can click to copy the full local path
+                 [:h1 {:onclick (str "navigator.clipboard.writeText('"
+                                     path "')")}
+                  (.getName file)
+                  ; Or download the Jepsen file
+                  [:a {:style "font-size: 60%;
+                              margin-left: 0.3em;"
+                       :href (str (file-url file) "?download=true")}
+                   "download"]])
+               [:div
+                [:pre
+                 (->> ; These are likely to be enormous, and we have them as
+                      ; separate files
+                      (assoc test :results '..., :history '...)
+                      (into (sorted-map))
+                      pprint
+                      with-out-str)]])}]
+    res))
+
 (defn files
   "Serve requests for /files/ urls"
   [req]
@@ -441,6 +528,16 @@
         f        (File. store/base-dir ^String pathname)]
     (assert-file-in-scope! f)
     (cond
+      ; Test.jepsen is special
+      (= "test.jepsen" (.getName f))
+      (if (= "download=true" (:query-string req))
+        (response/file-response pathname
+                                {:root store/base-dir
+                                 :index-files? false
+                                 :allow-symlinks? false})
+        (jepsen-file f))
+
+      ; Regular files
       (.isFile f)
       (let [res (response/file-response pathname
                                         {:root             store/base-dir
@@ -452,12 +549,15 @@
                 (response/charset "utf-8"))
             res))
 
+      ; Anything can be a .zip if you believe in yourself
       (= ext "zip")
       (zip req f)
 
+      ; Directory handler
       (.isDirectory f)
       (dir f)
 
+      ; Nope!
       true
       e404)))
 
