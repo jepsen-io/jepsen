@@ -284,7 +284,7 @@
                         test))
 
               ; Nothing we can do right now. Let's try to complete something.
-              :pending (recur ctx gen op-index
+              :pending (recur ctx gen' op-index
                               outstanding (long max-pending-interval))
 
               ; Good, we've got an invocation.
