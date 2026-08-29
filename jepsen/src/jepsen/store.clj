@@ -182,7 +182,7 @@
 
 (defn load-results
   "Loads the results map for a test by name and time. Prefers a lazy map from
-  test.fressian; falls back to parsing results.edn."
+  test.jepsen; falls back to parsing results.edn."
   [test-name test-time]
   (let [test   {:name test-name, :start-time test-time}
         jepsen (jepsen-file test)]
