@@ -528,8 +528,16 @@
                                (take 8))
         stable-latencies  (keep :stable-latency rs)
         lost-latencies    (keep :lost-latency rs)
-        m {:valid?             (cond (< 0 (count (:lost outcomes)))   false
+        m {:valid?             (cond ; Trivially: no attempts means validity
+                                     (= 0 (count rs))                 true
+
+                                     ; Something lost
+                                     (< 0 (count (:lost outcomes)))   false
+
+                                     ; Nothing ever stable; that's probably a
+                                     ; sign of a problem in the test
                                      (= 0 (count (:stable outcomes))) :unknown
+
                                      (and (:linearizable? opts)
                                           (< 0 (count stale)))        false
                                      true                             true)
