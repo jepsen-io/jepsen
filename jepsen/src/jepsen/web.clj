@@ -83,10 +83,13 @@
 (defn cache-test!
   "Updates the test cache with a partial map. Returns test."
   [test]
-  (swap! test-cache assoc (test-cache-key test)
-         {:name       (:name test)
-          :start-time (:start-time test)
-          :results    {:valid? (:valid? (:results test))}})
+  ; We don't want to cache incomplete tests; they could still be being
+  ; written.
+  (when (#{true false :unknown} (:valid? (:results test)))
+    (swap! test-cache assoc (test-cache-key test)
+           {:name       (:name test)
+            :start-time (:start-time test)
+            :results    {:valid? (:valid? (:results test))}}))
   test)
 
 (defn load-jepsen-file!
@@ -120,7 +123,7 @@
                                                      name time)
                                                    :incomplete)}
                          t (-> t (assoc :results results))]
-                     (swap! test-cache assoc (test-cache-key t) t)
+                     (cache-test! t)
                      t)
                    (catch java.io.EOFException e
                      (assoc t :results {:valid? :incomplete}))
