@@ -2,29 +2,18 @@
   "Common functions for tests that do cycle detection using Elle."
   (:require [jepsen.generator :as gen]))
 
-
-(defrecord MaxKeyTracker [gen max-key]
-  gen/Generator
-  (op [this test ctx]
-    (when-let [[op gen'] (gen/op gen test (assoc ctx :max-key max-key))]
-      [op (MaxKeyTracker. gen' max-key)]))
-
-  (update [this test ctx op]
-    (if (= :txn (:f op))
-      (let [max-key' (->> (:value op)
-                          (map second)
-                          (reduce max max-key))]
-        (MaxKeyTracker. (gen/update gen test (assoc ctx :max-key max-key') op)
-                        max-key'))
-      ; Not a txn
-      (MaxKeyTracker. (gen/update gen test (assoc ctx :max-key max-key) op)
-                      max-key))))
-
 (defn max-key-tracker
   "A generator which tracks the maximum key observed in a :txn. Makes this
   integer key available in (:max-key ctx) to inner generators."
   [gen]
-  (MaxKeyTracker. gen 0))
+  (gen/track :max-key 0
+             (fn [mk {:keys [f value]}]
+               (if (= :txn f)
+                 (->> value
+                      (map second)
+                      (reduce max mk))
+                 mk))
+             gen))
 
 (defrecord FinalGen []
   gen/Generator
