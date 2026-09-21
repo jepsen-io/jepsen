@@ -4,6 +4,7 @@
                      [pprint :refer [pprint]]
                      [test :refer :all]]
             [jepsen [checker :as c]
+                    [common-test :refer [default-start-time]]
                     [history :as h]
                     [store :as store]
                     [tests :as tests]
@@ -12,7 +13,7 @@
 
 (deftest timeline-test
   (let [test (assoc tests/noop-test
-                    :start-time 0)
+                    :start-time default-start-time)
         history (h/history
                   [{:process 0, :time 0, :type :invoke, :f :write, :value 3}
                    {:process 1, :time 1000000, :type :invoke, :f :read, :value nil}
@@ -29,11 +30,11 @@
              " / "
              [:a {:href "/files/noop"} "noop"]
              " / "
-             [:a {:href "/files/noop/0"} "0"]
+             [:a {:href "/files/noop/20000101T0000Z"} "20000101T0000Z"]
              " / "
-             [:a {:href "/files/noop/0/"} "independent"]
+             [:a {:href "/files/noop/20000101T0000Z/"} "independent"]
              " / "
-             [:a {:href "/files/noop/0/independent/"} ""]]
+             [:a {:href "/files/noop/20000101T0000Z/independent/"} ""]]
             [:h1 "noop key "]
             nil
             [:div
@@ -45,7 +46,7 @@
                  :id "i2",
                  :style "width:100;left:0;top:0;height:80",
                  :title
-                 "Dur: 2 ms\nErr: nil\nWall-clock Time: 1970-01-01T00:00:00.002Z\n\nOp:\n{:process 0\n :type :info\n :f :read\n :index 2\n :value }"}
+                 "Dur: 2 ms\nErr: nil\nWall-clock Time: 00:00:00.002Z\n\nOp:\n{:process 0\n :type :info\n :f :read\n :index 2\n :value }"}
                 "0 read 3<br />"]]
               [:a
                {:href "#i3"}
@@ -54,6 +55,6 @@
                  :id "i3",
                  :style "width:100;left:106;top:16;height:32",
                  :title
-                 "Dur: 2 ms\nErr: nil\nWall-clock Time: 1970-01-01T00:00:00.003Z\n\nOp:\n{:process 1\n :type :ok\n :f :read\n :index 3\n :value 3}"}
+                 "Dur: 2 ms\nErr: nil\nWall-clock Time: 00:00:00.003Z\n\nOp:\n{:process 1\n :type :ok\n :f :read\n :index 3\n :value 3}"}
                 "1 read <br />3"]]]]]]
          (t/hiccup test history opts)))))

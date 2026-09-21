@@ -1,6 +1,7 @@
 (ns jepsen.common-test
   "Support functions for writing tests."
   (:require [clojure.tools.logging :refer :all]
+            [java-time.api :as time]
             [jepsen [control :as c]
                     [core :as jepsen]
                     [os :as os]
@@ -8,6 +9,10 @@
                     [tests :as tests]]
             [jepsen.os.debian :as debian]
             [unilog.config :as unilog]))
+
+(def default-start-time
+  "A standard start time we use for various test maps."
+  (time/offset-date-time "2000-01-01T00:00:00+00"))
 
 (defn quiet-logging
   "A fixture to quiet down logging, call f, then restore it."

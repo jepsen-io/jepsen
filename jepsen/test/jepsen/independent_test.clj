@@ -3,7 +3,7 @@
             [clojure.pprint :refer [pprint]]
             [clojure.set :as set]
             [java-time.api :as time]
-            [jepsen [common-test :refer [quiet-logging]]
+            [jepsen [common-test :refer [default-start-time quiet-logging]]
                     [history :as h]]
             [jepsen.independent :refer :all]
             [jepsen.checker :as checker]
@@ -12,10 +12,6 @@
             [jepsen.history.core :as hc :refer [chunked]]))
 
 (use-fixtures :once quiet-logging)
-
-(def t0
-  "A single time so we get a consistent output directory."
-  (time/offset-date-time "2000-01-01T00:00:00+00"))
 
 ; Tests for independent generators are in generator-test; might want to pull
 ; them over here later.
@@ -62,6 +58,6 @@
             :failures [2]}
            (checker/check (checker even-checker)
                           {:name "independent-checker-test"
-                           :start-time t0}
+                           :start-time default-start-time}
                           history
                           {})))))

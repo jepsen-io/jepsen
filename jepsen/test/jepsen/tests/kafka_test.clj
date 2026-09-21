@@ -6,7 +6,7 @@
             [dom-top.core :refer [loopr]]
             [java-time.api :as time]
             [jepsen [checker :as checker]
-                    [common-test :refer [quiet-logging]]
+                    [common-test :refer [default-start-time quiet-logging]]
                     [generator :as gen]
                     [history :as h]
                     [store :as store]
@@ -16,10 +16,6 @@
             [jepsen.tests.kafka :refer :all]))
 
 (use-fixtures :once quiet-logging)
-
-(def t0
-  "A single time so we get a consistent output directory."
-  (time/offset-date-time "2000-01-01T00:00:00+00"))
 
 (defn deindex
   "Strips :index field off a map, or a collection of maps."
@@ -751,7 +747,7 @@
         c (checker)
         check (checker/check c
                              {:name "empty-history-test"
-                              :start-time t0
+                              :start-time default-start-time
                               :history history}
                              history
                              nil)]
