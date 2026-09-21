@@ -2,6 +2,10 @@
 
 ## 0.3.14
 
+This release focuses on generator performance and correctness, and introduces
+several new generators. It also improves the web interface and fixes some
+long-standing issues with time zones.
+
 ### Bugfixes
 
 - `generator/process-limit` could crash when it received an update before being
@@ -10,6 +14,9 @@
   available threads.
 - `generator/reserve` now nests properly within other `reserve`s, or other
   generators which restrict threads.
+- `generator/limit` no longer counts down the limit when operations are
+  `:pending`.
+- `checker/counter` now ignores nemesis operations
 
 ### API Changes
 
@@ -21,16 +28,38 @@
   tests of actual databases (since the values are similarly random), but it
   will change the deterministic pseudorandom choices observed by tests of the
   generators themselves.
+- Jepsen test directories and files now include time zones. This makes them
+  properly portable across different zones.
+- `checker/set` considers empty histories valid; this makes it easier to check
+  independent sets even when the database is down for the full duration of a
+  key.
 
 ### New Features
 
 - `generator/track`: keeps track of some value extracted from each operation.
 - `generator/until`: a generalized version of `until-ok`
 - `generator/relaxed-reconnect`: when a thread can't open a client, give it a short rest
+- A new CLI option `--seed` provides some degree of replayable deterministic
+  randomness
+- `independent/track-keys` and `final-generator` let you perform some final
+  operation at the end of a test across all keys.
+- The web interface now lets you preview and browse `test.jepsen` files; it
+  shows the test map without `:results` or `:history`.
 
 ### Minor Changes
 
-
+- `generator.interpreter` now updates its generator when operations are
+  `:pending`. This significantly improves performance by allowing expensive
+  computations, like functions used as generators, to be memoized rather than
+  re-evaluated many times in a row.
+- `cli/parse-concurrency` now allows `nil`; this is helpful when
+  workloads want to suggest their own concurrencies.
+- Jepsen no longer depends on Joda Time; we now use `java.time` throughout.
+- The web interface now displays times in the local time zone
+- The web interface no longer caches incomplete tests.
+- `tests.cycle` uses the new `track` generator to keep track of its maximum keys.
+- Clojure 1.12.6
+- SSHJ 0.41.1
 
 ## 0.3.13
 
