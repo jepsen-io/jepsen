@@ -272,7 +272,7 @@
             "n5" "n5"}))
     (is (= @db-primaries ["n1"]))))
 
-(deftest ^:integration ^:focus worker-recovery-test
+(deftest ^:integration worker-recovery-test
   ; Workers should only consume n ops even when failing.
   (let [invocations (atom 0)
         n 12
@@ -291,7 +291,6 @@
                           :generator (->> (repeat {:f :read})
                                           (gen/limit n)
                                           (gen/nemesis nil))))]
-    (pprint (:history test))
     (is (= n @invocations))))
 
 (deftest ^:integration generator-recovery-test
