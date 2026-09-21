@@ -1,5 +1,37 @@
 # Change Log
 
+## 0.3.14
+
+### Bugfixes
+
+- `generator/process-limit` could crash when it received an update before being
+  asked for an operation.
+- `generator/process-limit` can now limit to fewer processes than there are
+  available threads.
+- `generator/reserve` now nests properly within other `reserve`s, or other
+  generators which restrict threads.
+
+### API Changes
+
+- `generator/stagger` now uses an exponential, rather than uniform distribution
+  of delays between operations. You often want very short and much longer
+  delays between operations, especially for nemeses; now stagger will produce
+  these.
+- `jepsen.generator` now uses `jepsen.random` throughout. This shouldn't affect
+  tests of actual databases (since the values are similarly random), but it
+  will change the deterministic pseudorandom choices observed by tests of the
+  generators themselves.
+
+### New Features
+
+- `generator/track`: keeps track of some value extracted from each operation.
+- `generator/until`: a generalized version of `until-ok`
+- `generator/relaxed-reconnect`: when a thread can't open a client, give it a short rest
+
+### Minor Changes
+
+
+
 ## 0.3.13
 
 This is a small release. It makes expensive generators more efficient with a
