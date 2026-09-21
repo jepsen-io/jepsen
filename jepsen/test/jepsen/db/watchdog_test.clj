@@ -60,7 +60,8 @@
 
   (invoke! [_ test op]
     (let [r (c/on-nodes test running?)
-          ; We're going to assume every node runs on the same schedule, at least at our granularity.
+          ; We're going to assume every node runs on the same schedule, at
+          ; least at our granularity.
           _ (assert (apply = (vals r)))
           r (val (first r))]
       (assoc op :type :ok, :value r)))
@@ -76,8 +77,9 @@
   ; pressure, just gonna let it slide for now.
   (let [; We poll every second to see if things are running
         gen (->> (gen/repeat {:f :running})
-                 (gen/delay 1)
-                 ; We wait five seconds, kill everyone, wait five more, and restart.
+                 (gen/delay 0.9)
+                 ; We wait five seconds, kill everyone, wait five more, and
+                 ; restart.
                  (gen/nemesis
                    [(gen/sleep 5)
                     {:type :info, :f :start}
@@ -117,7 +119,8 @@
       (is (last fresh)))
 
     (testing "dead"
-      ; We should never run during this part. We might race during the first op though.
+      ; We should never run during this part. We might race during the first op
+      ; though.
       (is (every? false? (next dead))))
 
     (testing "restarted"
