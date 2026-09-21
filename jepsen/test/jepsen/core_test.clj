@@ -272,26 +272,27 @@
             "n5" "n5"}))
     (is (= @db-primaries ["n1"]))))
 
-(deftest ^:integration worker-recovery-test
+(deftest ^:integration ^:focus worker-recovery-test
   ; Workers should only consume n ops even when failing.
   (let [invocations (atom 0)
-        n 12]
-    (run! (assoc tst/noop-test
-                 :name "worker recovery"
-                 :client (reify client/Client
-                           (open!  [c t n] c)
-                           (setup! [c t])
-                           (invoke! [_ _ _]
-                             (swap! invocations inc)
-                             (/ 1 0))
-                           (teardown! [c t])
-                           (close! [c t]))
-                 :checker  (checker/unbridled-optimism)
-                 :pure-generators true
-                 :generator (->> (repeat {:f :read})
-                                 (gen/limit n)
-                                 (gen/nemesis nil))))
-      (is (= n @invocations))))
+        n 12
+        test (run! (assoc tst/noop-test
+                          :name "worker recovery"
+                          :client (reify client/Client
+                                    (open!  [c t n] c)
+                                    (setup! [c t])
+                                    (invoke! [_ _ _]
+                                      (swap! invocations inc)
+                                      (/ 1 0))
+                                    (teardown! [c t])
+                                    (close! [c t]))
+                          :checker  (checker/unbridled-optimism)
+                          :pure-generators true
+                          :generator (->> (repeat {:f :read})
+                                          (gen/limit n)
+                                          (gen/nemesis nil))))]
+    (pprint (:history test))
+    (is (= n @invocations))))
 
 (deftest ^:integration generator-recovery-test
   ; Throwing an exception from a generator shouldn't break the core. We use

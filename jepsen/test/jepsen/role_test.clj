@@ -209,16 +209,15 @@
                      gen/nemesis
                      (gen/limit 2)
                      gt/perfect*
-                     (filter (comp #{:info} :type))
-                     ; values use rand-nth baked into fns in a way we can't
-                     ; make deterministic; just drop em
-                     (map #(dissoc % :value)))]
+                     (filter (comp #{:info} :type)))]
         (is (= [{:time 0,
                  :type :info,
                  :process :nemesis,
-                 :f [:storage :start-partition]}
-                {:time 15702284397,
+                 :f [:storage :start-partition]
+                 :value :majority}
+                {:time 10591056470,,
                  :type :info,
                  :process :nemesis,
-                 :f [:storage :stop-partition]}]
+                 :f [:storage :stop-partition]
+                 :value nil}]
                ops))))))
