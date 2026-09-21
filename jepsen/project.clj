@@ -11,7 +11,7 @@
                   :exclusions [org.clj-commons/primitive-math
                                potemkin
                                riddley]]
-                 [org.clojure/clojure "1.12.5"]
+                 [org.clojure/clojure "1.12.6"]
                  [org.clojure/data.fressian "1.1.1"]
                  [org.clojure/data.generators "1.1.1"]
                  [org.clojure/tools.logging "1.3.1"]
@@ -26,7 +26,7 @@
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.1"]
                  [ring "1.15.5"]
-                 [com.hierynomus/sshj "0.40.0"
+                 [com.hierynomus/sshj "0.41.1"
                   :exclusions [org.slf4j/slf4j-api
                                org.bouncycastle/bcutil-jdk18on]]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
