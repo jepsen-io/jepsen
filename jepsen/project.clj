@@ -1,4 +1,4 @@
-(defproject jepsen "0.3.14-SNAPSHOT"
+(defproject jepsen "0.3.14"
   :description "Distributed systems testing framework."
   :url         "https://jepsen.io"
   :scm     {:name "git"
@@ -19,7 +19,7 @@
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
                  [elle "0.2.7"]
-                 [io.jepsen/generator "0.1.5-SNAPSHOT"]
+                 [io.jepsen/generator "0.1.5"]
                  [jepsen.txn "0.1.3"]
                  [knossos "0.3.16"]
                  [clj-ssh "0.5.14"]
