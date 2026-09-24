@@ -388,27 +388,23 @@
   ([pattern]
    (grepkill! 9 pattern))
   ([signal pattern]
-   ; Hahaha we'd like to use pkill here, but because we run sudo commands in a
-   ; bash wrapper (`bash -c "pkill ..."`), we'd end up matching the bash wrapper
-   ; and killing that as WELL, so... grep and awk it is! The grep -v makes sure
-   ; we don't kill the grep process OR the bash process executing it.
-   (dt/timeout
-     30000 (throw+ {:type    ::kill-timed-out
-                    :signal signal
-                    :pattern pattern}
-     (try+ (exec ;:ps :aux
-                 ;| :grep pattern
-                 ;| :grep :-v "grep"
-                 ;| :awk "{print $2}"
-                 :pgrep :-f :--ignore-ancestors pattern
-                 | :xargs :--no-run-if-empty :kill (str "-" (name+ signal)))
-           (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
-             nil)
-           (catch [:type :jepsen.control/nonzero-exit, :exit 123] e
-             (if (re-find #"No such process" (:err e))
-               ; Ah, process already exited
-               nil
-               (throw+ e))))))))
+   ; We'd like to use pkill here, but because we run sudo commands in a bash
+   ; wrapper (`bash -c "pkill ..."`), pkill -f would match the bash wrapper (and
+   ; sudo) and kill them as WELL. pgrep --ignore-ancestors skips our own
+   ; ancestors, and xargs hands the remaining pids to kill.
+   (dt/timeout 30000 (throw+ {:type    ::kill-timed-out
+                              :signal  signal
+                              :pattern pattern})
+               (try+ (exec :pgrep :-f :--ignore-ancestors pattern
+                           | :xargs :--no-run-if-empty
+                           :kill (str "-" (name+ signal)))
+                     (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
+                       nil)
+                     (catch [:type :jepsen.control/nonzero-exit, :exit 123] e
+                       (if (re-find #"No such process" (:err e))
+                         ; Ah, process already exited
+                         nil
+                         (throw+ e)))))))
 
 (defn start-daemon!
   "Starts a daemon process, logging stdout and stderr to the given file.
