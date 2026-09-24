@@ -4,7 +4,8 @@
                      [test :refer :all]]
             [clojure.java.io :as io]
             [jepsen [common-test :refer [quiet-logging]]
-                    [control :as c]]
+                    [control :as c]
+                    [util :refer [await-fn meh]]]
             [jepsen.control [util :as util]
                             [sshj :as sshj]]
             [clj-commons.slingshot :refer [try+ throw+]]))
@@ -83,6 +84,75 @@
       (let [pid (start-test-daemon! logfile pidfile)]
         (util/stop-daemon! "/usr/bin/perl" pidfile :TERM)
         (assert-daemon-stopped! pidfile pid)))))
+
+(defn proc-state
+  "Returns the state character (e.g. \"S\", \"T\", \"Z\") of the given pid
+  from /proc/<pid>/stat, or nil if there is no such process."
+  [pid]
+  (try+ (let [stat (c/exec :cat (str "/proc/" pid "/stat"))]
+          ; The comm field is parenthesized and may itself contain parens; the
+          ; state follows the last one.
+          (second (re-find #".*\)\s+(\S)" stat)))
+        (catch [:type :jepsen.control/nonzero-exit] _ nil)))
+
+(defn await-proc-state
+  "Waits until the given pid's state is in the set `states` (which may contain
+  nil for a vanished process), and returns that state."
+  [pid states]
+  (await-fn (fn []
+              (let [s (proc-state pid)]
+                (if (contains? states s)
+                  s
+                  (throw (ex-info "Unexpected process state"
+                                  {:pid pid, :state s, :expected states})))))
+            {:retry-interval 100
+             :log-message    (str "Waiting for " pid " to enter " states)
+             :timeout        5000}))
+
+(deftest ^:integration grepkill-test
+  ; SIGSTOP leaves the process alive, so we check the state in /proc rather
+  ; than just liveness.
+  (let [logfile "/tmp/jepsen-grepkill-test.log"
+        pidfile "/tmp/jepsen-grepkill-test.pid"
+        ; Anchored, so we don't match other sleeps or our own shell wrappers.
+        pattern "^/usr/bin/sleep 7331$"
+        pid     (atom nil)]
+    (try
+      ; Clear out any daemon left behind by an interrupted earlier run. The
+      ; anchored pattern can't match pkill's own shell wrapper.
+      (meh (c/exec :pkill :-KILL :-f pattern))
+      (c/exec :rm :-f logfile pidfile)
+      (util/start-daemon! {:chdir   "/tmp"
+                           :logfile logfile
+                           :pidfile pidfile}
+                          "/usr/bin/sleep" 7331)
+      (reset! pid (await-fn #(or (re-matches #"\d+"
+                                             (str/trim (c/exec :cat pidfile)))
+                                 (throw (ex-info "No pid yet" {})))
+                            {:retry-interval 100, :timeout 5000}))
+
+      (testing "pattern matches only our daemon"
+        (is (= @pid (c/exec :pgrep :-f pattern))))
+
+      (testing "stop"
+        (util/grepkill! :stop pattern)
+        (is (= "T" (await-proc-state @pid #{"T"}))))
+
+      (testing "cont"
+        (util/grepkill! :cont pattern)
+        (is (#{"S" "R"} (await-proc-state @pid #{"S" "R"}))))
+
+      (testing "kill"
+        (util/grepkill! pattern)
+        (is (contains? #{nil "Z"} (await-proc-state @pid #{nil "Z"}))))
+
+      (finally
+        ; Clean up by pid, not grepkill!, so a broken grepkill! can't leave a
+        ; stopped process behind.
+        (when-let [p @pid]
+          (meh (c/exec :kill :-CONT p))
+          (meh (c/exec :kill :-KILL p)))
+        (meh (c/exec :rm :-f logfile pidfile))))))
 
 (deftest ^:integration install-archive-test
   (testing "without auth credentials"
