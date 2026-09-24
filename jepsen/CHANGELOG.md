@@ -9,6 +9,10 @@
   signal. Kill faults built on `grepkill!` (which sends SIGKILL by default)
   and pause/resume faults built on `grepkill! :stop`/`:cont` did nothing.
   It sends signals again.
+- `control.util/grepkill!` now throws when `pgrep` (or `sudo`) fails, for
+  instance on an older procps without `--ignore-ancestors`, instead of
+  silently doing nothing. It only ignores `kill` errors for processes which
+  already exited.
 
 ## 0.3.14
 

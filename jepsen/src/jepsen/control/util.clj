@@ -391,20 +391,33 @@
    ; We'd like to use pkill here, but because we run sudo commands in a bash
    ; wrapper (`bash -c "pkill ..."`), pkill -f would match the bash wrapper (and
    ; sudo) and kill them as WELL. pgrep --ignore-ancestors skips our own
-   ; ancestors, and xargs hands the remaining pids to kill.
-   (dt/timeout 30000 (throw+ {:type    ::kill-timed-out
-                              :signal  signal
-                              :pattern pattern})
-               (try+ (exec :pgrep :-f :--ignore-ancestors pattern
-                           | :xargs :--no-run-if-empty
-                           :kill (str "-" (name+ signal)))
-                     (catch [:type :jepsen.control/nonzero-exit, :exit 0] _
-                       nil)
-                     (catch [:type :jepsen.control/nonzero-exit, :exit 123] e
-                       (if (re-find #"No such process" (:err e))
-                         ; Ah, process already exited
-                         nil
-                         (throw+ e)))))))
+   ; ancestors. We run pgrep and kill separately rather than piping one into
+   ; the other: in a pipeline, a failing pgrep (say, an older procps without
+   ; --ignore-ancestors) looks exactly like "nothing matched".
+   (dt/timeout
+     30000
+     (throw+ {:type    ::kill-timed-out
+              :signal  signal
+              :pattern pattern})
+     ; pgrep exits 1 when nothing matched. We turn that into a clean exit on
+     ; the node itself, rather than catching exit 1 here, because sudo also
+     ; exits 1 when it fails.
+     (let [pids (exec :pgrep :-f :--ignore-ancestors pattern
+                      (lit "||") :test (lit "$?") :-eq 1)
+           pids (remove str/blank? (str/split-lines pids))]
+       ; Batched, like xargs would, to stay well under the command line limit.
+       (doseq [pids (partition-all 1024 pids)]
+         ; /bin/kill, not the shell builtin: bash's kill reads -stop as
+         ; `-s top`.
+         (try+ (apply exec "/bin/kill" (str "-" (name+ signal)) pids)
+               (catch [:type :jepsen.control/nonzero-exit, :exit 1] e
+                 ; Processes may exit between pgrep and kill; that's fine. Any
+                 ; other error isn't.
+                 (let [errs (remove str/blank? (str/split-lines (:err e)))]
+                   (when-not (and (seq errs)
+                                  (every? #(re-find #"No such process" %)
+                                          errs))
+                     (throw+ e))))))))))
 
 (defn start-daemon!
   "Starts a daemon process, logging stdout and stderr to the given file.

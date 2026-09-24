@@ -134,8 +134,19 @@
       (testing "pattern matches only our daemon"
         (is (= @pid (c/exec :pgrep :-f pattern))))
 
-      (testing "stop"
-        (util/grepkill! :stop pattern)
+      (testing "no match"
+        (is (nil? (util/grepkill! "^/no/such/jepsen-grepkill-test$"))))
+
+      (testing "pgrep errors throw"
+        ; An invalid regex makes pgrep exit 2.
+        (is (= :jepsen.control/nonzero-exit
+               (try+ (util/grepkill! "(")
+                     nil
+                     (catch [:type :jepsen.control/nonzero-exit] e
+                       (:type e))))))
+
+      (testing "stop, through sudo's bash -c wrapper"
+        (c/su (util/grepkill! :stop pattern))
         (is (= "T" (await-proc-state @pid #{"T"}))))
 
       (testing "cont"
