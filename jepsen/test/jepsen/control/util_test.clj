@@ -109,6 +109,25 @@
              :log-message    (str "Waiting for " pid " to enter " states)
              :timeout        5000}))
 
+(defn start-grepkill-daemon!
+  "Starts `/usr/bin/sleep 7331` as a daemon for grepkill-test, first killing
+  any left behind by an interrupted earlier run. Returns the PID string."
+  [logfile pidfile pattern]
+  (meh (c/exec :pkill :-KILL :-f pattern))
+  (c/exec :rm :-f logfile pidfile)
+  (util/start-daemon! {:chdir   "/tmp"
+                       :logfile logfile
+                       :pidfile pidfile}
+                      "/usr/bin/sleep" 7331)
+  (try (await-fn #(or (re-matches #"\d+" (str/trim (c/exec :cat pidfile)))
+                      (throw (ex-info "No pid yet" {})))
+                 {:retry-interval 100, :timeout 5000})
+       (catch Exception e
+         ; Don't leave the daemon running if we never learned its pid.
+         (meh (c/exec :pkill :-KILL :-f pattern))
+         (meh (c/exec :rm :-f logfile pidfile))
+         (throw e))))
+
 (deftest ^:integration grepkill-test
   ; SIGSTOP leaves the process alive, so we check the state in /proc rather
   ; than just liveness.
@@ -116,42 +135,28 @@
         pidfile "/tmp/jepsen-grepkill-test.pid"
         ; Anchored, so we don't match other sleeps or our own shell wrappers.
         pattern "^/usr/bin/sleep 7331$"
-        pid     (atom nil)]
+        pid     (start-grepkill-daemon! logfile pidfile pattern)]
     (try
-      ; Clear out any daemon left behind by an interrupted earlier run. The
-      ; anchored pattern can't match pkill's own shell wrapper.
-      (meh (c/exec :pkill :-KILL :-f pattern))
-      (c/exec :rm :-f logfile pidfile)
-      (util/start-daemon! {:chdir   "/tmp"
-                           :logfile logfile
-                           :pidfile pidfile}
-                          "/usr/bin/sleep" 7331)
-      (reset! pid (await-fn #(or (re-matches #"\d+"
-                                             (str/trim (c/exec :cat pidfile)))
-                                 (throw (ex-info "No pid yet" {})))
-                            {:retry-interval 100, :timeout 5000}))
-
       (testing "pattern matches only our daemon"
-        (is (= @pid (c/exec :pgrep :-f pattern))))
+        (is (= pid (c/exec :pgrep :-f pattern))))
 
       (testing "stop"
         (util/grepkill! :stop pattern)
-        (is (= "T" (await-proc-state @pid #{"T"}))))
+        (is (= "T" (await-proc-state pid #{"T"}))))
 
       (testing "cont"
         (util/grepkill! :cont pattern)
-        (is (#{"S" "R"} (await-proc-state @pid #{"S" "R"}))))
+        (is (#{"S" "R"} (await-proc-state pid #{"S" "R"}))))
 
       (testing "kill"
         (util/grepkill! pattern)
-        (is (contains? #{nil "Z"} (await-proc-state @pid #{nil "Z"}))))
+        (is (contains? #{nil "Z"} (await-proc-state pid #{nil "Z"}))))
 
       (finally
         ; Clean up by pid, not grepkill!, so a broken grepkill! can't leave a
         ; stopped process behind.
-        (when-let [p @pid]
-          (meh (c/exec :kill :-CONT p))
-          (meh (c/exec :kill :-KILL p)))
+        (meh (c/exec :kill :-CONT pid))
+        (meh (c/exec :kill :-KILL pid))
         (meh (c/exec :rm :-f logfile pidfile))))))
 
 (deftest ^:integration install-archive-test
