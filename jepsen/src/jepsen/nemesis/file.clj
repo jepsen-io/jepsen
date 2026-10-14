@@ -243,13 +243,19 @@
   gen/Generator
   (op [this test ctx]
     ; Pick nodes we're allowed to interfere with
-    (let [n (if (number? n)
-              n
-              (n test))
-          _ (assert (integer? n)
-                    (str "Expected (n test) to return an integer, but got "
-                         (pr-str n)))
-          nodes (->> (:nodes test) rand/shuffle (take n) vec)]
+    (let [n (if (fn? n)
+              (n test)
+              n)
+          nodes (cond
+                  (integer? n)
+                  (->> (:nodes test) rand/shuffle (take n) vec)
+
+                  (seqable? n)
+                  (->> n rand/shuffle vec)
+
+                  :else
+                  (throw+ (IllegalArgumentException.
+                            (str "Expected n to be an integer, a collection of nodes, or a function returning either of those things, but it instead evaluated to a " (type n) ": " (pr-str n)))))]
       ; Unfurl into f-gen, with values rewritten to random subsets of those
       ; nodes.
       (gen/op
@@ -280,6 +286,10 @@
   `n` can also be a function `(n test)`, which can be used to select (e.g.) a
   minority of nodes. For example, try `(comp jepsen.util/minority count
   :nodes)`.
+
+  `n` may also be a collection of node names, or a function returning a
+  collection of node names. This is helpful when (e.g.) you need to target
+  faults to specific roles.
 
   This generator is intended to stress systems which can tolerate disk faults
   on up to n nodes, but no more."

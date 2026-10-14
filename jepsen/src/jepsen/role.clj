@@ -12,6 +12,7 @@
             [dom-top.core :refer [loopr]]
             [jepsen [client :as client]
                     [db :as db]
+                    [generator :as gen]
                     [nemesis :as n]]
             [jepsen.nemesis.combined :as nc]
             [clj-commons.slingshot :refer [try+ throw+]])
@@ -246,14 +247,33 @@
   [role nemesis]
   (RestrictedNemesis. role (atom nil) nemesis))
 
+(defrecord RestrictedGenerator [role barriers gen]
+  gen/Generator
+  (op [this test ctx]
+    (init-barriers! test barriers)
+    (when-let [[op gen'] (gen/op gen (restrict-test barriers role test) ctx)]
+      [op (RestrictedGenerator. role barriers gen')]))
+
+  (update [this test ctx event]
+    (init-barriers! test barriers)
+    (RestrictedGenerator.
+      role
+      barriers
+      (gen/update gen (restrict-test barriers role test) ctx event))))
+
+(defn restrict-generator
+  "Restricts a generator to act on a specific role."
+  [role gen]
+  (RestrictedGenerator. role (atom nil) gen))
+
 (defn restrict-nemesis-package
   "Restricts a jepsen.nemesis.combined package to act purely on a single role.
-  Right now we just restrict the nemesis, not the generators; maybe later we'll
-  need to do the generators too. Operations in this package have their
-  operation `:f`s lifted to `:f [role f]`. Also adds a :role key to the
-  package, for your use later."
+  Both the nemesis and generator are wrapped to restrict their test maps.
+  generators too. Operations in this package have their operation `:f`s lifted
+  to `:f [role f]`. Also adds a :role key to the package, for your use later."
   [role package]
   (-> package
-      (assoc :role    role
-             :nemesis (restrict-nemesis role (:nemesis package)))
+      (assoc :role      role
+             :generator (restrict-generator role (:generator package))
+             :nemesis   (restrict-nemesis role (:nemesis package)))
       (->> (nc/f-map (partial vector role)))))

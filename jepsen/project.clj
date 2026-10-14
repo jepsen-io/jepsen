@@ -18,8 +18,8 @@
                  [org.clojure/tools.cli "1.4.256"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
-                 [elle "0.2.7"]
-                 [io.jepsen/generator "0.1.5"]
+                 [elle "0.2.8-SNAPSHOT"]
+                 [io.jepsen/generator "0.1.6-SNAPSHOT"]
                  [jepsen.txn "0.1.3"]
                  [knossos "0.3.16"]
                  [clj-ssh "0.5.14"]

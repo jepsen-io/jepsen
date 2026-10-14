@@ -14,7 +14,7 @@
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
-(use-fixtures :once quiet-logging)
+;(use-fixtures :once quiet-logging)
 
 (def test
   "A basic test map."
@@ -208,16 +208,16 @@
       (let [ops (->> (:generator pkg')
                      gen/nemesis
                      (gen/limit 2)
-                     gt/perfect*
+                     (gt/perfect* test (gt/n+nemesis-context (count (:nodes test))))
                      (filter (comp #{:info} :type)))]
-        (is (= [{:time 0,
-                 :type :info,
-                 :process :nemesis,
+        (is (= [{:time 0
+                 :type :info
+                 :process :nemesis
                  :f [:storage :start-partition]
                  :value :majority}
-                {:time 10591056470,,
-                 :type :info,
-                 :process :nemesis,
+                {:time 10591056470
+                 :type :info
+                 :process :nemesis
                  :f [:storage :stop-partition]
                  :value nil}]
                ops))))))
