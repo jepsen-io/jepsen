@@ -264,7 +264,8 @@
 (defn restrict-generator
   "Restricts a generator to act on a specific role."
   [role gen]
-  (RestrictedGenerator. role (atom nil) gen))
+  (when gen
+    (RestrictedGenerator. role (atom nil) gen)))
 
 (defn restrict-nemesis-package
   "Restricts a jepsen.nemesis.combined package to act purely on a single role.
