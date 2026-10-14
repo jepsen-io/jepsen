@@ -276,5 +276,7 @@
   (-> package
       (assoc :role      role
              :generator (restrict-generator role (:generator package))
+             :final-generator (restrict-generator
+                                role (:final-generator package))
              :nemesis   (restrict-nemesis role (:nemesis package)))
       (->> (nc/f-map (partial vector role)))))
