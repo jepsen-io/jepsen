@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.3.15
+
+### Bugfixes
+
+- `control.util/grepkill!` has silently done nothing since 0.3.12: a
+  misplaced paren left its timeout with an empty body, so it never sent a
+  signal. Kill faults built on `grepkill!` (which sends SIGKILL by default)
+  and pause/resume faults built on `grepkill! :stop`/`:cont` did nothing.
+  It sends signals again.
+
 ## 0.3.14
 
 This release focuses on generator performance and correctness, and introduces
