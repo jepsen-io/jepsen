@@ -18,15 +18,15 @@
                  [org.clojure/tools.cli "1.4.256"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
-                 [elle "0.2.8-SNAPSHOT"]
-                 [io.jepsen/generator "0.1.6-SNAPSHOT"]
+                 [elle "0.2.8"]
+                 [io.jepsen/generator "0.1.6"]
                  [jepsen.txn "0.1.3"]
                  [knossos "0.3.16"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.1"]
                  [ring "1.15.5"]
-                 [com.hierynomus/sshj "0.41.1"
+                 [com.hierynomus/sshj "0.41.2"
                   :exclusions [org.slf4j/slf4j-api
                                org.bouncycastle/bcutil-jdk18on]]
                  [com.jcraft/jsch.agentproxy.connector-factory "0.0.9"]
