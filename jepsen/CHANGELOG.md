@@ -4,11 +4,25 @@
 
 ### Bugfixes
 
+- Elle 0.2.8 fixes a major correctness bug which caused `rw-register` workloads
+  to incorrectly infer cyclic version orders for keys. This was due to a bug in
+  the underlying Bifurcan data structure library used throughout Jepsen; that bug
+  has now been fixed upstream.
 - `control.util/grepkill!` has silently done nothing since 0.3.12: a
   misplaced paren left its timeout with an empty body, so it never sent a
   signal. Kill faults built on `grepkill!` (which sends SIGKILL by default)
   and pause/resume faults built on `grepkill! :stop`/`:cont` did nothing.
   It sends signals again.
+
+### Minor Changes
+
+- `(generator/mix [x)]` now returns `x`.
+- `generator.test` simulation functions can now take an optional test map.
+- `role/restrict-generator`: wraps a generator in one which only sees nodes for
+  a specific role
+- `role/restrict-nemesis-package` now restricts the generator as well. This
+  works better with generators that need to target specific nodes.
+- jepsen.history 0.1.9
 
 ## 0.3.14
 
