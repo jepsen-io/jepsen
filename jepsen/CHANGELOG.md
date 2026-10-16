@@ -2,6 +2,13 @@
 
 ## 0.3.15
 
+This release fixes a major bug in Elle's `rw-register` workload, which in turn
+was caused by https://github.com/lacuna/bifurcan/issues/60 and
+https://github.com/lacuna/bifurcan/issues/59. These are now fixed upstream. The
+`control.util/grepkill!` function was also nonfunctional, and is now fixed.
+There are also a few minor dependency bumps, and better support for using roles
+with generators that depend on `(:nodes test)`.
+
 ### Bugfixes
 
 - Elle 0.2.8 fixes a major correctness bug which caused `rw-register` workloads
@@ -23,6 +30,8 @@
 - `role/restrict-nemesis-package` now restricts the generator as well. This
   works better with generators that need to target specific nodes.
 - jepsen.history 0.1.9
+- jepsen.generator 0.1.6
+- sshj 0.41.2
 
 ## 0.3.14
 
