@@ -475,6 +475,92 @@
                    :stop  #{}
                    :color "#99F2E2"}}}))
 
+; Throwing every fault at once can render a cluster mostly unusable. It's often
+; more interesting to have a shifting mixture of packages at play over time,
+; sometimes with no faults at all.
+(defrecord PackageGen [; The time period, in nanos, we run a given set of
+                       ; packages
+                       ^long period
+                       ; The deadline when we'll rotate to new active packages
+                       ^long deadline
+                       ; A vector of collections of fs, one for each package
+                       fs
+                       ; A vector of integers, each an active package index
+                       active
+                       ; A vector of generators, one for each package
+                       gens
+                       ; A vector of final generators, one for each package
+                       finals]
+  gen/Generator
+  (op [this test ctx]
+    ; Lazily initialize deadline
+    (let [deadline (if (= -1 deadline)
+                     (+ (:time ctx) period)
+                     deadline)]
+      (if (<= deadline (:time ctx))
+        ; Pick new active packages
+        (let [active' (if (rand/bool 1/4)
+                        []
+                        (vec (util/random-nonempty-subset
+                               (range (count gens)))))]
+          (gen/op
+            [; Run final generators for all active packages
+             (map finals active)
+             {:type :log, :value (str "Switching to new mix of nemeses: "
+                                      (pr-str (mapv fs active')))}
+             (PackageGen. period (+ deadline period)
+                          fs active' gens finals)]
+            test ctx))
+        ; Fan out to each active package, ask each for an op, and pick the
+        ; soonest
+        (if (zero? (count active))
+          ; Nothing to do *now*; we'll know when the deadline is up.
+          [(gen/fill-in-op {:type  :sleep
+                            :value (- deadline (:time ctx))}
+                           ctx)
+           this]
+          ; Pick an op from the active generators
+          (if-let [{:keys [op gen' i]}
+                     (->> active
+                          (map (fn [i]
+                                 (when-let [[op gen']
+                                            (gen/op (gens i) test ctx)]
+                                   {:op   op
+                                    :gen' gen'
+                                    :i    i})))
+                          (reduce gen/soonest-op-map nil))]
+            [op
+             (PackageGen. period deadline fs active
+                          (assoc gens i gen')
+                          finals)]
+            (prn "exhausted"))))))
+
+  (update [this test ctx op]
+    ; Propagate update to all generators.
+    (PackageGen. period deadline fs active
+                 (mapv (fn [gen]
+                         (gen/update gen test ctx op))
+                       gens)
+                 finals)))
+
+(defn package-gen
+  "For long-running tests, it's nice to be able to have intervals of no faults,
+  intervals with lots of faults, just one kind of fault, etc. This takes a time
+  interval in seconds, which is how long to emit nemesis operations for a
+  particular subset of packages. Takes a collection of packages. Constructs a
+  nemesis generator which emits faults for a shifting collection of packages
+  over time."
+  [interval packages]
+  (let [packages (filter :generator packages)]
+    (when (seq packages)
+      (PackageGen.
+        (util/secs->nanos interval)
+        -1
+        (mapv (comp n/fs :nemesis) packages)
+        (vec (util/random-nonempty-subset (range (count packages))))
+        (mapv :generator packages)
+        (mapv :final-generator packages)))))
+
 (defn f-map-perf
   "Takes a perf map, and transforms the fs in it using `lift`."
   [lift perf]
@@ -549,7 +635,7 @@
   Optional options:
 
     :interval   The interval between operations, in seconds.
-    :faults     A collection of enabled faults, e.g. [:partition, :kill, ...]
+    :faults     A set of enabled faults, e.g. #{:partition, :kill, ...}
     :partition  Controls network partitions
     :packet     Controls network packet behavior
     :kill       Controls process kills
