@@ -18,6 +18,13 @@
 
 (def default-nodes ["n1" "n2" "n3" "n4" "n5"])
 
+(defn parse-comma-separated-kws
+  "Turns a string like foo,bar,baz into a vector of keywords like [:foo :bar
+  :baz]."
+  [s]
+  (->> (str/split s #",")
+       (mapv keyword)))
+
 (defn one-of
   "Takes a collection and returns a string like \"Must be one of ...\" and a
   list of names. For maps, uses keys."
