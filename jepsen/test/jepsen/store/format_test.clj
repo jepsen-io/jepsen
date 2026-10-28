@@ -212,6 +212,49 @@
   (testing "128"
     (check-big-vector! (vec (range 128)))))
 
+(deftest block-too-large-test
+  ; read-block-data can't load blocks over 2^31 - 1 bytes, so we should refuse
+  ; to write their headers.
+  (testing "largest readable size is fine"
+    (is (block-header-for-length-and-checksum!
+          :fressian-stream max-block-data-size (java.util.zip.CRC32.))))
+  (testing "one byte more throws"
+    (is-thrown+ [:type :jepsen.store.format/block-too-large]
+                (block-header-for-length-and-checksum!
+                  :fressian-stream (inc max-block-data-size)
+                  (java.util.zip.CRC32.)))))
+
+(deftest big-vector-max-chunk-bytes-test
+  ; Large elements should be split across chunks by size, even when the
+  ; element count is far below elements-per-chunk. Otherwise a chunk can exceed
+  ; the 2 GiB a single ByteBuffer can hold, and we cannot read it back.
+  (let [max-bytes (* 64 1024)
+        ; ~2 KB per element, ~400 KB total: at least 5 chunks of <= 64 KB
+        v         (mapv (fn [i] {:i i, :pad (apply str (repeat 2048 \x))})
+                        (range 200))
+        id        (with-open [h (open file)]
+                    (write-block-index! h)
+                    (let [w (big-vector-block-writer! h (new-block-id! h)
+                                                      1000 max-bytes)]
+                      (reduce append-to-big-vector-block! w v)
+                      (.close w)
+                      (:block-id w)))]
+    (with-open [h (open file)]
+      (load-block-index! h)
+      (let [chunks (->> (:blocks @(:block-index h))
+                        vals
+                        (map (partial read-block-by-offset h))
+                        (filter (comp #{:fressian-stream} :type)))]
+        (testing "split by size"
+          (is (< 4 (count chunks))))
+        (testing "no chunk far over the limit"
+          ; We only check bytes flushed to disk, so a chunk may overshoot by
+          ; the buffered bytes plus one element.
+          (doseq [c chunks]
+            (is (< (:length c) (+ max-bytes fressian-buffer-size 8192)))))
+        (testing "round trip"
+          (is (= v (into [] (:data (read-block-by-id h id))))))))))
+
 (deftest write-test-test
   (let [test {:history [:a :b :c]
               :results {:valid? false
