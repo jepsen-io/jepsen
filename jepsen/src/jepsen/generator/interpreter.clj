@@ -135,7 +135,12 @@
                           :exit  false
 
                           ; Ahhh
-                          :sleep (do (Thread/sleep (long (* 1000 (:value op))))
+                          :sleep
+                          (let [dt (:value op)]
+                            (assert (number? dt)
+                                    (str "Generator produced a :sleep operation with a non-numeric value: "
+                                         (pr-str op)))
+                            (Thread/sleep (long (* 1000 dt)))
                                      (.put out op)
                                      true)
 
