@@ -18,7 +18,7 @@
 
 (def default-nodes ["n1" "n2" "n3" "n4" "n5"])
 
-(defn parse-comma-separated-kws
+(defn parse-comma-kws
   "Turns a string like foo,bar,baz into a vector of keywords like [:foo :bar
   :baz]."
   [s]
