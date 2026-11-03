@@ -166,12 +166,14 @@
                 :apt-utils
                 :build-essential
                 :bzip2
+                :colorized-logs
                 :curl
                 :dirmngr
                 :faketime
                 :iproute2
                 :iptables
                 :iputils-ping
+                :less
                 :logrotate
                 :man-db
                 :netcat-openbsd
