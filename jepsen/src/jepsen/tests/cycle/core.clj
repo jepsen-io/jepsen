@@ -19,8 +19,8 @@
   gen/Generator
   (op [this test ctx]
     (when-let [mk (:max-key ctx)]
-      (gen/op (->> (range (:max-key ctx))
-                   (partition 8)
+      (gen/op (->> (range (inc mk))
+                   (partition-all 8)
                    (map (fn [ks]
                           {:f :txn, :value (mapv (fn [k] [:r k nil]) ks)})))
               test ctx)))
