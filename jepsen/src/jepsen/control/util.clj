@@ -519,3 +519,16 @@
   [process-name signal]
   (meh (exec :pkill :--signal signal process-name))
   :signaled)
+
+(defn strip-ansi-escapes!
+  "Removes ANSI escapes from a file path `in`, writing the stripped version to
+  `out`. Returns out. If no out is provided, defaults to `<in>.plain`. If file
+  does nothing, no-op."
+  ([in]
+   (strip-ansi-escapes! in (str in ".plain")))
+  ([in out]
+   (try+ (exec "ansi2txt" :< in :> out)
+         (catch [:exit 1] e
+           ; Does not exist
+           nil))
+   out))
