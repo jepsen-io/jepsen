@@ -109,8 +109,8 @@
         pause? (and (satisfies? db/Pause   db) (contains? faults :pause))
 
         ; Lists of possible specifications for nodes to kill/pause
-        kill-targets  (:targets (:kill opts)  (node-specs db))
-        pause-targets (:targets (:pause opts) (node-specs db))
+        kill-targets  (vec (:targets (:kill opts)  (node-specs db)))
+        pause-targets (vec (:targets (:pause opts) (node-specs db)))
 
         ; Starts and kills
         start  {:type :info, :f :start, :value :all}
@@ -310,7 +310,7 @@
   [opts]
   (let [needed?   ((:faults opts) :packet)
         db        (:db opts)
-        targets   (:targets   (:packet opts) (node-specs db))
+        targets   (vec (:targets (:packet opts) (node-specs db)))
         behaviors (:behaviors (:packet opts) [{}])
         start     (fn start [_ _]
                     {:type  :info
@@ -442,7 +442,7 @@
    Additional options as for [[nemesis-package]]."
   [{:keys [faults db file-corruption interval]}]
   (let [needed?     (:file-corruption faults)
-        targets     (:targets     file-corruption (node-specs db))
+        targets     (vec (:targets file-corruption (node-specs db)))
         corruptions (:corruptions file-corruption)
         gen (->> (fn gen [_test _context]
                    (let [target (rand/nth targets)
@@ -515,8 +515,9 @@
         ; soonest
         (if (zero? (count active))
           ; Nothing to do *now*; we'll know when the deadline is up.
-          [(gen/fill-in-op {:type  :sleep
-                            :value (- deadline (:time ctx))}
+          [(gen/fill-in-op {:type  :log
+                            :time  deadline
+                            :value "Done with quiet period"}
                            ctx)
            this]
           ; Pick an op from the active generators
