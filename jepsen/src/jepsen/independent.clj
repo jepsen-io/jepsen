@@ -224,10 +224,18 @@
     (let [process (:process event)
           thread  (gen/process->thread ctx process)
           group   (thread->group thread)
-          unlifted-op (update event :value val)]
+          unlifted-op (update event :value val)
+          ; The group's own context, as op hands its generator: the whole
+          ; test's would let a generator that builds a thread filter on its
+          ; first call (gen/process-limit, gen/reserve) build it over
+          ; threads outside its group, when a key's fresh generator meets
+          ; an update before an op.
+          group-ctx (if group->context-filter
+                      ((group->context-filter group) ctx)
+                      ctx)]
       (ConcurrentGenerator.
         n fgen group->threads thread->group group->context-filter keys
-        (update gens group gen/update test ctx unlifted-op)))))
+        (update gens group gen/update test group-ctx unlifted-op)))))
 
 (defn concurrent-generator
   "Takes a positive integer n, a sequence of keys (k1 k2 ...) and a function
