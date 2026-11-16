@@ -44,57 +44,59 @@
   count."
   [test history groups group-fn window-count]
   (h/ensure-pair-index history)
-  (let [t0          (:time (first history))
-        t1          (:time (peek history))
-        dt          (- t1 t0)
-        window-size (/ dt window-count)
-        ; A vector of windows, where each window is a map of {group name to an
-        ; empty vector of times. We'll derive the y coordinates once the
-        ; windows are built.
-        empty-window  (update-vals groups (constantly []))
-        empty-windows (vec (repeat window-count empty-window))
-        windows
-        (->> ;(t/take 10)
-             (t/filter h/invoke?)
-             (t/fold
-               {:identity (constantly empty-windows)
-                :reducer  (fn reducer [windows op]
-                            (let [window (-> (:time op)
-                                             (- t0)
-                                             (/ dt)
-                                             (* window-count)
-                                             Math/floor
-                                             long)
-                                  value (:value op)
-                                  group (group-fn op)]
-                              (if (nil? group)
-                                windows
-                                (update windows window
-                                        update group
-                                        conj (nanos->secs (:time op))))))
-                :combiner (fn combiner [windows1 windows2]
-                            (mapv (fn merge [win1 win2]
-                                    (merge-with into win1 win2))
-                                  windows1
-                                  windows2))})
-             (h/tesser history))
-        ; How many points in the biggest window?
-        max-window-count (->> windows
-                              (map (fn c [window]
-                                     (reduce + (map count (vals window)))))
-                              (reduce max 0))
-        ; How many Hz is the biggest window?
-        max-window-hz (/ max-window-count (nanos->secs window-size))]
-    ; Now for each group we'll unfurl each window into [x y] points, where the
-    ; y coordinates are scaled relative to the window with the most points.
-    ; This a.) spreads out points, and b.) means the y axis of the graph gives
-    ; a feeling for overall throughput over time.
-    (loopr [series empty-window]
-           [window windows]
-           ; With this window, give each point an increasing counter, carrying
-           ; that counter i across all groups.
-           (recur (op-color-plot-points-unfurl-inner
-                    max-window-hz max-window-count series window)))))
+  (if (= 0 (count history))
+    {}
+    (let [t0          (:time (first history))
+          t1          (:time (peek history))
+          dt          (- t1 t0)
+          window-size (/ dt window-count)
+          ; A vector of windows, where each window is a map of {group name to an
+          ; empty vector of times. We'll derive the y coordinates once the
+          ; windows are built.
+          empty-window  (update-vals groups (constantly []))
+          empty-windows (vec (repeat window-count empty-window))
+          windows
+          (->> ;(t/take 10)
+               (t/filter h/invoke?)
+               (t/fold
+                 {:identity (constantly empty-windows)
+                  :reducer  (fn reducer [windows op]
+                              (let [window (-> (:time op)
+                                               (- t0)
+                                               (/ dt)
+                                               (* window-count)
+                                               Math/floor
+                                               long)
+                                    value (:value op)
+                                    group (group-fn op)]
+                                (if (nil? group)
+                                  windows
+                                  (update windows window
+                                          update group
+                                          conj (nanos->secs (:time op))))))
+                  :combiner (fn combiner [windows1 windows2]
+                              (mapv (fn merge [win1 win2]
+                                      (merge-with into win1 win2))
+                                    windows1
+                                    windows2))})
+               (h/tesser history))
+          ; How many points in the biggest window?
+          max-window-count (->> windows
+                                (map (fn c [window]
+                                       (reduce + (map count (vals window)))))
+                                (reduce max 0))
+          ; How many Hz is the biggest window?
+          max-window-hz (/ max-window-count (nanos->secs window-size))]
+      ; Now for each group we'll unfurl each window into [x y] points, where the
+      ; y coordinates are scaled relative to the window with the most points.
+      ; This a.) spreads out points, and b.) means the y axis of the graph gives
+      ; a feeling for overall throughput over time.
+      (loopr [series empty-window]
+             [window windows]
+             ; With this window, give each point an increasing counter, carrying
+             ; that counter i across all groups.
+             (recur (op-color-plot-points-unfurl-inner
+                      max-window-hz max-window-count series window))))))
 
 (defn op-color-plot!
   "Renders a timeseries plot of each operation in a history, where operations
@@ -154,4 +156,4 @@
         perf/with-range
         (perf/with-nemeses history nemeses)
         perf/plot!
-        (try+ (catch [:type ::no-points] _ :no-points)))))
+        (try+ (catch [:type :jepsen.checker.perf/no-points] _ :no-points)))))
