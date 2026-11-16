@@ -374,6 +374,14 @@
   a new one?"
   16384)
 
+(def big-vector-max-chunk-bytes
+  "How many bytes may a chunk of a BigVector hold before we start a new one,
+  even if it has fewer than big-vector-chunk-size elements? read-block-data
+  loads each block into a single ByteBuffer, which holds at most 2^31 - 1
+  bytes, so this must stay well below 2 GiB. Large elements (e.g. reads which
+  return whole tables) can otherwise produce chunks we cannot read back."
+  (* 1024 1024 1024)) ; 1 GiB
+
 (defrecord BlockRef [^int id])
 
 (defn block-ref
@@ -709,11 +717,23 @@
   (write-file! (:file handle) (+ offset block-header-size) data)
   handle)
 
+(def max-block-data-size
+  "The largest data region (not including the header) a block may have.
+  read-block-data loads a block's data into a single ByteBuffer, whose size is
+  an int."
+  Integer/MAX_VALUE)
+
 (defn ^ByteBuffer block-header-for-length-and-checksum!
   "An optimized way to construct a block header, a block type, the length of a
   data region (not including headers) and the CRC checksum of that data.
-  Mutates the checksum in place."
+  Mutates the checksum in place. Throws if the data region is too large for
+  read-block-data to read back."
   [block-type data-length data-checksum]
+  (assert+ (<= data-length max-block-data-size)
+           {:type       ::block-too-large
+            :block-type block-type
+            :length     data-length
+            :max        max-block-data-size})
   (let [header (block-header)]
     (-> header
         (set-block-header-type!     block-type)
@@ -1046,6 +1066,14 @@
   (fress/write-object (.fressian-writer writer) data)
   writer)
 
+(defn fressian-stream-block-bytes
+  "How many bytes of data has this FressianStreamBlockWriter written to disk so
+  far? Does not count data still buffered in memory (at most
+  fressian-buffer-size bytes, plus whatever the Fressian writer holds)."
+  ^long [^FressianStreamBlockWriter writer]
+  (.bytesWritten ^FileOffsetOutputStream
+                 (.file-offset-output-stream writer)))
+
 (defn read-fressian-stream-block
   "Takes a handle and a ByteBuffer of data from a FressianStream block. Returns
   its contents as a vector."
@@ -1093,7 +1121,7 @@
 
 (defn big-vector-block-writer-worker!
   "Loop which writes values from a BigVectorBlockWriter's queue to disk."
-  [handle block-id elements-per-chunk ^BlockingQueue queue]
+  [handle block-id elements-per-chunk max-chunk-bytes ^BlockingQueue queue]
   (try
     (loop [; Number of elements written to completed blocks. We use
            ; this for the initial block index of each streaming
@@ -1120,7 +1148,9 @@
                                          chunks)
                 (write-block-index! handle)))
           ; Write element
-          (if (< uncompleted-count elements-per-chunk)
+          (if (and (< uncompleted-count elements-per-chunk)
+                   (< (fressian-stream-block-bytes chunk-writer)
+                      max-chunk-bytes))
             ; Room in this chunk
             (do (append-to-fressian-stream-block! chunk-writer element)
                 (recur completed-count
@@ -1145,8 +1175,10 @@
       (throw t))))
 
 (defn big-vector-block-writer!
-  "Takes a handle, a optional block ID, and the maximum number of elements per
-  chunk. Returns a BigVectorBlockWriter which can have elements appended to it
+  "Takes a handle, a optional block ID, the maximum number of elements per
+  chunk, and optionally the maximum number of bytes per chunk (default
+  big-vector-max-chunk-bytes). A chunk is sealed when it reaches either limit.
+  Returns a BigVectorBlockWriter which can have elements appended to it
   via append-to-big-vector-block!. Those elements, in turn, are appended to a
   series of newly created FressianStream blocks, each of which is stitched
   together into a BigVector block with the given ID. As each chunk of writes is
@@ -1160,6 +1192,9 @@
   ([handle elements-per-chunk]
    (big-vector-block-writer! handle (new-block-id! handle) elements-per-chunk))
   ([handle block-id elements-per-chunk]
+   (big-vector-block-writer! handle block-id elements-per-chunk
+                             big-vector-max-chunk-bytes))
+  ([handle block-id elements-per-chunk max-chunk-bytes]
    ; The queue here is twice the size of a chunk--we don't want to sprint ahead
    ; of the writer *too* far, but we definitely need to buffer at least a full
    ; chunk while the previous chunk is being sealed off.
@@ -1169,6 +1204,7 @@
                     (big-vector-block-writer-worker! handle
                                                      block-id
                                                      elements-per-chunk
+                                                     max-chunk-bytes
                                                      queue)))]
      (BigVectorBlockWriter. block-id queue worker))))
 
