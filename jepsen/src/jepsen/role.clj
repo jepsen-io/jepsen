@@ -14,6 +14,7 @@
                     [db :as db]
                     [generator :as gen]
                     [nemesis :as n]]
+            [jepsen.generator.context :as gen.ctx]
             [jepsen.nemesis.combined :as nc]
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CountDownLatch
@@ -208,7 +209,15 @@
       (client/open! client test node))))
 
 (defn restrict-client
-  "Your test has nodes with different roles, but only one role is client-facing.
+  "DEPRECATED. Use jepsen.role/restrict-generator instead. This made sense
+  initially, but it broke a long-standing convention in Jepsen that with `n`
+  nodes, process `i` maps to the `(mod i n)`-th node. I've decided it's a
+  better tradeoff to use restrict-generator instead; we'll leave some threads
+  idle, but it significantly simplifies things, and predictability is good.
+
+  ---
+
+  Your test has nodes with different roles, but only one role is client-facing.
 
   Wraps a jepsen Client `c` in a new Client specific to the given role. This
   client responds *only* to (client/open! wrapper test node). Instead of
@@ -220,6 +229,7 @@
   receive the full test map, rather than a restricted one. This may come back
   to bite us later, in which case we'll change."
   [role client]
+  (warn "DEPRECATED. jepsen.role/restrict-client turned out to be a bad idea; use jepsen.role/restrict-generator instead. While restrict-client is still here for compatibility, it will silently cause `gen/each-node` and `gen/with-node` to map operations to the wrong nodes.")
   (RestrictedClient. role client))
 
 (defrecord RestrictedNemesis [role     ; e.g. :storage
@@ -247,25 +257,54 @@
   [role nemesis]
   (RestrictedNemesis. role (atom nil) nemesis))
 
-(defrecord RestrictedGenerator [role barriers gen]
+(defn restricted-generator-thread-filter
+  "Computes the generator thread filter for a role, given a test and context."
+  [test role ctx]
+  (let [^java.util.List nodes (:nodes test)
+        ; How many nodes total?
+        n                     (count nodes)
+        ; Which means threads should be some multiple of these indices
+        base-indices  (->> (get (:roles test) role)
+                           (map (fn [node]
+                                     (.indexOf nodes node)))
+                           set)]
+  (gen.ctx/make-thread-filter
+    (fn filter [thread]
+      (if (integer? thread)
+        (contains? base-indices (mod thread n))
+        ; All other threads pass through
+        true)))))
+
+(defrecord RestrictedGenerator [role barriers thread-filter gen]
   gen/Generator
   (op [this test ctx]
     (init-barriers! test barriers)
-    (when-let [[op gen'] (gen/op gen (restrict-test barriers role test) ctx)]
-      [op (RestrictedGenerator. role barriers gen')]))
+    (let [thread-filter (or thread-filter
+                            (restricted-generator-thread-filter test role ctx))
+          ctx           (thread-filter ctx)]
+      (when-let [[op gen'] (gen/op gen (restrict-test barriers role test) ctx)]
+        [op (RestrictedGenerator. role barriers thread-filter gen')])))
 
   (update [this test ctx event]
     (init-barriers! test barriers)
-    (RestrictedGenerator.
-      role
-      barriers
-      (gen/update gen (restrict-test barriers role test) ctx event))))
+    (let [thread-filter (restricted-generator-thread-filter test role ctx)
+          ctx           (thread-filter ctx)]
+      (RestrictedGenerator.
+        role
+        barriers
+        thread-filter
+        (gen/update gen
+                    (restrict-test barriers role test)
+                    ctx
+                    event)))))
 
 (defn restrict-generator
-  "Restricts a generator to act on a specific role."
+  "Restricts a generator to act on a specific role. Filters the context such
+  that it only includes integer thread which map to the nodes for that role,
+  plus non-integer threads."
   [role gen]
   (when gen
-    (RestrictedGenerator. role (atom nil) gen)))
+    (RestrictedGenerator. role (atom nil) nil gen)))
 
 (defn restrict-nemesis-package
   "Restricts a jepsen.nemesis.combined package to act purely on a single role.

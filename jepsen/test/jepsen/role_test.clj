@@ -14,7 +14,7 @@
             [clj-commons.slingshot :refer [try+ throw+]])
   (:import (java.util.concurrent CyclicBarrier)))
 
-;(use-fixtures :once quiet-logging)
+(use-fixtures :once quiet-logging)
 
 (def test
   "A basic test map."
@@ -176,6 +176,28 @@
     (is (= [:client "c"] (client/open! wrapper test "d")))
     (is (= [:client "b"] (client/open! wrapper test "e")))
     ))
+
+(deftest restrict-generator-test
+  (let [h (->> [:x :y :z]
+                 (map (fn [x] {:f :read, :value x}))
+                 (gen/with-node)
+                 (gen/nemesis [{:type :info, :f :fault}])
+                 (r/restrict-generator :txn)
+                 (gt/perfect* test (gt/n+nemesis-context (count (:nodes test)))))]
+    ; Even though we have 5 integer processes, we only use processes 1 and 2,
+    ; the txn nodes.
+    (is (= 5 (count (:nodes test))))
+    (is (= [
+            {:time 0, :type :info, :process :nemesis, :f :fault, :value nil}
+            {:time 0, :type :invoke, :process 1, :f :read, :value :x, :node "c"}
+            {:time 0, :type :invoke, :process 2, :f :read, :value :y, :node "b"}
+            {:time 10, :type :ok, :process 2, :f :read, :value :y, :node "b"}
+            {:time 10, :type :invoke, :process 2, :f :read, :value :z, :node "b"}
+            {:time 10, :type :ok, :process 1, :f :read, :value :x, :node "c"}
+            {:time 10, :type :ok, :process :nemesis, :f :fault, :value nil}
+            {:time 20, :type :ok, :process 2, :f :read, :value :z, :node "b"}
+            ]
+           h))))
 
 ; A trivial nemesis, just to verify we restrict tests properly.
 (defrecord Nemesis []
