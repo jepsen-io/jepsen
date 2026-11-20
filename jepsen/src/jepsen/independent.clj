@@ -215,7 +215,9 @@
           thread      (gen/process->thread ctx process)
           group       (thread->group thread)
           group-ctx   ((group->context-filter group) ctx)
-          unlifted-op (update event :value val)]
+          unlifted-op (if (tuple? (:value event))
+                        (update event :value val)
+                        event)]
       (ConcurrentGenerator.
         n fgen group->threads thread->group group->context-filter keys
         (update gens group gen/update test group-ctx unlifted-op)))))
