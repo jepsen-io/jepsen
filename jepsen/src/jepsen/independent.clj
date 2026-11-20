@@ -106,6 +106,8 @@
                op))
             gen))
 
+(declare init-concurrent-generator)
+
 (defrecord ConcurrentGenerator
   [; n is the size of each group
    n
@@ -128,24 +130,9 @@
   (op [this test ctx]
     ; (prn)
     ; (prn :op :=======================================)
-    (let [; Figure out our thread<->group mappings and context filters
-          group->threads (or group->threads (make-group->threads n ctx))
-          group->context-filter (or group->context-filter
-                                    (mapv ctx/make-thread-filter
-                                          group->threads))
-          thread->group  (or thread->group  (make-thread->group  n ctx))
-          ; Lazily initialize our generators
-          gens2 (or gens
-                    (let [group-count (inc (reduce max 0 (vals thread->group)))
-                          gens      (->> (take group-count keys)
-                                         (map fgen)
-                                         (mapv tuple-gen keys))]
-                      ; Extend with nils if necessary
-                      (into gens (repeat (- group-count (count gens)) nil))))
-          ; If we consumed keys, update them.
-          keys (if gens keys
-                 (let [group-count (inc (reduce max 0 (vals thread->group)))]
-                   (drop group-count keys)))
+    (let [{:keys [group->threads group->context-filter thread->group
+                  keys gens]}
+          (init-concurrent-generator this ctx)
           ; What threads are open?
           free-threads (gen/free-threads ctx)
           ; What groups do they belong to?
@@ -158,7 +145,7 @@
       ; those groups can offer us.
       (loop [groups   free-groups
              keys     keys
-             gens     gens2
+             gens     gens
              soonest  nil]
         ;(prn :----------)
         ;(prn :group (first groups))
@@ -221,17 +208,51 @@
                      soonest)))))))
 
   (update [this test ctx event]
-    (let [process (:process event)
-          thread  (gen/process->thread ctx process)
-          group   (thread->group thread)
-          unlifted-op (update event :value val)
-          ; Same context op gives this group's generator.
-          group-ctx (if group->context-filter
-                      ((group->context-filter group) ctx)
-                      ctx)]
+    (let [{:keys [group->threads group->context-filter thread->group
+                  keys gens]}
+          (init-concurrent-generator this ctx)
+          process     (:process event)
+          thread      (gen/process->thread ctx process)
+          group       (thread->group thread)
+          group-ctx   ((group->context-filter group) ctx)
+          unlifted-op (update event :value val)]
       (ConcurrentGenerator.
         n fgen group->threads thread->group group->context-filter keys
         (update gens group gen/update test group-ctx unlifted-op)))))
+
+(defn init-concurrent-generator
+  "Lazily initializes thread/group mappings, context filters, and per-group
+  generators from a context."
+  [^ConcurrentGenerator gen ctx]
+  (if (and (.group->threads gen)
+           (.group->context-filter gen)
+           (.thread->group gen)
+           (.gens gen))
+    gen
+    (let [n                     (.n gen)
+          fgen                  (.fgen gen)
+          keys                  (.keys gen)
+          gens                  (.gens gen)
+          group->threads        (or (.group->threads gen)
+                                    (make-group->threads n ctx))
+          group->context-filter (or (.group->context-filter gen)
+                                    (mapv ctx/make-thread-filter
+                                          group->threads))
+          thread->group         (or (.thread->group gen)
+                                    (make-thread->group n ctx))
+          group-count           (inc (reduce max 0 (vals thread->group)))
+          [keys gens]           (if gens
+                                  [keys gens]
+                                  (let [gens (->> (take group-count keys)
+                                                  (map fgen)
+                                                  (mapv tuple-gen keys))]
+                                    ; Extend with nils if necessary
+                                    [(drop group-count keys)
+                                     (into gens
+                                           (repeat (- group-count (count gens))
+                                                   nil))]))]
+      (ConcurrentGenerator. n fgen group->threads thread->group
+                            group->context-filter keys gens))))
 
 (defn concurrent-generator
   "Takes a positive integer n, a sequence of keys (k1 k2 ...) and a function

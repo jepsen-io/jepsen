@@ -75,15 +75,22 @@
       this)))
 
 (deftest concurrent-generator-update-context-test
-  ; A key's generator must be updated in its own group's context, as op
-  ; calls it. Otherwise a generator which builds a thread filter on its first
-  ; call (gen/process-limit, gen/reserve) can build it over the whole test
-  ; when a fresh key's generator sees a completion before an op, and with
-  ; gen/process-limit, leave a whole group with no threads to run on.
-  (let [seen  (atom [])
-        ctx   (gen.test/n+nemesis-context 30)
-        g     (concurrent-generator 10 (range) (fn [_k] (recording-gen seen)))
-        [_ g] (gen/op g {} ctx)]
-    (gen/update g {} ctx {:type :ok, :process 25, :f :write, :time 0,
-                          :value (tuple 2 1)})
-    (is (= [(set (range 20 30))] @seen))))
+  ; Updates must pass each key's generator its group's filtered context,
+  ; matching op, both before and after the first op call.
+  (let [ctx   (gen.test/n+nemesis-context 30)
+        event {:type :ok, :process 25, :f :write, :time 0,
+               :value (tuple 2 1)}]
+    (testing "after op"
+      (let [seen  (atom [])
+            g     (concurrent-generator 10 (range) (fn [_k] (recording-gen seen)))
+            [_ g] (gen/op g {} ctx)]
+        (gen/update g {} ctx event)
+        (is (= [(set (range 20 30))] @seen))))
+
+    (testing "before op"
+      (let [seen (atom [])
+            g    (concurrent-generator 10 (range) (fn [_k] (recording-gen seen)))
+            g    (gen/update g {} ctx event)]
+        (is (= [(set (range 20 30))] @seen))
+        (let [[op _] (gen/op g {} ctx)]
+          (is (= :write (:f op))))))))
