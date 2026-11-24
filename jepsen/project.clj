@@ -11,21 +11,21 @@
                   :exclusions [org.clj-commons/primitive-math
                                potemkin
                                riddley]]
-                 [org.clojure/clojure "1.12.6"]
+                 [org.clojure/clojure "1.12.7"]
                  [org.clojure/data.fressian "1.1.1"]
                  [org.clojure/data.generators "1.1.1"]
-                 [org.clojure/tools.logging "1.3.1"]
+                 [org.clojure/tools.logging "1.3.2"]
                  [org.clojure/tools.cli "1.4.256"]
                  [spootnik/unilog "0.7.32"
                   :exclusions [org.slf4j/slf4j-api]]
                  [elle "0.2.8"]
-                 [io.jepsen/generator "0.1.7-SNAPSHOT"]
+                 [io.jepsen/generator "0.1.8"]
                  [jepsen.txn "0.1.3"]
                  [knossos "0.3.16"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.1"]
-                 [ring "1.15.5"]
+                 [ring "1.15.6"]
                  [com.hierynomus/sshj "0.41.2"
                   :exclusions [org.slf4j/slf4j-api
                                org.bouncycastle/bcutil-jdk18on]]

@@ -534,7 +534,8 @@
              (PackageGen. period deadline fs active
                           (assoc gens i gen')
                           finals)]
-            (prn "exhausted"))))))
+            ; Exhausted
+            nil)))))
 
   (update [this test ctx op]
     ; Propagate update to all generators.

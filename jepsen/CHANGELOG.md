@@ -1,5 +1,44 @@
 # Change Log
 
+## 0.3.16
+
+### Bugfixes
+
+- `checker.plot`: better errors when histories are empty
+- `nemesis.combined/package-gen` now issues a delay, rather than a sleep, which shortens the wait time at the end of a test
+- `tests.cycle`'s final generator now reads every key, rather than missing the maximum and final batches
+
+### API Changes
+
+- `role/restrict-client` is deprecated; use `restrict-generator` instead.
+
+### New Features
+
+- `generator/with-node`: adds a `:node` field to each operation
+- `generator/each-node`: runs a separate instance of a generator for each node
+
+- `generator.test` now simulates log and sleep operations, so you can test them
+- `random/str`: generate random unicode strings.
+- `random/filter-fn`: wrap a (presumably random) function so that its outputs pass a predicate
+- `random/zipf-codepoint`: generate random codepoints
+- `random/zipf-alphanumeric-codepoint`: generate alphanumeric codepoints
+- `nemesis.combined/package-gen`: generates nemesis operations from a shifting mixture of packages over time
+- `role/restrict-generator`: restricts a generator to just one role
+- `control.util/strip-ansi-escapes`: remove ANSI color escapes from a log file
+
+# Minor changes:
+
+- `jepsen.generator` now uses the clj-commons version of slingshot
+- `generator.interpreter` now throws a better error message for malformed sleep operations
+- `generator/limit`: sleep and log operations no longer count towards the limit
+- `generator/sleep`: better error messages when you don't provide a numeric argument
+- `os.debian` installs `less` and `colorized-logs` by default; we use them all the time
+- ` cli/parse-comma-separated-kws`: a utility we use all the time in argument parsing
+- clojure 1.12.7
+- tools.logging 1.3.2
+- jepsen.generator 0.1.8
+- ring 1.15.6
+
 ## 0.3.15
 
 This release fixes a major bug in Elle's `rw-register` workload, which in turn
