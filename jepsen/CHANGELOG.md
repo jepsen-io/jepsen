@@ -37,6 +37,7 @@
 - clojure 1.12.7
 - tools.logging 1.3.2
 - jepsen.generator 0.1.8
+- knossos 0.3.17
 - ring 1.15.6
 
 ## 0.3.15

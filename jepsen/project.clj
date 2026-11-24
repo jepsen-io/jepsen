@@ -21,7 +21,7 @@
                  [elle "0.2.8"]
                  [io.jepsen/generator "0.1.8"]
                  [jepsen.txn "0.1.3"]
-                 [knossos "0.3.16"]
+                 [knossos "0.3.17"]
                  [clj-ssh "0.5.14"]
                  [gnuplot "0.1.3"]
                  [http-kit "2.8.1"]
